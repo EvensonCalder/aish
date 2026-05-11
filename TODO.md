@@ -278,13 +278,13 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
   - [x] `#key set`
   - [x] `#key clear`
   - [x] `#context`
-  - [ ] `#completion`
+  - [x] `#completion`
   - [x] `#history`
-  - [ ] `#log`
+  - [x] `#log`
   - [ ] `#mt`
   - [ ] `#template list`
   - [ ] `#template rm`
-  - [ ] `#editor`
+  - [x] `#editor`
   - [ ] `#encrypt`
   - [ ] `#set-remote`
   - [ ] `#push`

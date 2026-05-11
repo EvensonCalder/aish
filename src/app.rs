@@ -375,6 +375,25 @@ pub fn execute_draft(
                     state.mode = Mode::Draft;
                     return Ok(());
                 }
+                "completion" => {
+                    writeln!(out, "completion.enabled=false")?;
+                    writeln!(out, "completion engine is not implemented yet")?;
+                    state.draft.clear();
+                    state.mode = Mode::Draft;
+                    return Ok(());
+                }
+                "log" => {
+                    writeln!(out, "event log is not implemented yet")?;
+                    state.draft.clear();
+                    state.mode = Mode::Draft;
+                    return Ok(());
+                }
+                "editor" => {
+                    writeln!(out, "external editor integration is not implemented yet")?;
+                    state.draft.clear();
+                    state.mode = Mode::Draft;
+                    return Ok(());
+                }
                 "history" => {
                     let count = args.parse::<usize>();
                     match (count, &state.regular_history_path) {
@@ -773,6 +792,9 @@ mod tests {
         assert!(output.contains("#env-key"));
         assert!(output.contains("#key"));
         assert!(output.contains("#context"));
+        assert!(output.contains("#completion"));
+        assert!(output.contains("#log"));
+        assert!(output.contains("#editor"));
         assert!(output.contains("#exit"));
         assert!(output.contains("#quit"));
         assert!(output.contains("#history"));
@@ -854,6 +876,39 @@ mod tests {
             ),
             ("#key", "usage: #key set | #key clear"),
             ("#key rotate", "usage: #key set | #key clear"),
+        ] {
+            let mut state = AppState::default();
+            state.draft.insert_str(line);
+            let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+            let mut output = Vec::new();
+
+            execute_draft(
+                &mut state,
+                &mut backend,
+                &mut output,
+                Duration::from_secs(5),
+            )
+            .unwrap();
+
+            let output = String::from_utf8(output).unwrap();
+            assert!(
+                output.contains(expected),
+                "missing {expected:?} in {output:?}"
+            );
+            assert_eq!(state.last_status, None);
+            assert!(state.draft.is_empty());
+        }
+    }
+
+    #[test]
+    fn subsystem_commands_report_placeholders() {
+        for (line, expected) in [
+            ("#completion", "completion engine is not implemented yet"),
+            ("#log", "event log is not implemented yet"),
+            (
+                "#editor",
+                "external editor integration is not implemented yet",
+            ),
         ] {
             let mut state = AppState::default();
             state.draft.insert_str(line);

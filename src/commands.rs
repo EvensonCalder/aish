@@ -19,8 +19,21 @@ pub enum NoteTag {
 }
 
 pub const IMPLEMENTED_PRIVATE_COMMANDS: &[&str] = &[
-    "help", "status", "config", "doctor", "model", "base-url", "env-key", "key", "context", "exit",
-    "quit", "history",
+    "help",
+    "status",
+    "config",
+    "doctor",
+    "model",
+    "base-url",
+    "env-key",
+    "key",
+    "context",
+    "exit",
+    "quit",
+    "history",
+    "completion",
+    "log",
+    "editor",
 ];
 
 pub fn parse_line(line: &str) -> ParsedLine<'_> {
