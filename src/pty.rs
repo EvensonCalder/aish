@@ -9,6 +9,7 @@ use anyhow::{Context, Result, bail};
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 
 const MARKER_PREFIX: &str = "__AISH_STATUS__";
+const READY_MARKER: &str = "__AISH_READY__";
 static NEXT_MARKER_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,6 +43,8 @@ impl PtyBackend {
             command.arg(arg);
         }
         command.env("PS1", "");
+        command.env("PROMPT", "");
+        command.env("RPROMPT", "");
 
         let child = pair
             .slave
@@ -78,9 +81,15 @@ impl PtyBackend {
             output: rx,
             child,
         };
-        backend.write_raw("stty -echo\n")?;
-        let _ = backend.drain_for(Duration::from_millis(150));
+        backend.initialize_shell(&launch)?;
         Ok(backend)
+    }
+
+    fn initialize_shell(&mut self, launch: &ShellLaunch) -> Result<()> {
+        self.write_raw(&launch.init_command)?;
+        let _ = self.read_until_ready(Duration::from_secs(5))?;
+        let _ = self.drain_for(Duration::from_millis(150));
+        Ok(())
     }
 
     pub fn write_raw(&mut self, text: &str) -> Result<()> {
@@ -121,6 +130,28 @@ impl PtyBackend {
             let now = Instant::now();
             if now >= deadline {
                 bail!("timed out waiting for backend shell prompt marker");
+            }
+            let remaining = deadline
+                .saturating_duration_since(now)
+                .min(Duration::from_millis(50));
+            match self.output.recv_timeout(remaining) {
+                Ok(chunk) => data.extend(chunk),
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => bail!("backend shell PTY closed"),
+            }
+        }
+    }
+
+    fn read_until_ready(&mut self, timeout: Duration) -> Result<String> {
+        let deadline = Instant::now() + timeout;
+        let mut data = Vec::new();
+        loop {
+            if String::from_utf8_lossy(&data).contains(READY_MARKER) {
+                return Ok(String::from_utf8_lossy(&data).into_owned());
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                bail!("timed out waiting for backend shell ready marker");
             }
             let remaining = deadline
                 .saturating_duration_since(now)
@@ -192,6 +223,7 @@ pub fn resolve_shell(configured_shell: &str) -> String {
 struct ShellLaunch {
     program: String,
     args: Vec<String>,
+    init_command: String,
 }
 
 fn shell_launch(configured_shell: &str) -> ShellLaunch {
@@ -201,12 +233,28 @@ fn shell_launch(configured_shell: &str) -> ShellLaunch {
         .and_then(|name| name.to_str())
         .unwrap_or_default();
 
-    let args = match shell_name {
-        "bash" => vec!["--noprofile".to_string(), "--norc".to_string()],
-        _ => Vec::new(),
+    let (args, init_command) = match shell_name {
+        "bash" => (
+            vec!["--noprofile".to_string(), "--norc".to_string()],
+            format!("stty -echo; printf '\\n{READY_MARKER}\\n'\n"),
+        ),
+        "zsh" => (
+            vec!["-f".to_string()],
+            format!(
+                "stty -echo; unsetopt zle prompt_cr prompt_sp; PROMPT=''; RPROMPT=''; printf '\\n{READY_MARKER}\\n'\n"
+            ),
+        ),
+        _ => (
+            Vec::new(),
+            format!("stty -echo; printf '\\n{READY_MARKER}\\n'\n"),
+        ),
     };
 
-    ShellLaunch { program, args }
+    ShellLaunch {
+        program,
+        args,
+        init_command,
+    }
 }
 
 fn parse_marker_output(raw: &str, marker: &str) -> Result<(String, i32)> {
@@ -243,13 +291,15 @@ mod tests {
         let launch = shell_launch("/bin/bash");
         assert_eq!(launch.program, "/bin/bash");
         assert_eq!(launch.args, ["--noprofile", "--norc"]);
+        assert!(launch.init_command.contains(READY_MARKER));
     }
 
     #[test]
     fn non_bash_launch_does_not_receive_bash_only_flags() {
         let launch = shell_launch("/bin/zsh");
         assert_eq!(launch.program, "/bin/zsh");
-        assert!(launch.args.is_empty());
+        assert_eq!(launch.args, ["-f"]);
+        assert!(launch.init_command.contains("unsetopt zle"));
     }
 
     #[test]
