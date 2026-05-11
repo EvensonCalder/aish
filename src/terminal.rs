@@ -116,11 +116,15 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
         }
         (KeyModifiers::CONTROL, KeyCode::Char('l')) => KeyAction::ClearScreen,
         (KeyModifiers::CONTROL, KeyCode::Char('a')) => {
-            state.draft.move_start();
+            if state.mode != crate::modes::Mode::History {
+                state.draft.move_start();
+            }
             KeyAction::Continue
         }
         (KeyModifiers::CONTROL, KeyCode::Char('e')) => {
-            state.draft.move_end();
+            if state.mode != crate::modes::Mode::History {
+                state.draft.move_end();
+            }
             KeyAction::Continue
         }
         (KeyModifiers::CONTROL, KeyCode::Char('u')) => {
@@ -136,26 +140,44 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
             KeyAction::Continue
         }
         (KeyModifiers::ALT, KeyCode::Char('b') | KeyCode::Left) => {
-            state.draft.move_previous_word();
+            if state.mode != crate::modes::Mode::History {
+                state.draft.move_previous_word();
+            }
             KeyAction::Continue
         }
         (KeyModifiers::ALT, KeyCode::Char('f') | KeyCode::Right) => {
-            state.draft.move_next_word();
+            if state.mode != crate::modes::Mode::History {
+                state.draft.move_next_word();
+            }
+            KeyAction::Continue
+        }
+        (_, KeyCode::Up) if state.mode == crate::modes::Mode::History => {
+            state.move_history_selection_older();
+            KeyAction::Continue
+        }
+        (_, KeyCode::Down) if state.mode == crate::modes::Mode::History => {
+            state.move_history_selection_newer();
             KeyAction::Continue
         }
         (_, KeyCode::Left) => {
-            state.draft.move_left();
+            if state.mode != crate::modes::Mode::History {
+                state.draft.move_left();
+            }
             KeyAction::Continue
         }
         (_, KeyCode::Right) => {
-            state.draft.move_right();
+            if state.mode != crate::modes::Mode::History {
+                state.draft.move_right();
+            }
             KeyAction::Continue
         }
         (_, KeyCode::Backspace) => {
+            state.copy_selected_history_to_draft();
             state.draft.backspace();
             KeyAction::Continue
         }
         (_, KeyCode::Delete) => {
+            state.copy_selected_history_to_draft();
             state.draft.delete();
             KeyAction::Continue
         }
@@ -165,6 +187,7 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
         }
         (_, KeyCode::Enter) => KeyAction::Submit,
         (_, KeyCode::Char(ch)) => {
+            state.copy_selected_history_to_draft();
             state.draft.insert_char(ch);
             KeyAction::Continue
         }
@@ -266,5 +289,81 @@ mod tests {
             apply_key_to_state(ctrl('d'), &mut state),
             KeyAction::Continue
         );
+    }
+
+    #[test]
+    fn history_mode_up_down_browses_without_editing_draft() {
+        let mut state = AppState {
+            mode: Mode::History,
+            regular_history: vec![
+                crate::history::HistoryEntry {
+                    t: 1,
+                    command: "one".to_string(),
+                    exit_code: Some(0),
+                    source: crate::history::HistorySource::User,
+                },
+                crate::history::HistoryEntry {
+                    t: 2,
+                    command: "two".to_string(),
+                    exit_code: Some(0),
+                    source: crate::history::HistorySource::User,
+                },
+            ],
+            selected_history_index: Some(0),
+            ..AppState::default()
+        };
+
+        apply_key_to_state(key(KeyCode::Up), &mut state);
+        assert_eq!(state.mode, Mode::History);
+        assert_eq!(state.selected_history_command(), Some("one"));
+        assert!(state.draft.is_empty());
+
+        apply_key_to_state(key(KeyCode::Down), &mut state);
+        assert_eq!(state.selected_history_command(), Some("two"));
+        assert!(state.draft.is_empty());
+    }
+
+    #[test]
+    fn history_mode_typing_copies_selection_to_draft_then_edits() {
+        let mut state = AppState {
+            mode: Mode::History,
+            regular_history: vec![crate::history::HistoryEntry {
+                t: 1,
+                command: "git statu".to_string(),
+                exit_code: Some(0),
+                source: crate::history::HistorySource::User,
+            }],
+            selected_history_index: Some(0),
+            ..AppState::default()
+        };
+
+        apply_key_to_state(key(KeyCode::Char('s')), &mut state);
+
+        assert_eq!(state.mode, Mode::Draft);
+        assert_eq!(state.draft.as_str(), "git status");
+    }
+
+    #[test]
+    fn history_mode_cursor_movement_does_not_copy_to_draft() {
+        let mut state = AppState {
+            mode: Mode::History,
+            regular_history: vec![crate::history::HistoryEntry {
+                t: 1,
+                command: "git status".to_string(),
+                exit_code: Some(0),
+                source: crate::history::HistorySource::User,
+            }],
+            selected_history_index: Some(0),
+            ..AppState::default()
+        };
+
+        apply_key_to_state(key(KeyCode::Left), &mut state);
+        apply_key_to_state(key(KeyCode::Right), &mut state);
+        apply_key_to_state(ctrl('a'), &mut state);
+        apply_key_to_state(ctrl('e'), &mut state);
+
+        assert_eq!(state.mode, Mode::History);
+        assert!(state.draft.is_empty());
+        assert_eq!(state.selected_history_command(), Some("git status"));
     }
 }

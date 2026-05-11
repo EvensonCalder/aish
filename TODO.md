@@ -217,7 +217,7 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
   - [x] note entry
 - [x] Implement append-only JSONL writer.
 - [x] Implement startup loader.
-- [ ] Implement in-memory indexes.
+- [x] Implement in-memory indexes.
 - [ ] Implement history trimming based on `#history <count>`.
 - [x] Store exit code and timestamp for executed commands.
 - [ ] Store `source = ai` for executed AI commands.
@@ -241,9 +241,9 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
 - [ ] Implement `$` history mode browsing.
 - [ ] Implement `%` AI mode browsing.
 - [ ] In history mode:
-  - [ ] `Up/Down` browse regular history only.
-  - [ ] `Enter` executes selected item.
-  - [ ] modification copies item to draft.
+  - [x] `Up/Down` browse regular history only.
+  - [x] `Enter` executes selected item.
+  - [x] modification copies item to draft.
 - [ ] In AI mode:
   - [ ] `Up/Down` browse AI items.
   - [ ] `Enter` executes current item.

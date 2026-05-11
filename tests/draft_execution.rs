@@ -128,6 +128,7 @@ fn execute_draft_appends_successful_command_to_regular_history() {
     assert_eq!(loaded.items[0].t, 1234567890);
     assert_eq!(loaded.items[0].exit_code, Some(0));
     assert_eq!(loaded.items[0].source, HistorySource::User);
+    assert_eq!(state.regular_history, loaded.items);
 }
 
 #[test]
@@ -235,4 +236,47 @@ fn private_history_command_trims_regular_history_to_newest_entries() {
 
     let output = String::from_utf8(output).unwrap();
     assert!(output.contains("history trimmed to 2"));
+    assert_eq!(state.regular_history.len(), 2);
+    assert_eq!(state.regular_history[0].command, "printf 'two\\n'");
+    assert_eq!(state.regular_history[1].command, "printf 'three\\n'");
+}
+
+#[test]
+fn execute_history_selection_runs_selected_command() {
+    let temp = tempfile::tempdir().unwrap();
+    let history_path = temp.path().join("history/regular.jsonl");
+    let mut state = AppState {
+        mode: Mode::History,
+        regular_history_path: Some(history_path.clone()),
+        regular_history: vec![HistoryEntry {
+            t: 1,
+            command: "printf 'from history\\n'".to_string(),
+            exit_code: Some(0),
+            source: HistorySource::User,
+        }],
+        selected_history_index: Some(0),
+        clock: fixed_clock,
+        ..AppState::default()
+    };
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    assert_eq!(String::from_utf8(output).unwrap().trim(), "from history");
+    assert_eq!(state.mode, Mode::Draft);
+    assert!(state.draft.is_empty());
+    assert_eq!(state.last_status, Some(0));
+
+    let loaded = load_jsonl::<HistoryEntry>(&history_path).unwrap();
+    assert_eq!(loaded.errors, []);
+    assert_eq!(loaded.items.len(), 1);
+    assert_eq!(loaded.items[0].command, "printf 'from history\\n'");
+    assert_eq!(state.regular_history.len(), 2);
 }

@@ -12,8 +12,8 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 52 library unit tests.
-- 8 draft execution integration tests.
+- 58 library unit tests.
+- 9 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
 - 1 ignored zsh PTY integration test.
@@ -198,7 +198,7 @@ Status:
 
 Known gaps:
 
-- Selected history index is not implemented.
+- Selected history index is implemented for regular history mode only.
 - Selected AI session/item state is not implemented.
 - Current cwd tracking is not implemented.
 - Output ring buffer is not implemented.
@@ -285,6 +285,8 @@ Implemented:
 - Failed commands are stored with exit status.
 - Executed command timestamps are stored.
 - Minimal regular history trimming with `#history <count>`.
+- Startup-loaded regular history is indexed newest-first for browsing.
+- Executed commands update the in-memory regular history list.
 
 Tests:
 
@@ -297,6 +299,13 @@ Tests:
 - `execute_draft_appends_successful_command_to_regular_history`
 - `execute_draft_appends_failed_command_to_regular_history`
 - `private_history_command_trims_regular_history_to_newest_entries`
+- `history::tests::history_store_indexes_regular_history_newest_first`
+- `app::tests::history_mode_selects_and_renders_regular_history_newest_first`
+- `app::tests::selected_history_copies_to_draft_for_editing`
+- `terminal::tests::history_mode_up_down_browses_without_editing_draft`
+- `terminal::tests::history_mode_typing_copies_selection_to_draft_then_edits`
+- `terminal::tests::history_mode_cursor_movement_does_not_copy_to_draft`
+- `execute_history_selection_runs_selected_command`
 
 Status:
 
@@ -306,7 +315,7 @@ Known gaps:
 
 - `#history <count>` currently trims regular history only.
 - Combined regular + AI item trimming is not complete.
-- In-memory indexes are currently a startup-loaded `HistoryStore`; search-specific indexes are not implemented.
+- Regular history has a newest-first in-memory browse index; search-specific indexes are not implemented.
 - AI command source persistence is not implemented because AI execution is not implemented.
 
 ### Draft History Storage
@@ -406,6 +415,7 @@ Status:
 Implemented:
 
 - `HistoryStore` loads regular history, draft history, AI sessions, and notes from `DirectoryLayout` paths.
+- `HistoryStore` builds a newest-first regular history index for browsing.
 - JSONL bad-line errors are aggregated across categories.
 - Missing category files load as empty through the shared JSONL loader.
 
@@ -413,6 +423,7 @@ Tests:
 
 - `history::tests::history_store_loads_all_history_categories`
 - `history::tests::history_store_aggregates_load_errors_across_categories`
+- `history::tests::history_store_indexes_regular_history_newest_first`
 
 Status:
 
@@ -444,7 +455,7 @@ Important missing or partial areas:
 
 - Full terminal event loop integration for concurrent PTY output.
 - Full keybinding map and rebinding config.
-- History browsing mode.
+- Full history browsing UX beyond regular Up/Down/Enter/edit-copy foundation.
 - AI browsing mode.
 - AI client and chat completions parsing.
 - Context pseudo-pipe.

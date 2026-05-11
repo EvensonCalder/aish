@@ -7,7 +7,8 @@ use anyhow::Result;
 use crate::commands::{ParsedLine, parse_line};
 use crate::config;
 use crate::history::{
-    DraftEntry, HistoryEntry, HistorySource, NoteEntry, append_jsonl, trim_regular_history,
+    DraftEntry, HistoryEntry, HistorySource, HistoryStore, NoteEntry, append_jsonl,
+    trim_regular_history,
 };
 use crate::input::InputBuffer;
 use crate::modes::Mode;
@@ -23,6 +24,8 @@ pub struct AppState {
     pub notes_path: Option<PathBuf>,
     pub draft_history_path: Option<PathBuf>,
     pub draft_persist: bool,
+    pub regular_history: Vec<HistoryEntry>,
+    pub selected_history_index: Option<usize>,
     pub clock: fn() -> i64,
 }
 
@@ -37,6 +40,8 @@ impl Default for AppState {
             notes_path: None,
             draft_history_path: None,
             draft_persist: true,
+            regular_history: Vec::new(),
+            selected_history_index: None,
             clock: unix_timestamp,
         }
     }
@@ -46,7 +51,60 @@ impl AppState {
     pub fn handle_empty_tab(&mut self) {
         if self.draft.is_empty() {
             self.mode = self.mode.next_primary();
+            if self.mode == Mode::History {
+                self.select_newest_history_if_available();
+            }
         }
+    }
+
+    pub fn select_newest_history_if_available(&mut self) {
+        self.selected_history_index = (!self.regular_history.is_empty()).then_some(0);
+    }
+
+    pub fn selected_history_command(&self) -> Option<&str> {
+        self.selected_history_index
+            .and_then(|index| self.regular_history_newest(index))
+            .map(|entry| entry.command.as_str())
+    }
+
+    pub fn move_history_selection_older(&mut self) -> bool {
+        let Some(index) = self.selected_history_index else {
+            self.select_newest_history_if_available();
+            return self.selected_history_index.is_some();
+        };
+        if index + 1 >= self.regular_history.len() {
+            return false;
+        }
+        self.selected_history_index = Some(index + 1);
+        true
+    }
+
+    pub fn move_history_selection_newer(&mut self) -> bool {
+        let Some(index) = self.selected_history_index else {
+            self.select_newest_history_if_available();
+            return self.selected_history_index.is_some();
+        };
+        if index == 0 {
+            return false;
+        }
+        self.selected_history_index = Some(index - 1);
+        true
+    }
+
+    pub fn copy_selected_history_to_draft(&mut self) -> bool {
+        let Some(command) = self.selected_history_command().map(str::to_string) else {
+            return false;
+        };
+        self.draft = InputBuffer::from(command);
+        self.mode = Mode::Draft;
+        true
+    }
+
+    fn regular_history_newest(&self, index: usize) -> Option<&HistoryEntry> {
+        self.regular_history
+            .len()
+            .checked_sub(index + 1)
+            .and_then(|regular_index| self.regular_history.get(regular_index))
     }
 
     pub fn prompt_prefix(&self) -> String {
@@ -54,23 +112,35 @@ impl AppState {
     }
 
     pub fn render_prompt_line(&self) -> String {
-        format!("{}{}", self.prompt_prefix(), self.draft.as_str())
+        let text = if self.mode == Mode::History {
+            self.selected_history_command().unwrap_or("")
+        } else {
+            self.draft.as_str()
+        };
+        format!("{}{}", self.prompt_prefix(), text)
     }
 
     pub fn terminal_cursor_column(&self) -> u16 {
-        let column = self.prompt_prefix().len() + self.draft.cursor();
+        let cursor = if self.mode == Mode::History {
+            self.selected_history_command().unwrap_or("").len()
+        } else {
+            self.draft.cursor()
+        };
+        let column = self.prompt_prefix().len() + cursor;
         column.min(u16::MAX as usize) as u16
     }
 }
 
 pub fn run() -> Result<()> {
     let (layout, config) = config::init_default_layout(config::default_aish_dir())?;
+    let store = HistoryStore::load(&layout)?;
     let mut backend = PtyBackend::spawn(&config.shell.backend)?;
     let mut state = AppState {
         regular_history_path: Some(layout.regular_history),
         notes_path: Some(layout.notes),
         draft_history_path: Some(layout.draft_history),
         draft_persist: config.draft.persist,
+        regular_history: store.regular,
         ..AppState::default()
     };
     crate::terminal::run(
@@ -87,6 +157,10 @@ pub fn execute_draft(
     out: &mut impl Write,
     timeout: Duration,
 ) -> Result<()> {
+    if state.draft.is_empty() && state.mode == Mode::History {
+        state.copy_selected_history_to_draft();
+    }
+
     if state.draft.is_empty() {
         return Ok(());
     }
@@ -148,6 +222,9 @@ pub fn execute_draft(
                     match (count, &state.regular_history_path) {
                         (Ok(count), Some(path)) => {
                             let loaded = trim_regular_history(path, count)?;
+                            let keep_from = loaded.items.len().saturating_sub(count);
+                            state.regular_history = loaded.items[keep_from..].to_vec();
+                            state.selected_history_index = None;
                             writeln!(
                                 out,
                                 "history trimmed to {count}; skipped {} bad line(s)",
@@ -182,15 +259,14 @@ pub fn execute_draft(
         writeln!(out, "{}", result.output)?;
     }
     if let Some(path) = &state.regular_history_path {
-        append_jsonl(
-            path,
-            &HistoryEntry {
-                command: result.command.clone(),
-                t: (state.clock)(),
-                exit_code: Some(result.exit_code),
-                source: HistorySource::User,
-            },
-        )?;
+        let entry = HistoryEntry {
+            command: result.command.clone(),
+            t: (state.clock)(),
+            exit_code: Some(result.exit_code),
+            source: HistorySource::User,
+        };
+        append_jsonl(path, &entry)?;
+        state.regular_history.push(entry);
     }
     state.last_status = Some(result.exit_code);
     state.draft.clear();
@@ -253,7 +329,7 @@ mod tests {
         assert_eq!(state.render_prompt_line(), "> git status");
 
         state.mode = Mode::History;
-        assert_eq!(state.render_prompt_line(), "$ git status");
+        assert_eq!(state.render_prompt_line(), "$ ");
 
         state.mode = Mode::Ai;
         assert_eq!(state.render_prompt_line(), "% git status");
@@ -270,6 +346,62 @@ mod tests {
 
         state.draft.move_start();
         assert_eq!(state.terminal_cursor_column(), 2);
+    }
+
+    #[test]
+    fn history_mode_selects_and_renders_regular_history_newest_first() {
+        let mut state = AppState {
+            regular_history: vec![
+                HistoryEntry {
+                    t: 1,
+                    command: "one".to_string(),
+                    exit_code: Some(0),
+                    source: HistorySource::User,
+                },
+                HistoryEntry {
+                    t: 2,
+                    command: "two".to_string(),
+                    exit_code: Some(0),
+                    source: HistorySource::User,
+                },
+            ],
+            ..AppState::default()
+        };
+
+        state.handle_empty_tab();
+
+        assert_eq!(state.mode, Mode::History);
+        assert_eq!(state.selected_history_index, Some(0));
+        assert_eq!(state.selected_history_command(), Some("two"));
+        assert_eq!(state.render_prompt_line(), "$ two");
+        assert_eq!(state.terminal_cursor_column(), 5);
+
+        assert!(state.move_history_selection_older());
+        assert_eq!(state.selected_history_command(), Some("one"));
+        assert!(!state.move_history_selection_older());
+        assert!(state.move_history_selection_newer());
+        assert_eq!(state.selected_history_command(), Some("two"));
+    }
+
+    #[test]
+    fn selected_history_copies_to_draft_for_editing() {
+        let mut state = AppState {
+            mode: Mode::History,
+            regular_history: vec![HistoryEntry {
+                t: 1,
+                command: "git status".to_string(),
+                exit_code: Some(0),
+                source: HistorySource::User,
+            }],
+            selected_history_index: Some(0),
+            ..AppState::default()
+        };
+
+        assert!(state.copy_selected_history_to_draft());
+
+        assert_eq!(state.mode, Mode::Draft);
+        assert_eq!(state.draft.as_str(), "git status");
+        assert_eq!(state.draft.cursor(), "git status".len());
     }
 
     #[test]

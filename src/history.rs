@@ -77,6 +77,7 @@ pub struct JsonlLineError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HistoryStore {
     pub regular: Vec<HistoryEntry>,
+    pub regular_newest_indices: Vec<usize>,
     pub drafts: Vec<DraftEntry>,
     pub ai_sessions: Vec<AiSession>,
     pub notes: Vec<NoteEntry>,
@@ -89,6 +90,7 @@ impl HistoryStore {
         let drafts = load_jsonl::<DraftEntry>(&layout.draft_history)?;
         let ai_sessions = load_jsonl::<AiSession>(&layout.ai_history)?;
         let notes = load_jsonl::<NoteEntry>(&layout.notes)?;
+        let regular_newest_indices = newest_first_indices(regular.items.len());
 
         let mut errors = Vec::new();
         errors.extend(regular.errors);
@@ -98,12 +100,29 @@ impl HistoryStore {
 
         Ok(Self {
             regular: regular.items,
+            regular_newest_indices,
             drafts: drafts.items,
             ai_sessions: ai_sessions.items,
             notes: notes.items,
             errors,
         })
     }
+
+    pub fn regular_newest(&self) -> impl Iterator<Item = &HistoryEntry> {
+        self.regular_newest_indices
+            .iter()
+            .map(|index| &self.regular[*index])
+    }
+
+    pub fn regular_by_newest_index(&self, index: usize) -> Option<&HistoryEntry> {
+        self.regular_newest_indices
+            .get(index)
+            .map(|regular_index| &self.regular[*regular_index])
+    }
+}
+
+fn newest_first_indices(len: usize) -> Vec<usize> {
+    (0..len).rev().collect()
 }
 
 pub fn append_jsonl<T: Serialize>(path: &Path, item: &T) -> Result<()> {
@@ -460,6 +479,7 @@ mod tests {
 
         assert_eq!(store.errors, []);
         assert_eq!(store.regular.len(), 1);
+        assert_eq!(store.regular_newest_indices, [0]);
         assert_eq!(store.drafts.len(), 1);
         assert_eq!(store.ai_sessions.len(), 1);
         assert_eq!(store.notes.len(), 1);
@@ -467,6 +487,37 @@ mod tests {
         assert_eq!(store.drafts[0].text, "git status");
         assert_eq!(store.ai_sessions[0].items[0].text, "ls");
         assert_eq!(store.notes[0].text, "ship it");
+    }
+
+    #[test]
+    fn history_store_indexes_regular_history_newest_first() {
+        let temp = tempfile::tempdir().unwrap();
+        let layout = DirectoryLayout::new(temp.path().join("aish-home"));
+        layout.create_dirs().unwrap();
+
+        for (t, command) in [(1, "one"), (2, "two"), (3, "three")] {
+            append_jsonl(
+                &layout.regular_history,
+                &HistoryEntry {
+                    t,
+                    command: command.to_string(),
+                    exit_code: Some(0),
+                    source: HistorySource::User,
+                },
+            )
+            .unwrap();
+        }
+
+        let store = HistoryStore::load(&layout).unwrap();
+        let commands: Vec<_> = store
+            .regular_newest()
+            .map(|entry| entry.command.as_str())
+            .collect();
+
+        assert_eq!(store.regular_newest_indices, [2, 1, 0]);
+        assert_eq!(commands, ["three", "two", "one"]);
+        assert_eq!(store.regular_by_newest_index(1).unwrap().command, "two");
+        assert!(store.regular_by_newest_index(3).is_none());
     }
 
     #[test]
