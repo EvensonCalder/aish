@@ -1,0 +1,92 @@
+use std::io::{self, Write};
+use std::time::Duration;
+
+use anyhow::Result;
+
+use crate::config;
+use crate::input::InputBuffer;
+use crate::modes::Mode;
+use crate::pty::PtyBackend;
+
+#[derive(Debug)]
+pub struct AppState {
+    pub mode: Mode,
+    pub draft: InputBuffer,
+    pub last_status: Option<i32>,
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self {
+            mode: Mode::Draft,
+            draft: InputBuffer::new(),
+            last_status: None,
+        }
+    }
+}
+
+impl AppState {
+    pub fn handle_empty_tab(&mut self) {
+        if self.draft.is_empty() {
+            self.mode = self.mode.next_primary();
+        }
+    }
+}
+
+pub fn run() -> Result<()> {
+    let (_layout, config) = config::init_default_layout(config::default_aish_dir())?;
+    let mut backend = PtyBackend::spawn(&config.shell.backend)?;
+    let mut state = AppState::default();
+    crate::terminal::run(
+        &mut state,
+        &mut backend,
+        &mut io::stdout(),
+        Duration::from_secs(60),
+    )
+}
+
+pub fn execute_draft(
+    state: &mut AppState,
+    backend: &mut PtyBackend,
+    out: &mut impl Write,
+    timeout: Duration,
+) -> Result<()> {
+    if state.draft.is_empty() {
+        return Ok(());
+    }
+
+    let command = state.draft.as_str().to_string();
+    state.mode = Mode::CommandRunning;
+    let result = backend.run_command(&command, timeout)?;
+    if !result.output.is_empty() {
+        writeln!(out, "{}", result.output)?;
+    }
+    state.last_status = Some(result.exit_code);
+    state.draft.clear();
+    state.mode = Mode::Draft;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_tab_cycles_modes() {
+        let mut state = AppState::default();
+        state.handle_empty_tab();
+        assert_eq!(state.mode, Mode::History);
+        state.handle_empty_tab();
+        assert_eq!(state.mode, Mode::Ai);
+        state.handle_empty_tab();
+        assert_eq!(state.mode, Mode::Draft);
+    }
+
+    #[test]
+    fn non_empty_tab_does_not_switch_modes() {
+        let mut state = AppState::default();
+        state.draft.insert_str("git");
+        state.handle_empty_tab();
+        assert_eq!(state.mode, Mode::Draft);
+    }
+}
