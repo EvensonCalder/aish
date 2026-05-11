@@ -562,7 +562,9 @@ pub fn execute_draft(
                                                     placeholders.join(", ")
                                                 )?;
                                             }
-                                            let unresolved = template_placeholders(state.draft.as_str());
+                                            let mut unresolved =
+                                                template_placeholders(state.draft.as_str());
+                                            unresolved.sort();
                                             if !unresolved.is_empty() {
                                                 writeln!(
                                                     out,
@@ -570,13 +572,14 @@ pub fn execute_draft(
                                                     unresolved.join(", ")
                                                 )?;
                                             }
-                                            let unused_keys: Vec<_> = values
+                                            let mut unused_keys: Vec<_> = values
                                                 .keys()
                                                 .filter(|key| {
                                                     !used_keys.iter().any(|used| used == *key)
                                                 })
                                                 .cloned()
                                                 .collect();
+                                            unused_keys.sort();
                                             if !unused_keys.is_empty() {
                                                 writeln!(
                                                     out,
@@ -1427,7 +1430,9 @@ mod tests {
         };
         state
             .draft
-            .insert_str("#template use deploy from=src host=prod to=/srv/app extra=ignored");
+            .insert_str(
+                "#template use deploy from=src host=prod to=/srv/app zextra=ignored aextra=unused",
+            );
         let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
         let mut output = Vec::new();
 
@@ -1443,7 +1448,7 @@ mod tests {
         assert!(output.contains("template copied to draft: deploy"));
         assert!(output.contains("template placeholders: from, user, host, to"));
         assert!(output.contains("unresolved template placeholders: user"));
-        assert!(output.contains("unused template values: extra"));
+        assert!(output.contains("unused template values: aextra, zextra"));
         assert_eq!(state.last_status, None);
         assert_eq!(state.mode, Mode::Draft);
         assert_eq!(state.draft.as_str(), "rsync src {user}@prod:/srv/app src");
