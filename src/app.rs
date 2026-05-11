@@ -15,6 +15,7 @@ use crate::history::{
 use crate::input::InputBuffer;
 use crate::modes::Mode;
 use crate::pty::PtyBackend;
+use crate::templates::{TemplateEntry, append_template, load_templates};
 
 #[derive(Debug)]
 pub struct AppState {
@@ -25,6 +26,7 @@ pub struct AppState {
     pub regular_history_path: Option<PathBuf>,
     pub notes_path: Option<PathBuf>,
     pub draft_history_path: Option<PathBuf>,
+    pub template_store_path: Option<PathBuf>,
     pub draft_persist: bool,
     pub regular_history: Vec<HistoryEntry>,
     pub selected_history_index: Option<usize>,
@@ -44,6 +46,7 @@ impl Default for AppState {
             regular_history_path: None,
             notes_path: None,
             draft_history_path: None,
+            template_store_path: None,
             draft_persist: true,
             regular_history: Vec::new(),
             selected_history_index: None,
@@ -229,6 +232,7 @@ pub fn run() -> Result<()> {
         regular_history_path: Some(layout.regular_history),
         notes_path: Some(layout.notes),
         draft_history_path: Some(layout.draft_history),
+        template_store_path: Some(layout.template_store),
         draft_persist: config.draft.persist,
         regular_history: store.regular,
         ai_sessions: store.ai_sessions,
@@ -416,14 +420,48 @@ pub fn execute_draft(
                     return Ok(());
                 }
                 "mt" => {
-                    writeln!(out, "#mt template creation is not implemented yet")?;
+                    match parse_template_args(args) {
+                        Some((name, body)) => match &state.template_store_path {
+                            Some(path) => {
+                                append_template(
+                                    path,
+                                    &TemplateEntry {
+                                        name: name.to_string(),
+                                        body: body.to_string(),
+                                    },
+                                )?;
+                                writeln!(out, "template stored: {name}")?;
+                            }
+                            None => writeln!(out, "template storage is not configured")?,
+                        },
+                        None => writeln!(out, "usage: #mt <name> <body>")?,
+                    }
                     state.draft.clear();
                     state.mode = Mode::Draft;
                     return Ok(());
                 }
                 "template" => {
                     match args.split_whitespace().next() {
-                        Some("list") => writeln!(out, "template listing is not implemented yet")?,
+                        Some("list") => match &state.template_store_path {
+                            Some(path) => {
+                                let loaded = load_templates(path)?;
+                                if loaded.items.is_empty() {
+                                    writeln!(out, "no templates stored")?;
+                                } else {
+                                    for template in loaded.items {
+                                        writeln!(out, "{}", template.name)?;
+                                    }
+                                }
+                                if !loaded.errors.is_empty() {
+                                    writeln!(
+                                        out,
+                                        "skipped {} bad template line(s)",
+                                        loaded.errors.len()
+                                    )?;
+                                }
+                            }
+                            None => writeln!(out, "template storage is not configured")?,
+                        },
                         Some("rm") => writeln!(out, "template removal is not implemented yet")?,
                         _ => writeln!(out, "usage: #template list | #template rm <name>")?,
                     }
@@ -551,6 +589,7 @@ fn write_config_report(state: &AppState, out: &mut impl Write) -> Result<()> {
     write_config_path(out, "history.regular", &state.regular_history_path)?;
     write_config_path(out, "history.notes", &state.notes_path)?;
     write_config_path(out, "history.draft", &state.draft_history_path)?;
+    write_config_path(out, "templates.store", &state.template_store_path)?;
     Ok(())
 }
 
@@ -569,6 +608,14 @@ fn write_ai_config_placeholder(out: &mut impl Write, name: &str, args: &str) -> 
         writeln!(out, "#{name} persistence is not implemented yet")?;
     }
     Ok(())
+}
+
+fn parse_template_args(args: &str) -> Option<(&str, &str)> {
+    let args = args.trim();
+    let split_at = args.find(char::is_whitespace)?;
+    let (name, body) = args.split_at(split_at);
+    let body = body.trim_start();
+    (!name.is_empty() && !body.is_empty()).then_some((name, body))
 }
 
 fn write_path_status(out: &mut impl Write, name: &str, path: &Option<PathBuf>) -> Result<()> {
@@ -983,13 +1030,84 @@ mod tests {
     }
 
     #[test]
-    fn template_commands_report_placeholders_without_storage_side_effects() {
+    fn mt_command_persists_template_entry() {
+        let temp = tempfile::tempdir().unwrap();
+        let template_path = temp.path().join("templates/templates.jsonl");
+        let mut state = AppState {
+            template_store_path: Some(template_path.clone()),
+            ..AppState::default()
+        };
+        state.draft.insert_str("#mt deploy rsync {from} {to}");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("template stored: deploy"));
+        assert_eq!(state.last_status, None);
+        assert!(state.draft.is_empty());
+
+        let loaded = load_templates(&template_path).unwrap();
+        assert_eq!(loaded.errors, []);
+        assert_eq!(loaded.items.len(), 1);
+        assert_eq!(loaded.items[0].name, "deploy");
+        assert_eq!(loaded.items[0].body, "rsync {from} {to}");
+    }
+
+    #[test]
+    fn template_list_prints_stored_template_names() {
+        let temp = tempfile::tempdir().unwrap();
+        let template_path = temp.path().join("templates/templates.jsonl");
+        append_template(
+            &template_path,
+            &TemplateEntry {
+                name: "deploy".to_string(),
+                body: "rsync {from} {to}".to_string(),
+            },
+        )
+        .unwrap();
+        append_template(
+            &template_path,
+            &TemplateEntry {
+                name: "logs".to_string(),
+                body: "tail -f {file}".to_string(),
+            },
+        )
+        .unwrap();
+        let mut state = AppState {
+            template_store_path: Some(template_path),
+            ..AppState::default()
+        };
+        state.draft.insert_str("#template list");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("deploy"));
+        assert!(output.contains("logs"));
+        assert_eq!(state.last_status, None);
+        assert!(state.draft.is_empty());
+    }
+
+    #[test]
+    fn template_commands_report_usage_or_unimplemented_removal() {
         for (line, expected) in [
-            (
-                "#mt deploy rsync {from} {to}",
-                "#mt template creation is not implemented yet",
-            ),
-            ("#template list", "template listing is not implemented yet"),
+            ("#mt deploy", "usage: #mt <name> <body>"),
             (
                 "#template rm deploy",
                 "template removal is not implemented yet",
@@ -1069,10 +1187,12 @@ mod tests {
         let history_path = temp.path().join("history/regular.jsonl");
         let notes_path = temp.path().join("history/notes.jsonl");
         let draft_path = temp.path().join("history/draft.jsonl");
+        let template_path = temp.path().join("templates/templates.jsonl");
         let mut state = AppState {
             regular_history_path: Some(history_path.clone()),
             notes_path: Some(notes_path.clone()),
             draft_history_path: Some(draft_path.clone()),
+            template_store_path: Some(template_path.clone()),
             draft_persist: false,
             ..AppState::default()
         };
@@ -1097,9 +1217,12 @@ mod tests {
         assert!(output.contains(&notes_path.display().to_string()));
         assert!(output.contains("history.draft="));
         assert!(output.contains(&draft_path.display().to_string()));
+        assert!(output.contains("templates.store="));
+        assert!(output.contains(&template_path.display().to_string()));
         assert!(!history_path.exists());
         assert!(!notes_path.exists());
         assert!(!draft_path.exists());
+        assert!(!template_path.exists());
         assert!(state.draft.is_empty());
     }
 
