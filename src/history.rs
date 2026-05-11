@@ -2,6 +2,7 @@ use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 
+use crate::commands::NoteTag;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
@@ -19,6 +20,12 @@ pub enum HistorySource {
     Ai,
     Editor,
     Paste,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NoteEntry {
+    pub tag: NoteTag,
+    pub text: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -170,5 +177,17 @@ mod tests {
         let raw = serde_json::to_string(&entry).unwrap();
 
         assert!(raw.contains("\"source\":\"user\""));
+    }
+
+    #[test]
+    fn note_entry_serializes_tag_as_snake_case() {
+        let entry = NoteEntry {
+            tag: NoteTag::Fixme,
+            text: "clean this up".to_string(),
+        };
+
+        let raw = serde_json::to_string(&entry).unwrap();
+
+        assert!(raw.contains("\"tag\":\"fixme\""));
     }
 }

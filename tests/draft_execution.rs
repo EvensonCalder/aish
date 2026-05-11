@@ -1,7 +1,8 @@
 use std::time::Duration;
 
 use aish::app::{AppState, execute_draft};
-use aish::history::{HistoryEntry, HistorySource, load_jsonl};
+use aish::commands::NoteTag;
+use aish::history::{HistoryEntry, HistorySource, NoteEntry, load_jsonl};
 use aish::modes::Mode;
 use aish::pty::PtyBackend;
 
@@ -150,4 +151,38 @@ fn execute_draft_appends_failed_command_to_regular_history() {
     assert_eq!(loaded.items[0].command, "false");
     assert_eq!(loaded.items[0].exit_code, Some(1));
     assert_eq!(loaded.items[0].source, HistorySource::User);
+}
+
+#[test]
+fn execute_draft_stores_notes_without_sending_them_to_shell() {
+    let temp = tempfile::tempdir().unwrap();
+    let notes_path = temp.path().join("history/notes.jsonl");
+    let mut state = AppState {
+        notes_path: Some(notes_path.clone()),
+        ..AppState::default()
+    };
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    state.draft.insert_str("# TODO: deploy later");
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.contains("note stored"));
+    assert_eq!(state.last_status, None);
+    assert_eq!(state.mode, Mode::Draft);
+    assert!(state.draft.is_empty());
+
+    let loaded = load_jsonl::<NoteEntry>(&notes_path).unwrap();
+    assert_eq!(loaded.errors, []);
+    assert_eq!(loaded.items.len(), 1);
+    assert_eq!(loaded.items[0].tag, NoteTag::Todo);
+    assert_eq!(loaded.items[0].text, "deploy later");
 }

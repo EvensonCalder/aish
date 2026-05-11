@@ -6,7 +6,7 @@ use anyhow::Result;
 
 use crate::commands::{ParsedLine, parse_line};
 use crate::config;
-use crate::history::{HistoryEntry, HistorySource, append_jsonl};
+use crate::history::{HistoryEntry, HistorySource, NoteEntry, append_jsonl};
 use crate::input::InputBuffer;
 use crate::modes::Mode;
 use crate::pty::PtyBackend;
@@ -18,6 +18,7 @@ pub struct AppState {
     pub last_status: Option<i32>,
     pub exit_requested: bool,
     pub regular_history_path: Option<PathBuf>,
+    pub notes_path: Option<PathBuf>,
 }
 
 impl Default for AppState {
@@ -28,6 +29,7 @@ impl Default for AppState {
             last_status: None,
             exit_requested: false,
             regular_history_path: None,
+            notes_path: None,
         }
     }
 }
@@ -58,6 +60,7 @@ pub fn run() -> Result<()> {
     let mut backend = PtyBackend::spawn(&config.shell.backend)?;
     let mut state = AppState {
         regular_history_path: Some(layout.regular_history),
+        notes_path: Some(layout.notes),
         ..AppState::default()
     };
     crate::terminal::run(
@@ -87,7 +90,16 @@ pub fn execute_draft(
             state.mode = Mode::Draft;
             return Ok(());
         }
-        ParsedLine::Note { .. } => {
+        ParsedLine::Note { tag, text } => {
+            if let Some(path) = &state.notes_path {
+                append_jsonl(
+                    path,
+                    &NoteEntry {
+                        tag,
+                        text: text.to_string(),
+                    },
+                )?;
+            }
             writeln!(out, "note stored")?;
             state.draft.clear();
             state.mode = Mode::Draft;
