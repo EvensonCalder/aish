@@ -562,6 +562,14 @@ pub fn execute_draft(
                                                     placeholders.join(", ")
                                                 )?;
                                             }
+                                            let unresolved = template_placeholders(state.draft.as_str());
+                                            if !unresolved.is_empty() {
+                                                writeln!(
+                                                    out,
+                                                    "unresolved template placeholders: {}",
+                                                    unresolved.join(", ")
+                                                )?;
+                                            }
                                             let unused_keys: Vec<_> = values
                                                 .keys()
                                                 .filter(|key| {
@@ -1434,6 +1442,7 @@ mod tests {
         let output = String::from_utf8(output).unwrap();
         assert!(output.contains("template copied to draft: deploy"));
         assert!(output.contains("template placeholders: from, user, host, to"));
+        assert!(output.contains("unresolved template placeholders: user"));
         assert!(output.contains("unused template values: extra"));
         assert_eq!(state.last_status, None);
         assert_eq!(state.mode, Mode::Draft);

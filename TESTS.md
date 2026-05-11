@@ -468,6 +468,7 @@ Implemented:
 - `#template use <name> key=value...` applies explicit placeholder substitutions before copying to draft.
 - `#template use <name> key="value with spaces"` and single-quoted variants are supported.
 - `#template use <name> key=value` reports unused keys that do not match any `{placeholder}`.
+- `#template use <name>` reports unresolved placeholders that remain after explicit substitution.
 
 Tests:
 
