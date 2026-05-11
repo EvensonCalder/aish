@@ -13,6 +13,14 @@ use crossterm::terminal::{
 use crate::app::{AppState, execute_draft};
 use crate::pty::PtyBackend;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyAction {
+    Continue,
+    Exit,
+    ClearScreen,
+    Submit,
+}
+
 pub struct TerminalGuard;
 
 impl TerminalGuard {
@@ -74,52 +82,88 @@ fn handle_key(
     out: &mut impl Write,
     command_timeout: Duration,
 ) -> Result<bool> {
-    match (key.modifiers, key.code) {
-        (KeyModifiers::CONTROL, KeyCode::Char('d')) if state.draft.is_empty() => return Ok(true),
-        (KeyModifiers::CONTROL, KeyCode::Char('d')) => {
-            state.draft.delete();
-        }
-        (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
-            state.draft.clear();
-        }
-        (KeyModifiers::CONTROL, KeyCode::Char('l')) => {
+    match apply_key_to_state(key, state) {
+        KeyAction::Exit => return Ok(true),
+        KeyAction::ClearScreen => {
             execute!(out, Clear(ClearType::All), MoveToColumn(0))?;
         }
-        (KeyModifiers::CONTROL, KeyCode::Char('a')) => state.draft.move_start(),
-        (KeyModifiers::CONTROL, KeyCode::Char('e')) => state.draft.move_end(),
-        (KeyModifiers::CONTROL, KeyCode::Char('u')) => state.draft.delete_to_start(),
-        (KeyModifiers::CONTROL, KeyCode::Char('k')) => state.draft.delete_to_end(),
-        (KeyModifiers::CONTROL, KeyCode::Char('w')) => {
-            state.draft.delete_previous_word();
-        }
-        (KeyModifiers::ALT, KeyCode::Char('b') | KeyCode::Left) => {
-            state.draft.move_previous_word();
-        }
-        (KeyModifiers::ALT, KeyCode::Char('f') | KeyCode::Right) => {
-            state.draft.move_next_word();
-        }
-        (_, KeyCode::Left) => {
-            state.draft.move_left();
-        }
-        (_, KeyCode::Right) => {
-            state.draft.move_right();
-        }
-        (_, KeyCode::Backspace) => {
-            state.draft.backspace();
-        }
-        (_, KeyCode::Delete) => {
-            state.draft.delete();
-        }
-        (_, KeyCode::Tab) => state.handle_empty_tab(),
-        (_, KeyCode::Enter) => {
+        KeyAction::Submit => {
             writeln!(out)?;
             execute_draft(state, backend, out, command_timeout)?;
         }
-        (_, KeyCode::Char(ch)) => state.draft.insert_char(ch),
-        _ => {}
+        KeyAction::Continue => {}
     }
     redraw(state, out)?;
     Ok(false)
+}
+
+pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
+    match (key.modifiers, key.code) {
+        (KeyModifiers::CONTROL, KeyCode::Char('d')) if state.draft.is_empty() => KeyAction::Exit,
+        (KeyModifiers::CONTROL, KeyCode::Char('d')) => {
+            state.draft.delete();
+            KeyAction::Continue
+        }
+        (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
+            state.draft.clear();
+            KeyAction::Continue
+        }
+        (KeyModifiers::CONTROL, KeyCode::Char('l')) => KeyAction::ClearScreen,
+        (KeyModifiers::CONTROL, KeyCode::Char('a')) => {
+            state.draft.move_start();
+            KeyAction::Continue
+        }
+        (KeyModifiers::CONTROL, KeyCode::Char('e')) => {
+            state.draft.move_end();
+            KeyAction::Continue
+        }
+        (KeyModifiers::CONTROL, KeyCode::Char('u')) => {
+            state.draft.delete_to_start();
+            KeyAction::Continue
+        }
+        (KeyModifiers::CONTROL, KeyCode::Char('k')) => {
+            state.draft.delete_to_end();
+            KeyAction::Continue
+        }
+        (KeyModifiers::CONTROL, KeyCode::Char('w')) => {
+            state.draft.delete_previous_word();
+            KeyAction::Continue
+        }
+        (KeyModifiers::ALT, KeyCode::Char('b') | KeyCode::Left) => {
+            state.draft.move_previous_word();
+            KeyAction::Continue
+        }
+        (KeyModifiers::ALT, KeyCode::Char('f') | KeyCode::Right) => {
+            state.draft.move_next_word();
+            KeyAction::Continue
+        }
+        (_, KeyCode::Left) => {
+            state.draft.move_left();
+            KeyAction::Continue
+        }
+        (_, KeyCode::Right) => {
+            state.draft.move_right();
+            KeyAction::Continue
+        }
+        (_, KeyCode::Backspace) => {
+            state.draft.backspace();
+            KeyAction::Continue
+        }
+        (_, KeyCode::Delete) => {
+            state.draft.delete();
+            KeyAction::Continue
+        }
+        (_, KeyCode::Tab) => {
+            state.handle_empty_tab();
+            KeyAction::Continue
+        }
+        (_, KeyCode::Enter) => KeyAction::Submit,
+        (_, KeyCode::Char(ch)) => {
+            state.draft.insert_char(ch);
+            KeyAction::Continue
+        }
+        _ => KeyAction::Continue,
+    }
 }
 
 pub fn redraw(state: &AppState, out: &mut impl Write) -> Result<()> {
@@ -127,4 +171,93 @@ pub fn redraw(state: &AppState, out: &mut impl Write) -> Result<()> {
     write!(out, "{} {}", state.mode.symbol(), state.draft.as_str())?;
     out.flush()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::modes::Mode;
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn ctrl(ch: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(ch), KeyModifiers::CONTROL)
+    }
+
+    fn alt(ch: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(ch), KeyModifiers::ALT)
+    }
+
+    #[test]
+    fn printable_keys_edit_draft_at_cursor() {
+        let mut state = AppState::default();
+        apply_key_to_state(key(KeyCode::Char('a')), &mut state);
+        apply_key_to_state(key(KeyCode::Char('c')), &mut state);
+        apply_key_to_state(key(KeyCode::Left), &mut state);
+        apply_key_to_state(key(KeyCode::Char('b')), &mut state);
+
+        assert_eq!(state.draft.as_str(), "abc");
+        assert_eq!(state.draft.cursor(), 2);
+    }
+
+    #[test]
+    fn control_navigation_and_deletion_update_draft() {
+        let mut state = AppState::default();
+        state.draft.insert_str("cargo test --all");
+
+        assert_eq!(
+            apply_key_to_state(ctrl('a'), &mut state),
+            KeyAction::Continue
+        );
+        assert_eq!(state.draft.cursor(), 0);
+        apply_key_to_state(ctrl('e'), &mut state);
+        assert_eq!(state.draft.cursor(), state.draft.as_str().len());
+        apply_key_to_state(ctrl('w'), &mut state);
+        assert_eq!(state.draft.as_str(), "cargo test ");
+        apply_key_to_state(ctrl('u'), &mut state);
+        assert_eq!(state.draft.as_str(), "");
+    }
+
+    #[test]
+    fn alt_word_navigation_moves_by_tokens() {
+        let mut state = AppState::default();
+        state.draft.insert_str("git commit message");
+
+        apply_key_to_state(ctrl('a'), &mut state);
+        apply_key_to_state(alt('f'), &mut state);
+        assert_eq!(state.draft.cursor(), 4);
+        apply_key_to_state(alt('f'), &mut state);
+        assert_eq!(state.draft.cursor(), 11);
+        apply_key_to_state(alt('b'), &mut state);
+        assert_eq!(state.draft.cursor(), 4);
+    }
+
+    #[test]
+    fn tab_switches_mode_only_for_empty_draft() {
+        let mut state = AppState::default();
+        apply_key_to_state(key(KeyCode::Tab), &mut state);
+        assert_eq!(state.mode, Mode::History);
+
+        state.draft.insert_str("git");
+        apply_key_to_state(key(KeyCode::Tab), &mut state);
+        assert_eq!(state.mode, Mode::History);
+    }
+
+    #[test]
+    fn enter_and_empty_ctrl_d_return_actions() {
+        let mut state = AppState::default();
+        assert_eq!(
+            apply_key_to_state(key(KeyCode::Enter), &mut state),
+            KeyAction::Submit
+        );
+        assert_eq!(apply_key_to_state(ctrl('d'), &mut state), KeyAction::Exit);
+
+        state.draft.insert_str("x");
+        assert_eq!(
+            apply_key_to_state(ctrl('d'), &mut state),
+            KeyAction::Continue
+        );
+    }
 }
