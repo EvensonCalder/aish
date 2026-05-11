@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 70 library unit tests.
+- 71 library unit tests.
 - 13 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
@@ -250,7 +250,8 @@ Implemented:
 - Context pseudo-pipe commands are not executed yet.
 - Unknown private commands are not sent to shell.
 - Unknown private commands suggest the nearest implemented command when there is a close match.
-- Minimal private commands: `#help`, `#status`, `#config`, `#doctor`, `#exit`, `#quit`, `#history <count>`.
+- Minimal private commands: `#help`, `#status`, `#config`, `#doctor`, `#context`, `#exit`, `#quit`, `#history <count>`.
+- `#context` reports that context collection is currently disabled/not implemented.
 - `#config` prints read-only runtime configuration and does not create missing storage files.
 - `#doctor` prints read-only diagnostics and does not create missing storage files.
 
@@ -269,6 +270,7 @@ Tests:
 - `app::tests::private_status_prints_mode_and_last_status`
 - `app::tests::private_config_prints_read_only_runtime_config`
 - `app::tests::private_doctor_prints_read_only_diagnostics`
+- `app::tests::private_context_reports_disabled_placeholder`
 - `app::tests::private_history_without_count_prints_usage`
 - `app::tests::private_exit_requests_app_exit`
 - `app::tests::unknown_private_command_prints_suggestion`

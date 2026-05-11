@@ -333,6 +333,16 @@ pub fn execute_draft(
                     state.mode = Mode::Draft;
                     return Ok(());
                 }
+                "context" => {
+                    writeln!(
+                        out,
+                        "context.enabled=false context.confirm=true context.max_bytes=0"
+                    )?;
+                    writeln!(out, "context collection is not implemented yet")?;
+                    state.draft.clear();
+                    state.mode = Mode::Draft;
+                    return Ok(());
+                }
                 "history" => {
                     let count = args.parse::<usize>();
                     match (count, &state.regular_history_path) {
@@ -717,9 +727,33 @@ mod tests {
         assert!(output.contains("#status"));
         assert!(output.contains("#config"));
         assert!(output.contains("#doctor"));
+        assert!(output.contains("#context"));
         assert!(output.contains("#exit"));
         assert!(output.contains("#quit"));
         assert!(output.contains("#history"));
+        assert!(state.draft.is_empty());
+    }
+
+    #[test]
+    fn private_context_reports_disabled_placeholder() {
+        let mut state = AppState::default();
+        state.draft.insert_str("#context");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("context.enabled=false"));
+        assert!(output.contains("context.confirm=true"));
+        assert!(output.contains("context collection is not implemented yet"));
+        assert_eq!(state.last_status, None);
         assert!(state.draft.is_empty());
     }
 
