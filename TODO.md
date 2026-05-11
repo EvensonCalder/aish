@@ -270,7 +270,7 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
 - [ ] Recognize private commands:
   - [x] `#help`
   - [x] `#status`
-  - [ ] `#config`
+  - [x] `#config`
   - [x] `#doctor`
   - [ ] `#model`
   - [ ] `#base-url`

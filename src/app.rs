@@ -321,6 +321,12 @@ pub fn execute_draft(
                     state.mode = Mode::Draft;
                     return Ok(());
                 }
+                "config" => {
+                    write_config_report(state, out)?;
+                    state.draft.clear();
+                    state.mode = Mode::Draft;
+                    return Ok(());
+                }
                 "doctor" => {
                     write_doctor_report(state, out)?;
                     state.draft.clear();
@@ -432,6 +438,23 @@ fn write_doctor_report(state: &AppState, out: &mut impl Write) -> Result<()> {
     write_path_status(out, "regular_history_path", &state.regular_history_path)?;
     write_path_status(out, "notes_path", &state.notes_path)?;
     write_path_status(out, "draft_history_path", &state.draft_history_path)?;
+    Ok(())
+}
+
+fn write_config_report(state: &AppState, out: &mut impl Write) -> Result<()> {
+    writeln!(out, "Aish config")?;
+    writeln!(out, "draft.persist={}", state.draft_persist)?;
+    write_config_path(out, "history.regular", &state.regular_history_path)?;
+    write_config_path(out, "history.notes", &state.notes_path)?;
+    write_config_path(out, "history.draft", &state.draft_history_path)?;
+    Ok(())
+}
+
+fn write_config_path(out: &mut impl Write, name: &str, path: &Option<PathBuf>) -> Result<()> {
+    match path {
+        Some(path) => writeln!(out, "{name}={}", path.display())?,
+        None => writeln!(out, "{name}=unconfigured")?,
+    }
     Ok(())
 }
 
@@ -692,10 +715,51 @@ mod tests {
         let output = String::from_utf8(output).unwrap();
         assert!(output.contains("#help"));
         assert!(output.contains("#status"));
+        assert!(output.contains("#config"));
         assert!(output.contains("#doctor"));
         assert!(output.contains("#exit"));
         assert!(output.contains("#quit"));
         assert!(output.contains("#history"));
+        assert!(state.draft.is_empty());
+    }
+
+    #[test]
+    fn private_config_prints_read_only_runtime_config() {
+        let temp = tempfile::tempdir().unwrap();
+        let history_path = temp.path().join("history/regular.jsonl");
+        let notes_path = temp.path().join("history/notes.jsonl");
+        let draft_path = temp.path().join("history/draft.jsonl");
+        let mut state = AppState {
+            regular_history_path: Some(history_path.clone()),
+            notes_path: Some(notes_path.clone()),
+            draft_history_path: Some(draft_path.clone()),
+            draft_persist: false,
+            ..AppState::default()
+        };
+        state.draft.insert_str("#config");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("Aish config"));
+        assert!(output.contains("draft.persist=false"));
+        assert!(output.contains("history.regular="));
+        assert!(output.contains(&history_path.display().to_string()));
+        assert!(output.contains("history.notes="));
+        assert!(output.contains(&notes_path.display().to_string()));
+        assert!(output.contains("history.draft="));
+        assert!(output.contains(&draft_path.display().to_string()));
+        assert!(!history_path.exists());
+        assert!(!notes_path.exists());
+        assert!(!draft_path.exists());
         assert!(state.draft.is_empty());
     }
 
