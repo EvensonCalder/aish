@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 
+use crate::commands::{ParsedLine, parse_line};
 use crate::config;
 use crate::input::InputBuffer;
 use crate::modes::Mode;
@@ -56,6 +57,34 @@ pub fn execute_draft(
     }
 
     let command = state.draft.as_str().to_string();
+    match parse_line(&command) {
+        ParsedLine::Ordinary(_) => {}
+        ParsedLine::EmptyPrivate => {
+            writeln!(out, "empty Aish command")?;
+            state.draft.clear();
+            state.mode = Mode::Draft;
+            return Ok(());
+        }
+        ParsedLine::Note { .. } => {
+            writeln!(out, "note stored")?;
+            state.draft.clear();
+            state.mode = Mode::Draft;
+            return Ok(());
+        }
+        ParsedLine::Private { name, .. } => {
+            writeln!(out, "Aish command not implemented yet: #{name}")?;
+            state.draft.clear();
+            state.mode = Mode::Draft;
+            return Ok(());
+        }
+        ParsedLine::AiPrompt(_) => {
+            writeln!(out, "AI prompts are not implemented yet")?;
+            state.draft.clear();
+            state.mode = Mode::Draft;
+            return Ok(());
+        }
+    }
+
     state.mode = Mode::CommandRunning;
     let result = backend.run_command(&command, timeout)?;
     if !result.output.is_empty() {

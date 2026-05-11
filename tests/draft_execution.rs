@@ -47,3 +47,26 @@ fn execute_draft_records_failed_status_and_returns_to_draft() {
     assert_eq!(state.mode, Mode::Draft);
     assert!(state.draft.is_empty());
 }
+
+#[test]
+fn execute_draft_does_not_send_line_leading_hash_to_backend_shell() {
+    let mut state = AppState::default();
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    state.draft.insert_str("#definitely-not-a-shell-comment");
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.contains("Aish command not implemented yet"));
+    assert_eq!(state.last_status, None);
+    assert_eq!(state.mode, Mode::Draft);
+    assert!(state.draft.is_empty());
+}

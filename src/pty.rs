@@ -114,7 +114,8 @@ impl PtyBackend {
         let deadline = Instant::now() + timeout;
         let mut data = Vec::new();
         loop {
-            if String::from_utf8_lossy(&data).contains(marker) {
+            let current = String::from_utf8_lossy(&data);
+            if marker_status_is_complete(&current, marker) {
                 return Ok(String::from_utf8_lossy(&data).into_owned());
             }
             let now = Instant::now();
@@ -148,6 +149,21 @@ impl PtyBackend {
 fn next_marker() -> String {
     let id = NEXT_MARKER_ID.fetch_add(1, Ordering::Relaxed);
     format!("{MARKER_PREFIX}{id}__")
+}
+
+fn marker_status_is_complete(raw: &str, marker: &str) -> bool {
+    let Some(marker_pos) = raw.find(marker) else {
+        return false;
+    };
+    let status_start = marker_pos + marker.len();
+    let mut chars = raw[status_start..].chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !first.is_ascii_digit() {
+        return false;
+    }
+    chars.any(|ch| ch == '\n' || ch == '\r')
 }
 
 pub fn resolve_shell(configured_shell: &str) -> String {
@@ -237,5 +253,21 @@ mod tests {
         let (output, status) = parse_marker_output(&raw, marker).unwrap();
         assert_eq!(output, "before __AISH_STATUS__ after");
         assert_eq!(status, 0);
+    }
+
+    #[test]
+    fn marker_status_requires_digits_and_line_end() {
+        let marker = "__AISH_STATUS__123__";
+        assert!(!marker_status_is_complete("hello", marker));
+        assert!(!marker_status_is_complete(marker, marker));
+        assert!(!marker_status_is_complete("__AISH_STATUS__123__", marker));
+        assert!(!marker_status_is_complete(
+            "__AISH_STATUS__123__x\n",
+            marker
+        ));
+        assert!(marker_status_is_complete(
+            "hello\r\n__AISH_STATUS__123__0\r\n",
+            marker
+        ));
     }
 }
