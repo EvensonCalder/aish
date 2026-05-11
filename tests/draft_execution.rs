@@ -49,6 +49,28 @@ fn execute_draft_records_failed_status_and_returns_to_draft() {
 }
 
 #[test]
+fn execute_draft_sends_multiline_buffer_exactly_to_backend() {
+    let mut state = AppState::default();
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    state.draft.insert_str("printf 'one\\n'\nprintf 'two\\n'");
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    assert_eq!(String::from_utf8(output).unwrap().trim(), "one\ntwo");
+    assert_eq!(state.last_status, Some(0));
+    assert_eq!(state.mode, Mode::Draft);
+    assert!(state.draft.is_empty());
+}
+
+#[test]
 fn execute_draft_does_not_send_line_leading_hash_to_backend_shell() {
     let mut state = AppState::default();
     let mut backend = PtyBackend::spawn("/bin/bash").unwrap();

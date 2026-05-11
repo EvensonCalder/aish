@@ -207,7 +207,7 @@ fn parse_marker_output(raw: &str, marker: &str) -> Result<(String, i32)> {
     let marker_pos = raw
         .find(marker)
         .context("backend shell output did not contain prompt marker")?;
-    let output = raw[..marker_pos].trim_matches(['\r', '\n']).to_string();
+    let output = normalize_pty_newlines(raw[..marker_pos].trim_matches(['\r', '\n']));
     let status_start = marker_pos + marker.len();
     let status: String = raw[status_start..]
         .chars()
@@ -218,6 +218,10 @@ fn parse_marker_output(raw: &str, marker: &str) -> Result<(String, i32)> {
     }
     let exit_code = status.parse::<i32>().context("invalid shell exit status")?;
     Ok((output, exit_code))
+}
+
+fn normalize_pty_newlines(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
 }
 
 #[cfg(test)]
@@ -258,6 +262,15 @@ mod tests {
         let raw = format!("before __AISH_STATUS__ after\r\n{marker}0\r\n");
         let (output, status) = parse_marker_output(&raw, marker).unwrap();
         assert_eq!(output, "before __AISH_STATUS__ after");
+        assert_eq!(status, 0);
+    }
+
+    #[test]
+    fn parser_normalizes_pty_newlines() {
+        let marker = "__AISH_STATUS__123__";
+        let raw = format!("one\r\ntwo\r\n{marker}0\r\n");
+        let (output, status) = parse_marker_output(&raw, marker).unwrap();
+        assert_eq!(output, "one\ntwo");
         assert_eq!(status, 0);
     }
 
