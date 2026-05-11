@@ -56,6 +56,25 @@ pub fn remove_templates_by_name(path: &Path, name: &str) -> Result<TemplateRemov
     })
 }
 
+pub fn replace_template(path: &Path, entry: TemplateEntry) -> Result<TemplateRemoval> {
+    let loaded = load_templates(path)?;
+    let before = loaded.items.len();
+    let mut remaining: Vec<_> = loaded
+        .items
+        .into_iter()
+        .filter(|template| template.name != entry.name)
+        .collect();
+    let removed = before - remaining.len();
+    remaining.push(entry);
+    rewrite_jsonl(path, &remaining)?;
+
+    Ok(TemplateRemoval {
+        removed,
+        remaining,
+        errors: loaded.errors,
+    })
+}
+
 pub fn template_placeholders(body: &str) -> Vec<String> {
     let mut placeholders = Vec::new();
     let mut rest = body;
@@ -149,6 +168,35 @@ mod tests {
         assert_eq!(loaded.errors, []);
         assert_eq!(loaded.items.len(), 1);
         assert_eq!(loaded.items[0].body, "new");
+    }
+
+    #[test]
+    fn replace_template_removes_old_matches_and_appends_replacement() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("templates/templates.jsonl");
+        for (name, body) in [("deploy", "old"), ("logs", "tail"), ("deploy", "older")] {
+            append_template(
+                &path,
+                &TemplateEntry {
+                    name: name.to_string(),
+                    body: body.to_string(),
+                },
+            )
+            .unwrap();
+        }
+
+        let replacement = TemplateEntry {
+            name: "deploy".to_string(),
+            body: "new".to_string(),
+        };
+        let removal = replace_template(&path, replacement.clone()).unwrap();
+        let loaded = load_templates(&path).unwrap();
+
+        assert_eq!(removal.removed, 2);
+        assert_eq!(removal.errors, []);
+        assert_eq!(loaded.items.len(), 2);
+        assert_eq!(loaded.items[0].name, "logs");
+        assert_eq!(loaded.items[1], replacement);
     }
 
     #[test]

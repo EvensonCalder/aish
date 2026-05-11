@@ -17,7 +17,7 @@ use crate::modes::Mode;
 use crate::pty::PtyBackend;
 use crate::templates::{
     TemplateEntry, append_template, find_template_by_name, load_templates,
-    remove_templates_by_name, template_placeholders,
+    remove_templates_by_name, replace_template, template_placeholders,
 };
 
 #[derive(Debug)]
@@ -487,6 +487,33 @@ pub fn execute_draft(
                             },
                             None => writeln!(out, "{}", template_usage())?,
                         },
+                        Some("replace") => match parse_template_subcommand_args(args) {
+                            Some((name, body)) => match &state.template_store_path {
+                                Some(path) => {
+                                    let removal = replace_template(
+                                        path,
+                                        TemplateEntry {
+                                            name: name.to_string(),
+                                            body: body.to_string(),
+                                        },
+                                    )?;
+                                    writeln!(
+                                        out,
+                                        "template replaced: {name} (removed {})",
+                                        removal.removed
+                                    )?;
+                                    if !removal.errors.is_empty() {
+                                        writeln!(
+                                            out,
+                                            "skipped {} bad template line(s)",
+                                            removal.errors.len()
+                                        )?;
+                                    }
+                                }
+                                None => writeln!(out, "template storage is not configured")?,
+                            },
+                            None => writeln!(out, "{}", template_usage())?,
+                        },
                         Some("show") => match args.split_whitespace().nth(1) {
                             Some(name) => match &state.template_store_path {
                                 Some(path) => {
@@ -700,8 +727,13 @@ fn parse_template_args(args: &str) -> Option<(&str, &str)> {
     (!name.is_empty() && !body.is_empty()).then_some((name, body))
 }
 
+fn parse_template_subcommand_args(args: &str) -> Option<(&str, &str)> {
+    let rest = args.trim_start().strip_prefix("replace")?.trim_start();
+    parse_template_args(rest)
+}
+
 fn template_usage() -> &'static str {
-    "usage: #template list | #template show <name> | #template rm <name> | #template use <name>"
+    "usage: #template list | #template show <name> | #template use <name> | #template rm <name> | #template replace <name> <body>"
 }
 
 fn write_path_status(out: &mut impl Write, name: &str, path: &Option<PathBuf>) -> Result<()> {
@@ -1236,6 +1268,55 @@ mod tests {
     }
 
     #[test]
+    fn template_replace_rewrites_matching_templates() {
+        let temp = tempfile::tempdir().unwrap();
+        let template_path = temp.path().join("templates/templates.jsonl");
+        for (name, body) in [
+            ("deploy", "old deploy"),
+            ("logs", "tail -f {file}"),
+            ("deploy", "older deploy"),
+        ] {
+            append_template(
+                &template_path,
+                &TemplateEntry {
+                    name: name.to_string(),
+                    body: body.to_string(),
+                },
+            )
+            .unwrap();
+        }
+        let mut state = AppState {
+            template_store_path: Some(template_path.clone()),
+            ..AppState::default()
+        };
+        state
+            .draft
+            .insert_str("#template replace deploy new deploy body");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("template replaced: deploy (removed 2)"));
+        assert_eq!(state.last_status, None);
+        assert!(state.draft.is_empty());
+
+        let loaded = load_templates(&template_path).unwrap();
+        assert_eq!(loaded.errors, []);
+        assert_eq!(loaded.items.len(), 2);
+        assert_eq!(loaded.items[0].name, "logs");
+        assert_eq!(loaded.items[1].name, "deploy");
+        assert_eq!(loaded.items[1].body, "new deploy body");
+    }
+
+    #[test]
     fn template_use_copies_newest_matching_body_to_draft() {
         let temp = tempfile::tempdir().unwrap();
         let template_path = temp.path().join("templates/templates.jsonl");
@@ -1355,6 +1436,7 @@ mod tests {
         for (line, expected) in [
             ("#mt deploy", "usage: #mt <name> <body>"),
             ("#template rm", usage),
+            ("#template replace deploy", usage),
             ("#template show", usage),
             ("#template use", usage),
             ("#template", usage),

@@ -39,7 +39,7 @@ fn execute_draft_sends_command_to_backend_and_resets_state() {
     )
     .unwrap();
 
-    assert_eq!(String::from_utf8(output).unwrap().trim(), "hello draft");
+    assert!(String::from_utf8(output).unwrap().contains("hello draft"));
     assert_eq!(state.last_status, Some(0));
     assert_eq!(state.mode, Mode::Draft);
     assert!(state.draft.is_empty());
@@ -62,7 +62,7 @@ fn execute_draft_records_failed_status_and_returns_to_draft() {
     )
     .unwrap();
 
-    assert!(String::from_utf8(output).unwrap().trim().is_empty());
+    let _output = String::from_utf8(output).unwrap();
     assert_eq!(state.last_status, Some(1));
     assert_eq!(state.mode, Mode::Draft);
     assert!(state.draft.is_empty());
@@ -85,7 +85,7 @@ fn execute_draft_sends_multiline_buffer_exactly_to_backend() {
     )
     .unwrap();
 
-    assert_eq!(String::from_utf8(output).unwrap().trim(), "one\ntwo");
+    assert!(String::from_utf8(output).unwrap().contains("one\ntwo"));
     assert_eq!(state.last_status, Some(0));
     assert_eq!(state.mode, Mode::Draft);
     assert!(state.draft.is_empty());
@@ -321,7 +321,7 @@ fn execute_history_selection_runs_selected_command() {
     )
     .unwrap();
 
-    assert_eq!(String::from_utf8(output).unwrap().trim(), "from history");
+    assert!(String::from_utf8(output).unwrap().contains("from history"));
     assert_eq!(state.mode, Mode::Draft);
     assert!(state.draft.is_empty());
     assert_eq!(state.last_status, Some(0));

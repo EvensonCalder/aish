@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 89 library unit tests.
+- 91 library unit tests.
 - 13 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
@@ -462,6 +462,7 @@ Implemented:
 - `#template list` reads template entries and prints template names.
 - `#template show <name>` prints the newest matching template body without changing draft.
 - `#template rm <name>` removes all valid template entries matching a name.
+- `#template replace <name> <body>` removes existing matches and appends one replacement entry.
 - `#template use <name>` copies the newest matching template body into draft without executing it.
 - `#template use <name>` reports simple `{placeholder}` names found in the copied body.
 
@@ -474,7 +475,9 @@ Tests:
 - `app::tests::template_list_prints_stored_template_names`
 - `app::tests::template_show_prints_newest_matching_body`
 - `templates::tests::remove_templates_by_name_removes_all_matches_and_keeps_others`
+- `templates::tests::replace_template_removes_old_matches_and_appends_replacement`
 - `app::tests::template_rm_removes_matching_templates`
+- `app::tests::template_replace_rewrites_matching_templates`
 - `app::tests::template_use_copies_newest_matching_body_to_draft`
 - `app::tests::template_use_reports_missing_template_without_changing_draft`
 - `app::tests::template_commands_report_usage_for_invalid_input`
