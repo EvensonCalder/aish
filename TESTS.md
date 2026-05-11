@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 88 library unit tests.
+- 89 library unit tests.
 - 13 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
@@ -460,6 +460,7 @@ Implemented:
 - `TemplateEntry` JSONL model.
 - `#mt <name> <body>` appends a template entry to `templates/templates.jsonl`.
 - `#template list` reads template entries and prints template names.
+- `#template show <name>` prints the newest matching template body without changing draft.
 - `#template rm <name>` removes all valid template entries matching a name.
 - `#template use <name>` copies the newest matching template body into draft without executing it.
 - `#template use <name>` reports simple `{placeholder}` names found in the copied body.
@@ -471,6 +472,7 @@ Tests:
 - `templates::tests::template_placeholders_returns_unique_simple_names_in_order`
 - `app::tests::mt_command_persists_template_entry`
 - `app::tests::template_list_prints_stored_template_names`
+- `app::tests::template_show_prints_newest_matching_body`
 - `templates::tests::remove_templates_by_name_removes_all_matches_and_keeps_others`
 - `app::tests::template_rm_removes_matching_templates`
 - `app::tests::template_use_copies_newest_matching_body_to_draft`

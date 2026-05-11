@@ -485,10 +485,30 @@ pub fn execute_draft(
                                 }
                                 None => writeln!(out, "template storage is not configured")?,
                             },
-                            None => writeln!(
-                                out,
-                                "usage: #template list | #template rm <name> | #template use <name>"
-                            )?,
+                            None => writeln!(out, "{}", template_usage())?,
+                        },
+                        Some("show") => match args.split_whitespace().nth(1) {
+                            Some(name) => match &state.template_store_path {
+                                Some(path) => {
+                                    let loaded = find_template_by_name(path, name)?;
+                                    match loaded.items.first() {
+                                        Some(template) => {
+                                            writeln!(out, "template: {}", template.name)?;
+                                            writeln!(out, "{}", template.body)?;
+                                        }
+                                        None => writeln!(out, "template not found: {name}")?,
+                                    }
+                                    if !loaded.errors.is_empty() {
+                                        writeln!(
+                                            out,
+                                            "skipped {} bad template line(s)",
+                                            loaded.errors.len()
+                                        )?;
+                                    }
+                                }
+                                None => writeln!(out, "template storage is not configured")?,
+                            },
+                            None => writeln!(out, "{}", template_usage())?,
                         },
                         Some("use") => match args.split_whitespace().nth(1) {
                             Some(name) => match &state.template_store_path {
@@ -521,15 +541,9 @@ pub fn execute_draft(
                                 }
                                 None => writeln!(out, "template storage is not configured")?,
                             },
-                            None => writeln!(
-                                out,
-                                "usage: #template list | #template rm <name> | #template use <name>"
-                            )?,
+                            None => writeln!(out, "{}", template_usage())?,
                         },
-                        _ => writeln!(
-                            out,
-                            "usage: #template list | #template rm <name> | #template use <name>"
-                        )?,
+                        _ => writeln!(out, "{}", template_usage())?,
                     }
                     if !keep_draft {
                         state.draft.clear();
@@ -684,6 +698,10 @@ fn parse_template_args(args: &str) -> Option<(&str, &str)> {
     let (name, body) = args.split_at(split_at);
     let body = body.trim_start();
     (!name.is_empty() && !body.is_empty()).then_some((name, body))
+}
+
+fn template_usage() -> &'static str {
+    "usage: #template list | #template show <name> | #template rm <name> | #template use <name>"
 }
 
 fn write_path_status(out: &mut impl Write, name: &str, path: &Option<PathBuf>) -> Result<()> {
@@ -1290,25 +1308,57 @@ mod tests {
     }
 
     #[test]
+    fn template_show_prints_newest_matching_body() {
+        let temp = tempfile::tempdir().unwrap();
+        let template_path = temp.path().join("templates/templates.jsonl");
+        for (name, body) in [
+            ("deploy", "old deploy"),
+            ("logs", "tail -f {file}"),
+            ("deploy", "new deploy"),
+        ] {
+            append_template(
+                &template_path,
+                &TemplateEntry {
+                    name: name.to_string(),
+                    body: body.to_string(),
+                },
+            )
+            .unwrap();
+        }
+        let mut state = AppState {
+            template_store_path: Some(template_path),
+            ..AppState::default()
+        };
+        state.draft.insert_str("#template show deploy");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("template: deploy"));
+        assert!(output.contains("new deploy"));
+        assert!(!output.contains("old deploy"));
+        assert_eq!(state.last_status, None);
+        assert!(state.draft.is_empty());
+    }
+
+    #[test]
     fn template_commands_report_usage_for_invalid_input() {
+        let usage = template_usage();
         for (line, expected) in [
             ("#mt deploy", "usage: #mt <name> <body>"),
-            (
-                "#template rm",
-                "usage: #template list | #template rm <name> | #template use <name>",
-            ),
-            (
-                "#template use",
-                "usage: #template list | #template rm <name> | #template use <name>",
-            ),
-            (
-                "#template",
-                "usage: #template list | #template rm <name> | #template use <name>",
-            ),
-            (
-                "#template show deploy",
-                "usage: #template list | #template rm <name> | #template use <name>",
-            ),
+            ("#template rm", usage),
+            ("#template show", usage),
+            ("#template use", usage),
+            ("#template", usage),
+            ("#template unknown deploy", usage),
         ] {
             let mut state = AppState::default();
             state.draft.insert_str(line);

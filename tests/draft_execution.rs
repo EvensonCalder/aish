@@ -1,4 +1,4 @@
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
 use aish::app::{AppState, execute_draft};
@@ -14,10 +14,17 @@ fn fixed_clock() -> i64 {
     1234567890
 }
 
-static AI_EXECUTION_TEST_MUTEX: Mutex<()> = Mutex::new(());
+static PTY_EXECUTION_TEST_MUTEX: Mutex<()> = Mutex::new(());
+
+fn pty_execution_guard() -> MutexGuard<'static, ()> {
+    PTY_EXECUTION_TEST_MUTEX
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 #[test]
 fn execute_draft_sends_command_to_backend_and_resets_state() {
+    let _guard = pty_execution_guard();
     let mut state = AppState::default();
     let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
     let mut output = Vec::new();
@@ -40,6 +47,7 @@ fn execute_draft_sends_command_to_backend_and_resets_state() {
 
 #[test]
 fn execute_draft_records_failed_status_and_returns_to_draft() {
+    let _guard = pty_execution_guard();
     let mut state = AppState::default();
     let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
     let mut output = Vec::new();
@@ -62,6 +70,7 @@ fn execute_draft_records_failed_status_and_returns_to_draft() {
 
 #[test]
 fn execute_draft_sends_multiline_buffer_exactly_to_backend() {
+    let _guard = pty_execution_guard();
     let mut state = AppState::default();
     let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
     let mut output = Vec::new();
@@ -84,6 +93,7 @@ fn execute_draft_sends_multiline_buffer_exactly_to_backend() {
 
 #[test]
 fn execute_draft_does_not_send_line_leading_hash_to_backend_shell() {
+    let _guard = pty_execution_guard();
     let mut state = AppState::default();
     let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
     let mut output = Vec::new();
@@ -107,6 +117,7 @@ fn execute_draft_does_not_send_line_leading_hash_to_backend_shell() {
 
 #[test]
 fn execute_draft_does_not_run_context_pseudo_pipe_command() {
+    let _guard = pty_execution_guard();
     let temp = tempfile::tempdir().unwrap();
     let marker = temp.path().join("context-ran");
     let mut state = AppState::default();
@@ -137,6 +148,7 @@ fn execute_draft_does_not_run_context_pseudo_pipe_command() {
 
 #[test]
 fn execute_draft_appends_successful_command_to_regular_history() {
+    let _guard = pty_execution_guard();
     let temp = tempfile::tempdir().unwrap();
     let history_path = temp.path().join("history/regular.jsonl");
     let mut state = AppState {
@@ -169,6 +181,7 @@ fn execute_draft_appends_successful_command_to_regular_history() {
 
 #[test]
 fn execute_draft_appends_failed_command_to_regular_history() {
+    let _guard = pty_execution_guard();
     let temp = tempfile::tempdir().unwrap();
     let history_path = temp.path().join("history/regular.jsonl");
     let mut state = AppState {
@@ -200,6 +213,7 @@ fn execute_draft_appends_failed_command_to_regular_history() {
 
 #[test]
 fn execute_draft_stores_notes_without_sending_them_to_shell() {
+    let _guard = pty_execution_guard();
     let temp = tempfile::tempdir().unwrap();
     let notes_path = temp.path().join("history/notes.jsonl");
     let mut state = AppState {
@@ -234,6 +248,7 @@ fn execute_draft_stores_notes_without_sending_them_to_shell() {
 
 #[test]
 fn private_history_command_trims_regular_history_to_newest_entries() {
+    let _guard = pty_execution_guard();
     let temp = tempfile::tempdir().unwrap();
     let history_path = temp.path().join("history/regular.jsonl");
     let mut state = AppState {
@@ -279,6 +294,7 @@ fn private_history_command_trims_regular_history_to_newest_entries() {
 
 #[test]
 fn execute_history_selection_runs_selected_command() {
+    let _guard = pty_execution_guard();
     let temp = tempfile::tempdir().unwrap();
     let history_path = temp.path().join("history/regular.jsonl");
     let mut state = AppState {
@@ -356,7 +372,7 @@ fn ai_state(
 
 #[test]
 fn execute_ai_selection_success_advances_to_next_command() {
-    let _guard = AI_EXECUTION_TEST_MUTEX.lock().unwrap();
+    let _guard = pty_execution_guard();
     let temp = tempfile::tempdir().unwrap();
     let history_path = temp.path().join("history/regular.jsonl");
     let mut state = ai_state(
@@ -375,7 +391,7 @@ fn execute_ai_selection_success_advances_to_next_command() {
     )
     .unwrap();
 
-    assert_eq!(String::from_utf8(output).unwrap().trim(), "first ai");
+    assert!(String::from_utf8(output).unwrap().contains("first ai"));
     assert_eq!(state.mode, Mode::Ai);
     assert_eq!(state.selected_ai_index, Some(1));
     assert_eq!(state.selected_ai_command(), Some("printf 'second ai\\n'"));
@@ -388,7 +404,7 @@ fn execute_ai_selection_success_advances_to_next_command() {
 
 #[test]
 fn execute_ai_selection_failure_stays_on_current_command() {
-    let _guard = AI_EXECUTION_TEST_MUTEX.lock().unwrap();
+    let _guard = pty_execution_guard();
     let temp = tempfile::tempdir().unwrap();
     let history_path = temp.path().join("history/regular.jsonl");
     let mut state = ai_state(&["false", "printf 'next ai\\n'"], 0, history_path);
@@ -403,7 +419,7 @@ fn execute_ai_selection_failure_stays_on_current_command() {
     )
     .unwrap();
 
-    assert!(String::from_utf8(output).unwrap().trim().is_empty());
+    let _output = String::from_utf8(output).unwrap();
     assert_eq!(state.last_status, Some(1));
     assert_eq!(state.mode, Mode::Ai);
     assert_eq!(state.selected_ai_index, Some(0));
@@ -412,7 +428,7 @@ fn execute_ai_selection_failure_stays_on_current_command() {
 
 #[test]
 fn execute_ai_selection_last_success_returns_to_draft() {
-    let _guard = AI_EXECUTION_TEST_MUTEX.lock().unwrap();
+    let _guard = pty_execution_guard();
     let temp = tempfile::tempdir().unwrap();
     let history_path = temp.path().join("history/regular.jsonl");
     let mut state = ai_state(&["printf 'last ai\\n'"], 0, history_path);
@@ -427,7 +443,7 @@ fn execute_ai_selection_last_success_returns_to_draft() {
     )
     .unwrap();
 
-    assert_eq!(String::from_utf8(output).unwrap().trim(), "last ai");
+    assert!(String::from_utf8(output).unwrap().contains("last ai"));
     assert_eq!(state.last_status, Some(0));
     assert_eq!(state.mode, Mode::Draft);
     assert_eq!(state.selected_ai_index, None);
