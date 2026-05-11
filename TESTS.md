@@ -1,0 +1,452 @@
+# Aish Test Summary
+
+This document records the current implementation status, the tests that cover each feature, and the latest verified test commands.
+
+Last full verification performed during development:
+
+```text
+cargo fmt --check
+cargo test
+cargo clippy --all-targets -- -D warnings
+```
+
+Current test inventory:
+
+- 50 library unit tests.
+- 8 draft execution integration tests.
+- 1 first-run integration test.
+- 3 active bash PTY integration tests.
+- 1 ignored zsh PTY integration test.
+- 0 doctests.
+
+Current expected result:
+
+- All active tests pass.
+- `zsh_pty_backend_runs_commands_and_preserves_shell_state_when_available` is intentionally ignored until shell-specific zsh prompt/echo integration is implemented.
+
+## Test Commands
+
+Use these commands before committing feature changes:
+
+```text
+cargo fmt --check
+cargo test
+cargo clippy --all-targets -- -D warnings
+```
+
+Useful focused commands:
+
+```text
+cargo test --lib
+cargo test --test draft_execution -- --nocapture
+cargo test --test first_run -- --nocapture
+cargo test --test pty_backend -- --nocapture
+cargo test -- --list
+```
+
+## Feature Coverage
+
+### Project Foundation
+
+Implemented:
+
+- Rust binary crate `aish`.
+- Internal module skeleton for app, config, terminal, pty, input, modes, history, AI, templates, completion, picker, editor, paste, encryption, sync, log, and shell integration.
+- `anyhow`, `serde`, `serde_json`, and `toml` are configured.
+
+Tests:
+
+- `config::tests::default_config_matches_spec_basics`
+- `config::tests::config_roundtrips_through_json_for_future_jsonl_storage`
+
+Status:
+
+- Passing.
+
+### Config And First Run
+
+Implemented:
+
+- Default `~/.aish` layout.
+- `AISH_HOME` override for tests and isolated runs.
+- First-run directory creation.
+- Missing config creates default `config.toml`.
+- Invalid config returns a readable error.
+- Draft config defaults: `persist = true`, `sync = false`.
+
+Tests:
+
+- `config::tests::default_config_matches_spec_basics`
+- `config::tests::normalize_replaces_empty_values`
+- `config::tests::first_run_creates_layout_and_default_config`
+- `config::tests::invalid_config_has_readable_error`
+- `config::tests::aish_home_environment_overrides_default_root`
+- `first_run_creates_aish_home_without_user_home_side_effects`
+
+Status:
+
+- Passing.
+
+### PTY Backend: Bash MVP
+
+Implemented:
+
+- `portable-pty` backend.
+- Shell resolution: configured shell, `$SHELL`, `/bin/bash` fallback.
+- Bash clean startup flags: `--noprofile --norc`.
+- PTY pair creation and shell spawn.
+- PTY master read thread.
+- PTY writes.
+- Prompt/command completion marker.
+- Per-command unique marker to avoid collision with user output.
+- Marker parsing waits for marker plus exit status and line ending.
+- Marker parsing handles echoed marker injection commands.
+- PTY CRLF output normalization.
+- Backend shell is killed on `PtyBackend` drop.
+- Real bash shell state persistence is tested with `pwd`, `cd /tmp`, `pwd`.
+
+Tests:
+
+- `pty::tests::resolves_configured_shell_before_environment`
+- `pty::tests::bash_launch_uses_clean_startup_flags`
+- `pty::tests::non_bash_launch_does_not_receive_bash_only_flags`
+- `pty::tests::parses_marker_and_hides_it_from_output`
+- `pty::tests::parser_ignores_old_fixed_marker_in_user_output`
+- `pty::tests::parser_normalizes_pty_newlines`
+- `pty::tests::parser_uses_real_marker_when_command_echo_contains_marker`
+- `pty::tests::marker_status_requires_digits_and_line_end`
+- `pty_backend_runs_commands_and_preserves_shell_state`
+- `pty_backend_captures_failed_command_exit_status`
+- `pty_backend_does_not_confuse_user_output_with_prompt_marker`
+
+Status:
+
+- Passing for bash.
+
+### PTY Backend: Zsh Preparation
+
+Implemented:
+
+- zsh launch preparation uses `zsh -f`.
+- zsh init attempts to disable prompt/ZLE behavior for future support.
+- A real zsh PTY integration test exists but is ignored.
+
+Tests:
+
+- `zsh_pty_backend_runs_commands_and_preserves_shell_state_when_available`
+
+Status:
+
+- Ignored by design.
+- Reason: zsh still needs shell-specific prompt/echo integration beyond bash v0.1.
+
+### Terminal Raw Mode And Event Loop
+
+Implemented:
+
+- Raw mode enable/disable guard.
+- Bracketed paste enable/disable guard.
+- Panic cleanup hook for terminal restoration.
+- Keyboard event handling.
+- Paste event handling for single-line paste insertion.
+- Redraw function for prompt/input line.
+- Cursor placement after redraw.
+- `Ctrl-D` empty draft exit action.
+- Minimal private `#exit` and `#quit` exit path.
+
+Tests:
+
+- `terminal::tests::printable_keys_edit_draft_at_cursor`
+- `terminal::tests::control_navigation_and_deletion_update_draft`
+- `terminal::tests::alt_word_navigation_moves_by_tokens`
+- `terminal::tests::tab_switches_mode_only_for_empty_draft`
+- `terminal::tests::enter_and_empty_ctrl_d_return_actions`
+- `app::tests::terminal_cursor_column_tracks_draft_cursor`
+- `app::tests::private_exit_requests_app_exit`
+
+Status:
+
+- Passing.
+
+Known gaps:
+
+- PTY output is not yet integrated as a separate event-loop source.
+- Timer/background events are not implemented.
+- Binary-level raw terminal smoke test was attempted with `expectrl` but was not stable enough to keep. Current coverage is unit/integration level rather than full interactive terminal automation.
+
+### Core Modes
+
+Implemented:
+
+- Primary modes: `Draft`, `History`, `Ai`.
+- Temporary modes: `CommandRunning`, `Passthrough`, `ExternalEditor`, `PasteReviewEditor`, `Picker`, `UnlockPassthrough`.
+- Prompt symbols: `>`, `$`, `%`.
+- Empty-input `Tab` mode cycling.
+- Prompt line rendering.
+
+Tests:
+
+- `modes::tests::primary_modes_cycle_deterministically`
+- `modes::tests::primary_mode_symbols_match_spec`
+- `app::tests::empty_tab_cycles_modes`
+- `app::tests::non_empty_tab_does_not_switch_modes`
+- `app::tests::prompt_line_uses_current_mode_symbol`
+
+Status:
+
+- Passing.
+
+Known gaps:
+
+- Selected history index is not implemented.
+- Selected AI session/item state is not implemented.
+- Current cwd tracking is not implemented.
+- Output ring buffer is not implemented.
+- Custom prompt variables are not implemented.
+
+### Draft Input Editor
+
+Implemented:
+
+- Editable UTF-8-safe input buffer.
+- Insertion at cursor.
+- String/paste insertion at cursor.
+- Backspace and Delete.
+- `Ctrl-A`, `Ctrl-E`.
+- `Ctrl-U`, `Ctrl-K`, `Ctrl-W`.
+- Left/Right.
+- `Alt-B`, `Alt-F`, `Alt-Left`, `Alt-Right` through key handling.
+- Cursor placement on redraw.
+- Multi-line draft buffer execution.
+- Draft command submission to PTY.
+
+Tests:
+
+- `input::tests::inserts_and_edits_in_middle`
+- `input::tests::backspace_and_delete_are_utf8_safe`
+- `input::tests::control_deletion_matches_readline_basics`
+- `input::tests::word_navigation_skips_tokens`
+- `terminal::tests::printable_keys_edit_draft_at_cursor`
+- `terminal::tests::control_navigation_and_deletion_update_draft`
+- `terminal::tests::alt_word_navigation_moves_by_tokens`
+- `execute_draft_sends_command_to_backend_and_resets_state`
+- `execute_draft_records_failed_status_and_returns_to_draft`
+- `execute_draft_sends_multiline_buffer_exactly_to_backend`
+
+Status:
+
+- Passing.
+
+### Private `#` Input Safety
+
+Implemented:
+
+- Line-leading `#` is parsed before shell execution.
+- Ordinary input is sent to shell.
+- Notes are recognized.
+- Private commands are recognized.
+- AI prompts are recognized as placeholders but not sent to AI yet.
+- Unknown private commands are not sent to shell.
+- Minimal private commands: `#help`, `#status`, `#exit`, `#quit`, `#history <count>`.
+
+Tests:
+
+- `commands::tests::ordinary_input_is_not_private`
+- `commands::tests::line_leading_hash_space_is_ai_prompt`
+- `commands::tests::private_command_allows_no_space_after_hash`
+- `commands::tests::notes_are_detected_with_or_without_space_after_hash`
+- `execute_draft_does_not_send_line_leading_hash_to_backend_shell`
+- `app::tests::private_help_prints_available_commands`
+- `app::tests::private_status_prints_mode_and_last_status`
+- `app::tests::private_history_without_count_prints_usage`
+- `app::tests::private_exit_requests_app_exit`
+
+Status:
+
+- Passing.
+
+Known gaps:
+
+- Most private commands from `SPEC.md` are still not implemented.
+- Unknown private command suggestions are not implemented.
+- Continuation parsing is not implemented.
+- Context pseudo-pipe parsing/execution is not implemented.
+
+### Regular History Storage
+
+Implemented:
+
+- `HistoryEntry` JSONL format.
+- `HistorySource` serialization.
+- Append-only JSONL writer.
+- JSONL loader.
+- Bad line reporting and skipping.
+- Executed commands are appended to regular history.
+- Failed commands are stored with exit status.
+- Executed command timestamps are stored.
+- Minimal regular history trimming with `#history <count>`.
+
+Tests:
+
+- `history::tests::history_entry_serializes_source_as_snake_case`
+- `history::tests::append_and_load_jsonl_items`
+- `history::tests::missing_jsonl_file_loads_as_empty`
+- `history::tests::bad_jsonl_lines_are_reported_and_skipped`
+- `history::tests::rewrite_jsonl_replaces_existing_contents`
+- `history::tests::trim_regular_history_keeps_newest_entries_and_skips_bad_lines`
+- `execute_draft_appends_successful_command_to_regular_history`
+- `execute_draft_appends_failed_command_to_regular_history`
+- `private_history_command_trims_regular_history_to_newest_entries`
+
+Status:
+
+- Passing.
+
+Known gaps:
+
+- `#history <count>` currently trims regular history only.
+- Combined regular + AI item trimming is not complete.
+- In-memory indexes are not implemented.
+- AI command source persistence is not implemented because AI execution is not implemented.
+
+### Draft History Storage
+
+Implemented:
+
+- `[draft] persist = true` default config.
+- `[draft] sync = false` default config.
+- `DraftEntry` JSONL format.
+- `save_draft_if_configured` persists non-empty drafts when configured.
+- Terminal normal exit path calls `save_draft_if_configured`.
+
+Tests:
+
+- `history::tests::draft_entry_roundtrips_through_json`
+- `app::tests::save_draft_if_configured_persists_non_empty_draft`
+- `app::tests::save_draft_if_configured_skips_empty_or_disabled_drafts`
+
+Status:
+
+- Passing.
+
+Known gaps:
+
+- Startup loading into a structured in-memory store is not implemented yet.
+- Draft browsing behavior is not implemented yet.
+
+### Note Storage
+
+Implemented:
+
+- `NoteTag` JSON serialization.
+- `NoteEntry` JSONL format.
+- `# TODO:`, `# NOTE:`, `# FIXME:`, `# HACK:`, `# XXX:` are recognized.
+- Notes are stored without shell execution.
+
+Tests:
+
+- `commands::tests::notes_are_detected_with_or_without_space_after_hash`
+- `history::tests::note_entry_serializes_tag_as_snake_case`
+- `execute_draft_stores_notes_without_sending_them_to_shell`
+
+Status:
+
+- Passing.
+
+### AI History Data Model
+
+Implemented:
+
+- `AiSession` JSONL model.
+- `AiItem` model.
+- `AiItemKind` model with snake_case serialization.
+- Template AI items can carry `name`.
+- `name = None` is omitted from JSON.
+
+Tests:
+
+- `history::tests::ai_session_roundtrips_through_jsonl`
+- `history::tests::ai_item_kind_serializes_as_snake_case`
+
+Status:
+
+- Passing.
+
+Known gaps:
+
+- No AI client yet.
+- No chat completions API usage yet.
+- No AI prompt execution pipeline yet.
+- No `%` AI browsing yet.
+- No source=`ai` executed-command persistence yet.
+
+### JSONL Storage Helpers
+
+Implemented:
+
+- `append_jsonl`.
+- `load_jsonl`.
+- `rewrite_jsonl`.
+- Missing file loads as empty.
+- Corrupt lines are reported and skipped.
+
+Tests:
+
+- `history::tests::append_and_load_jsonl_items`
+- `history::tests::missing_jsonl_file_loads_as_empty`
+- `history::tests::bad_jsonl_lines_are_reported_and_skipped`
+- `history::tests::rewrite_jsonl_replaces_existing_contents`
+
+Status:
+
+- Passing.
+
+## Current Ignored Test
+
+Ignored test:
+
+- `zsh_pty_backend_runs_commands_and_preserves_shell_state_when_available`
+
+Reason:
+
+- zsh emits prompt/ZLE/control-sequence behavior that needs shell-specific integration. The project currently targets bash v0.1 behavior first while preserving a test scaffold for zsh.
+
+How to run ignored tests manually:
+
+```text
+cargo test --test pty_backend -- --ignored --nocapture
+```
+
+Expected current result:
+
+- The zsh ignored test is not expected to pass yet.
+
+## Current Gaps
+
+Important missing or partial areas:
+
+- Full terminal event loop integration for concurrent PTY output.
+- Full keybinding map and rebinding config.
+- History browsing mode.
+- AI browsing mode.
+- AI client and chat completions parsing.
+- Context pseudo-pipe.
+- External editor integration.
+- Multi-line paste review editor.
+- Template system.
+- Completion engine.
+- Pickers/fzf integration.
+- Event log.
+- Encryption.
+- Git sync.
+- Shell-specific zsh/fish integration.
+
+## Recommended Next Tests
+
+Next high-value tests to add:
+
+- `HistoryStore` startup loader tests for regular, draft, AI, and note JSONL files.
+- In-memory index tests for newest-to-oldest regular history ordering.
+- Read-only history mode transition tests.
+- AI item flattening tests from `AiSession` into browsable command candidates.
+- More terminal-level tests around paste behavior and redraw with multi-line drafts.

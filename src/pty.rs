@@ -45,6 +45,7 @@ impl PtyBackend {
         command.env("PS1", "");
         command.env("PROMPT", "");
         command.env("RPROMPT", "");
+        command.env("BASH_SILENCE_DEPRECATION_WARNING", "1");
 
         let child = pair
             .slave
@@ -101,6 +102,7 @@ impl PtyBackend {
     }
 
     pub fn run_command(&mut self, command: &str, timeout: Duration) -> Result<CommandResult> {
+        let _ = self.drain_for(Duration::from_millis(25));
         let marker = next_marker();
         let marker_command =
             format!("__aish_status=$?; printf '\\n%s%s\\n' '{marker}' \"$__aish_status\"\n");
