@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 50 library unit tests.
+- 52 library unit tests.
 - 8 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
@@ -306,7 +306,7 @@ Known gaps:
 
 - `#history <count>` currently trims regular history only.
 - Combined regular + AI item trimming is not complete.
-- In-memory indexes are not implemented.
+- In-memory indexes are currently a startup-loaded `HistoryStore`; search-specific indexes are not implemented.
 - AI command source persistence is not implemented because AI execution is not implemented.
 
 ### Draft History Storage
@@ -396,6 +396,23 @@ Tests:
 - `history::tests::missing_jsonl_file_loads_as_empty`
 - `history::tests::bad_jsonl_lines_are_reported_and_skipped`
 - `history::tests::rewrite_jsonl_replaces_existing_contents`
+
+Status:
+
+- Passing.
+
+### HistoryStore Startup Loader
+
+Implemented:
+
+- `HistoryStore` loads regular history, draft history, AI sessions, and notes from `DirectoryLayout` paths.
+- JSONL bad-line errors are aggregated across categories.
+- Missing category files load as empty through the shared JSONL loader.
+
+Tests:
+
+- `history::tests::history_store_loads_all_history_categories`
+- `history::tests::history_store_aggregates_load_errors_across_categories`
 
 Status:
 

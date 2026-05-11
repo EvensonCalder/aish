@@ -3,6 +3,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 
 use crate::commands::NoteTag;
+use crate::config::DirectoryLayout;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
@@ -71,6 +72,38 @@ pub struct JsonlLineError {
     pub path: PathBuf,
     pub line: usize,
     pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HistoryStore {
+    pub regular: Vec<HistoryEntry>,
+    pub drafts: Vec<DraftEntry>,
+    pub ai_sessions: Vec<AiSession>,
+    pub notes: Vec<NoteEntry>,
+    pub errors: Vec<JsonlLineError>,
+}
+
+impl HistoryStore {
+    pub fn load(layout: &DirectoryLayout) -> Result<Self> {
+        let regular = load_jsonl::<HistoryEntry>(&layout.regular_history)?;
+        let drafts = load_jsonl::<DraftEntry>(&layout.draft_history)?;
+        let ai_sessions = load_jsonl::<AiSession>(&layout.ai_history)?;
+        let notes = load_jsonl::<NoteEntry>(&layout.notes)?;
+
+        let mut errors = Vec::new();
+        errors.extend(regular.errors);
+        errors.extend(drafts.errors);
+        errors.extend(ai_sessions.errors);
+        errors.extend(notes.errors);
+
+        Ok(Self {
+            regular: regular.items,
+            drafts: drafts.items,
+            ai_sessions: ai_sessions.items,
+            notes: notes.items,
+            errors,
+        })
+    }
 }
 
 pub fn append_jsonl<T: Serialize>(path: &Path, item: &T) -> Result<()> {
@@ -372,5 +405,94 @@ mod tests {
 
         assert!(raw.contains("\"kind\":\"command\""));
         assert!(!raw.contains("name"));
+    }
+
+    #[test]
+    fn history_store_loads_all_history_categories() {
+        let temp = tempfile::tempdir().unwrap();
+        let layout = DirectoryLayout::new(temp.path().join("aish-home"));
+        layout.create_dirs().unwrap();
+
+        append_jsonl(
+            &layout.regular_history,
+            &HistoryEntry {
+                t: 1,
+                command: "pwd".to_string(),
+                exit_code: Some(0),
+                source: HistorySource::User,
+            },
+        )
+        .unwrap();
+        append_jsonl(
+            &layout.draft_history,
+            &DraftEntry {
+                t: 2,
+                text: "git status".to_string(),
+            },
+        )
+        .unwrap();
+        append_jsonl(
+            &layout.ai_history,
+            &AiSession {
+                id: "a_1".to_string(),
+                t: 3,
+                prompt: "list files".to_string(),
+                ctx: false,
+                model: "test-model".to_string(),
+                items: vec![AiItem {
+                    kind: AiItemKind::Command,
+                    text: "ls".to_string(),
+                    name: None,
+                }],
+            },
+        )
+        .unwrap();
+        append_jsonl(
+            &layout.notes,
+            &NoteEntry {
+                tag: NoteTag::Todo,
+                text: "ship it".to_string(),
+            },
+        )
+        .unwrap();
+
+        let store = HistoryStore::load(&layout).unwrap();
+
+        assert_eq!(store.errors, []);
+        assert_eq!(store.regular.len(), 1);
+        assert_eq!(store.drafts.len(), 1);
+        assert_eq!(store.ai_sessions.len(), 1);
+        assert_eq!(store.notes.len(), 1);
+        assert_eq!(store.regular[0].command, "pwd");
+        assert_eq!(store.drafts[0].text, "git status");
+        assert_eq!(store.ai_sessions[0].items[0].text, "ls");
+        assert_eq!(store.notes[0].text, "ship it");
+    }
+
+    #[test]
+    fn history_store_aggregates_load_errors_across_categories() {
+        let temp = tempfile::tempdir().unwrap();
+        let layout = DirectoryLayout::new(temp.path().join("aish-home"));
+        layout.create_dirs().unwrap();
+        fs::write(&layout.regular_history, "bad-regular\n").unwrap();
+        fs::write(&layout.ai_history, "bad-ai\n").unwrap();
+
+        let store = HistoryStore::load(&layout).unwrap();
+
+        assert!(store.regular.is_empty());
+        assert!(store.ai_sessions.is_empty());
+        assert_eq!(store.errors.len(), 2);
+        assert!(
+            store
+                .errors
+                .iter()
+                .any(|error| error.path == layout.regular_history)
+        );
+        assert!(
+            store
+                .errors
+                .iter()
+                .any(|error| error.path == layout.ai_history)
+        );
     }
 }
