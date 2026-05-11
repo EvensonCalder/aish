@@ -211,18 +211,18 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
 ### Tasks
 
 - [ ] Define JSONL formats:
-  - [ ] regular history entry
+  - [x] regular history entry
   - [ ] draft entry
   - [ ] AI session entry
-  - [ ] note entry
-- [ ] Implement append-only JSONL writer.
-- [ ] Implement startup loader.
+  - [x] note entry
+- [x] Implement append-only JSONL writer.
+- [x] Implement startup loader.
 - [ ] Implement in-memory indexes.
 - [ ] Implement history trimming based on `#history <count>`.
 - [ ] Store exit code and timestamp for executed commands.
 - [ ] Store `source = ai` for executed AI commands.
 - [ ] Persist draft history if configured.
-- [ ] Implement note storage for `# TODO:` style comments.
+- [x] Implement note storage for `# TODO:` style comments.
 
 ### Acceptance criteria
 
