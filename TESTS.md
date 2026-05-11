@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 94 library unit tests.
+- 95 library unit tests.
 - 13 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
@@ -311,7 +311,7 @@ Implemented:
 - Executed commands are appended to regular history.
 - Failed commands are stored with exit status.
 - Executed command timestamps are stored.
-- Minimal regular history trimming with `#history <count>`.
+- Combined regular history and AI command-item trimming with `#history <count>`.
 - Startup-loaded regular history is indexed newest-first for browsing.
 - Executed commands update the in-memory regular history list.
 
@@ -323,9 +323,10 @@ Tests:
 - `history::tests::bad_jsonl_lines_are_reported_and_skipped`
 - `history::tests::rewrite_jsonl_replaces_existing_contents`
 - `history::tests::trim_regular_history_keeps_newest_entries_and_skips_bad_lines`
+- `history::tests::trim_combined_history_limits_regular_plus_ai_command_items`
 - `execute_draft_appends_successful_command_to_regular_history`
 - `execute_draft_appends_failed_command_to_regular_history`
-- `private_history_command_trims_regular_history_to_newest_entries`
+- `private_history_command_trims_regular_and_ai_history_to_combined_limit`
 - `history::tests::history_store_indexes_regular_history_newest_first`
 - `app::tests::history_mode_selects_and_renders_regular_history_newest_first`
 - `app::tests::selected_history_copies_to_draft_for_editing`
@@ -340,8 +341,6 @@ Status:
 
 Known gaps:
 
-- `#history <count>` currently trims regular history only.
-- Combined regular + AI item trimming is not complete.
 - Regular history has a newest-first in-memory browse index; search-specific indexes are not implemented.
 - AI command source persistence is not implemented because AI execution is not implemented.
 

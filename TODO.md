@@ -218,7 +218,7 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
 - [x] Implement append-only JSONL writer.
 - [x] Implement startup loader.
 - [x] Implement in-memory indexes.
-- [ ] Implement history trimming based on `#history <count>`.
+- [x] Implement history trimming based on `#history <count>`.
 - [x] Store exit code and timestamp for executed commands.
 - [x] Store `source = ai` for executed AI commands.
 - [x] Persist draft history if configured.

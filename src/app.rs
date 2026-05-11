@@ -11,7 +11,7 @@ use crate::commands::{
 use crate::config;
 use crate::history::{
     AiCommandIndex, AiItem, AiItemKind, AiSession, DraftEntry, HistoryEntry, HistorySource,
-    HistoryStore, NoteEntry, append_jsonl, trim_regular_history,
+    HistoryStore, NoteEntry, ai_command_indices, append_jsonl, load_jsonl, trim_combined_history,
 };
 use crate::input::InputBuffer;
 use crate::modes::Mode;
@@ -28,6 +28,7 @@ pub struct AppState {
     pub last_status: Option<i32>,
     pub exit_requested: bool,
     pub regular_history_path: Option<PathBuf>,
+    pub ai_history_path: Option<PathBuf>,
     pub notes_path: Option<PathBuf>,
     pub draft_history_path: Option<PathBuf>,
     pub template_store_path: Option<PathBuf>,
@@ -48,6 +49,7 @@ impl Default for AppState {
             last_status: None,
             exit_requested: false,
             regular_history_path: None,
+            ai_history_path: None,
             notes_path: None,
             draft_history_path: None,
             template_store_path: None,
@@ -234,6 +236,7 @@ pub fn run() -> Result<()> {
     let mut backend = PtyBackend::spawn(&config.shell.backend)?;
     let mut state = AppState {
         regular_history_path: Some(layout.regular_history),
+        ai_history_path: Some(layout.ai_history),
         notes_path: Some(layout.notes),
         draft_history_path: Some(layout.draft_history),
         template_store_path: Some(layout.template_store),
@@ -404,20 +407,24 @@ pub fn execute_draft(
                 }
                 "history" => {
                     let count = args.parse::<usize>();
-                    match (count, &state.regular_history_path) {
-                        (Ok(count), Some(path)) => {
-                            let loaded = trim_regular_history(path, count)?;
-                            let keep_from = loaded.items.len().saturating_sub(count);
-                            state.regular_history = loaded.items[keep_from..].to_vec();
+                    match (count, &state.regular_history_path, &state.ai_history_path) {
+                        (Ok(count), Some(regular_path), Some(ai_path)) => {
+                            let loaded = trim_combined_history(regular_path, ai_path, count)?;
+                            let keep_from = loaded.regular.items.len().saturating_sub(count);
+                            state.regular_history = loaded.regular.items[keep_from..].to_vec();
+                            state.ai_sessions = load_jsonl::<AiSession>(ai_path)?.items;
+                            state.ai_command_indices = ai_command_indices(&state.ai_sessions);
                             state.selected_history_index = None;
+                            state.selected_ai_index = None;
                             writeln!(
                                 out,
-                                "history trimmed to {count}; skipped {} bad line(s)",
-                                loaded.errors.len()
+                                "history trimmed to {count}; skipped {} bad regular line(s), {} bad ai line(s)",
+                                loaded.regular.errors.len(),
+                                loaded.ai_sessions.errors.len()
                             )?;
                         }
-                        (Ok(_), None) => writeln!(out, "history storage is not configured")?,
-                        (Err(_), _) => writeln!(out, "usage: #history <count>")?,
+                        (Ok(_), _, _) => writeln!(out, "history storage is not configured")?,
+                        (Err(_), _, _) => writeln!(out, "usage: #history <count>")?,
                     }
                     state.draft.clear();
                     state.mode = Mode::Draft;
@@ -1428,11 +1435,9 @@ mod tests {
             template_store_path: Some(template_path),
             ..AppState::default()
         };
-        state
-            .draft
-            .insert_str(
-                "#template use deploy from=src host=prod to=/srv/app zextra=ignored aextra=unused",
-            );
+        state.draft.insert_str(
+            "#template use deploy from=src host=prod to=/srv/app zextra=ignored aextra=unused",
+        );
         let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
         let mut output = Vec::new();
 

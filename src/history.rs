@@ -85,6 +85,12 @@ pub struct HistoryStore {
     pub errors: Vec<JsonlLineError>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrimHistoryLoad {
+    pub regular: JsonlLoad<HistoryEntry>,
+    pub ai_sessions: JsonlLoad<AiSession>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AiCommandIndex {
     pub session_index: usize,
@@ -144,11 +150,11 @@ impl HistoryStore {
     }
 }
 
-fn newest_first_indices(len: usize) -> Vec<usize> {
+pub fn newest_first_indices(len: usize) -> Vec<usize> {
     (0..len).rev().collect()
 }
 
-fn ai_command_indices(sessions: &[AiSession]) -> Vec<AiCommandIndex> {
+pub fn ai_command_indices(sessions: &[AiSession]) -> Vec<AiCommandIndex> {
     sessions
         .iter()
         .enumerate()
@@ -216,6 +222,51 @@ pub fn trim_regular_history(path: &Path, max_entries: usize) -> Result<JsonlLoad
     let keep_from = loaded.items.len().saturating_sub(max_entries);
     rewrite_jsonl(path, &loaded.items[keep_from..])?;
     Ok(loaded)
+}
+
+pub fn trim_combined_history(
+    regular_path: &Path,
+    ai_path: &Path,
+    max_entries: usize,
+) -> Result<TrimHistoryLoad> {
+    let regular = load_jsonl::<HistoryEntry>(regular_path)?;
+    let ai_sessions = load_jsonl::<AiSession>(ai_path)?;
+
+    let keep_from = regular.items.len().saturating_sub(max_entries);
+    let trimmed_regular = regular.items[keep_from..].to_vec();
+
+    let mut remaining_ai_commands = max_entries.saturating_sub(trimmed_regular.len());
+    let mut trimmed_ai_sessions = Vec::new();
+
+    for session in ai_sessions.items.iter().rev() {
+        let mut kept_items = Vec::new();
+        let mut kept_command = false;
+        for item in session.items.iter().rev() {
+            if item.kind == AiItemKind::Command {
+                if remaining_ai_commands == 0 {
+                    continue;
+                }
+                remaining_ai_commands -= 1;
+                kept_command = true;
+            }
+            kept_items.push(item.clone());
+        }
+        kept_items.reverse();
+        if kept_command {
+            let mut trimmed_session = session.clone();
+            trimmed_session.items = kept_items;
+            trimmed_ai_sessions.push(trimmed_session);
+        }
+    }
+    trimmed_ai_sessions.reverse();
+
+    rewrite_jsonl(regular_path, &trimmed_regular)?;
+    rewrite_jsonl(ai_path, &trimmed_ai_sessions)?;
+
+    Ok(TrimHistoryLoad {
+        regular,
+        ai_sessions,
+    })
 }
 
 pub fn load_jsonl<T: DeserializeOwned>(path: &Path) -> Result<JsonlLoad<T>> {
@@ -378,6 +429,84 @@ mod tests {
         assert_eq!(after_trim.items.len(), 2);
         assert_eq!(after_trim.items[0].command, "two");
         assert_eq!(after_trim.items[1].command, "three");
+    }
+
+    #[test]
+    fn trim_combined_history_limits_regular_plus_ai_command_items() {
+        let temp = tempfile::tempdir().unwrap();
+        let regular_path = temp.path().join("regular.jsonl");
+        let ai_path = temp.path().join("ai.jsonl");
+
+        for (t, command) in [(1, "one"), (2, "two"), (3, "three")] {
+            append_jsonl(
+                &regular_path,
+                &HistoryEntry {
+                    t,
+                    command: command.to_string(),
+                    exit_code: Some(0),
+                    source: HistorySource::User,
+                },
+            )
+            .unwrap();
+        }
+
+        append_jsonl(
+            &ai_path,
+            &AiSession {
+                id: "a_1".to_string(),
+                t: 4,
+                prompt: "older".to_string(),
+                ctx: false,
+                model: "test".to_string(),
+                items: vec![
+                    AiItem {
+                        kind: AiItemKind::Command,
+                        text: "ai one".to_string(),
+                        name: None,
+                    },
+                    AiItem {
+                        kind: AiItemKind::Template,
+                        text: "template one".to_string(),
+                        name: Some("t1".to_string()),
+                    },
+                ],
+            },
+        )
+        .unwrap();
+        append_jsonl(
+            &ai_path,
+            &AiSession {
+                id: "a_2".to_string(),
+                t: 5,
+                prompt: "newer".to_string(),
+                ctx: false,
+                model: "test".to_string(),
+                items: vec![
+                    AiItem {
+                        kind: AiItemKind::Command,
+                        text: "ai two".to_string(),
+                        name: None,
+                    },
+                    AiItem {
+                        kind: AiItemKind::Command,
+                        text: "ai three".to_string(),
+                        name: None,
+                    },
+                ],
+            },
+        )
+        .unwrap();
+
+        let before_trim = trim_combined_history(&regular_path, &ai_path, 2).unwrap();
+        let after_regular = load_jsonl::<HistoryEntry>(&regular_path).unwrap();
+        let after_ai = load_jsonl::<AiSession>(&ai_path).unwrap();
+
+        assert_eq!(before_trim.regular.items.len(), 3);
+        assert_eq!(before_trim.ai_sessions.items.len(), 2);
+        assert_eq!(after_regular.items.len(), 2);
+        assert_eq!(after_regular.items[0].command, "two");
+        assert_eq!(after_regular.items[1].command, "three");
+        assert!(after_ai.items.is_empty());
     }
 
     #[test]

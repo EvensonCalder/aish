@@ -5,7 +5,7 @@ use aish::app::{AppState, execute_draft};
 use aish::commands::NoteTag;
 use aish::history::{
     AiCommandIndex, AiItem, AiItemKind, AiSession, HistoryEntry, HistorySource, NoteEntry,
-    load_jsonl,
+    append_jsonl, load_jsonl,
 };
 use aish::modes::Mode;
 use aish::pty::PtyBackend;
@@ -247,12 +247,14 @@ fn execute_draft_stores_notes_without_sending_them_to_shell() {
 }
 
 #[test]
-fn private_history_command_trims_regular_history_to_newest_entries() {
+fn private_history_command_trims_regular_and_ai_history_to_combined_limit() {
     let _guard = pty_execution_guard();
     let temp = tempfile::tempdir().unwrap();
     let history_path = temp.path().join("history/regular.jsonl");
+    let ai_history_path = temp.path().join("history/ai.jsonl");
     let mut state = AppState {
         regular_history_path: Some(history_path.clone()),
+        ai_history_path: Some(ai_history_path.clone()),
         clock: fixed_clock,
         ..AppState::default()
     };
@@ -270,6 +272,28 @@ fn private_history_command_trims_regular_history_to_newest_entries() {
         .unwrap();
     }
 
+    append_jsonl(
+        &ai_history_path,
+        &AiSession {
+            id: "a_1".to_string(),
+            t: 4,
+            prompt: "commands".to_string(),
+            ctx: false,
+            model: "test".to_string(),
+            items: vec![AiItem {
+                kind: AiItemKind::Command,
+                text: "printf 'ai\\n'".to_string(),
+                name: None,
+            }],
+        },
+    )
+    .unwrap();
+    state.ai_sessions = load_jsonl::<AiSession>(&ai_history_path).unwrap().items;
+    state.ai_command_indices = vec![AiCommandIndex {
+        session_index: 0,
+        item_index: 0,
+    }];
+
     state.draft.insert_str("#history 2");
     execute_draft(
         &mut state,
@@ -280,14 +304,18 @@ fn private_history_command_trims_regular_history_to_newest_entries() {
     .unwrap();
 
     let loaded = load_jsonl::<HistoryEntry>(&history_path).unwrap();
+    let loaded_ai = load_jsonl::<AiSession>(&ai_history_path).unwrap();
     assert_eq!(loaded.errors, []);
     assert_eq!(loaded.items.len(), 2);
     assert_eq!(loaded.items[0].command, "printf 'two\\n'");
     assert_eq!(loaded.items[1].command, "printf 'three\\n'");
+    assert!(loaded_ai.items.is_empty());
 
     let output = String::from_utf8(output).unwrap();
     assert!(output.contains("history trimmed to 2"));
     assert_eq!(state.regular_history.len(), 2);
+    assert!(state.ai_sessions.is_empty());
+    assert!(state.ai_command_indices.is_empty());
     assert_eq!(state.regular_history[0].command, "printf 'two\\n'");
     assert_eq!(state.regular_history[1].command, "printf 'three\\n'");
 }
