@@ -15,7 +15,7 @@ use crate::history::{
 use crate::input::InputBuffer;
 use crate::modes::Mode;
 use crate::pty::PtyBackend;
-use crate::templates::{TemplateEntry, append_template, load_templates};
+use crate::templates::{TemplateEntry, append_template, load_templates, remove_templates_by_name};
 
 #[derive(Debug)]
 pub struct AppState {
@@ -462,7 +462,27 @@ pub fn execute_draft(
                             }
                             None => writeln!(out, "template storage is not configured")?,
                         },
-                        Some("rm") => writeln!(out, "template removal is not implemented yet")?,
+                        Some("rm") => match args.split_whitespace().nth(1) {
+                            Some(name) => match &state.template_store_path {
+                                Some(path) => {
+                                    let removal = remove_templates_by_name(path, name)?;
+                                    writeln!(
+                                        out,
+                                        "template removed: {name} ({})",
+                                        removal.removed
+                                    )?;
+                                    if !removal.errors.is_empty() {
+                                        writeln!(
+                                            out,
+                                            "skipped {} bad template line(s)",
+                                            removal.errors.len()
+                                        )?;
+                                    }
+                                }
+                                None => writeln!(out, "template storage is not configured")?,
+                            },
+                            None => writeln!(out, "usage: #template list | #template rm <name>")?,
+                        },
                         _ => writeln!(out, "usage: #template list | #template rm <name>")?,
                     }
                     state.draft.clear();
@@ -1105,12 +1125,57 @@ mod tests {
     }
 
     #[test]
-    fn template_commands_report_usage_or_unimplemented_removal() {
+    fn template_rm_removes_matching_templates() {
+        let temp = tempfile::tempdir().unwrap();
+        let template_path = temp.path().join("templates/templates.jsonl");
+        for (name, body) in [
+            ("deploy", "rsync {from} {to}"),
+            ("logs", "tail -f {file}"),
+            ("deploy", "kubectl apply -f {file}"),
+        ] {
+            append_template(
+                &template_path,
+                &TemplateEntry {
+                    name: name.to_string(),
+                    body: body.to_string(),
+                },
+            )
+            .unwrap();
+        }
+        let mut state = AppState {
+            template_store_path: Some(template_path.clone()),
+            ..AppState::default()
+        };
+        state.draft.insert_str("#template rm deploy");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("template removed: deploy (2)"));
+        assert_eq!(state.last_status, None);
+        assert!(state.draft.is_empty());
+
+        let loaded = load_templates(&template_path).unwrap();
+        assert_eq!(loaded.errors, []);
+        assert_eq!(loaded.items.len(), 1);
+        assert_eq!(loaded.items[0].name, "logs");
+    }
+
+    #[test]
+    fn template_commands_report_usage_for_invalid_input() {
         for (line, expected) in [
             ("#mt deploy", "usage: #mt <name> <body>"),
             (
-                "#template rm deploy",
-                "template removal is not implemented yet",
+                "#template rm",
+                "usage: #template list | #template rm <name>",
             ),
             ("#template", "usage: #template list | #template rm <name>"),
             (

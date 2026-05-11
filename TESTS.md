@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 82 library unit tests.
+- 84 library unit tests.
 - 13 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
@@ -460,14 +460,16 @@ Implemented:
 - `TemplateEntry` JSONL model.
 - `#mt <name> <body>` appends a template entry to `templates/templates.jsonl`.
 - `#template list` reads template entries and prints template names.
-- `#template rm` remains a placeholder.
+- `#template rm <name>` removes all valid template entries matching a name.
 
 Tests:
 
 - `templates::tests::template_entry_roundtrips_through_jsonl`
 - `app::tests::mt_command_persists_template_entry`
 - `app::tests::template_list_prints_stored_template_names`
-- `app::tests::template_commands_report_usage_or_unimplemented_removal`
+- `templates::tests::remove_templates_by_name_removes_all_matches_and_keeps_others`
+- `app::tests::template_rm_removes_matching_templates`
+- `app::tests::template_commands_report_usage_for_invalid_input`
 
 Status:
 
@@ -526,7 +528,7 @@ Important missing or partial areas:
 - Context pseudo-pipe.
 - External editor integration.
 - Multi-line paste review editor.
-- Template removal and picker UI.
+- Template picker UI.
 - Completion engine.
 - Pickers/fzf integration.
 - Event log.
