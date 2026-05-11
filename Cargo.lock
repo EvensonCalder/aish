@@ -11,6 +11,7 @@ dependencies = [
  "dirs",
  "portable-pty",
  "serde",
+ "serde_json",
  "tempfile",
  "toml",
 ]

@@ -257,6 +257,16 @@ mod tests {
     }
 
     #[test]
+    fn config_roundtrips_through_json_for_future_jsonl_storage() {
+        let config = Config::default();
+
+        let raw = serde_json::to_string(&config).unwrap();
+        let parsed: Config = serde_json::from_str(&raw).unwrap();
+
+        assert_eq!(parsed, config);
+    }
+
+    #[test]
     fn aish_home_environment_overrides_default_root() {
         let temp = tempfile::tempdir().unwrap();
         unsafe {
