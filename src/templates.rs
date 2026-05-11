@@ -94,13 +94,22 @@ pub fn template_placeholders(body: &str) -> Vec<String> {
 }
 
 pub fn apply_template_values(body: &str, values: &HashMap<String, String>) -> String {
+    apply_template_values_with_usage(body, values).0
+}
+
+pub fn apply_template_values_with_usage(
+    body: &str,
+    values: &HashMap<String, String>,
+) -> (String, Vec<String>) {
     let mut rendered = body.to_string();
+    let mut used = Vec::new();
     for placeholder in template_placeholders(body) {
         if let Some(value) = values.get(&placeholder) {
             rendered = rendered.replace(&format!("{{{placeholder}}}"), value);
+            used.push(placeholder);
         }
     }
-    rendered
+    (rendered, used)
 }
 
 fn is_placeholder_name(candidate: &str) -> bool {
@@ -229,5 +238,19 @@ mod tests {
             apply_template_values("cp {from} {to} {mode}", &values),
             "cp src dst {mode}"
         );
+    }
+
+    #[test]
+    fn apply_template_values_with_usage_reports_used_keys() {
+        let values = HashMap::from([
+            ("from".to_string(), "src".to_string()),
+            ("to".to_string(), "dst".to_string()),
+            ("extra".to_string(), "ignored".to_string()),
+        ]);
+
+        let (rendered, used) = apply_template_values_with_usage("cp {from} {to} {mode}", &values);
+
+        assert_eq!(rendered, "cp src dst {mode}");
+        assert_eq!(used, ["from", "to"]);
     }
 }

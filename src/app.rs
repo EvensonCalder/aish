@@ -17,8 +17,8 @@ use crate::input::InputBuffer;
 use crate::modes::Mode;
 use crate::pty::PtyBackend;
 use crate::templates::{
-    TemplateEntry, append_template, apply_template_values, find_template_by_name, load_templates,
-    remove_templates_by_name, replace_template, template_placeholders,
+    TemplateEntry, append_template, apply_template_values_with_usage, find_template_by_name,
+    load_templates, remove_templates_by_name, replace_template, template_placeholders,
 };
 
 #[derive(Debug)]
@@ -545,8 +545,11 @@ pub fn execute_draft(
                                     match loaded.items.first() {
                                         Some(template) => {
                                             let values = parse_template_values(args);
-                                            let rendered =
-                                                apply_template_values(&template.body, &values);
+                                            let (rendered, used_keys) =
+                                                apply_template_values_with_usage(
+                                                    &template.body,
+                                                    &values,
+                                                );
                                             state.draft = InputBuffer::from(rendered);
                                             keep_draft = true;
                                             writeln!(out, "template copied to draft: {name}")?;
@@ -557,6 +560,20 @@ pub fn execute_draft(
                                                     out,
                                                     "template placeholders: {}",
                                                     placeholders.join(", ")
+                                                )?;
+                                            }
+                                            let unused_keys: Vec<_> = values
+                                                .keys()
+                                                .filter(|key| {
+                                                    !used_keys.iter().any(|used| used == *key)
+                                                })
+                                                .cloned()
+                                                .collect();
+                                            if !unused_keys.is_empty() {
+                                                writeln!(
+                                                    out,
+                                                    "unused template values: {}",
+                                                    unused_keys.join(", ")
                                                 )?;
                                             }
                                         }
@@ -1402,7 +1419,7 @@ mod tests {
         };
         state
             .draft
-            .insert_str("#template use deploy from=src host=prod to=/srv/app");
+            .insert_str("#template use deploy from=src host=prod to=/srv/app extra=ignored");
         let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
         let mut output = Vec::new();
 
@@ -1417,6 +1434,7 @@ mod tests {
         let output = String::from_utf8(output).unwrap();
         assert!(output.contains("template copied to draft: deploy"));
         assert!(output.contains("template placeholders: from, user, host, to"));
+        assert!(output.contains("unused template values: extra"));
         assert_eq!(state.last_status, None);
         assert_eq!(state.mode, Mode::Draft);
         assert_eq!(state.draft.as_str(), "rsync src {user}@prod:/srv/app src");
