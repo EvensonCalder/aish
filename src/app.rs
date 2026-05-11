@@ -351,6 +351,20 @@ pub fn execute_draft(
                     state.mode = Mode::Draft;
                     return Ok(());
                 }
+                "key" => {
+                    match args.split_whitespace().next() {
+                        Some("set") => {
+                            writeln!(out, "#key set is not implemented yet; no key stored")?
+                        }
+                        Some("clear") => {
+                            writeln!(out, "#key clear is not implemented yet; no key removed")?
+                        }
+                        _ => writeln!(out, "usage: #key set | #key clear")?,
+                    }
+                    state.draft.clear();
+                    state.mode = Mode::Draft;
+                    return Ok(());
+                }
                 "context" => {
                     writeln!(
                         out,
@@ -757,6 +771,7 @@ mod tests {
         assert!(output.contains("#model"));
         assert!(output.contains("#base-url"));
         assert!(output.contains("#env-key"));
+        assert!(output.contains("#key"));
         assert!(output.contains("#context"));
         assert!(output.contains("#exit"));
         assert!(output.contains("#quit"));
@@ -805,6 +820,40 @@ mod tests {
                 "#env-key OPENAI_API_KEY",
                 "#env-key persistence is not implemented yet",
             ),
+        ] {
+            let mut state = AppState::default();
+            state.draft.insert_str(line);
+            let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+            let mut output = Vec::new();
+
+            execute_draft(
+                &mut state,
+                &mut backend,
+                &mut output,
+                Duration::from_secs(5),
+            )
+            .unwrap();
+
+            let output = String::from_utf8(output).unwrap();
+            assert!(
+                output.contains(expected),
+                "missing {expected:?} in {output:?}"
+            );
+            assert_eq!(state.last_status, None);
+            assert!(state.draft.is_empty());
+        }
+    }
+
+    #[test]
+    fn key_commands_report_placeholders_without_secret_side_effects() {
+        for (line, expected) in [
+            ("#key set", "#key set is not implemented yet; no key stored"),
+            (
+                "#key clear",
+                "#key clear is not implemented yet; no key removed",
+            ),
+            ("#key", "usage: #key set | #key clear"),
+            ("#key rotate", "usage: #key set | #key clear"),
         ] {
             let mut state = AppState::default();
             state.draft.insert_str(line);
