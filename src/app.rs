@@ -7,8 +7,8 @@ use anyhow::Result;
 use crate::commands::{ParsedLine, parse_line};
 use crate::config;
 use crate::history::{
-    DraftEntry, HistoryEntry, HistorySource, HistoryStore, NoteEntry, append_jsonl,
-    trim_regular_history,
+    AiCommandIndex, AiItem, AiItemKind, AiSession, DraftEntry, HistoryEntry, HistorySource,
+    HistoryStore, NoteEntry, append_jsonl, trim_regular_history,
 };
 use crate::input::InputBuffer;
 use crate::modes::Mode;
@@ -26,6 +26,9 @@ pub struct AppState {
     pub draft_persist: bool,
     pub regular_history: Vec<HistoryEntry>,
     pub selected_history_index: Option<usize>,
+    pub ai_sessions: Vec<AiSession>,
+    pub ai_command_indices: Vec<AiCommandIndex>,
+    pub selected_ai_index: Option<usize>,
     pub clock: fn() -> i64,
 }
 
@@ -42,6 +45,9 @@ impl Default for AppState {
             draft_persist: true,
             regular_history: Vec::new(),
             selected_history_index: None,
+            ai_sessions: Vec::new(),
+            ai_command_indices: Vec::new(),
+            selected_ai_index: None,
             clock: unix_timestamp,
         }
     }
@@ -53,6 +59,8 @@ impl AppState {
             self.mode = self.mode.next_primary();
             if self.mode == Mode::History {
                 self.select_newest_history_if_available();
+            } else if self.mode == Mode::Ai {
+                self.select_first_ai_if_available();
             }
         }
     }
@@ -100,6 +108,86 @@ impl AppState {
         true
     }
 
+    pub fn select_first_ai_if_available(&mut self) {
+        self.selected_ai_index = (!self.ai_command_indices.is_empty()).then_some(0);
+    }
+
+    pub fn selected_ai_command(&self) -> Option<&str> {
+        self.selected_ai_item().map(|(_, item)| item.text.as_str())
+    }
+
+    pub fn move_ai_selection_previous(&mut self) -> bool {
+        let Some(index) = self.selected_ai_index else {
+            self.select_first_ai_if_available();
+            return self.selected_ai_index.is_some();
+        };
+        if index == 0 {
+            return false;
+        }
+        self.selected_ai_index = Some(index - 1);
+        true
+    }
+
+    pub fn move_ai_selection_next(&mut self) -> bool {
+        let Some(index) = self.selected_ai_index else {
+            self.select_first_ai_if_available();
+            return self.selected_ai_index.is_some();
+        };
+        if index + 1 >= self.ai_command_indices.len() {
+            return false;
+        }
+        self.selected_ai_index = Some(index + 1);
+        true
+    }
+
+    pub fn copy_selected_ai_to_draft(&mut self) -> bool {
+        let Some(command) = self.selected_ai_command().map(str::to_string) else {
+            return false;
+        };
+        self.draft = InputBuffer::from(command);
+        self.mode = Mode::Draft;
+        true
+    }
+
+    pub fn copy_read_only_selection_to_draft(&mut self) -> bool {
+        match self.mode {
+            Mode::History => self.copy_selected_history_to_draft(),
+            Mode::Ai => self.copy_selected_ai_to_draft(),
+            _ => false,
+        }
+    }
+
+    fn selected_ai_item(&self) -> Option<(&AiSession, &AiItem)> {
+        let index = self.ai_command_indices.get(self.selected_ai_index?)?;
+        let session = self.ai_sessions.get(index.session_index)?;
+        let item = session.items.get(index.item_index)?;
+        (item.kind == AiItemKind::Command).then_some((session, item))
+    }
+
+    fn advance_after_ai_success(&mut self) {
+        let Some(current_index) = self.selected_ai_index else {
+            self.mode = Mode::Draft;
+            return;
+        };
+        let Some(current_command) = self.ai_command_indices.get(current_index) else {
+            self.mode = Mode::Draft;
+            return;
+        };
+        let next_index = current_index + 1;
+        let Some(next_command) = self.ai_command_indices.get(next_index) else {
+            self.selected_ai_index = None;
+            self.mode = Mode::Draft;
+            return;
+        };
+        if next_command.session_index == current_command.session_index {
+            self.selected_ai_index = Some(next_index);
+            self.mode = Mode::Ai;
+        } else {
+            self.selected_ai_index = None;
+            self.mode = Mode::Draft;
+        }
+    }
+
     fn regular_history_newest(&self, index: usize) -> Option<&HistoryEntry> {
         self.regular_history
             .len()
@@ -112,19 +200,19 @@ impl AppState {
     }
 
     pub fn render_prompt_line(&self) -> String {
-        let text = if self.mode == Mode::History {
-            self.selected_history_command().unwrap_or("")
-        } else {
-            self.draft.as_str()
+        let text = match self.mode {
+            Mode::History => self.selected_history_command().unwrap_or(""),
+            Mode::Ai => self.selected_ai_command().unwrap_or(""),
+            _ => self.draft.as_str(),
         };
         format!("{}{}", self.prompt_prefix(), text)
     }
 
     pub fn terminal_cursor_column(&self) -> u16 {
-        let cursor = if self.mode == Mode::History {
-            self.selected_history_command().unwrap_or("").len()
-        } else {
-            self.draft.cursor()
+        let cursor = match self.mode {
+            Mode::History => self.selected_history_command().unwrap_or("").len(),
+            Mode::Ai => self.selected_ai_command().unwrap_or("").len(),
+            _ => self.draft.cursor(),
         };
         let column = self.prompt_prefix().len() + cursor;
         column.min(u16::MAX as usize) as u16
@@ -141,6 +229,8 @@ pub fn run() -> Result<()> {
         draft_history_path: Some(layout.draft_history),
         draft_persist: config.draft.persist,
         regular_history: store.regular,
+        ai_sessions: store.ai_sessions,
+        ai_command_indices: store.ai_command_indices,
         ..AppState::default()
     };
     crate::terminal::run(
@@ -159,6 +249,10 @@ pub fn execute_draft(
 ) -> Result<()> {
     if state.draft.is_empty() && state.mode == Mode::History {
         state.copy_selected_history_to_draft();
+    }
+    let executing_ai = state.draft.is_empty() && state.mode == Mode::Ai;
+    if executing_ai {
+        state.copy_selected_ai_to_draft();
     }
 
     if state.draft.is_empty() {
@@ -263,14 +357,24 @@ pub fn execute_draft(
             command: result.command.clone(),
             t: (state.clock)(),
             exit_code: Some(result.exit_code),
-            source: HistorySource::User,
+            source: if executing_ai {
+                HistorySource::Ai
+            } else {
+                HistorySource::User
+            },
         };
         append_jsonl(path, &entry)?;
         state.regular_history.push(entry);
     }
     state.last_status = Some(result.exit_code);
     state.draft.clear();
-    state.mode = Mode::Draft;
+    if executing_ai && result.exit_code == 0 {
+        state.advance_after_ai_success();
+    } else if executing_ai {
+        state.mode = Mode::Ai;
+    } else {
+        state.mode = Mode::Draft;
+    }
     Ok(())
 }
 
@@ -332,7 +436,7 @@ mod tests {
         assert_eq!(state.render_prompt_line(), "$ ");
 
         state.mode = Mode::Ai;
-        assert_eq!(state.render_prompt_line(), "% git status");
+        assert_eq!(state.render_prompt_line(), "% ");
     }
 
     #[test]
@@ -398,6 +502,87 @@ mod tests {
         };
 
         assert!(state.copy_selected_history_to_draft());
+
+        assert_eq!(state.mode, Mode::Draft);
+        assert_eq!(state.draft.as_str(), "git status");
+        assert_eq!(state.draft.cursor(), "git status".len());
+    }
+
+    #[test]
+    fn ai_mode_selects_and_renders_command_items_in_order() {
+        let mut state = AppState {
+            ai_sessions: vec![AiSession {
+                id: "a_1".to_string(),
+                t: 1,
+                prompt: "make commands".to_string(),
+                ctx: false,
+                model: "test".to_string(),
+                items: vec![
+                    AiItem {
+                        kind: AiItemKind::Command,
+                        text: "one".to_string(),
+                        name: None,
+                    },
+                    AiItem {
+                        kind: AiItemKind::Command,
+                        text: "two".to_string(),
+                        name: None,
+                    },
+                ],
+            }],
+            ai_command_indices: vec![
+                AiCommandIndex {
+                    session_index: 0,
+                    item_index: 0,
+                },
+                AiCommandIndex {
+                    session_index: 0,
+                    item_index: 1,
+                },
+            ],
+            ..AppState::default()
+        };
+
+        state.handle_empty_tab();
+        state.handle_empty_tab();
+
+        assert_eq!(state.mode, Mode::Ai);
+        assert_eq!(state.selected_ai_index, Some(0));
+        assert_eq!(state.selected_ai_command(), Some("one"));
+        assert_eq!(state.render_prompt_line(), "% one");
+
+        assert!(state.move_ai_selection_next());
+        assert_eq!(state.selected_ai_command(), Some("two"));
+        assert!(!state.move_ai_selection_next());
+        assert!(state.move_ai_selection_previous());
+        assert_eq!(state.selected_ai_command(), Some("one"));
+    }
+
+    #[test]
+    fn selected_ai_copies_to_draft_for_editing() {
+        let mut state = AppState {
+            mode: Mode::Ai,
+            ai_sessions: vec![AiSession {
+                id: "a_1".to_string(),
+                t: 1,
+                prompt: "make commands".to_string(),
+                ctx: false,
+                model: "test".to_string(),
+                items: vec![AiItem {
+                    kind: AiItemKind::Command,
+                    text: "git status".to_string(),
+                    name: None,
+                }],
+            }],
+            ai_command_indices: vec![AiCommandIndex {
+                session_index: 0,
+                item_index: 0,
+            }],
+            selected_ai_index: Some(0),
+            ..AppState::default()
+        };
+
+        assert!(state.copy_selected_ai_to_draft());
 
         assert_eq!(state.mode, Mode::Draft);
         assert_eq!(state.draft.as_str(), "git status");

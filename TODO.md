@@ -220,7 +220,7 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
 - [x] Implement in-memory indexes.
 - [ ] Implement history trimming based on `#history <count>`.
 - [x] Store exit code and timestamp for executed commands.
-- [ ] Store `source = ai` for executed AI commands.
+- [x] Store `source = ai` for executed AI commands.
 - [x] Persist draft history if configured.
 - [x] Implement note storage for `# TODO:` style comments.
 
@@ -238,20 +238,20 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
 
 ### Tasks
 
-- [ ] Implement `$` history mode browsing.
-- [ ] Implement `%` AI mode browsing.
+- [x] Implement `$` history mode browsing.
+- [x] Implement `%` AI mode browsing.
 - [ ] In history mode:
   - [x] `Up/Down` browse regular history only.
   - [x] `Enter` executes selected item.
   - [x] modification copies item to draft.
-- [ ] In AI mode:
-  - [ ] `Up/Down` browse AI items.
-  - [ ] `Enter` executes current item.
-  - [ ] success advances to next item.
-  - [ ] failure stays on current item.
-  - [ ] last success returns to draft.
-  - [ ] modification copies item to draft.
-- [ ] Ensure cursor movement does not count as modification.
+- [x] In AI mode:
+  - [x] `Up/Down` browse AI items.
+  - [x] `Enter` executes current item.
+  - [x] success advances to next item.
+  - [x] failure stays on current item.
+  - [x] last success returns to draft.
+  - [x] modification copies item to draft.
+- [x] Ensure cursor movement does not count as modification.
 
 ### Acceptance criteria
 

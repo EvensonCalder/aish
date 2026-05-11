@@ -1,14 +1,20 @@
+use std::sync::Mutex;
 use std::time::Duration;
 
 use aish::app::{AppState, execute_draft};
 use aish::commands::NoteTag;
-use aish::history::{HistoryEntry, HistorySource, NoteEntry, load_jsonl};
+use aish::history::{
+    AiCommandIndex, AiItem, AiItemKind, AiSession, HistoryEntry, HistorySource, NoteEntry,
+    load_jsonl,
+};
 use aish::modes::Mode;
 use aish::pty::PtyBackend;
 
 fn fixed_clock() -> i64 {
     1234567890
 }
+
+static AI_EXECUTION_TEST_MUTEX: Mutex<()> = Mutex::new(());
 
 #[test]
 fn execute_draft_sends_command_to_backend_and_resets_state() {
@@ -279,4 +285,121 @@ fn execute_history_selection_runs_selected_command() {
     assert_eq!(loaded.items.len(), 1);
     assert_eq!(loaded.items[0].command, "printf 'from history\\n'");
     assert_eq!(state.regular_history.len(), 2);
+}
+
+fn ai_state(
+    commands: &[&str],
+    selected_ai_index: usize,
+    history_path: std::path::PathBuf,
+) -> AppState {
+    AppState {
+        mode: Mode::Ai,
+        regular_history_path: Some(history_path),
+        ai_sessions: vec![AiSession {
+            id: "a_1".to_string(),
+            t: 1,
+            prompt: "commands".to_string(),
+            ctx: false,
+            model: "test".to_string(),
+            items: commands
+                .iter()
+                .map(|command| AiItem {
+                    kind: AiItemKind::Command,
+                    text: (*command).to_string(),
+                    name: None,
+                })
+                .collect(),
+        }],
+        ai_command_indices: commands
+            .iter()
+            .enumerate()
+            .map(|(item_index, _)| AiCommandIndex {
+                session_index: 0,
+                item_index,
+            })
+            .collect(),
+        selected_ai_index: Some(selected_ai_index),
+        clock: fixed_clock,
+        ..AppState::default()
+    }
+}
+
+#[test]
+fn execute_ai_selection_success_advances_to_next_command() {
+    let _guard = AI_EXECUTION_TEST_MUTEX.lock().unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let history_path = temp.path().join("history/regular.jsonl");
+    let mut state = ai_state(
+        &["printf 'first ai\\n'", "printf 'second ai\\n'"],
+        0,
+        history_path.clone(),
+    );
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    assert_eq!(String::from_utf8(output).unwrap().trim(), "first ai");
+    assert_eq!(state.mode, Mode::Ai);
+    assert_eq!(state.selected_ai_index, Some(1));
+    assert_eq!(state.selected_ai_command(), Some("printf 'second ai\\n'"));
+
+    let loaded = load_jsonl::<HistoryEntry>(&history_path).unwrap();
+    assert_eq!(loaded.items.len(), 1);
+    assert_eq!(loaded.items[0].source, HistorySource::Ai);
+    assert_eq!(state.regular_history[0].source, HistorySource::Ai);
+}
+
+#[test]
+fn execute_ai_selection_failure_stays_on_current_command() {
+    let _guard = AI_EXECUTION_TEST_MUTEX.lock().unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let history_path = temp.path().join("history/regular.jsonl");
+    let mut state = ai_state(&["false", "printf 'next ai\\n'"], 0, history_path);
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    assert!(String::from_utf8(output).unwrap().trim().is_empty());
+    assert_eq!(state.last_status, Some(1));
+    assert_eq!(state.mode, Mode::Ai);
+    assert_eq!(state.selected_ai_index, Some(0));
+    assert_eq!(state.selected_ai_command(), Some("false"));
+}
+
+#[test]
+fn execute_ai_selection_last_success_returns_to_draft() {
+    let _guard = AI_EXECUTION_TEST_MUTEX.lock().unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let history_path = temp.path().join("history/regular.jsonl");
+    let mut state = ai_state(&["printf 'last ai\\n'"], 0, history_path);
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    assert_eq!(String::from_utf8(output).unwrap().trim(), "last ai");
+    assert_eq!(state.last_status, Some(0));
+    assert_eq!(state.mode, Mode::Draft);
+    assert_eq!(state.selected_ai_index, None);
+    assert!(state.draft.is_empty());
 }

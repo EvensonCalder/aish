@@ -12,8 +12,8 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 58 library unit tests.
-- 9 draft execution integration tests.
+- 64 library unit tests.
+- 12 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
 - 1 ignored zsh PTY integration test.
@@ -371,11 +371,28 @@ Implemented:
 - `AiItemKind` model with snake_case serialization.
 - Template AI items can carry `name`.
 - `name = None` is omitted from JSON.
+- `HistoryStore` builds a flattened AI command-item browse index in execution order.
+- `%` AI mode can browse generated command items.
+- AI command execution stores regular history with `source = "ai"`.
+- Successful AI command execution advances to the next command in the same session.
+- Failed AI command execution stays on the current command.
+- Last successful AI command execution returns to draft mode.
+- Editing a selected AI command copies it to draft first.
+- Cursor movement in AI mode is read-only and does not copy to draft.
 
 Tests:
 
 - `history::tests::ai_session_roundtrips_through_jsonl`
 - `history::tests::ai_item_kind_serializes_as_snake_case`
+- `history::tests::history_store_indexes_ai_command_items_in_execution_order`
+- `app::tests::ai_mode_selects_and_renders_command_items_in_order`
+- `app::tests::selected_ai_copies_to_draft_for_editing`
+- `terminal::tests::ai_mode_up_down_browses_without_editing_draft`
+- `terminal::tests::ai_mode_typing_copies_selection_to_draft_then_edits`
+- `terminal::tests::ai_mode_cursor_movement_does_not_copy_to_draft`
+- `execute_ai_selection_success_advances_to_next_command`
+- `execute_ai_selection_failure_stays_on_current_command`
+- `execute_ai_selection_last_success_returns_to_draft`
 
 Status:
 
@@ -386,8 +403,7 @@ Known gaps:
 - No AI client yet.
 - No chat completions API usage yet.
 - No AI prompt execution pipeline yet.
-- No `%` AI browsing yet.
-- No source=`ai` executed-command persistence yet.
+- AI browsing currently depends on pre-existing stored AI sessions; prompt-to-session generation is not implemented yet.
 
 ### JSONL Storage Helpers
 
@@ -416,6 +432,7 @@ Implemented:
 
 - `HistoryStore` loads regular history, draft history, AI sessions, and notes from `DirectoryLayout` paths.
 - `HistoryStore` builds a newest-first regular history index for browsing.
+- `HistoryStore` builds a flattened AI command-item browse index in execution order.
 - JSONL bad-line errors are aggregated across categories.
 - Missing category files load as empty through the shared JSONL loader.
 
@@ -424,6 +441,7 @@ Tests:
 - `history::tests::history_store_loads_all_history_categories`
 - `history::tests::history_store_aggregates_load_errors_across_categories`
 - `history::tests::history_store_indexes_regular_history_newest_first`
+- `history::tests::history_store_indexes_ai_command_items_in_execution_order`
 
 Status:
 
@@ -456,7 +474,7 @@ Important missing or partial areas:
 - Full terminal event loop integration for concurrent PTY output.
 - Full keybinding map and rebinding config.
 - Full history browsing UX beyond regular Up/Down/Enter/edit-copy foundation.
-- AI browsing mode.
+- Full AI browsing UX beyond Up/Down/Enter/edit-copy foundation.
 - AI client and chat completions parsing.
 - Context pseudo-pipe.
 - External editor integration.

@@ -80,8 +80,15 @@ pub struct HistoryStore {
     pub regular_newest_indices: Vec<usize>,
     pub drafts: Vec<DraftEntry>,
     pub ai_sessions: Vec<AiSession>,
+    pub ai_command_indices: Vec<AiCommandIndex>,
     pub notes: Vec<NoteEntry>,
     pub errors: Vec<JsonlLineError>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AiCommandIndex {
+    pub session_index: usize,
+    pub item_index: usize,
 }
 
 impl HistoryStore {
@@ -91,6 +98,7 @@ impl HistoryStore {
         let ai_sessions = load_jsonl::<AiSession>(&layout.ai_history)?;
         let notes = load_jsonl::<NoteEntry>(&layout.notes)?;
         let regular_newest_indices = newest_first_indices(regular.items.len());
+        let ai_command_indices = ai_command_indices(&ai_sessions.items);
 
         let mut errors = Vec::new();
         errors.extend(regular.errors);
@@ -103,6 +111,7 @@ impl HistoryStore {
             regular_newest_indices,
             drafts: drafts.items,
             ai_sessions: ai_sessions.items,
+            ai_command_indices,
             notes: notes.items,
             errors,
         })
@@ -119,10 +128,42 @@ impl HistoryStore {
             .get(index)
             .map(|regular_index| &self.regular[*regular_index])
     }
+
+    pub fn ai_commands(&self) -> impl Iterator<Item = (&AiSession, &AiItem)> {
+        self.ai_command_indices.iter().map(|index| {
+            let session = &self.ai_sessions[index.session_index];
+            (session, &session.items[index.item_index])
+        })
+    }
+
+    pub fn ai_command_by_index(&self, index: usize) -> Option<(&AiSession, &AiItem)> {
+        self.ai_command_indices.get(index).map(|command_index| {
+            let session = &self.ai_sessions[command_index.session_index];
+            (session, &session.items[command_index.item_index])
+        })
+    }
 }
 
 fn newest_first_indices(len: usize) -> Vec<usize> {
     (0..len).rev().collect()
+}
+
+fn ai_command_indices(sessions: &[AiSession]) -> Vec<AiCommandIndex> {
+    sessions
+        .iter()
+        .enumerate()
+        .flat_map(|(session_index, session)| {
+            session
+                .items
+                .iter()
+                .enumerate()
+                .filter(|(_, item)| item.kind == AiItemKind::Command)
+                .map(move |(item_index, _)| AiCommandIndex {
+                    session_index,
+                    item_index,
+                })
+        })
+        .collect()
 }
 
 pub fn append_jsonl<T: Serialize>(path: &Path, item: &T) -> Result<()> {
@@ -482,6 +523,7 @@ mod tests {
         assert_eq!(store.regular_newest_indices, [0]);
         assert_eq!(store.drafts.len(), 1);
         assert_eq!(store.ai_sessions.len(), 1);
+        assert_eq!(store.ai_command_indices.len(), 1);
         assert_eq!(store.notes.len(), 1);
         assert_eq!(store.regular[0].command, "pwd");
         assert_eq!(store.drafts[0].text, "git status");
@@ -518,6 +560,85 @@ mod tests {
         assert_eq!(commands, ["three", "two", "one"]);
         assert_eq!(store.regular_by_newest_index(1).unwrap().command, "two");
         assert!(store.regular_by_newest_index(3).is_none());
+    }
+
+    #[test]
+    fn history_store_indexes_ai_command_items_in_execution_order() {
+        let temp = tempfile::tempdir().unwrap();
+        let layout = DirectoryLayout::new(temp.path().join("aish-home"));
+        layout.create_dirs().unwrap();
+
+        append_jsonl(
+            &layout.ai_history,
+            &AiSession {
+                id: "a_1".to_string(),
+                t: 1,
+                prompt: "setup".to_string(),
+                ctx: false,
+                model: "test".to_string(),
+                items: vec![
+                    AiItem {
+                        kind: AiItemKind::Command,
+                        text: "one".to_string(),
+                        name: None,
+                    },
+                    AiItem {
+                        kind: AiItemKind::Template,
+                        text: "skip-template".to_string(),
+                        name: Some("template".to_string()),
+                    },
+                    AiItem {
+                        kind: AiItemKind::Command,
+                        text: "two".to_string(),
+                        name: None,
+                    },
+                ],
+            },
+        )
+        .unwrap();
+        append_jsonl(
+            &layout.ai_history,
+            &AiSession {
+                id: "a_2".to_string(),
+                t: 2,
+                prompt: "next".to_string(),
+                ctx: false,
+                model: "test".to_string(),
+                items: vec![AiItem {
+                    kind: AiItemKind::Command,
+                    text: "three".to_string(),
+                    name: None,
+                }],
+            },
+        )
+        .unwrap();
+
+        let store = HistoryStore::load(&layout).unwrap();
+        let commands: Vec<_> = store
+            .ai_commands()
+            .map(|(_, item)| item.text.as_str())
+            .collect();
+
+        assert_eq!(
+            store.ai_command_indices,
+            [
+                AiCommandIndex {
+                    session_index: 0,
+                    item_index: 0
+                },
+                AiCommandIndex {
+                    session_index: 0,
+                    item_index: 2
+                },
+                AiCommandIndex {
+                    session_index: 1,
+                    item_index: 0
+                },
+            ]
+        );
+        assert_eq!(commands, ["one", "two", "three"]);
+        assert_eq!(store.ai_command_by_index(1).unwrap().1.text, "two");
+        assert!(store.ai_command_by_index(3).is_none());
     }
 
     #[test]

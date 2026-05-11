@@ -104,6 +104,10 @@ fn handle_key(
 }
 
 pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
+    let is_read_only_mode = matches!(
+        state.mode,
+        crate::modes::Mode::History | crate::modes::Mode::Ai
+    );
     match (key.modifiers, key.code) {
         (KeyModifiers::CONTROL, KeyCode::Char('d')) if state.draft.is_empty() => KeyAction::Exit,
         (KeyModifiers::CONTROL, KeyCode::Char('d')) => {
@@ -116,37 +120,40 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
         }
         (KeyModifiers::CONTROL, KeyCode::Char('l')) => KeyAction::ClearScreen,
         (KeyModifiers::CONTROL, KeyCode::Char('a')) => {
-            if state.mode != crate::modes::Mode::History {
+            if !is_read_only_mode {
                 state.draft.move_start();
             }
             KeyAction::Continue
         }
         (KeyModifiers::CONTROL, KeyCode::Char('e')) => {
-            if state.mode != crate::modes::Mode::History {
+            if !is_read_only_mode {
                 state.draft.move_end();
             }
             KeyAction::Continue
         }
         (KeyModifiers::CONTROL, KeyCode::Char('u')) => {
+            state.copy_read_only_selection_to_draft();
             state.draft.delete_to_start();
             KeyAction::Continue
         }
         (KeyModifiers::CONTROL, KeyCode::Char('k')) => {
+            state.copy_read_only_selection_to_draft();
             state.draft.delete_to_end();
             KeyAction::Continue
         }
         (KeyModifiers::CONTROL, KeyCode::Char('w')) => {
+            state.copy_read_only_selection_to_draft();
             state.draft.delete_previous_word();
             KeyAction::Continue
         }
         (KeyModifiers::ALT, KeyCode::Char('b') | KeyCode::Left) => {
-            if state.mode != crate::modes::Mode::History {
+            if !is_read_only_mode {
                 state.draft.move_previous_word();
             }
             KeyAction::Continue
         }
         (KeyModifiers::ALT, KeyCode::Char('f') | KeyCode::Right) => {
-            if state.mode != crate::modes::Mode::History {
+            if !is_read_only_mode {
                 state.draft.move_next_word();
             }
             KeyAction::Continue
@@ -159,25 +166,33 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
             state.move_history_selection_newer();
             KeyAction::Continue
         }
+        (_, KeyCode::Up) if state.mode == crate::modes::Mode::Ai => {
+            state.move_ai_selection_previous();
+            KeyAction::Continue
+        }
+        (_, KeyCode::Down) if state.mode == crate::modes::Mode::Ai => {
+            state.move_ai_selection_next();
+            KeyAction::Continue
+        }
         (_, KeyCode::Left) => {
-            if state.mode != crate::modes::Mode::History {
+            if !is_read_only_mode {
                 state.draft.move_left();
             }
             KeyAction::Continue
         }
         (_, KeyCode::Right) => {
-            if state.mode != crate::modes::Mode::History {
+            if !is_read_only_mode {
                 state.draft.move_right();
             }
             KeyAction::Continue
         }
         (_, KeyCode::Backspace) => {
-            state.copy_selected_history_to_draft();
+            state.copy_read_only_selection_to_draft();
             state.draft.backspace();
             KeyAction::Continue
         }
         (_, KeyCode::Delete) => {
-            state.copy_selected_history_to_draft();
+            state.copy_read_only_selection_to_draft();
             state.draft.delete();
             KeyAction::Continue
         }
@@ -187,7 +202,7 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
         }
         (_, KeyCode::Enter) => KeyAction::Submit,
         (_, KeyCode::Char(ch)) => {
-            state.copy_selected_history_to_draft();
+            state.copy_read_only_selection_to_draft();
             state.draft.insert_char(ch);
             KeyAction::Continue
         }
@@ -365,5 +380,116 @@ mod tests {
         assert_eq!(state.mode, Mode::History);
         assert!(state.draft.is_empty());
         assert_eq!(state.selected_history_command(), Some("git status"));
+    }
+
+    #[test]
+    fn ai_mode_up_down_browses_without_editing_draft() {
+        let mut state = AppState {
+            mode: Mode::Ai,
+            ai_sessions: vec![crate::history::AiSession {
+                id: "a_1".to_string(),
+                t: 1,
+                prompt: "commands".to_string(),
+                ctx: false,
+                model: "test".to_string(),
+                items: vec![
+                    crate::history::AiItem {
+                        kind: crate::history::AiItemKind::Command,
+                        text: "one".to_string(),
+                        name: None,
+                    },
+                    crate::history::AiItem {
+                        kind: crate::history::AiItemKind::Command,
+                        text: "two".to_string(),
+                        name: None,
+                    },
+                ],
+            }],
+            ai_command_indices: vec![
+                crate::history::AiCommandIndex {
+                    session_index: 0,
+                    item_index: 0,
+                },
+                crate::history::AiCommandIndex {
+                    session_index: 0,
+                    item_index: 1,
+                },
+            ],
+            selected_ai_index: Some(0),
+            ..AppState::default()
+        };
+
+        apply_key_to_state(key(KeyCode::Down), &mut state);
+        assert_eq!(state.mode, Mode::Ai);
+        assert_eq!(state.selected_ai_command(), Some("two"));
+        assert!(state.draft.is_empty());
+
+        apply_key_to_state(key(KeyCode::Up), &mut state);
+        assert_eq!(state.selected_ai_command(), Some("one"));
+        assert!(state.draft.is_empty());
+    }
+
+    #[test]
+    fn ai_mode_typing_copies_selection_to_draft_then_edits() {
+        let mut state = AppState {
+            mode: Mode::Ai,
+            ai_sessions: vec![crate::history::AiSession {
+                id: "a_1".to_string(),
+                t: 1,
+                prompt: "commands".to_string(),
+                ctx: false,
+                model: "test".to_string(),
+                items: vec![crate::history::AiItem {
+                    kind: crate::history::AiItemKind::Command,
+                    text: "git statu".to_string(),
+                    name: None,
+                }],
+            }],
+            ai_command_indices: vec![crate::history::AiCommandIndex {
+                session_index: 0,
+                item_index: 0,
+            }],
+            selected_ai_index: Some(0),
+            ..AppState::default()
+        };
+
+        apply_key_to_state(key(KeyCode::Char('s')), &mut state);
+
+        assert_eq!(state.mode, Mode::Draft);
+        assert_eq!(state.draft.as_str(), "git status");
+    }
+
+    #[test]
+    fn ai_mode_cursor_movement_does_not_copy_to_draft() {
+        let mut state = AppState {
+            mode: Mode::Ai,
+            ai_sessions: vec![crate::history::AiSession {
+                id: "a_1".to_string(),
+                t: 1,
+                prompt: "commands".to_string(),
+                ctx: false,
+                model: "test".to_string(),
+                items: vec![crate::history::AiItem {
+                    kind: crate::history::AiItemKind::Command,
+                    text: "git status".to_string(),
+                    name: None,
+                }],
+            }],
+            ai_command_indices: vec![crate::history::AiCommandIndex {
+                session_index: 0,
+                item_index: 0,
+            }],
+            selected_ai_index: Some(0),
+            ..AppState::default()
+        };
+
+        apply_key_to_state(key(KeyCode::Left), &mut state);
+        apply_key_to_state(key(KeyCode::Right), &mut state);
+        apply_key_to_state(ctrl('a'), &mut state);
+        apply_key_to_state(ctrl('e'), &mut state);
+
+        assert_eq!(state.mode, Mode::Ai);
+        assert!(state.draft.is_empty());
+        assert_eq!(state.selected_ai_command(), Some("git status"));
     }
 }
