@@ -1,5 +1,6 @@
 use std::env;
 use std::io::{Read, Write};
+use std::path::Path;
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
@@ -23,7 +24,7 @@ pub struct PtyBackend {
 
 impl PtyBackend {
     pub fn spawn(configured_shell: &str) -> Result<Self> {
-        let shell = resolve_shell(configured_shell);
+        let launch = shell_launch(configured_shell);
         let pty_system = NativePtySystem::default();
         let pair = pty_system
             .openpty(PtySize {
@@ -34,15 +35,16 @@ impl PtyBackend {
             })
             .context("failed to create PTY")?;
 
-        let mut command = CommandBuilder::new(&shell);
-        command.arg("--noprofile");
-        command.arg("--norc");
+        let mut command = CommandBuilder::new(&launch.program);
+        for arg in &launch.args {
+            command.arg(arg);
+        }
         command.env("PS1", "");
 
         let child = pair
             .slave
             .spawn_command(command)
-            .with_context(|| format!("failed to spawn backend shell {shell}"))?;
+            .with_context(|| format!("failed to spawn backend shell {}", launch.program))?;
         let mut reader = pair
             .master
             .try_clone_reader()
@@ -149,6 +151,27 @@ pub fn resolve_shell(configured_shell: &str) -> String {
         .unwrap_or_else(|| "/bin/bash".to_string())
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ShellLaunch {
+    program: String,
+    args: Vec<String>,
+}
+
+fn shell_launch(configured_shell: &str) -> ShellLaunch {
+    let program = resolve_shell(configured_shell);
+    let shell_name = Path::new(&program)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+
+    let args = match shell_name {
+        "bash" => vec!["--noprofile".to_string(), "--norc".to_string()],
+        _ => Vec::new(),
+    };
+
+    ShellLaunch { program, args }
+}
+
 fn parse_marker_output(raw: &str) -> Result<(String, i32)> {
     let marker_pos = raw
         .find(MARKER_PREFIX)
@@ -173,6 +196,20 @@ mod tests {
     #[test]
     fn resolves_configured_shell_before_environment() {
         assert_eq!(resolve_shell("/bin/custom-shell"), "/bin/custom-shell");
+    }
+
+    #[test]
+    fn bash_launch_uses_clean_startup_flags() {
+        let launch = shell_launch("/bin/bash");
+        assert_eq!(launch.program, "/bin/bash");
+        assert_eq!(launch.args, ["--noprofile", "--norc"]);
+    }
+
+    #[test]
+    fn non_bash_launch_does_not_receive_bash_only_flags() {
+        let launch = shell_launch("/bin/zsh");
+        assert_eq!(launch.program, "/bin/zsh");
+        assert!(launch.args.is_empty());
     }
 
     #[test]
