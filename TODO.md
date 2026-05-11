@@ -285,10 +285,10 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
   - [x] `#template list`
   - [x] `#template rm`
   - [x] `#editor`
-  - [ ] `#encrypt`
-  - [ ] `#set-remote`
-  - [ ] `#push`
-  - [ ] `#sync`
+  - [x] `#encrypt`
+  - [x] `#set-remote`
+  - [x] `#push`
+  - [x] `#sync`
 - [x] Recognize `# TODO:`, `# NOTE:`, `# FIXME:`, `# HACK:`, `# XXX:` as notes.
 - [x] Recognize AI prompt `# <text>`.
 - [x] Recognize pseudo-pipe context syntax `# prompt < command`.

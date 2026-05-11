@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 75 library unit tests.
+- 76 library unit tests.
 - 13 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
@@ -250,11 +250,12 @@ Implemented:
 - Context pseudo-pipe commands are not executed yet.
 - Unknown private commands are not sent to shell.
 - Unknown private commands suggest the nearest implemented command when there is a close match.
-- Minimal private commands: `#help`, `#status`, `#config`, `#doctor`, `#model`, `#base-url`, `#env-key`, `#key set`, `#key clear`, `#context`, `#completion`, `#log`, `#editor`, `#mt`, `#template list`, `#template rm`, `#exit`, `#quit`, `#history <count>`.
+- Minimal private commands: `#help`, `#status`, `#config`, `#doctor`, `#model`, `#base-url`, `#env-key`, `#key set`, `#key clear`, `#context`, `#completion`, `#log`, `#editor`, `#mt`, `#template list`, `#template rm`, `#encrypt`, `#set-remote`, `#push`, `#sync`, `#exit`, `#quit`, `#history <count>`.
 - AI configuration commands are recognized as placeholders but do not persist config or read secrets yet.
 - Key commands are recognized as placeholders but do not store, read, or remove secrets yet.
 - Completion, log, and editor commands are recognized as placeholders but do not activate those subsystems yet.
 - Template commands are recognized as placeholders but do not read or write template storage yet.
+- Encryption and sync commands are recognized as placeholders but do not change files, encryption state, remotes, or run git commands yet.
 - `#context` reports that context collection is currently disabled/not implemented.
 - `#config` prints read-only runtime configuration and does not create missing storage files.
 - `#doctor` prints read-only diagnostics and does not create missing storage files.
@@ -279,6 +280,7 @@ Tests:
 - `app::tests::key_commands_report_placeholders_without_secret_side_effects`
 - `app::tests::subsystem_commands_report_placeholders`
 - `app::tests::template_commands_report_placeholders_without_storage_side_effects`
+- `app::tests::encryption_and_sync_commands_report_placeholders_without_side_effects`
 - `app::tests::private_history_without_count_prints_usage`
 - `app::tests::private_exit_requests_app_exit`
 - `app::tests::unknown_private_command_prints_suggestion`

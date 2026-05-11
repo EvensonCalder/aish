@@ -431,6 +431,33 @@ pub fn execute_draft(
                     state.mode = Mode::Draft;
                     return Ok(());
                 }
+                "encrypt" => {
+                    writeln!(out, "encryption is not implemented yet; no data changed")?;
+                    state.draft.clear();
+                    state.mode = Mode::Draft;
+                    return Ok(());
+                }
+                "set-remote" => {
+                    writeln!(
+                        out,
+                        "sync remote configuration is not implemented yet; no remote changed"
+                    )?;
+                    state.draft.clear();
+                    state.mode = Mode::Draft;
+                    return Ok(());
+                }
+                "push" => {
+                    writeln!(out, "sync push is not implemented yet; no git command run")?;
+                    state.draft.clear();
+                    state.mode = Mode::Draft;
+                    return Ok(());
+                }
+                "sync" => {
+                    writeln!(out, "sync is not implemented yet; no git command run")?;
+                    state.draft.clear();
+                    state.mode = Mode::Draft;
+                    return Ok(());
+                }
                 _ => {}
             }
             match suggest_private_command(name) {
@@ -813,6 +840,10 @@ mod tests {
         assert!(output.contains("#editor"));
         assert!(output.contains("#mt"));
         assert!(output.contains("#template"));
+        assert!(output.contains("#encrypt"));
+        assert!(output.contains("#set-remote"));
+        assert!(output.contains("#push"));
+        assert!(output.contains("#sync"));
         assert!(output.contains("#exit"));
         assert!(output.contains("#quit"));
         assert!(output.contains("#history"));
@@ -968,6 +999,46 @@ mod tests {
                 "#template show deploy",
                 "usage: #template list | #template rm <name>",
             ),
+        ] {
+            let mut state = AppState::default();
+            state.draft.insert_str(line);
+            let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+            let mut output = Vec::new();
+
+            execute_draft(
+                &mut state,
+                &mut backend,
+                &mut output,
+                Duration::from_secs(5),
+            )
+            .unwrap();
+
+            let output = String::from_utf8(output).unwrap();
+            assert!(
+                output.contains(expected),
+                "missing {expected:?} in {output:?}"
+            );
+            assert_eq!(state.last_status, None);
+            assert!(state.draft.is_empty());
+        }
+    }
+
+    #[test]
+    fn encryption_and_sync_commands_report_placeholders_without_side_effects() {
+        for (line, expected) in [
+            (
+                "#encrypt on",
+                "encryption is not implemented yet; no data changed",
+            ),
+            (
+                "#set-remote git@example.invalid:aish.git",
+                "sync remote configuration is not implemented yet; no remote changed",
+            ),
+            (
+                "#push",
+                "sync push is not implemented yet; no git command run",
+            ),
+            ("#sync", "sync is not implemented yet; no git command run"),
         ] {
             let mut state = AppState::default();
             state.draft.insert_str(line);
