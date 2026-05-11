@@ -168,7 +168,7 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
 
 pub fn redraw(state: &AppState, out: &mut impl Write) -> Result<()> {
     execute!(out, MoveToColumn(0), Clear(ClearType::CurrentLine))?;
-    write!(out, "{} {}", state.mode.symbol(), state.draft.as_str())?;
+    write!(out, "{}", state.render_prompt_line())?;
     out.flush()?;
     Ok(())
 }

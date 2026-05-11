@@ -32,6 +32,14 @@ impl AppState {
             self.mode = self.mode.next_primary();
         }
     }
+
+    pub fn prompt_prefix(&self) -> String {
+        format!("{} ", self.mode.symbol())
+    }
+
+    pub fn render_prompt_line(&self) -> String {
+        format!("{}{}", self.prompt_prefix(), self.draft.as_str())
+    }
 }
 
 pub fn run() -> Result<()> {
@@ -117,5 +125,18 @@ mod tests {
         state.draft.insert_str("git");
         state.handle_empty_tab();
         assert_eq!(state.mode, Mode::Draft);
+    }
+
+    #[test]
+    fn prompt_line_uses_current_mode_symbol() {
+        let mut state = AppState::default();
+        state.draft.insert_str("git status");
+        assert_eq!(state.render_prompt_line(), "> git status");
+
+        state.mode = Mode::History;
+        assert_eq!(state.render_prompt_line(), "$ git status");
+
+        state.mode = Mode::Ai;
+        assert_eq!(state.render_prompt_line(), "% git status");
     }
 }
