@@ -213,7 +213,7 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
 - [ ] Define JSONL formats:
   - [x] regular history entry
   - [x] draft entry
-  - [ ] AI session entry
+  - [x] AI session entry
   - [x] note entry
 - [x] Implement append-only JSONL writer.
 - [x] Implement startup loader.

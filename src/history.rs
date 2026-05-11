@@ -35,6 +35,31 @@ pub struct DraftEntry {
     pub text: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AiSession {
+    pub id: String,
+    pub t: i64,
+    pub prompt: String,
+    pub ctx: bool,
+    pub model: String,
+    pub items: Vec<AiItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AiItem {
+    pub kind: AiItemKind,
+    pub text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AiItemKind {
+    Command,
+    Template,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JsonlLoad<T> {
     pub items: Vec<T>,
@@ -300,5 +325,52 @@ mod tests {
         let parsed: DraftEntry = serde_json::from_str(&raw).unwrap();
 
         assert_eq!(parsed, entry);
+    }
+
+    #[test]
+    fn ai_session_roundtrips_through_jsonl() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("history/ai.jsonl");
+        let session = AiSession {
+            id: "a_123".to_string(),
+            t: 123,
+            prompt: "set git user".to_string(),
+            ctx: false,
+            model: "test-model".to_string(),
+            items: vec![
+                AiItem {
+                    kind: AiItemKind::Command,
+                    text: "git config --global user.name \"{name}\"".to_string(),
+                    name: None,
+                },
+                AiItem {
+                    kind: AiItemKind::Template,
+                    text: "git config --global user.email \"{email}\"".to_string(),
+                    name: Some("git-email".to_string()),
+                },
+            ],
+        };
+
+        append_jsonl(&path, &session).unwrap();
+        let loaded = load_jsonl::<AiSession>(&path).unwrap();
+
+        assert_eq!(loaded.errors, []);
+        assert_eq!(loaded.items, [session]);
+        assert_eq!(loaded.items[0].items[0].kind, AiItemKind::Command);
+        assert_eq!(loaded.items[0].items[1].kind, AiItemKind::Template);
+    }
+
+    #[test]
+    fn ai_item_kind_serializes_as_snake_case() {
+        let item = AiItem {
+            kind: AiItemKind::Command,
+            text: "pwd".to_string(),
+            name: None,
+        };
+
+        let raw = serde_json::to_string(&item).unwrap();
+
+        assert!(raw.contains("\"kind\":\"command\""));
+        assert!(!raw.contains("name"));
     }
 }
