@@ -1,6 +1,6 @@
 use std::io::{self, Write};
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 
@@ -19,6 +19,7 @@ pub struct AppState {
     pub exit_requested: bool,
     pub regular_history_path: Option<PathBuf>,
     pub notes_path: Option<PathBuf>,
+    pub clock: fn() -> i64,
 }
 
 impl Default for AppState {
@@ -30,6 +31,7 @@ impl Default for AppState {
             exit_requested: false,
             regular_history_path: None,
             notes_path: None,
+            clock: unix_timestamp,
         }
     }
 }
@@ -158,6 +160,7 @@ pub fn execute_draft(
             path,
             &HistoryEntry {
                 command: result.command.clone(),
+                t: (state.clock)(),
                 exit_code: Some(result.exit_code),
                 source: HistorySource::User,
             },
@@ -167,6 +170,13 @@ pub fn execute_draft(
     state.draft.clear();
     state.mode = Mode::Draft;
     Ok(())
+}
+
+pub fn unix_timestamp() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs().min(i64::MAX as u64) as i64)
+        .unwrap_or(0)
 }
 
 #[cfg(test)]
@@ -282,5 +292,10 @@ mod tests {
         assert!(output.contains("mode=>"));
         assert!(output.contains("last_status=7"));
         assert!(state.draft.is_empty());
+    }
+
+    #[test]
+    fn unix_timestamp_returns_non_negative_seconds() {
+        assert!(unix_timestamp() >= 0);
     }
 }

@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HistoryEntry {
+    pub t: i64,
     pub command: String,
     pub exit_code: Option<i32>,
     pub source: HistorySource,
@@ -169,6 +170,7 @@ mod tests {
     #[test]
     fn history_entry_serializes_source_as_snake_case() {
         let entry = HistoryEntry {
+            t: 123,
             command: "pwd".to_string(),
             exit_code: Some(0),
             source: HistorySource::User,
@@ -177,6 +179,7 @@ mod tests {
         let raw = serde_json::to_string(&entry).unwrap();
 
         assert!(raw.contains("\"source\":\"user\""));
+        assert!(raw.contains("\"t\":123"));
     }
 
     #[test]

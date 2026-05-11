@@ -219,7 +219,7 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
 - [x] Implement startup loader.
 - [ ] Implement in-memory indexes.
 - [ ] Implement history trimming based on `#history <count>`.
-- [ ] Store exit code and timestamp for executed commands.
+- [x] Store exit code and timestamp for executed commands.
 - [ ] Store `source = ai` for executed AI commands.
 - [ ] Persist draft history if configured.
 - [x] Implement note storage for `# TODO:` style comments.

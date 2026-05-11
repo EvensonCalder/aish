@@ -6,6 +6,10 @@ use aish::history::{HistoryEntry, HistorySource, NoteEntry, load_jsonl};
 use aish::modes::Mode;
 use aish::pty::PtyBackend;
 
+fn fixed_clock() -> i64 {
+    1234567890
+}
+
 #[test]
 fn execute_draft_sends_command_to_backend_and_resets_state() {
     let mut state = AppState::default();
@@ -101,6 +105,7 @@ fn execute_draft_appends_successful_command_to_regular_history() {
     let history_path = temp.path().join("history/regular.jsonl");
     let mut state = AppState {
         regular_history_path: Some(history_path.clone()),
+        clock: fixed_clock,
         ..AppState::default()
     };
     let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
@@ -120,6 +125,7 @@ fn execute_draft_appends_successful_command_to_regular_history() {
     assert_eq!(loaded.errors, []);
     assert_eq!(loaded.items.len(), 1);
     assert_eq!(loaded.items[0].command, "printf 'stored\\n'");
+    assert_eq!(loaded.items[0].t, 1234567890);
     assert_eq!(loaded.items[0].exit_code, Some(0));
     assert_eq!(loaded.items[0].source, HistorySource::User);
 }
@@ -130,6 +136,7 @@ fn execute_draft_appends_failed_command_to_regular_history() {
     let history_path = temp.path().join("history/regular.jsonl");
     let mut state = AppState {
         regular_history_path: Some(history_path.clone()),
+        clock: fixed_clock,
         ..AppState::default()
     };
     let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
@@ -149,6 +156,7 @@ fn execute_draft_appends_failed_command_to_regular_history() {
     assert_eq!(loaded.errors, []);
     assert_eq!(loaded.items.len(), 1);
     assert_eq!(loaded.items[0].command, "false");
+    assert_eq!(loaded.items[0].t, 1234567890);
     assert_eq!(loaded.items[0].exit_code, Some(1));
     assert_eq!(loaded.items[0].source, HistorySource::User);
 }
