@@ -15,7 +15,9 @@ use crate::history::{
 use crate::input::InputBuffer;
 use crate::modes::Mode;
 use crate::pty::PtyBackend;
-use crate::templates::{TemplateEntry, append_template, load_templates, remove_templates_by_name};
+use crate::templates::{
+    TemplateEntry, append_template, find_template_by_name, load_templates, remove_templates_by_name,
+};
 
 #[derive(Debug)]
 pub struct AppState {
@@ -441,6 +443,7 @@ pub fn execute_draft(
                     return Ok(());
                 }
                 "template" => {
+                    let mut keep_draft = false;
                     match args.split_whitespace().next() {
                         Some("list") => match &state.template_store_path {
                             Some(path) => {
@@ -481,11 +484,46 @@ pub fn execute_draft(
                                 }
                                 None => writeln!(out, "template storage is not configured")?,
                             },
-                            None => writeln!(out, "usage: #template list | #template rm <name>")?,
+                            None => writeln!(
+                                out,
+                                "usage: #template list | #template rm <name> | #template use <name>"
+                            )?,
                         },
-                        _ => writeln!(out, "usage: #template list | #template rm <name>")?,
+                        Some("use") => match args.split_whitespace().nth(1) {
+                            Some(name) => match &state.template_store_path {
+                                Some(path) => {
+                                    let loaded = find_template_by_name(path, name)?;
+                                    match loaded.items.first() {
+                                        Some(template) => {
+                                            state.draft = InputBuffer::from(template.body.clone());
+                                            keep_draft = true;
+                                            writeln!(out, "template copied to draft: {name}")?;
+                                        }
+                                        None => writeln!(out, "template not found: {name}")?,
+                                    }
+                                    if !loaded.errors.is_empty() {
+                                        writeln!(
+                                            out,
+                                            "skipped {} bad template line(s)",
+                                            loaded.errors.len()
+                                        )?;
+                                    }
+                                }
+                                None => writeln!(out, "template storage is not configured")?,
+                            },
+                            None => writeln!(
+                                out,
+                                "usage: #template list | #template rm <name> | #template use <name>"
+                            )?,
+                        },
+                        _ => writeln!(
+                            out,
+                            "usage: #template list | #template rm <name> | #template use <name>"
+                        )?,
                     }
-                    state.draft.clear();
+                    if !keep_draft {
+                        state.draft.clear();
+                    }
                     state.mode = Mode::Draft;
                     return Ok(());
                 }
@@ -1170,17 +1208,92 @@ mod tests {
     }
 
     #[test]
+    fn template_use_copies_newest_matching_body_to_draft() {
+        let temp = tempfile::tempdir().unwrap();
+        let template_path = temp.path().join("templates/templates.jsonl");
+        for (name, body) in [
+            ("deploy", "old deploy"),
+            ("logs", "tail -f {file}"),
+            ("deploy", "new deploy"),
+        ] {
+            append_template(
+                &template_path,
+                &TemplateEntry {
+                    name: name.to_string(),
+                    body: body.to_string(),
+                },
+            )
+            .unwrap();
+        }
+        let mut state = AppState {
+            template_store_path: Some(template_path),
+            ..AppState::default()
+        };
+        state.draft.insert_str("#template use deploy");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("template copied to draft: deploy"));
+        assert_eq!(state.last_status, None);
+        assert_eq!(state.mode, Mode::Draft);
+        assert_eq!(state.draft.as_str(), "new deploy");
+        assert_eq!(state.draft.cursor(), "new deploy".len());
+    }
+
+    #[test]
+    fn template_use_reports_missing_template_without_changing_draft() {
+        let temp = tempfile::tempdir().unwrap();
+        let template_path = temp.path().join("templates/templates.jsonl");
+        let mut state = AppState {
+            template_store_path: Some(template_path),
+            ..AppState::default()
+        };
+        state.draft.insert_str("#template use missing");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("template not found: missing"));
+        assert_eq!(state.last_status, None);
+        assert!(state.draft.is_empty());
+    }
+
+    #[test]
     fn template_commands_report_usage_for_invalid_input() {
         for (line, expected) in [
             ("#mt deploy", "usage: #mt <name> <body>"),
             (
                 "#template rm",
-                "usage: #template list | #template rm <name>",
+                "usage: #template list | #template rm <name> | #template use <name>",
             ),
-            ("#template", "usage: #template list | #template rm <name>"),
+            (
+                "#template use",
+                "usage: #template list | #template rm <name> | #template use <name>",
+            ),
+            (
+                "#template",
+                "usage: #template list | #template rm <name> | #template use <name>",
+            ),
             (
                 "#template show deploy",
-                "usage: #template list | #template rm <name>",
+                "usage: #template list | #template rm <name> | #template use <name>",
             ),
         ] {
             let mut state = AppState::default();

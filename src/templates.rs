@@ -19,6 +19,18 @@ pub fn load_templates(path: &Path) -> Result<JsonlLoad<TemplateEntry>> {
     load_jsonl(path)
 }
 
+pub fn find_template_by_name(path: &Path, name: &str) -> Result<JsonlLoad<TemplateEntry>> {
+    let mut loaded = load_templates(path)?;
+    loaded.items = loaded
+        .items
+        .into_iter()
+        .rev()
+        .find(|template| template.name == name)
+        .into_iter()
+        .collect();
+    Ok(loaded)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TemplateRemoval {
     pub removed: usize,
@@ -91,5 +103,27 @@ mod tests {
         assert_eq!(removal.remaining.len(), 1);
         assert_eq!(loaded.items, removal.remaining);
         assert_eq!(loaded.items[0].name, "logs");
+    }
+
+    #[test]
+    fn find_template_by_name_returns_newest_match() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("templates/templates.jsonl");
+        for (name, body) in [("deploy", "old"), ("logs", "tail"), ("deploy", "new")] {
+            append_template(
+                &path,
+                &TemplateEntry {
+                    name: name.to_string(),
+                    body: body.to_string(),
+                },
+            )
+            .unwrap();
+        }
+
+        let loaded = find_template_by_name(&path, "deploy").unwrap();
+
+        assert_eq!(loaded.errors, []);
+        assert_eq!(loaded.items.len(), 1);
+        assert_eq!(loaded.items[0].body, "new");
     }
 }
