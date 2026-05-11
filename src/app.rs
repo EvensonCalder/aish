@@ -87,11 +87,34 @@ pub fn execute_draft(
             return Ok(());
         }
         ParsedLine::Private { name, .. } => {
-            if matches!(name, "exit" | "quit") {
-                state.exit_requested = true;
-                state.draft.clear();
-                state.mode = Mode::Draft;
-                return Ok(());
+            match name {
+                "exit" | "quit" => {
+                    state.exit_requested = true;
+                    state.draft.clear();
+                    state.mode = Mode::Draft;
+                    return Ok(());
+                }
+                "help" => {
+                    writeln!(out, "Aish private commands: #help, #status, #exit")?;
+                    state.draft.clear();
+                    state.mode = Mode::Draft;
+                    return Ok(());
+                }
+                "status" => {
+                    writeln!(
+                        out,
+                        "mode={} last_status={}",
+                        state.mode.symbol(),
+                        state
+                            .last_status
+                            .map(|status| status.to_string())
+                            .unwrap_or_else(|| "none".to_string())
+                    )?;
+                    state.draft.clear();
+                    state.mode = Mode::Draft;
+                    return Ok(());
+                }
+                _ => {}
             }
             writeln!(out, "Aish command not implemented yet: #{name}")?;
             state.draft.clear();
@@ -184,5 +207,51 @@ mod tests {
         assert!(state.exit_requested);
         assert!(state.draft.is_empty());
         assert!(output.is_empty());
+    }
+
+    #[test]
+    fn private_help_prints_available_commands() {
+        let mut state = AppState::default();
+        state.draft.insert_str("#help");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("#help"));
+        assert!(output.contains("#status"));
+        assert!(output.contains("#exit"));
+        assert!(state.draft.is_empty());
+    }
+
+    #[test]
+    fn private_status_prints_mode_and_last_status() {
+        let mut state = AppState {
+            last_status: Some(7),
+            ..AppState::default()
+        };
+        state.draft.insert_str("#status");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("mode=>"));
+        assert!(output.contains("last_status=7"));
+        assert!(state.draft.is_empty());
     }
 }
