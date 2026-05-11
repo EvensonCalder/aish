@@ -1,9 +1,13 @@
+use std::sync::Mutex;
 use std::time::Duration;
 
 use aish::pty::PtyBackend;
 
+static PTY_TEST_LOCK: Mutex<()> = Mutex::new(());
+
 #[test]
 fn pty_backend_runs_commands_and_preserves_shell_state() {
+    let _guard = PTY_TEST_LOCK.lock().unwrap();
     let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
 
     let first_pwd = backend.run_command("pwd", Duration::from_secs(5)).unwrap();
@@ -23,6 +27,7 @@ fn pty_backend_runs_commands_and_preserves_shell_state() {
 
 #[test]
 fn pty_backend_captures_failed_command_exit_status() {
+    let _guard = PTY_TEST_LOCK.lock().unwrap();
     let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
 
     let result = backend
@@ -35,6 +40,7 @@ fn pty_backend_captures_failed_command_exit_status() {
 
 #[test]
 fn pty_backend_does_not_confuse_user_output_with_prompt_marker() {
+    let _guard = PTY_TEST_LOCK.lock().unwrap();
     let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
 
     let result = backend

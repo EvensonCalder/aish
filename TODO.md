@@ -8,31 +8,31 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
 
 ### Tasks
 
-- [ ] Create Rust workspace.
-- [ ] Add binary crate `aish`.
-- [ ] Add internal modules:
-  - [ ] `app`
-  - [ ] `config`
-  - [ ] `terminal`
-  - [ ] `pty`
-  - [ ] `input`
-  - [ ] `modes`
-  - [ ] `history`
-  - [ ] `ai`
-  - [ ] `templates`
-  - [ ] `completion`
-  - [ ] `picker`
-  - [ ] `editor`
-  - [ ] `paste`
-  - [ ] `encryption`
-  - [ ] `sync`
-  - [ ] `log`
-  - [ ] `shell_integration`
-- [ ] Add basic error type using `anyhow` or project-specific error enum.
-- [ ] Add `serde`, `serde_json`, and `toml` for config/storage.
-- [ ] Define `~/.aish` directory layout.
-- [ ] Implement first-run directory creation.
-- [ ] Implement config load/create/save.
+- [x] Create Rust workspace.
+- [x] Add binary crate `aish`.
+- [x] Add internal modules:
+  - [x] `app`
+  - [x] `config`
+  - [x] `terminal`
+  - [x] `pty`
+  - [x] `input`
+  - [x] `modes`
+  - [x] `history`
+  - [x] `ai`
+  - [x] `templates`
+  - [x] `completion`
+  - [x] `picker`
+  - [x] `editor`
+  - [x] `paste`
+  - [x] `encryption`
+  - [x] `sync`
+  - [x] `log`
+  - [x] `shell_integration`
+- [x] Add basic error type using `anyhow` or project-specific error enum.
+- [x] Add `serde`, `serde_json`, and `toml` for config/storage.
+- [x] Define `~/.aish` directory layout.
+- [x] Implement first-run directory creation.
+- [x] Implement config load/create/save.
 
 ### Acceptance criteria
 
@@ -47,19 +47,19 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
 
 ### Tasks
 
-- [ ] Choose PTY implementation, initially `portable-pty` unless lower-level control is required.
-- [ ] Start backend shell:
-  - [ ] configured shell if set
-  - [ ] `$SHELL` if present
-  - [ ] `/bin/bash` fallback
-- [ ] Create PTY pair.
-- [ ] Spawn shell on PTY slave.
-- [ ] Read PTY master output asynchronously.
-- [ ] Write commands to PTY master.
-- [ ] Forward output to terminal in a basic way.
-- [ ] Add shell prompt marker for readiness detection.
-- [ ] Hide or filter the prompt marker from user output.
-- [ ] Detect command completion via prompt marker.
+- [x] Choose PTY implementation, initially `portable-pty` unless lower-level control is required.
+- [x] Start backend shell:
+  - [x] configured shell if set
+  - [x] `$SHELL` if present
+  - [x] `/bin/bash` fallback
+- [x] Create PTY pair.
+- [x] Spawn shell on PTY slave.
+- [x] Read PTY master output asynchronously.
+- [x] Write commands to PTY master.
+- [x] Forward output to terminal in a basic way.
+- [x] Add shell prompt marker for readiness detection.
+- [x] Hide or filter the prompt marker from user output.
+- [x] Detect command completion via prompt marker.
 
 ### Acceptance criteria
 
@@ -74,19 +74,19 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
 
 ### Tasks
 
-- [ ] Enable raw mode.
-- [ ] Enable bracketed paste mode.
-- [ ] Read key events.
-- [ ] Read paste events.
-- [ ] Restore terminal on panic/exit where practical.
+- [x] Enable raw mode.
+- [x] Enable bracketed paste mode.
+- [x] Read key events.
+- [x] Read paste events.
+- [x] Restore terminal on panic/exit where practical.
 - [ ] Implement central event loop:
-  - [ ] keyboard events
-  - [ ] paste events
+  - [x] keyboard events
+  - [x] paste events
   - [ ] PTY output events
   - [ ] timer/background events
-- [ ] Add redraw function for prompt/input line.
-- [ ] Add `Ctrl-D` empty input exit.
-- [ ] Add safe terminal cleanup guard.
+- [x] Add redraw function for prompt/input line.
+- [x] Add `Ctrl-D` empty input exit.
+- [x] Add safe terminal cleanup guard.
 
 ### Acceptance criteria
 
@@ -101,31 +101,31 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
 
 ### Tasks
 
-- [ ] Define primary modes:
-  - [ ] `Draft`
-  - [ ] `History`
-  - [ ] `Ai`
-- [ ] Define temporary modes:
-  - [ ] `CommandRunning`
-  - [ ] `Passthrough`
-  - [ ] `ExternalEditor`
-  - [ ] `PasteReviewEditor`
-  - [ ] `Picker`
-  - [ ] `UnlockPassthrough`
+- [x] Define primary modes:
+  - [x] `Draft`
+  - [x] `History`
+  - [x] `Ai`
+- [x] Define temporary modes:
+  - [x] `CommandRunning`
+  - [x] `Passthrough`
+  - [x] `ExternalEditor`
+  - [x] `PasteReviewEditor`
+  - [x] `Picker`
+  - [x] `UnlockPassthrough`
 - [ ] Define `AppState`:
-  - [ ] mode
-  - [ ] draft buffer
-  - [ ] cursor position
+  - [x] mode
+  - [x] draft buffer
+  - [x] cursor position
   - [ ] selected history index
   - [ ] selected AI session/item
-  - [ ] last exit status
+  - [x] last exit status
   - [ ] current cwd if known
   - [ ] output ring buffer
-- [ ] Implement empty-input `Tab` mode switching.
-- [ ] Implement prompt symbols:
-  - [ ] `>` draft
-  - [ ] `$` history
-  - [ ] `%` AI
+- [x] Implement empty-input `Tab` mode switching.
+- [x] Implement prompt symbols:
+  - [x] `>` draft
+  - [x] `$` history
+  - [x] `%` AI
 - [ ] Implement customizable prompt variables.
 
 ### Acceptance criteria
@@ -140,23 +140,23 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
 
 ### Tasks
 
-- [ ] Implement editable buffer with cursor.
-- [ ] Support insertion, deletion, and paste insertion.
-- [ ] Implement standard navigation:
-  - [ ] `Ctrl-A`
-  - [ ] `Ctrl-E`
-  - [ ] `Left/Right`
-  - [ ] `Alt-Left/Alt-Right`
-  - [ ] `Alt-B/Alt-F`
-- [ ] Implement deletion:
-  - [ ] `Backspace`
-  - [ ] `Delete`
-  - [ ] `Ctrl-W`
-  - [ ] `Ctrl-U`
-  - [ ] `Ctrl-K`
+- [x] Implement editable buffer with cursor.
+- [x] Support insertion, deletion, and paste insertion.
+- [x] Implement standard navigation:
+  - [x] `Ctrl-A`
+  - [x] `Ctrl-E`
+  - [x] `Left/Right`
+  - [x] `Alt-Left/Alt-Right`
+  - [x] `Alt-B/Alt-F`
+- [x] Implement deletion:
+  - [x] `Backspace`
+  - [x] `Delete`
+  - [x] `Ctrl-W`
+  - [x] `Ctrl-U`
+  - [x] `Ctrl-K`
 - [ ] Implement redraw with cursor placement.
 - [ ] Implement multi-line draft buffer support for editor-returned content.
-- [ ] Implement command submission from draft to PTY.
+- [x] Implement command submission from draft to PTY.
 
 ### Acceptance criteria
 
@@ -922,4 +922,3 @@ enum AiItemKind {
 - [ ] Git sync.
 - [ ] Shell integration notes.
 - [ ] Troubleshooting with `#doctor`.
-
