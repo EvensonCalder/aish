@@ -293,7 +293,7 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
 - [x] Recognize AI prompt `# <text>`.
 - [x] Recognize pseudo-pipe context syntax `# prompt < command`.
 - [ ] Implement continuation parsing for `#` and `#mt`.
-- [ ] Unknown private command shows error and suggestions.
+- [x] Unknown private command shows error and suggestions.
 
 ### Acceptance criteria
 

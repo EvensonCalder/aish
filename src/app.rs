@@ -4,7 +4,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 
-use crate::commands::{ParsedLine, parse_line};
+use crate::commands::{
+    IMPLEMENTED_PRIVATE_COMMANDS, ParsedLine, parse_line, suggest_private_command,
+};
 use crate::config;
 use crate::history::{
     AiCommandIndex, AiItem, AiItemKind, AiSession, DraftEntry, HistoryEntry, HistorySource,
@@ -292,7 +294,15 @@ pub fn execute_draft(
                     return Ok(());
                 }
                 "help" => {
-                    writeln!(out, "Aish private commands: #help, #status, #exit")?;
+                    writeln!(
+                        out,
+                        "Aish private commands: {}",
+                        IMPLEMENTED_PRIVATE_COMMANDS
+                            .iter()
+                            .map(|name| format!("#{name}"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )?;
                     state.draft.clear();
                     state.mode = Mode::Draft;
                     return Ok(());
@@ -334,7 +344,13 @@ pub fn execute_draft(
                 }
                 _ => {}
             }
-            writeln!(out, "Aish command not implemented yet: #{name}")?;
+            match suggest_private_command(name) {
+                Some(suggestion) => writeln!(
+                    out,
+                    "Aish command not implemented yet: #{name}. Did you mean #{suggestion}?"
+                )?,
+                None => writeln!(out, "Aish command not implemented yet: #{name}")?,
+            }
             state.draft.clear();
             state.mode = Mode::Draft;
             return Ok(());
@@ -638,6 +654,30 @@ mod tests {
         assert!(output.contains("#help"));
         assert!(output.contains("#status"));
         assert!(output.contains("#exit"));
+        assert!(output.contains("#quit"));
+        assert!(output.contains("#history"));
+        assert!(state.draft.is_empty());
+    }
+
+    #[test]
+    fn unknown_private_command_prints_suggestion() {
+        let mut state = AppState::default();
+        state.draft.insert_str("#statsu");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("Aish command not implemented yet: #statsu"));
+        assert!(output.contains("Did you mean #status?"));
+        assert_eq!(state.last_status, None);
         assert!(state.draft.is_empty());
     }
 

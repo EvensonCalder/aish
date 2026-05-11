@@ -18,6 +18,8 @@ pub enum NoteTag {
     Xxx,
 }
 
+pub const IMPLEMENTED_PRIVATE_COMMANDS: &[&str] = &["help", "status", "exit", "quit", "history"];
+
 pub fn parse_line(line: &str) -> ParsedLine<'_> {
     if !line.starts_with('#') {
         return ParsedLine::Ordinary(line);
@@ -72,6 +74,37 @@ fn parse_note(rest: &str) -> Option<(NoteTag, &str)> {
     None
 }
 
+pub fn suggest_private_command(name: &str) -> Option<&'static str> {
+    IMPLEMENTED_PRIVATE_COMMANDS
+        .iter()
+        .copied()
+        .filter(|candidate| edit_distance_at_most(name, candidate, 3))
+        .min_by_key(|candidate| edit_distance(name, candidate))
+}
+
+fn edit_distance_at_most(left: &str, right: &str, max: usize) -> bool {
+    left.len().abs_diff(right.len()) <= max && edit_distance(left, right) <= max
+}
+
+fn edit_distance(left: &str, right: &str) -> usize {
+    let right_len = right.chars().count();
+    let mut previous: Vec<usize> = (0..=right_len).collect();
+    let mut current = vec![0; right_len + 1];
+
+    for (left_index, left_char) in left.chars().enumerate() {
+        current[0] = left_index + 1;
+        for (right_index, right_char) in right.chars().enumerate() {
+            let substitution_cost = usize::from(left_char != right_char);
+            current[right_index + 1] = (previous[right_index + 1] + 1)
+                .min(current[right_index] + 1)
+                .min(previous[right_index] + substitution_cost);
+        }
+        std::mem::swap(&mut previous, &mut current);
+    }
+
+    previous[right_len]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -121,6 +154,13 @@ mod tests {
                 args: "gpt-4.1"
             }
         );
+    }
+
+    #[test]
+    fn unknown_private_command_suggestion_uses_nearest_implemented_command() {
+        assert_eq!(suggest_private_command("statsu"), Some("status"));
+        assert_eq!(suggest_private_command("histroy"), Some("history"));
+        assert_eq!(suggest_private_command("totally-unknown"), None);
     }
 
     #[test]

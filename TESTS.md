@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 66 library unit tests.
+- 68 library unit tests.
 - 13 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
@@ -249,6 +249,7 @@ Implemented:
 - AI prompts with context pseudo-pipe syntax are recognized as placeholders.
 - Context pseudo-pipe commands are not executed yet.
 - Unknown private commands are not sent to shell.
+- Unknown private commands suggest the nearest implemented command when there is a close match.
 - Minimal private commands: `#help`, `#status`, `#exit`, `#quit`, `#history <count>`.
 
 Tests:
@@ -258,6 +259,7 @@ Tests:
 - `commands::tests::ai_prompt_with_context_command_is_detected`
 - `commands::tests::incomplete_context_syntax_stays_plain_ai_prompt`
 - `commands::tests::private_command_allows_no_space_after_hash`
+- `commands::tests::unknown_private_command_suggestion_uses_nearest_implemented_command`
 - `commands::tests::notes_are_detected_with_or_without_space_after_hash`
 - `execute_draft_does_not_send_line_leading_hash_to_backend_shell`
 - `execute_draft_does_not_run_context_pseudo_pipe_command`
@@ -265,6 +267,7 @@ Tests:
 - `app::tests::private_status_prints_mode_and_last_status`
 - `app::tests::private_history_without_count_prints_usage`
 - `app::tests::private_exit_requests_app_exit`
+- `app::tests::unknown_private_command_prints_suggestion`
 
 Status:
 
@@ -273,7 +276,6 @@ Status:
 Known gaps:
 
 - Most private commands from `SPEC.md` are still not implemented.
-- Unknown private command suggestions are not implemented.
 - Continuation parsing is not implemented.
 - Context pseudo-pipe execution is not implemented.
 
