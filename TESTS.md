@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 92 library unit tests.
+- 93 library unit tests.
 - 13 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
@@ -466,6 +466,7 @@ Implemented:
 - `#template use <name>` copies the newest matching template body into draft without executing it.
 - `#template use <name>` reports simple `{placeholder}` names found in the copied body.
 - `#template use <name> key=value...` applies explicit placeholder substitutions before copying to draft.
+- `#template use <name> key="value with spaces"` and single-quoted variants are supported.
 
 Tests:
 
@@ -481,6 +482,7 @@ Tests:
 - `app::tests::template_rm_removes_matching_templates`
 - `app::tests::template_replace_rewrites_matching_templates`
 - `app::tests::template_use_copies_newest_matching_body_to_draft`
+- `app::tests::template_use_supports_quoted_values_with_spaces`
 - `app::tests::template_use_reports_missing_template_without_changing_draft`
 - `app::tests::template_commands_report_usage_for_invalid_input`
 

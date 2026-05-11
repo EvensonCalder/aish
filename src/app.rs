@@ -737,16 +737,61 @@ fn parse_template_subcommand_args(args: &str) -> Option<(&str, &str)> {
 }
 
 fn parse_template_values(args: &str) -> HashMap<String, String> {
-    let mut parts = args.split_whitespace();
+    let tokens = split_template_tokens(args);
+    let mut parts = tokens.iter().map(String::as_str);
     let _subcommand = parts.next();
     let _name = parts.next();
 
     parts
         .filter_map(|part| {
             let (key, value) = part.split_once('=')?;
-            (!key.is_empty()).then_some((key.to_string(), value.to_string()))
+            (!key.is_empty()).then_some((key.to_string(), trim_matching_quotes(value).to_string()))
         })
         .collect()
+}
+
+fn split_template_tokens(input: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut quote: Option<char> = None;
+
+    for ch in input.chars() {
+        match quote {
+            Some(active) if ch == active => {
+                quote = None;
+                current.push(ch);
+            }
+            Some(_) => current.push(ch),
+            None if ch == '\'' || ch == '"' => {
+                quote = Some(ch);
+                current.push(ch);
+            }
+            None if ch.is_whitespace() => {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+            }
+            None => current.push(ch),
+        }
+    }
+
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+
+    tokens
+}
+
+fn trim_matching_quotes(value: &str) -> &str {
+    if value.len() >= 2 {
+        let bytes = value.as_bytes();
+        let first = bytes[0];
+        let last = bytes[value.len() - 1];
+        if (first == b'\'' && last == b'\'') || (first == b'"' && last == b'"') {
+            return &value[1..value.len() - 1];
+        }
+    }
+    value
 }
 
 fn template_usage() -> &'static str {
@@ -1402,6 +1447,43 @@ mod tests {
         assert!(output.contains("template not found: missing"));
         assert_eq!(state.last_status, None);
         assert!(state.draft.is_empty());
+    }
+
+    #[test]
+    fn template_use_supports_quoted_values_with_spaces() {
+        let temp = tempfile::tempdir().unwrap();
+        let template_path = temp.path().join("templates/templates.jsonl");
+        append_template(
+            &template_path,
+            &TemplateEntry {
+                name: "deploy".to_string(),
+                body: "echo {message} && cd {path}".to_string(),
+            },
+        )
+        .unwrap();
+        let mut state = AppState {
+            template_store_path: Some(template_path),
+            ..AppState::default()
+        };
+        state
+            .draft
+            .insert_str("#template use deploy message=\"hello world\" path='/tmp/my dir'");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("template copied to draft: deploy"));
+        assert_eq!(state.last_status, None);
+        assert_eq!(state.mode, Mode::Draft);
+        assert_eq!(state.draft.as_str(), "echo hello world && cd /tmp/my dir");
     }
 
     #[test]
