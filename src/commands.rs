@@ -104,6 +104,40 @@ pub fn suggest_private_command(name: &str) -> Option<&'static str> {
         .min_by_key(|candidate| edit_distance(name, candidate))
 }
 
+pub fn normalize_continuation_lines(lines: &[&str]) -> Option<String> {
+    if lines.len() < 2 {
+        return None;
+    }
+
+    normalize_ai_continuation(lines).or_else(|| normalize_mt_continuation(lines))
+}
+
+fn normalize_ai_continuation(lines: &[&str]) -> Option<String> {
+    let mut parts = Vec::with_capacity(lines.len());
+    for line in lines {
+        let rest = line.strip_prefix("# ")?;
+        parts.push(strip_continuation(rest.trim()).trim().to_string());
+    }
+    Some(format!("# {}", parts.join(" ").trim()))
+}
+
+fn normalize_mt_continuation(lines: &[&str]) -> Option<String> {
+    let first = lines.first()?.strip_prefix("#mt")?.trim_start();
+    let mut parts = Vec::with_capacity(lines.len());
+    parts.push(strip_continuation(first).trim().to_string());
+
+    for line in &lines[1..] {
+        let rest = line.strip_prefix("#mt")?.trim_start();
+        parts.push(strip_continuation(rest).trim().to_string());
+    }
+
+    Some(format!("#mt {}", parts.join(" ").trim()))
+}
+
+fn strip_continuation(line: &str) -> &str {
+    line.strip_suffix('\\').unwrap_or(line)
+}
+
 fn edit_distance_at_most(left: &str, right: &str, max: usize) -> bool {
     left.len().abs_diff(right.len()) <= max && edit_distance(left, right) <= max
 }
@@ -200,6 +234,61 @@ mod tests {
                 tag: NoteTag::Todo,
                 text: "deploy later"
             }
+        );
+    }
+
+    #[test]
+    fn normalizes_ai_prompt_continuation_lines() {
+        let normalized = normalize_continuation_lines(&[
+            "# how to set remote? < \\",
+            "#   git -h && \\",
+            "#   git remote -h",
+        ]);
+
+        assert_eq!(
+            normalized.as_deref(),
+            Some("# how to set remote? < git -h && git remote -h")
+        );
+        assert_eq!(
+            normalized.as_deref().map(parse_line),
+            Some(ParsedLine::AiPromptWithContext {
+                prompt: "how to set remote?",
+                command: "git -h && git remote -h"
+            })
+        );
+    }
+
+    #[test]
+    fn normalizes_mt_continuation_lines() {
+        let normalized = normalize_continuation_lines(&[
+            "#mt deploy \\",
+            "#mt   rsync -avz {from} \\",
+            "#mt   {user}@{host}:{to}",
+        ]);
+
+        assert_eq!(
+            normalized.as_deref(),
+            Some("#mt deploy rsync -avz {from} {user}@{host}:{to}")
+        );
+        assert_eq!(
+            normalized.as_deref().map(parse_line),
+            Some(ParsedLine::Private {
+                name: "mt",
+                args: "deploy rsync -avz {from} {user}@{host}:{to}"
+            })
+        );
+    }
+
+    #[test]
+    fn continuation_normalization_rejects_mixed_or_single_lines() {
+        assert_eq!(normalize_continuation_lines(&["# one"]), None);
+        assert_eq!(
+            normalize_continuation_lines(&["# one \\", "not-a-prefix"]),
+            None
+        );
+        assert_eq!(
+            normalize_continuation_lines(&["#mt name \\", "# body"]),
+            None
         );
     }
 }

@@ -292,7 +292,7 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
 - [x] Recognize `# TODO:`, `# NOTE:`, `# FIXME:`, `# HACK:`, `# XXX:` as notes.
 - [x] Recognize AI prompt `# <text>`.
 - [x] Recognize pseudo-pipe context syntax `# prompt < command`.
-- [ ] Implement continuation parsing for `#` and `#mt`.
+- [x] Implement continuation parsing for `#` and `#mt`.
 - [x] Unknown private command shows error and suggestions.
 
 ### Acceptance criteria

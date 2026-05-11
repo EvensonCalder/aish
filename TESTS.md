@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 76 library unit tests.
+- 79 library unit tests.
 - 13 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
@@ -247,6 +247,7 @@ Implemented:
 - Private commands are recognized.
 - AI prompts are recognized as placeholders but not sent to AI yet.
 - AI prompts with context pseudo-pipe syntax are recognized as placeholders.
+- Visual continuation lines for `#` prompts and `#mt` template creation can be normalized by a pure parser helper.
 - Context pseudo-pipe commands are not executed yet.
 - Unknown private commands are not sent to shell.
 - Unknown private commands suggest the nearest implemented command when there is a close match.
@@ -266,6 +267,9 @@ Tests:
 - `commands::tests::line_leading_hash_space_is_ai_prompt`
 - `commands::tests::ai_prompt_with_context_command_is_detected`
 - `commands::tests::incomplete_context_syntax_stays_plain_ai_prompt`
+- `commands::tests::normalizes_ai_prompt_continuation_lines`
+- `commands::tests::normalizes_mt_continuation_lines`
+- `commands::tests::continuation_normalization_rejects_mixed_or_single_lines`
 - `commands::tests::private_command_allows_no_space_after_hash`
 - `commands::tests::unknown_private_command_suggestion_uses_nearest_implemented_command`
 - `commands::tests::notes_are_detected_with_or_without_space_after_hash`
@@ -292,7 +296,7 @@ Status:
 Known gaps:
 
 - Most private commands from `SPEC.md` are still not implemented.
-- Continuation parsing is not implemented.
+- Continuation parsing is pure parser logic only; terminal multiline collection is not wired yet.
 - Context pseudo-pipe execution is not implemented.
 
 ### Regular History Storage
