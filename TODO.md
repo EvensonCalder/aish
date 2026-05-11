@@ -154,8 +154,8 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
   - [x] `Ctrl-W`
   - [x] `Ctrl-U`
   - [x] `Ctrl-K`
-- [ ] Implement redraw with cursor placement.
-- [ ] Implement multi-line draft buffer support for editor-returned content.
+- [x] Implement redraw with cursor placement.
+- [x] Implement multi-line draft buffer support for editor-returned content.
 - [x] Implement command submission from draft to PTY.
 
 ### Acceptance criteria

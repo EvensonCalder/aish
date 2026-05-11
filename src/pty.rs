@@ -158,18 +158,24 @@ fn next_marker() -> String {
 }
 
 fn marker_status_is_complete(raw: &str, marker: &str) -> bool {
-    let Some(marker_pos) = raw.find(marker) else {
-        return false;
-    };
+    find_complete_marker(raw, marker).is_some()
+}
+
+fn find_complete_marker(raw: &str, marker: &str) -> Option<usize> {
+    raw.match_indices(marker)
+        .find_map(|(marker_pos, _)| marker_has_complete_status(raw, marker, marker_pos))
+}
+
+fn marker_has_complete_status(raw: &str, marker: &str, marker_pos: usize) -> Option<usize> {
     let status_start = marker_pos + marker.len();
     let mut chars = raw[status_start..].chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
+    let first = chars.next()?;
     if !first.is_ascii_digit() {
-        return false;
+        return None;
     }
-    chars.any(|ch| ch == '\n' || ch == '\r')
+    chars
+        .any(|ch| ch == '\n' || ch == '\r')
+        .then_some(marker_pos)
 }
 
 pub fn resolve_shell(configured_shell: &str) -> String {
@@ -204,8 +210,7 @@ fn shell_launch(configured_shell: &str) -> ShellLaunch {
 }
 
 fn parse_marker_output(raw: &str, marker: &str) -> Result<(String, i32)> {
-    let marker_pos = raw
-        .find(marker)
+    let marker_pos = find_complete_marker(raw, marker)
         .context("backend shell output did not contain prompt marker")?;
     let output = normalize_pty_newlines(raw[..marker_pos].trim_matches(['\r', '\n']));
     let status_start = marker_pos + marker.len();
@@ -271,6 +276,17 @@ mod tests {
         let raw = format!("one\r\ntwo\r\n{marker}0\r\n");
         let (output, status) = parse_marker_output(&raw, marker).unwrap();
         assert_eq!(output, "one\ntwo");
+        assert_eq!(status, 0);
+    }
+
+    #[test]
+    fn parser_uses_real_marker_when_command_echo_contains_marker() {
+        let marker = "__AISH_STATUS__123__";
+        let raw = format!(
+            "__aish_status=$?; printf '\\n%s%s\\n' '{marker}' \"$__aish_status\"\r\nactual\r\n{marker}0\r\n"
+        );
+        let (output, status) = parse_marker_output(&raw, marker).unwrap();
+        assert!(output.contains("actual"));
         assert_eq!(status, 0);
     }
 
