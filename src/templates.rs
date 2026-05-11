@@ -56,6 +56,30 @@ pub fn remove_templates_by_name(path: &Path, name: &str) -> Result<TemplateRemov
     })
 }
 
+pub fn template_placeholders(body: &str) -> Vec<String> {
+    let mut placeholders = Vec::new();
+    let mut rest = body;
+    while let Some(start) = rest.find('{') {
+        rest = &rest[start + 1..];
+        let Some(end) = rest.find('}') else {
+            break;
+        };
+        let candidate = &rest[..end];
+        if is_placeholder_name(candidate) && !placeholders.iter().any(|item| item == candidate) {
+            placeholders.push(candidate.to_string());
+        }
+        rest = &rest[end + 1..];
+    }
+    placeholders
+}
+
+fn is_placeholder_name(candidate: &str) -> bool {
+    !candidate.is_empty()
+        && candidate
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -125,5 +149,13 @@ mod tests {
         assert_eq!(loaded.errors, []);
         assert_eq!(loaded.items.len(), 1);
         assert_eq!(loaded.items[0].body, "new");
+    }
+
+    #[test]
+    fn template_placeholders_returns_unique_simple_names_in_order() {
+        assert_eq!(
+            template_placeholders("rsync {from} {user}@{host}:{to} {from} {bad space} {}"),
+            ["from", "user", "host", "to"]
+        );
     }
 }

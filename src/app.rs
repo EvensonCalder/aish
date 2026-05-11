@@ -16,7 +16,8 @@ use crate::input::InputBuffer;
 use crate::modes::Mode;
 use crate::pty::PtyBackend;
 use crate::templates::{
-    TemplateEntry, append_template, find_template_by_name, load_templates, remove_templates_by_name,
+    TemplateEntry, append_template, find_template_by_name, load_templates,
+    remove_templates_by_name, template_placeholders,
 };
 
 #[derive(Debug)]
@@ -498,6 +499,15 @@ pub fn execute_draft(
                                             state.draft = InputBuffer::from(template.body.clone());
                                             keep_draft = true;
                                             writeln!(out, "template copied to draft: {name}")?;
+                                            let placeholders =
+                                                template_placeholders(&template.body);
+                                            if !placeholders.is_empty() {
+                                                writeln!(
+                                                    out,
+                                                    "template placeholders: {}",
+                                                    placeholders.join(", ")
+                                                )?;
+                                            }
                                         }
                                         None => writeln!(out, "template not found: {name}")?,
                                     }
@@ -1214,7 +1224,7 @@ mod tests {
         for (name, body) in [
             ("deploy", "old deploy"),
             ("logs", "tail -f {file}"),
-            ("deploy", "new deploy"),
+            ("deploy", "rsync {from} {user}@{host}:{to} {from}"),
         ] {
             append_template(
                 &template_path,
@@ -1243,10 +1253,14 @@ mod tests {
 
         let output = String::from_utf8(output).unwrap();
         assert!(output.contains("template copied to draft: deploy"));
+        assert!(output.contains("template placeholders: from, user, host, to"));
         assert_eq!(state.last_status, None);
         assert_eq!(state.mode, Mode::Draft);
-        assert_eq!(state.draft.as_str(), "new deploy");
-        assert_eq!(state.draft.cursor(), "new deploy".len());
+        assert_eq!(
+            state.draft.as_str(),
+            "rsync {from} {user}@{host}:{to} {from}"
+        );
+        assert_eq!(state.draft.cursor(), state.draft.as_str().len());
     }
 
     #[test]
