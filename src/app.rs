@@ -1,10 +1,12 @@
 use std::io::{self, Write};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Result;
 
 use crate::commands::{ParsedLine, parse_line};
 use crate::config;
+use crate::history::{HistoryEntry, HistorySource, append_jsonl};
 use crate::input::InputBuffer;
 use crate::modes::Mode;
 use crate::pty::PtyBackend;
@@ -15,6 +17,7 @@ pub struct AppState {
     pub draft: InputBuffer,
     pub last_status: Option<i32>,
     pub exit_requested: bool,
+    pub regular_history_path: Option<PathBuf>,
 }
 
 impl Default for AppState {
@@ -24,6 +27,7 @@ impl Default for AppState {
             draft: InputBuffer::new(),
             last_status: None,
             exit_requested: false,
+            regular_history_path: None,
         }
     }
 }
@@ -50,9 +54,12 @@ impl AppState {
 }
 
 pub fn run() -> Result<()> {
-    let (_layout, config) = config::init_default_layout(config::default_aish_dir())?;
+    let (layout, config) = config::init_default_layout(config::default_aish_dir())?;
     let mut backend = PtyBackend::spawn(&config.shell.backend)?;
-    let mut state = AppState::default();
+    let mut state = AppState {
+        regular_history_path: Some(layout.regular_history),
+        ..AppState::default()
+    };
     crate::terminal::run(
         &mut state,
         &mut backend,
@@ -133,6 +140,16 @@ pub fn execute_draft(
     let result = backend.run_command(&command, timeout)?;
     if !result.output.is_empty() {
         writeln!(out, "{}", result.output)?;
+    }
+    if let Some(path) = &state.regular_history_path {
+        append_jsonl(
+            path,
+            &HistoryEntry {
+                command: result.command.clone(),
+                exit_code: Some(result.exit_code),
+                source: HistorySource::User,
+            },
+        )?;
     }
     state.last_status = Some(result.exit_code);
     state.draft.clear();

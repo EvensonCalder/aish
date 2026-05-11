@@ -3,7 +3,23 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistoryEntry {
+    pub command: String,
+    pub exit_code: Option<i32>,
+    pub source: HistorySource,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HistorySource {
+    User,
+    Ai,
+    Editor,
+    Paste,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JsonlLoad<T> {
@@ -141,5 +157,18 @@ mod tests {
         assert_eq!(loaded.errors[0].line, 2);
         assert_eq!(loaded.errors[0].path, path);
         assert!(loaded.errors[0].message.contains("expected"));
+    }
+
+    #[test]
+    fn history_entry_serializes_source_as_snake_case() {
+        let entry = HistoryEntry {
+            command: "pwd".to_string(),
+            exit_code: Some(0),
+            source: HistorySource::User,
+        };
+
+        let raw = serde_json::to_string(&entry).unwrap();
+
+        assert!(raw.contains("\"source\":\"user\""));
     }
 }
