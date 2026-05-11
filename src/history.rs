@@ -29,6 +29,12 @@ pub struct NoteEntry {
     pub text: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DraftEntry {
+    pub t: i64,
+    pub text: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JsonlLoad<T> {
     pub items: Vec<T>,
@@ -281,5 +287,18 @@ mod tests {
         let raw = serde_json::to_string(&entry).unwrap();
 
         assert!(raw.contains("\"tag\":\"fixme\""));
+    }
+
+    #[test]
+    fn draft_entry_roundtrips_through_json() {
+        let entry = DraftEntry {
+            t: 123,
+            text: "git status".to_string(),
+        };
+
+        let raw = serde_json::to_string(&entry).unwrap();
+        let parsed: DraftEntry = serde_json::from_str(&raw).unwrap();
+
+        assert_eq!(parsed, entry);
     }
 }

@@ -6,7 +6,9 @@ use anyhow::Result;
 
 use crate::commands::{ParsedLine, parse_line};
 use crate::config;
-use crate::history::{HistoryEntry, HistorySource, NoteEntry, append_jsonl, trim_regular_history};
+use crate::history::{
+    DraftEntry, HistoryEntry, HistorySource, NoteEntry, append_jsonl, trim_regular_history,
+};
 use crate::input::InputBuffer;
 use crate::modes::Mode;
 use crate::pty::PtyBackend;
@@ -19,6 +21,8 @@ pub struct AppState {
     pub exit_requested: bool,
     pub regular_history_path: Option<PathBuf>,
     pub notes_path: Option<PathBuf>,
+    pub draft_history_path: Option<PathBuf>,
+    pub draft_persist: bool,
     pub clock: fn() -> i64,
 }
 
@@ -31,6 +35,8 @@ impl Default for AppState {
             exit_requested: false,
             regular_history_path: None,
             notes_path: None,
+            draft_history_path: None,
+            draft_persist: true,
             clock: unix_timestamp,
         }
     }
@@ -63,6 +69,8 @@ pub fn run() -> Result<()> {
     let mut state = AppState {
         regular_history_path: Some(layout.regular_history),
         notes_path: Some(layout.notes),
+        draft_history_path: Some(layout.draft_history),
+        draft_persist: config.draft.persist,
         ..AppState::default()
     };
     crate::terminal::run(
@@ -195,6 +203,24 @@ pub fn unix_timestamp() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs().min(i64::MAX as u64) as i64)
         .unwrap_or(0)
+}
+
+pub fn save_draft_if_configured(state: &AppState) -> Result<bool> {
+    if !state.draft_persist || state.draft.is_empty() {
+        return Ok(false);
+    }
+    let Some(path) = &state.draft_history_path else {
+        return Ok(false);
+    };
+
+    append_jsonl(
+        path,
+        &DraftEntry {
+            t: (state.clock)(),
+            text: state.draft.as_str().to_string(),
+        },
+    )?;
+    Ok(true)
 }
 
 #[cfg(test)]
@@ -338,5 +364,51 @@ mod tests {
     #[test]
     fn unix_timestamp_returns_non_negative_seconds() {
         assert!(unix_timestamp() >= 0);
+    }
+
+    fn fixed_clock() -> i64 {
+        42
+    }
+
+    #[test]
+    fn save_draft_if_configured_persists_non_empty_draft() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("draft.jsonl");
+        let mut state = AppState {
+            draft_history_path: Some(path.clone()),
+            clock: fixed_clock,
+            ..AppState::default()
+        };
+        state.draft.insert_str("git status");
+
+        assert!(save_draft_if_configured(&state).unwrap());
+
+        let loaded = crate::history::load_jsonl::<DraftEntry>(&path).unwrap();
+        assert_eq!(loaded.errors, []);
+        assert_eq!(loaded.items.len(), 1);
+        assert_eq!(loaded.items[0].t, 42);
+        assert_eq!(loaded.items[0].text, "git status");
+    }
+
+    #[test]
+    fn save_draft_if_configured_skips_empty_or_disabled_drafts() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("draft.jsonl");
+        let mut state = AppState {
+            draft_history_path: Some(path.clone()),
+            draft_persist: false,
+            ..AppState::default()
+        };
+        state.draft.insert_str("git status");
+
+        assert!(!save_draft_if_configured(&state).unwrap());
+        assert!(!path.exists());
+
+        let state = AppState {
+            draft_history_path: Some(path.clone()),
+            ..AppState::default()
+        };
+        assert!(!save_draft_if_configured(&state).unwrap());
+        assert!(!path.exists());
     }
 }

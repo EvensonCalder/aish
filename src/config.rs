@@ -10,6 +10,7 @@ pub struct Config {
     pub shell: ShellConfig,
     pub prompt: PromptConfig,
     pub storage: StorageConfig,
+    pub draft: DraftConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -30,6 +31,13 @@ pub struct PromptConfig {
 #[serde(default, deny_unknown_fields)]
 pub struct StorageConfig {
     pub home: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DraftConfig {
+    pub persist: bool,
+    pub sync: bool,
 }
 
 impl Default for ShellConfig {
@@ -54,6 +62,15 @@ impl Default for StorageConfig {
     fn default() -> Self {
         Self {
             home: default_aish_dir(),
+        }
+    }
+}
+
+impl Default for DraftConfig {
+    fn default() -> Self {
+        Self {
+            persist: true,
+            sync: false,
         }
     }
 }
@@ -203,6 +220,8 @@ mod tests {
         assert_eq!(config.prompt.draft, "{user}@{host} {cwd} > ");
         assert_eq!(config.prompt.history, "{user}@{host} {cwd} $ ");
         assert_eq!(config.prompt.ai, "{user}@{host} {cwd} % ");
+        assert!(config.draft.persist);
+        assert!(!config.draft.sync);
         assert!(config.storage.home.ends_with(".aish"));
     }
 
@@ -220,6 +239,7 @@ mod tests {
             storage: StorageConfig {
                 home: PathBuf::new(),
             },
+            draft: DraftConfig::default(),
         };
 
         normalize_config(&mut config);

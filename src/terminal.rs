@@ -10,7 +10,7 @@ use crossterm::terminal::{
     Clear, ClearType, disable_raw_mode, enable_raw_mode, is_raw_mode_enabled,
 };
 
-use crate::app::{AppState, execute_draft};
+use crate::app::{AppState, execute_draft, save_draft_if_configured};
 use crate::pty::PtyBackend;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,7 +61,10 @@ pub fn run(
 
     loop {
         match event::read()? {
-            Event::Key(key) if handle_key(key, state, backend, out, command_timeout)? => break,
+            Event::Key(key) if handle_key(key, state, backend, out, command_timeout)? => {
+                let _ = save_draft_if_configured(state)?;
+                break;
+            }
             Event::Paste(text) => {
                 if !text.contains('\n') && !text.contains('\r') {
                     state.draft.insert_str(&text);
