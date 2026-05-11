@@ -32,3 +32,18 @@ fn pty_backend_captures_failed_command_exit_status() {
     assert_eq!(result.exit_code, 1);
     assert!(result.output.trim().is_empty());
 }
+
+#[test]
+fn pty_backend_does_not_confuse_user_output_with_prompt_marker() {
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+
+    let result = backend
+        .run_command(
+            "printf '%s %s %s\\n' before __AISH_STATUS__ after",
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+    assert_eq!(result.exit_code, 0);
+    assert_eq!(result.output.trim(), "before __AISH_STATUS__ after");
+}

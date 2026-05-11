@@ -1,6 +1,7 @@
 use std::env;
 use std::io::{Read, Write};
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
@@ -8,6 +9,7 @@ use anyhow::{Context, Result, bail};
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 
 const MARKER_PREFIX: &str = "__AISH_STATUS__";
+static NEXT_MARKER_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandResult {
@@ -90,15 +92,17 @@ impl PtyBackend {
     }
 
     pub fn run_command(&mut self, command: &str, timeout: Duration) -> Result<CommandResult> {
-        let marker_command = format!("printf '\\n{MARKER_PREFIX}%s\\n' $?\n");
+        let marker = next_marker();
+        let marker_command =
+            format!("__aish_status=$?; printf '\\n%s%s\\n' '{marker}' \"$__aish_status\"\n");
         self.write_raw(command)?;
         if !command.ends_with('\n') {
             self.write_raw("\n")?;
         }
         self.write_raw(&marker_command)?;
 
-        let raw = self.read_until_marker(timeout)?;
-        let (output, exit_code) = parse_marker_output(&raw)?;
+        let raw = self.read_until_marker(&marker, timeout)?;
+        let (output, exit_code) = parse_marker_output(&raw, &marker)?;
         Ok(CommandResult {
             command: command.trim_end_matches('\n').to_string(),
             output,
@@ -106,11 +110,11 @@ impl PtyBackend {
         })
     }
 
-    fn read_until_marker(&mut self, timeout: Duration) -> Result<String> {
+    fn read_until_marker(&mut self, marker: &str, timeout: Duration) -> Result<String> {
         let deadline = Instant::now() + timeout;
         let mut data = Vec::new();
         loop {
-            if String::from_utf8_lossy(&data).contains(MARKER_PREFIX) {
+            if String::from_utf8_lossy(&data).contains(marker) {
                 return Ok(String::from_utf8_lossy(&data).into_owned());
             }
             let now = Instant::now();
@@ -139,6 +143,11 @@ impl PtyBackend {
         }
         String::from_utf8_lossy(&data).into_owned()
     }
+}
+
+fn next_marker() -> String {
+    let id = NEXT_MARKER_ID.fetch_add(1, Ordering::Relaxed);
+    format!("{MARKER_PREFIX}{id}__")
 }
 
 pub fn resolve_shell(configured_shell: &str) -> String {
@@ -172,12 +181,12 @@ fn shell_launch(configured_shell: &str) -> ShellLaunch {
     ShellLaunch { program, args }
 }
 
-fn parse_marker_output(raw: &str) -> Result<(String, i32)> {
+fn parse_marker_output(raw: &str, marker: &str) -> Result<(String, i32)> {
     let marker_pos = raw
-        .find(MARKER_PREFIX)
+        .find(marker)
         .context("backend shell output did not contain prompt marker")?;
     let output = raw[..marker_pos].trim_matches(['\r', '\n']).to_string();
-    let status_start = marker_pos + MARKER_PREFIX.len();
+    let status_start = marker_pos + marker.len();
     let status: String = raw[status_start..]
         .chars()
         .take_while(|ch| ch.is_ascii_digit())
@@ -214,8 +223,19 @@ mod tests {
 
     #[test]
     fn parses_marker_and_hides_it_from_output() {
-        let (output, status) = parse_marker_output("hello\r\n__AISH_STATUS__7\r\n").unwrap();
+        let marker = "__AISH_STATUS__123__";
+        let raw = format!("hello\r\n{marker}7\r\n");
+        let (output, status) = parse_marker_output(&raw, marker).unwrap();
         assert_eq!(output, "hello");
         assert_eq!(status, 7);
+    }
+
+    #[test]
+    fn parser_ignores_old_fixed_marker_in_user_output() {
+        let marker = "__AISH_STATUS__123__";
+        let raw = format!("before __AISH_STATUS__ after\r\n{marker}0\r\n");
+        let (output, status) = parse_marker_output(&raw, marker).unwrap();
+        assert_eq!(output, "before __AISH_STATUS__ after");
+        assert_eq!(status, 0);
     }
 }
