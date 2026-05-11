@@ -14,6 +14,7 @@ pub struct AppState {
     pub mode: Mode,
     pub draft: InputBuffer,
     pub last_status: Option<i32>,
+    pub exit_requested: bool,
 }
 
 impl Default for AppState {
@@ -22,6 +23,7 @@ impl Default for AppState {
             mode: Mode::Draft,
             draft: InputBuffer::new(),
             last_status: None,
+            exit_requested: false,
         }
     }
 }
@@ -80,6 +82,12 @@ pub fn execute_draft(
             return Ok(());
         }
         ParsedLine::Private { name, .. } => {
+            if matches!(name, "exit" | "quit") {
+                state.exit_requested = true;
+                state.draft.clear();
+                state.mode = Mode::Draft;
+                return Ok(());
+            }
             writeln!(out, "Aish command not implemented yet: #{name}")?;
             state.draft.clear();
             state.mode = Mode::Draft;
@@ -138,5 +146,25 @@ mod tests {
 
         state.mode = Mode::Ai;
         assert_eq!(state.render_prompt_line(), "% git status");
+    }
+
+    #[test]
+    fn private_exit_requests_app_exit() {
+        let mut state = AppState::default();
+        state.draft.insert_str("#exit");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        assert!(state.exit_requested);
+        assert!(state.draft.is_empty());
+        assert!(output.is_empty());
     }
 }

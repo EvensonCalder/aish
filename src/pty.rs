@@ -21,7 +21,7 @@ pub struct CommandResult {
 pub struct PtyBackend {
     writer: Box<dyn Write + Send>,
     output: Receiver<Vec<u8>>,
-    _child: Box<dyn portable_pty::Child + Send + Sync>,
+    child: Box<dyn portable_pty::Child + Send + Sync>,
 }
 
 impl PtyBackend {
@@ -76,7 +76,7 @@ impl PtyBackend {
         let mut backend = Self {
             writer,
             output: rx,
-            _child: child,
+            child,
         };
         backend.write_raw("stty -echo\n")?;
         let _ = backend.drain_for(Duration::from_millis(150));
@@ -143,6 +143,12 @@ impl PtyBackend {
             }
         }
         String::from_utf8_lossy(&data).into_owned()
+    }
+}
+
+impl Drop for PtyBackend {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
     }
 }
 

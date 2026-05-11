@@ -90,6 +90,9 @@ fn handle_key(
         KeyAction::Submit => {
             writeln!(out)?;
             execute_draft(state, backend, out, command_timeout)?;
+            if state.exit_requested {
+                return Ok(true);
+            }
         }
         KeyAction::Continue => {}
     }
