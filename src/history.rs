@@ -60,6 +60,40 @@ pub fn append_jsonl<T: Serialize>(path: &Path, item: &T) -> Result<()> {
     Ok(())
 }
 
+pub fn rewrite_jsonl<T: Serialize>(path: &Path, items: &[T]) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create JSONL directory {}", parent.display()))?;
+    }
+
+    let tmp = path.with_extension("jsonl.tmp");
+    {
+        let mut file = fs::File::create(&tmp)
+            .with_context(|| format!("failed to create JSONL temp file {}", tmp.display()))?;
+        for item in items {
+            serde_json::to_writer(&mut file, item)
+                .with_context(|| format!("failed to serialize JSONL item for {}", tmp.display()))?;
+            file.write_all(b"\n")
+                .with_context(|| format!("failed to write JSONL newline to {}", tmp.display()))?;
+        }
+    }
+    fs::rename(&tmp, path).with_context(|| {
+        format!(
+            "failed to replace JSONL file {} with {}",
+            path.display(),
+            tmp.display()
+        )
+    })?;
+    Ok(())
+}
+
+pub fn trim_regular_history(path: &Path, max_entries: usize) -> Result<JsonlLoad<HistoryEntry>> {
+    let loaded = load_jsonl::<HistoryEntry>(path)?;
+    let keep_from = loaded.items.len().saturating_sub(max_entries);
+    rewrite_jsonl(path, &loaded.items[keep_from..])?;
+    Ok(loaded)
+}
+
 pub fn load_jsonl<T: DeserializeOwned>(path: &Path) -> Result<JsonlLoad<T>> {
     if !path.exists() {
         return Ok(JsonlLoad {
@@ -165,6 +199,61 @@ mod tests {
         assert_eq!(loaded.errors[0].line, 2);
         assert_eq!(loaded.errors[0].path, path);
         assert!(loaded.errors[0].message.contains("expected"));
+    }
+
+    #[test]
+    fn rewrite_jsonl_replaces_existing_contents() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("regular.jsonl");
+        append_jsonl(
+            &path,
+            &TestEntry {
+                command: "old".to_string(),
+                exit_code: Some(0),
+            },
+        )
+        .unwrap();
+
+        rewrite_jsonl(
+            &path,
+            &[TestEntry {
+                command: "new".to_string(),
+                exit_code: Some(1),
+            }],
+        )
+        .unwrap();
+
+        let loaded = load_jsonl::<TestEntry>(&path).unwrap();
+        assert_eq!(loaded.items.len(), 1);
+        assert_eq!(loaded.items[0].command, "new");
+    }
+
+    #[test]
+    fn trim_regular_history_keeps_newest_entries_and_skips_bad_lines() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("regular.jsonl");
+        fs::write(
+            &path,
+            [
+                "{\"t\":1,\"command\":\"one\",\"exit_code\":0,\"source\":\"user\"}",
+                "bad-json",
+                "{\"t\":2,\"command\":\"two\",\"exit_code\":0,\"source\":\"user\"}",
+                "{\"t\":3,\"command\":\"three\",\"exit_code\":1,\"source\":\"user\"}",
+                "",
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+
+        let before_trim = trim_regular_history(&path, 2).unwrap();
+        let after_trim = load_jsonl::<HistoryEntry>(&path).unwrap();
+
+        assert_eq!(before_trim.items.len(), 3);
+        assert_eq!(before_trim.errors.len(), 1);
+        assert_eq!(after_trim.errors, []);
+        assert_eq!(after_trim.items.len(), 2);
+        assert_eq!(after_trim.items[0].command, "two");
+        assert_eq!(after_trim.items[1].command, "three");
     }
 
     #[test]

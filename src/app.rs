@@ -6,7 +6,7 @@ use anyhow::Result;
 
 use crate::commands::{ParsedLine, parse_line};
 use crate::config;
-use crate::history::{HistoryEntry, HistorySource, NoteEntry, append_jsonl};
+use crate::history::{HistoryEntry, HistorySource, NoteEntry, append_jsonl, trim_regular_history};
 use crate::input::InputBuffer;
 use crate::modes::Mode;
 use crate::pty::PtyBackend;
@@ -107,7 +107,7 @@ pub fn execute_draft(
             state.mode = Mode::Draft;
             return Ok(());
         }
-        ParsedLine::Private { name, .. } => {
+        ParsedLine::Private { name, args } => {
             match name {
                 "exit" | "quit" => {
                     state.exit_requested = true;
@@ -131,6 +131,24 @@ pub fn execute_draft(
                             .map(|status| status.to_string())
                             .unwrap_or_else(|| "none".to_string())
                     )?;
+                    state.draft.clear();
+                    state.mode = Mode::Draft;
+                    return Ok(());
+                }
+                "history" => {
+                    let count = args.parse::<usize>();
+                    match (count, &state.regular_history_path) {
+                        (Ok(count), Some(path)) => {
+                            let loaded = trim_regular_history(path, count)?;
+                            writeln!(
+                                out,
+                                "history trimmed to {count}; skipped {} bad line(s)",
+                                loaded.errors.len()
+                            )?;
+                        }
+                        (Ok(_), None) => writeln!(out, "history storage is not configured")?,
+                        (Err(_), _) => writeln!(out, "usage: #history <count>")?,
+                    }
                     state.draft.clear();
                     state.mode = Mode::Draft;
                     return Ok(());
@@ -291,6 +309,29 @@ mod tests {
         let output = String::from_utf8(output).unwrap();
         assert!(output.contains("mode=>"));
         assert!(output.contains("last_status=7"));
+        assert!(state.draft.is_empty());
+    }
+
+    #[test]
+    fn private_history_without_count_prints_usage() {
+        let mut state = AppState::default();
+        state.draft.insert_str("#history nope");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        assert!(
+            String::from_utf8(output)
+                .unwrap()
+                .contains("usage: #history <count>")
+        );
         assert!(state.draft.is_empty());
     }
 

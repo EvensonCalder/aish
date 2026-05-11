@@ -194,3 +194,45 @@ fn execute_draft_stores_notes_without_sending_them_to_shell() {
     assert_eq!(loaded.items[0].tag, NoteTag::Todo);
     assert_eq!(loaded.items[0].text, "deploy later");
 }
+
+#[test]
+fn private_history_command_trims_regular_history_to_newest_entries() {
+    let temp = tempfile::tempdir().unwrap();
+    let history_path = temp.path().join("history/regular.jsonl");
+    let mut state = AppState {
+        regular_history_path: Some(history_path.clone()),
+        clock: fixed_clock,
+        ..AppState::default()
+    };
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    for command in ["printf 'one\\n'", "printf 'two\\n'", "printf 'three\\n'"] {
+        state.draft.insert_str(command);
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+    }
+
+    state.draft.insert_str("#history 2");
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    let loaded = load_jsonl::<HistoryEntry>(&history_path).unwrap();
+    assert_eq!(loaded.errors, []);
+    assert_eq!(loaded.items.len(), 2);
+    assert_eq!(loaded.items[0].command, "printf 'two\\n'");
+    assert_eq!(loaded.items[1].command, "printf 'three\\n'");
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.contains("history trimmed to 2"));
+}
