@@ -42,6 +42,11 @@ impl AppState {
     pub fn render_prompt_line(&self) -> String {
         format!("{}{}", self.prompt_prefix(), self.draft.as_str())
     }
+
+    pub fn terminal_cursor_column(&self) -> u16 {
+        let column = self.prompt_prefix().len() + self.draft.cursor();
+        column.min(u16::MAX as usize) as u16
+    }
 }
 
 pub fn run() -> Result<()> {
@@ -146,6 +151,19 @@ mod tests {
 
         state.mode = Mode::Ai;
         assert_eq!(state.render_prompt_line(), "% git status");
+    }
+
+    #[test]
+    fn terminal_cursor_column_tracks_draft_cursor() {
+        let mut state = AppState::default();
+        state.draft.insert_str("abc");
+        assert_eq!(state.terminal_cursor_column(), 5);
+
+        state.draft.move_left();
+        assert_eq!(state.terminal_cursor_column(), 4);
+
+        state.draft.move_start();
+        assert_eq!(state.terminal_cursor_column(), 2);
     }
 
     #[test]
