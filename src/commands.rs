@@ -4,6 +4,7 @@ pub enum ParsedLine<'a> {
     Note { tag: NoteTag, text: &'a str },
     Private { name: &'a str, args: &'a str },
     AiPrompt(&'a str),
+    AiPromptWithContext { prompt: &'a str, command: &'a str },
     EmptyPrivate,
 }
 
@@ -32,7 +33,11 @@ pub fn parse_line(line: &str) -> ParsedLine<'_> {
     }
 
     if let Some(prompt) = rest.strip_prefix(' ') {
-        return ParsedLine::AiPrompt(prompt.trim());
+        let prompt = prompt.trim();
+        if let Some((prompt, command)) = parse_context_prompt(prompt) {
+            return ParsedLine::AiPromptWithContext { prompt, command };
+        }
+        return ParsedLine::AiPrompt(prompt);
     }
 
     let trimmed = rest.trim_start();
@@ -42,6 +47,13 @@ pub fn parse_line(line: &str) -> ParsedLine<'_> {
         name,
         args: args.trim_start(),
     }
+}
+
+fn parse_context_prompt(prompt: &str) -> Option<(&str, &str)> {
+    let (prompt, command) = prompt.split_once('<')?;
+    let prompt = prompt.trim();
+    let command = command.trim();
+    (!prompt.is_empty() && !command.is_empty()).then_some((prompt, command))
 }
 
 fn parse_note(rest: &str) -> Option<(NoteTag, &str)> {
@@ -74,6 +86,29 @@ mod tests {
         assert_eq!(
             parse_line("# how do I list files?"),
             ParsedLine::AiPrompt("how do I list files?")
+        );
+    }
+
+    #[test]
+    fn ai_prompt_with_context_command_is_detected() {
+        assert_eq!(
+            parse_line("# explain remotes < git -h && git remote -h"),
+            ParsedLine::AiPromptWithContext {
+                prompt: "explain remotes",
+                command: "git -h && git remote -h"
+            }
+        );
+    }
+
+    #[test]
+    fn incomplete_context_syntax_stays_plain_ai_prompt() {
+        assert_eq!(
+            parse_line("# explain remotes < "),
+            ParsedLine::AiPrompt("explain remotes <")
+        );
+        assert_eq!(
+            parse_line("# < git status"),
+            ParsedLine::AiPrompt("< git status")
         );
     }
 

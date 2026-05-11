@@ -266,10 +266,10 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
 
 ### Tasks
 
-- [ ] Implement line-leading `#` parser.
+- [x] Implement line-leading `#` parser.
 - [ ] Recognize private commands:
-  - [ ] `#help`
-  - [ ] `#status`
+  - [x] `#help`
+  - [x] `#status`
   - [ ] `#config`
   - [ ] `#doctor`
   - [ ] `#model`
@@ -279,7 +279,7 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
   - [ ] `#key clear`
   - [ ] `#context`
   - [ ] `#completion`
-  - [ ] `#history`
+  - [x] `#history`
   - [ ] `#log`
   - [ ] `#mt`
   - [ ] `#template list`
@@ -289,9 +289,9 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
   - [ ] `#set-remote`
   - [ ] `#push`
   - [ ] `#sync`
-- [ ] Recognize `# TODO:`, `# NOTE:`, `# FIXME:`, `# HACK:`, `# XXX:` as notes.
-- [ ] Recognize AI prompt `# <text>`.
-- [ ] Recognize pseudo-pipe context syntax `# prompt < command`.
+- [x] Recognize `# TODO:`, `# NOTE:`, `# FIXME:`, `# HACK:`, `# XXX:` as notes.
+- [x] Recognize AI prompt `# <text>`.
+- [x] Recognize pseudo-pipe context syntax `# prompt < command`.
 - [ ] Implement continuation parsing for `#` and `#mt`.
 - [ ] Unknown private command shows error and suggestions.
 

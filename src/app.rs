@@ -345,6 +345,16 @@ pub fn execute_draft(
             state.mode = Mode::Draft;
             return Ok(());
         }
+        ParsedLine::AiPromptWithContext { prompt, command } => {
+            writeln!(
+                out,
+                "AI prompts with context are not implemented yet; context command not executed: {command}"
+            )?;
+            writeln!(out, "prompt: {prompt}")?;
+            state.draft.clear();
+            state.mode = Mode::Draft;
+            return Ok(());
+        }
     }
 
     state.mode = Mode::CommandRunning;

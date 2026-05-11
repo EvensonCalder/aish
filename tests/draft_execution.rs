@@ -106,6 +106,36 @@ fn execute_draft_does_not_send_line_leading_hash_to_backend_shell() {
 }
 
 #[test]
+fn execute_draft_does_not_run_context_pseudo_pipe_command() {
+    let temp = tempfile::tempdir().unwrap();
+    let marker = temp.path().join("context-ran");
+    let mut state = AppState::default();
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    state
+        .draft
+        .insert_str(&format!("# explain this < touch {}", marker.display()));
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.contains("AI prompts with context are not implemented yet"));
+    assert!(output.contains("context command not executed"));
+    assert!(output.contains("prompt: explain this"));
+    assert!(!marker.exists());
+    assert_eq!(state.last_status, None);
+    assert_eq!(state.mode, Mode::Draft);
+    assert!(state.draft.is_empty());
+}
+
+#[test]
 fn execute_draft_appends_successful_command_to_regular_history() {
     let temp = tempfile::tempdir().unwrap();
     let history_path = temp.path().join("history/regular.jsonl");
