@@ -281,9 +281,9 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
   - [x] `#completion`
   - [x] `#history`
   - [x] `#log`
-  - [ ] `#mt`
-  - [ ] `#template list`
-  - [ ] `#template rm`
+  - [x] `#mt`
+  - [x] `#template list`
+  - [x] `#template rm`
   - [x] `#editor`
   - [ ] `#encrypt`
   - [ ] `#set-remote`

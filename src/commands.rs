@@ -31,6 +31,8 @@ pub const IMPLEMENTED_PRIVATE_COMMANDS: &[&str] = &[
     "exit",
     "quit",
     "history",
+    "mt",
+    "template",
     "completion",
     "log",
     "editor",

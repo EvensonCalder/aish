@@ -415,6 +415,22 @@ pub fn execute_draft(
                     state.mode = Mode::Draft;
                     return Ok(());
                 }
+                "mt" => {
+                    writeln!(out, "#mt template creation is not implemented yet")?;
+                    state.draft.clear();
+                    state.mode = Mode::Draft;
+                    return Ok(());
+                }
+                "template" => {
+                    match args.split_whitespace().next() {
+                        Some("list") => writeln!(out, "template listing is not implemented yet")?,
+                        Some("rm") => writeln!(out, "template removal is not implemented yet")?,
+                        _ => writeln!(out, "usage: #template list | #template rm <name>")?,
+                    }
+                    state.draft.clear();
+                    state.mode = Mode::Draft;
+                    return Ok(());
+                }
                 _ => {}
             }
             match suggest_private_command(name) {
@@ -795,6 +811,8 @@ mod tests {
         assert!(output.contains("#completion"));
         assert!(output.contains("#log"));
         assert!(output.contains("#editor"));
+        assert!(output.contains("#mt"));
+        assert!(output.contains("#template"));
         assert!(output.contains("#exit"));
         assert!(output.contains("#quit"));
         assert!(output.contains("#history"));
@@ -908,6 +926,47 @@ mod tests {
             (
                 "#editor",
                 "external editor integration is not implemented yet",
+            ),
+        ] {
+            let mut state = AppState::default();
+            state.draft.insert_str(line);
+            let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+            let mut output = Vec::new();
+
+            execute_draft(
+                &mut state,
+                &mut backend,
+                &mut output,
+                Duration::from_secs(5),
+            )
+            .unwrap();
+
+            let output = String::from_utf8(output).unwrap();
+            assert!(
+                output.contains(expected),
+                "missing {expected:?} in {output:?}"
+            );
+            assert_eq!(state.last_status, None);
+            assert!(state.draft.is_empty());
+        }
+    }
+
+    #[test]
+    fn template_commands_report_placeholders_without_storage_side_effects() {
+        for (line, expected) in [
+            (
+                "#mt deploy rsync {from} {to}",
+                "#mt template creation is not implemented yet",
+            ),
+            ("#template list", "template listing is not implemented yet"),
+            (
+                "#template rm deploy",
+                "template removal is not implemented yet",
+            ),
+            ("#template", "usage: #template list | #template rm <name>"),
+            (
+                "#template show deploy",
+                "usage: #template list | #template rm <name>",
             ),
         ] {
             let mut state = AppState::default();
