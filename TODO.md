@@ -272,9 +272,9 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
   - [x] `#status`
   - [x] `#config`
   - [x] `#doctor`
-  - [ ] `#model`
-  - [ ] `#base-url`
-  - [ ] `#env-key`
+  - [x] `#model`
+  - [x] `#base-url`
+  - [x] `#env-key`
   - [ ] `#key set`
   - [ ] `#key clear`
   - [x] `#context`

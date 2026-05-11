@@ -333,6 +333,24 @@ pub fn execute_draft(
                     state.mode = Mode::Draft;
                     return Ok(());
                 }
+                "model" => {
+                    write_ai_config_placeholder(out, "model", args)?;
+                    state.draft.clear();
+                    state.mode = Mode::Draft;
+                    return Ok(());
+                }
+                "base-url" => {
+                    write_ai_config_placeholder(out, "base-url", args)?;
+                    state.draft.clear();
+                    state.mode = Mode::Draft;
+                    return Ok(());
+                }
+                "env-key" => {
+                    write_ai_config_placeholder(out, "env-key", args)?;
+                    state.draft.clear();
+                    state.mode = Mode::Draft;
+                    return Ok(());
+                }
                 "context" => {
                     writeln!(
                         out,
@@ -464,6 +482,15 @@ fn write_config_path(out: &mut impl Write, name: &str, path: &Option<PathBuf>) -
     match path {
         Some(path) => writeln!(out, "{name}={}", path.display())?,
         None => writeln!(out, "{name}=unconfigured")?,
+    }
+    Ok(())
+}
+
+fn write_ai_config_placeholder(out: &mut impl Write, name: &str, args: &str) -> Result<()> {
+    if args.trim().is_empty() {
+        writeln!(out, "#{name} is not configured yet")?;
+    } else {
+        writeln!(out, "#{name} persistence is not implemented yet")?;
     }
     Ok(())
 }
@@ -727,6 +754,9 @@ mod tests {
         assert!(output.contains("#status"));
         assert!(output.contains("#config"));
         assert!(output.contains("#doctor"));
+        assert!(output.contains("#model"));
+        assert!(output.contains("#base-url"));
+        assert!(output.contains("#env-key"));
         assert!(output.contains("#context"));
         assert!(output.contains("#exit"));
         assert!(output.contains("#quit"));
@@ -755,6 +785,48 @@ mod tests {
         assert!(output.contains("context collection is not implemented yet"));
         assert_eq!(state.last_status, None);
         assert!(state.draft.is_empty());
+    }
+
+    #[test]
+    fn ai_config_commands_report_placeholders_without_persisting() {
+        for (line, expected) in [
+            ("#model", "#model is not configured yet"),
+            (
+                "#model test-model",
+                "#model persistence is not implemented yet",
+            ),
+            ("#base-url", "#base-url is not configured yet"),
+            (
+                "#base-url https://example.invalid/v1",
+                "#base-url persistence is not implemented yet",
+            ),
+            ("#env-key", "#env-key is not configured yet"),
+            (
+                "#env-key OPENAI_API_KEY",
+                "#env-key persistence is not implemented yet",
+            ),
+        ] {
+            let mut state = AppState::default();
+            state.draft.insert_str(line);
+            let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+            let mut output = Vec::new();
+
+            execute_draft(
+                &mut state,
+                &mut backend,
+                &mut output,
+                Duration::from_secs(5),
+            )
+            .unwrap();
+
+            let output = String::from_utf8(output).unwrap();
+            assert!(
+                output.contains(expected),
+                "missing {expected:?} in {output:?}"
+            );
+            assert_eq!(state.last_status, None);
+            assert!(state.draft.is_empty());
+        }
     }
 
     #[test]
