@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::Result;
@@ -90,6 +91,16 @@ pub fn template_placeholders(body: &str) -> Vec<String> {
         rest = &rest[end + 1..];
     }
     placeholders
+}
+
+pub fn apply_template_values(body: &str, values: &HashMap<String, String>) -> String {
+    let mut rendered = body.to_string();
+    for placeholder in template_placeholders(body) {
+        if let Some(value) = values.get(&placeholder) {
+            rendered = rendered.replace(&format!("{{{placeholder}}}"), value);
+        }
+    }
+    rendered
 }
 
 fn is_placeholder_name(candidate: &str) -> bool {
@@ -204,6 +215,19 @@ mod tests {
         assert_eq!(
             template_placeholders("rsync {from} {user}@{host}:{to} {from} {bad space} {}"),
             ["from", "user", "host", "to"]
+        );
+    }
+
+    #[test]
+    fn apply_template_values_replaces_known_placeholders_and_leaves_unknown() {
+        let values = HashMap::from([
+            ("from".to_string(), "src".to_string()),
+            ("to".to_string(), "dst".to_string()),
+        ]);
+
+        assert_eq!(
+            apply_template_values("cp {from} {to} {mode}", &values),
+            "cp src dst {mode}"
         );
     }
 }

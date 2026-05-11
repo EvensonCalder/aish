@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -16,7 +17,7 @@ use crate::input::InputBuffer;
 use crate::modes::Mode;
 use crate::pty::PtyBackend;
 use crate::templates::{
-    TemplateEntry, append_template, find_template_by_name, load_templates,
+    TemplateEntry, append_template, apply_template_values, find_template_by_name, load_templates,
     remove_templates_by_name, replace_template, template_placeholders,
 };
 
@@ -543,7 +544,10 @@ pub fn execute_draft(
                                     let loaded = find_template_by_name(path, name)?;
                                     match loaded.items.first() {
                                         Some(template) => {
-                                            state.draft = InputBuffer::from(template.body.clone());
+                                            let values = parse_template_values(args);
+                                            let rendered =
+                                                apply_template_values(&template.body, &values);
+                                            state.draft = InputBuffer::from(rendered);
                                             keep_draft = true;
                                             writeln!(out, "template copied to draft: {name}")?;
                                             let placeholders =
@@ -730,6 +734,19 @@ fn parse_template_args(args: &str) -> Option<(&str, &str)> {
 fn parse_template_subcommand_args(args: &str) -> Option<(&str, &str)> {
     let rest = args.trim_start().strip_prefix("replace")?.trim_start();
     parse_template_args(rest)
+}
+
+fn parse_template_values(args: &str) -> HashMap<String, String> {
+    let mut parts = args.split_whitespace();
+    let _subcommand = parts.next();
+    let _name = parts.next();
+
+    parts
+        .filter_map(|part| {
+            let (key, value) = part.split_once('=')?;
+            (!key.is_empty()).then_some((key.to_string(), value.to_string()))
+        })
+        .collect()
 }
 
 fn template_usage() -> &'static str {
@@ -1338,7 +1355,9 @@ mod tests {
             template_store_path: Some(template_path),
             ..AppState::default()
         };
-        state.draft.insert_str("#template use deploy");
+        state
+            .draft
+            .insert_str("#template use deploy from=src host=prod to=/srv/app");
         let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
         let mut output = Vec::new();
 
@@ -1355,10 +1374,7 @@ mod tests {
         assert!(output.contains("template placeholders: from, user, host, to"));
         assert_eq!(state.last_status, None);
         assert_eq!(state.mode, Mode::Draft);
-        assert_eq!(
-            state.draft.as_str(),
-            "rsync {from} {user}@{host}:{to} {from}"
-        );
+        assert_eq!(state.draft.as_str(), "rsync src {user}@prod:/srv/app src");
         assert_eq!(state.draft.cursor(), state.draft.as_str().len());
     }
 
