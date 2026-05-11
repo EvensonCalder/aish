@@ -321,6 +321,12 @@ pub fn execute_draft(
                     state.mode = Mode::Draft;
                     return Ok(());
                 }
+                "doctor" => {
+                    write_doctor_report(state, out)?;
+                    state.draft.clear();
+                    state.mode = Mode::Draft;
+                    return Ok(());
+                }
                 "history" => {
                     let count = args.parse::<usize>();
                     match (count, &state.regular_history_path) {
@@ -400,6 +406,39 @@ pub fn execute_draft(
         state.mode = Mode::Ai;
     } else {
         state.mode = Mode::Draft;
+    }
+    Ok(())
+}
+
+fn write_doctor_report(state: &AppState, out: &mut impl Write) -> Result<()> {
+    writeln!(out, "Aish doctor")?;
+    writeln!(out, "mode={}", state.mode.symbol())?;
+    writeln!(
+        out,
+        "last_status={}",
+        state
+            .last_status
+            .map(|status| status.to_string())
+            .unwrap_or_else(|| "none".to_string())
+    )?;
+    writeln!(out, "draft_persist={}", state.draft_persist)?;
+    writeln!(
+        out,
+        "regular_history_entries={}",
+        state.regular_history.len()
+    )?;
+    writeln!(out, "ai_sessions={}", state.ai_sessions.len())?;
+    writeln!(out, "ai_commands={}", state.ai_command_indices.len())?;
+    write_path_status(out, "regular_history_path", &state.regular_history_path)?;
+    write_path_status(out, "notes_path", &state.notes_path)?;
+    write_path_status(out, "draft_history_path", &state.draft_history_path)?;
+    Ok(())
+}
+
+fn write_path_status(out: &mut impl Write, name: &str, path: &Option<PathBuf>) -> Result<()> {
+    match path {
+        Some(path) => writeln!(out, "{name}={} exists={}", path.display(), path.exists())?,
+        None => writeln!(out, "{name}=unconfigured")?,
     }
     Ok(())
 }
@@ -653,9 +692,73 @@ mod tests {
         let output = String::from_utf8(output).unwrap();
         assert!(output.contains("#help"));
         assert!(output.contains("#status"));
+        assert!(output.contains("#doctor"));
         assert!(output.contains("#exit"));
         assert!(output.contains("#quit"));
         assert!(output.contains("#history"));
+        assert!(state.draft.is_empty());
+    }
+
+    #[test]
+    fn private_doctor_prints_read_only_diagnostics() {
+        let temp = tempfile::tempdir().unwrap();
+        let history_path = temp.path().join("history/regular.jsonl");
+        let notes_path = temp.path().join("history/notes.jsonl");
+        let draft_path = temp.path().join("history/draft.jsonl");
+        let mut state = AppState {
+            last_status: Some(7),
+            regular_history_path: Some(history_path.clone()),
+            notes_path: Some(notes_path.clone()),
+            draft_history_path: Some(draft_path.clone()),
+            regular_history: vec![HistoryEntry {
+                t: 1,
+                command: "pwd".to_string(),
+                exit_code: Some(0),
+                source: HistorySource::User,
+            }],
+            ai_sessions: vec![AiSession {
+                id: "a_1".to_string(),
+                t: 1,
+                prompt: "commands".to_string(),
+                ctx: false,
+                model: "test".to_string(),
+                items: vec![AiItem {
+                    kind: AiItemKind::Command,
+                    text: "ls".to_string(),
+                    name: None,
+                }],
+            }],
+            ai_command_indices: vec![AiCommandIndex {
+                session_index: 0,
+                item_index: 0,
+            }],
+            ..AppState::default()
+        };
+        state.draft.insert_str("#doctor");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("Aish doctor"));
+        assert!(output.contains("mode=>"));
+        assert!(output.contains("last_status=7"));
+        assert!(output.contains("draft_persist=true"));
+        assert!(output.contains("regular_history_entries=1"));
+        assert!(output.contains("ai_sessions=1"));
+        assert!(output.contains("ai_commands=1"));
+        assert!(output.contains("regular_history_path="));
+        assert!(output.contains("exists=false"));
+        assert!(!history_path.exists());
+        assert!(!notes_path.exists());
+        assert!(!draft_path.exists());
         assert!(state.draft.is_empty());
     }
 

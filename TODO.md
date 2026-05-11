@@ -271,7 +271,7 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
   - [x] `#help`
   - [x] `#status`
   - [ ] `#config`
-  - [ ] `#doctor`
+  - [x] `#doctor`
   - [ ] `#model`
   - [ ] `#base-url`
   - [ ] `#env-key`

@@ -18,7 +18,8 @@ pub enum NoteTag {
     Xxx,
 }
 
-pub const IMPLEMENTED_PRIVATE_COMMANDS: &[&str] = &["help", "status", "exit", "quit", "history"];
+pub const IMPLEMENTED_PRIVATE_COMMANDS: &[&str] =
+    &["help", "status", "doctor", "exit", "quit", "history"];
 
 pub fn parse_line(line: &str) -> ParsedLine<'_> {
     if !line.starts_with('#') {
