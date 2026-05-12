@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 135 library unit tests.
+- 137 library unit tests.
 - 18 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
@@ -284,6 +284,7 @@ Implemented:
 - Single-line paste copies read-only history/AI selections to draft before inserting pasted text.
 - Editor draft submission preserves multi-line backslash continuation and lets the backend shell interpret it.
 - Ordinary and editor draft history preserve backslash continuations as one submitted command string.
+- Optional shell logical splitter helper splits simple lines while preserving backslash continuations; it is not wired into default history behavior.
 - Editor roundtrip helper prepares a file, runs a fake editor, and reads successful edits back into draft while preserving the original draft on editor failure.
 - `Ctrl-X Ctrl-E` terminal handling resolves the editor, suspends raw mode when needed, runs the roundtrip, restores raw mode when needed, and reports success/failure.
 - `editor.execute_after_save = true` runs a successfully saved editor draft immediately with raw editor-draft semantics.
@@ -581,6 +582,8 @@ Tests:
 - `history::tests::history_store_aggregates_load_errors_across_categories`
 - `history::tests::history_store_indexes_regular_history_newest_first`
 - `history::tests::history_store_indexes_ai_command_items_in_execution_order`
+- `history::tests::split_logical_commands_splits_simple_non_empty_lines`
+- `history::tests::split_logical_commands_preserves_backslash_continuations`
 
 Status:
 

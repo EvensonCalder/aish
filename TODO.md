@@ -373,15 +373,15 @@ This is a future configurable enhancement. It must not replace the default faith
 
 ### Tasks
 
-- [ ] Add optional best-effort shell logical command splitter config.
-- [ ] Preserve backslash continuations.
+- [x] Add pure best-effort shell logical command splitter helper.
+- [x] Preserve backslash continuations.
 - [ ] Preserve quoted multi-line strings.
 - [ ] Preserve heredoc blocks.
 - [ ] Ignore blank lines.
 - [ ] Store comment-only lines as notes if enabled.
 - [ ] Add tests for common cases:
-  - [ ] two simple lines
-  - [ ] backslash continuation
+  - [x] two simple lines
+  - [x] backslash continuation
   - [ ] quoted newline
   - [ ] heredoc
   - [ ] comments

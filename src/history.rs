@@ -172,6 +172,39 @@ pub fn ai_command_indices(sessions: &[AiSession]) -> Vec<AiCommandIndex> {
         .collect()
 }
 
+pub fn split_logical_commands(input: &str) -> Vec<String> {
+    let mut commands = Vec::new();
+    let mut current = String::new();
+
+    for line in input.lines() {
+        if line.trim().is_empty() && current.is_empty() {
+            continue;
+        }
+        if !current.is_empty() {
+            current.push('\n');
+        }
+        current.push_str(line);
+        if !line_ends_with_continuation(line) {
+            let command = current.trim();
+            if !command.is_empty() {
+                commands.push(command.to_string());
+            }
+            current.clear();
+        }
+    }
+
+    let command = current.trim();
+    if !command.is_empty() {
+        commands.push(command.to_string());
+    }
+
+    commands
+}
+
+fn line_ends_with_continuation(line: &str) -> bool {
+    line.trim_end().ends_with('\\')
+}
+
 pub fn append_jsonl<T: Serialize>(path: &Path, item: &T) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -768,6 +801,20 @@ mod tests {
         assert_eq!(commands, ["one", "two", "three"]);
         assert_eq!(store.ai_command_by_index(1).unwrap().1.text, "two");
         assert!(store.ai_command_by_index(3).is_none());
+    }
+
+    #[test]
+    fn split_logical_commands_splits_simple_non_empty_lines() {
+        let commands = split_logical_commands("\ncd /tmp\n\npwd\n");
+
+        assert_eq!(commands, ["cd /tmp", "pwd"]);
+    }
+
+    #[test]
+    fn split_logical_commands_preserves_backslash_continuations() {
+        let commands = split_logical_commands("echo foo \\\n+bar\npwd");
+
+        assert_eq!(commands, ["echo foo \\\n+bar", "pwd"]);
     }
 
     #[test]
