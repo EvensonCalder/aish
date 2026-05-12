@@ -258,6 +258,12 @@ impl AppState {
         Ok(result)
     }
 
+    pub fn replace_draft_from_editor_text(&mut self, content: impl Into<String>) {
+        self.draft = InputBuffer::from(content.into());
+        self.draft_from_editor = true;
+        self.mode = Mode::Draft;
+    }
+
     fn selected_ai_item(&self) -> Option<(&AiSession, &AiItem)> {
         let index = self.ai_command_indices.get(self.selected_ai_index?)?;
         let session = self.ai_sessions.get(index.session_index)?;
@@ -1424,6 +1430,22 @@ mod tests {
         assert_eq!(
             state.terminal_cursor_column(),
             state.render_prompt_line().len() as u16
+        );
+    }
+
+    #[test]
+    fn replace_draft_from_editor_text_creates_opaque_editor_draft() {
+        let mut state = AppState::default();
+
+        state.replace_draft_from_editor_text("echo one\necho two");
+
+        assert_eq!(state.mode, Mode::Draft);
+        assert!(state.draft_from_editor);
+        assert_eq!(state.draft.as_str(), "echo one\necho two");
+        assert!(
+            state
+                .render_prompt_line()
+                .contains("[editor draft: 2 line(s)")
         );
     }
 

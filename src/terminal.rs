@@ -75,6 +75,8 @@ pub fn run(
                         state.draft_from_editor = false;
                     }
                     state.draft.insert_str(&text);
+                } else {
+                    state.replace_draft_from_editor_text(normalize_paste_newlines(&text));
                 }
                 redraw(state, out)?;
             }
@@ -162,6 +164,10 @@ pub fn run_external_editor(
         )?;
     }
     Ok(())
+}
+
+fn normalize_paste_newlines(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
 }
 
 pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
@@ -652,6 +658,14 @@ mod tests {
 
         assert_eq!(state.draft.as_str(), "echo one\necho two");
         assert!(state.draft_from_editor);
+    }
+
+    #[test]
+    fn normalize_paste_newlines_canonicalizes_crlf_and_cr() {
+        assert_eq!(
+            normalize_paste_newlines("one\r\ntwo\rthree"),
+            "one\ntwo\nthree"
+        );
     }
 
     #[test]

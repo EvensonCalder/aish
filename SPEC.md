@@ -398,8 +398,8 @@ Single-line paste:
 
 Multi-line paste:
 
-- Must not enter draft by default.
-- Default behavior should be editor review.
+- Must not execute by default.
+- Default behavior creates an opaque editor draft using the pasted content.
 - Alternative behavior can be direct execution after warning.
 
 Config:
@@ -412,11 +412,11 @@ confirm_execute = true
 
 `multiline = "editor"`:
 
-1. Open PasteReviewEditor with pasted content.
-2. On save, content becomes a raw submission candidate.
-3. If `confirm_execute = true`, ask before execution.
-4. If confirmed, send raw content to the backend shell.
-5. Do not store pasted content as draft.
+1. Convert pasted content to an editor draft.
+2. Show only the editor draft summary in the main prompt.
+3. `Ctrl-X Ctrl-E` can reopen the content in the external editor.
+4. `Enter` submits the raw editor draft to the backend shell.
+5. Do not auto-execute on paste.
 
 `multiline = "execute"`:
 
