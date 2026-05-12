@@ -5,6 +5,7 @@ use std::process::{Command, Stdio};
 use anyhow::{Context, Result, bail};
 
 use crate::history::{AiItemKind, AiSession, HistoryEntry};
+use crate::templates::TemplateEntry;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PickerAction {
@@ -56,6 +57,16 @@ pub fn combined_history_picker_candidates(
 ) -> Vec<String> {
     let mut candidates = regular_history_picker_candidates(history);
     candidates.extend(ai_history_picker_candidates(sessions));
+    candidates
+}
+
+pub fn template_picker_candidates(templates: &[TemplateEntry]) -> Vec<String> {
+    let mut candidates = Vec::new();
+    for template in templates.iter().rev() {
+        if !candidates.iter().any(|name| name == &template.name) {
+            candidates.push(template.name.clone());
+        }
+    }
     candidates
 }
 
@@ -413,6 +424,29 @@ mod tests {
         assert_eq!(
             combined_history_picker_candidates(&history, &sessions),
             vec!["two", "one", "ai command"]
+        );
+    }
+
+    #[test]
+    fn template_picker_candidates_return_newest_unique_names() {
+        let templates = vec![
+            TemplateEntry {
+                name: "deploy".to_string(),
+                body: "old".to_string(),
+            },
+            TemplateEntry {
+                name: "logs".to_string(),
+                body: "tail".to_string(),
+            },
+            TemplateEntry {
+                name: "deploy".to_string(),
+                body: "new".to_string(),
+            },
+        ];
+
+        assert_eq!(
+            template_picker_candidates(&templates),
+            vec!["deploy", "logs"]
         );
     }
 }

@@ -25,6 +25,7 @@ pub enum KeyAction {
     HistorySearch,
     ExternalEditor,
     FilePicker,
+    TemplatePicker,
     AdvancedKeyPlaceholder(&'static str),
     Submit,
     ShowCompletions,
@@ -111,6 +112,9 @@ fn handle_key(
         }
         KeyAction::FilePicker => {
             run_file_picker(state, out)?;
+        }
+        KeyAction::TemplatePicker => {
+            run_template_picker(state, out)?;
         }
         KeyAction::AdvancedKeyPlaceholder(name) => {
             writeln!(out, "{name} is not implemented yet")?;
@@ -205,6 +209,35 @@ pub fn run_history_picker(state: &mut AppState, out: &mut impl Write) -> Result<
     apply_history_picker_result(state, result, out)
 }
 
+pub fn run_template_picker(state: &mut AppState, out: &mut impl Write) -> Result<()> {
+    let candidates = state.template_picker_candidates()?;
+    if candidates.is_empty() {
+        writeln!(out, "template picker has no candidates")?;
+        return Ok(());
+    }
+
+    let result = run_external_picker(|| run_fzf_picker(&candidates))?;
+    apply_template_picker_result(state, result, out)
+}
+
+fn apply_template_picker_result(
+    state: &mut AppState,
+    result: PickerRunResult,
+    out: &mut impl Write,
+) -> Result<()> {
+    let Some(selected) = result.selected else {
+        writeln!(out, "template picker cancelled")?;
+        return Ok(());
+    };
+
+    if state.replace_draft_from_template_picker(&selected)? {
+        writeln!(out, "template copied to draft: {selected}")?;
+    } else {
+        writeln!(out, "template not found: {selected}")?;
+    }
+    Ok(())
+}
+
 fn apply_history_picker_result(
     state: &mut AppState,
     result: PickerRunResult,
@@ -295,9 +328,7 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
         return match (key.modifiers, key.code) {
             (KeyModifiers::CONTROL, KeyCode::Char('e')) => KeyAction::ExternalEditor,
             (KeyModifiers::CONTROL, KeyCode::Char('f')) => KeyAction::FilePicker,
-            (KeyModifiers::CONTROL, KeyCode::Char('t')) => {
-                KeyAction::AdvancedKeyPlaceholder("template picker")
-            }
+            (KeyModifiers::CONTROL, KeyCode::Char('t')) => KeyAction::TemplatePicker,
             (KeyModifiers::CONTROL, KeyCode::Char('b')) => {
                 KeyAction::AdvancedKeyPlaceholder("git branch picker")
             }
@@ -778,9 +809,23 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_x_prefix_resolves_template_picker_chord_to_launch_action() {
+        let mut state = AppState::default();
+        state.draft.insert_str("git status");
+
+        apply_key_to_state(ctrl('x'), &mut state);
+
+        assert_eq!(
+            apply_key_to_state(ctrl('t'), &mut state),
+            KeyAction::TemplatePicker
+        );
+        assert!(!state.ctrl_x_prefix);
+        assert_eq!(state.draft.as_str(), "git status");
+    }
+
+    #[test]
     fn ctrl_x_prefix_resolves_other_advanced_chords_to_placeholders() {
         for (ch, name) in [
-            ('t', "template picker"),
             ('b', "git branch picker"),
             ('v', "environment variable picker"),
         ] {
@@ -885,6 +930,65 @@ mod tests {
         assert_eq!(
             String::from_utf8(output).unwrap(),
             "history search cancelled\n"
+        );
+    }
+
+    #[test]
+    fn apply_template_picker_result_copies_template_to_protected_draft() {
+        let temp = tempfile::tempdir().unwrap();
+        let template_path = temp.path().join("templates.jsonl");
+        crate::templates::append_template(
+            &template_path,
+            &crate::templates::TemplateEntry {
+                name: "deploy".to_string(),
+                body: "rsync {from} {to}".to_string(),
+            },
+        )
+        .unwrap();
+        let mut state = AppState {
+            template_store_path: Some(template_path),
+            ..AppState::default()
+        };
+        let mut output = Vec::new();
+
+        apply_template_picker_result(
+            &mut state,
+            PickerRunResult {
+                selected: Some("deploy".to_string()),
+                exit_code: Some(0),
+            },
+            &mut output,
+        )
+        .unwrap();
+
+        assert_eq!(state.draft.as_str(), "rsync {from} {to}");
+        assert!(state.draft_from_template);
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            "template copied to draft: deploy\n"
+        );
+    }
+
+    #[test]
+    fn apply_template_picker_result_reports_cancel_without_editing() {
+        let mut state = AppState::default();
+        state.draft.insert_str("partial");
+        let mut output = Vec::new();
+
+        apply_template_picker_result(
+            &mut state,
+            PickerRunResult {
+                selected: None,
+                exit_code: Some(130),
+            },
+            &mut output,
+        )
+        .unwrap();
+
+        assert_eq!(state.draft.as_str(), "partial");
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            "template picker cancelled\n"
         );
     }
 

@@ -27,6 +27,7 @@ use crate::modes::Mode;
 use crate::picker::{
     PickerAction, ai_history_picker_candidates, apply_picker_result,
     combined_history_picker_candidates, regular_history_picker_candidates,
+    template_picker_candidates,
 };
 use crate::pty::PtyBackend;
 use crate::templates::{
@@ -342,6 +343,29 @@ impl AppState {
         self.draft_from_editor = false;
         self.draft_from_template = false;
         self.mode = Mode::Draft;
+    }
+
+    pub fn template_picker_candidates(&self) -> Result<Vec<String>> {
+        let Some(path) = &self.template_store_path else {
+            return Ok(Vec::new());
+        };
+        let loaded = load_templates(path)?;
+        Ok(template_picker_candidates(&loaded.items))
+    }
+
+    pub fn replace_draft_from_template_picker(&mut self, name: &str) -> Result<bool> {
+        let Some(path) = &self.template_store_path else {
+            return Ok(false);
+        };
+        let loaded = find_template_by_name(path, name)?;
+        let Some(template) = loaded.items.first() else {
+            return Ok(false);
+        };
+        self.draft = InputBuffer::from(template.body.clone());
+        self.draft_from_editor = false;
+        self.draft_from_template = true;
+        self.mode = Mode::Draft;
+        Ok(true)
     }
 
     fn selected_ai_item(&self) -> Option<(&AiSession, &AiItem)> {
@@ -1476,6 +1500,59 @@ mod tests {
         assert_eq!(state.draft.as_str(), "git commit -m 'hello world'");
         assert!(!state.draft_from_editor);
         assert!(!state.draft_from_template);
+    }
+
+    #[test]
+    fn template_picker_candidates_return_newest_unique_names() {
+        let temp = tempfile::tempdir().unwrap();
+        let template_path = temp.path().join("templates.jsonl");
+        for (name, body) in [("deploy", "old"), ("logs", "tail"), ("deploy", "new")] {
+            append_template(
+                &template_path,
+                &TemplateEntry {
+                    name: name.to_string(),
+                    body: body.to_string(),
+                },
+            )
+            .unwrap();
+        }
+        let state = AppState {
+            template_store_path: Some(template_path),
+            ..AppState::default()
+        };
+
+        assert_eq!(
+            state.template_picker_candidates().unwrap(),
+            vec!["deploy", "logs"]
+        );
+    }
+
+    #[test]
+    fn replace_draft_from_template_picker_uses_newest_template_body() {
+        let temp = tempfile::tempdir().unwrap();
+        let template_path = temp.path().join("templates.jsonl");
+        for (name, body) in [("deploy", "old"), ("deploy", "rsync {from} {to}")] {
+            append_template(
+                &template_path,
+                &TemplateEntry {
+                    name: name.to_string(),
+                    body: body.to_string(),
+                },
+            )
+            .unwrap();
+        }
+        let mut state = AppState {
+            template_store_path: Some(template_path),
+            draft_from_editor: true,
+            ..AppState::default()
+        };
+
+        assert!(state.replace_draft_from_template_picker("deploy").unwrap());
+
+        assert_eq!(state.mode, Mode::Draft);
+        assert_eq!(state.draft.as_str(), "rsync {from} {to}");
+        assert!(state.draft_from_template);
+        assert!(!state.draft_from_editor);
     }
 
     #[test]

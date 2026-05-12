@@ -479,13 +479,13 @@ Status: implemented for v0.1.0 terminal draft completion. Candidate ranking, can
   - [x] apply selected path to draft
   - [x] run external `fzf` from keybinding
 - [x] Implement history search picker for `Ctrl-R`.
-- [ ] Implement template picker.
+- [x] Implement template picker.
 - [ ] Implement git branch picker.
 - [ ] Implement env var picker.
 - [ ] Support keybindings:
   - [x] `Ctrl-X Ctrl-F`
   - [x] `Ctrl-R`
-  - [ ] `Ctrl-X Ctrl-T`
+  - [x] `Ctrl-X Ctrl-T`
   - [ ] `Ctrl-X Ctrl-B`
   - [ ] `Ctrl-X Ctrl-V`
 
