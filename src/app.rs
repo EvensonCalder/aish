@@ -400,7 +400,12 @@ pub fn execute_draft(
                     )?;
                     writeln!(out, "Default keybindings:")?;
                     for binding in default_keybindings() {
-                        writeln!(out, "{} - {}", binding.key, binding.action)?;
+                        let status = if binding.implemented {
+                            "implemented"
+                        } else {
+                            "reserved"
+                        };
+                        writeln!(out, "{} [{}] - {}", binding.key, status, binding.action)?;
                     }
                     state.draft.clear();
                     state.mode = Mode::Draft;
@@ -1282,8 +1287,8 @@ mod tests {
         assert!(output.contains("#quit"));
         assert!(output.contains("#history"));
         assert!(output.contains("Default keybindings:"));
-        assert!(output.contains("Ctrl-C - clear or cancel draft"));
-        assert!(output.contains("Ctrl-X Ctrl-E - external editor reserved"));
+        assert!(output.contains("Ctrl-C [implemented] - clear or cancel draft"));
+        assert!(output.contains("Ctrl-X Ctrl-E [reserved] - external editor reserved"));
         assert!(state.draft.is_empty());
     }
 

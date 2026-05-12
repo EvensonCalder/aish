@@ -2,88 +2,109 @@
 pub struct KeyBinding {
     pub key: &'static str,
     pub action: &'static str,
+    pub implemented: bool,
 }
 
 pub const DEFAULT_KEYBINDINGS: &[KeyBinding] = &[
     KeyBinding {
         key: "Ctrl-C",
         action: "clear or cancel draft",
+        implemented: true,
     },
     KeyBinding {
         key: "Ctrl-D",
         action: "exit on empty draft or delete character",
+        implemented: true,
     },
     KeyBinding {
         key: "Ctrl-L",
         action: "clear screen",
+        implemented: true,
     },
     KeyBinding {
         key: "Ctrl-A",
         action: "move to start",
+        implemented: true,
     },
     KeyBinding {
         key: "Ctrl-E",
         action: "move to end",
+        implemented: true,
     },
     KeyBinding {
         key: "Ctrl-U",
         action: "delete to start",
+        implemented: true,
     },
     KeyBinding {
         key: "Ctrl-K",
         action: "delete to end",
+        implemented: true,
     },
     KeyBinding {
         key: "Ctrl-W",
         action: "delete previous word",
+        implemented: true,
     },
     KeyBinding {
         key: "Alt-B / Alt-Left",
         action: "move previous word",
+        implemented: true,
     },
     KeyBinding {
         key: "Alt-F / Alt-Right",
         action: "move next word",
+        implemented: true,
     },
     KeyBinding {
         key: "Tab",
         action: "cycle mode on empty draft",
+        implemented: true,
     },
     KeyBinding {
         key: "Enter",
         action: "submit selected command or draft",
+        implemented: true,
     },
     KeyBinding {
         key: "Up / Down",
         action: "browse history or AI selections",
+        implemented: true,
     },
     KeyBinding {
         key: "Ctrl-R",
         action: "history search reserved",
+        implemented: false,
     },
     KeyBinding {
         key: "Esc",
         action: "cancel temporary mode reserved",
+        implemented: false,
     },
     KeyBinding {
         key: "Ctrl-X Ctrl-E",
         action: "external editor reserved",
+        implemented: false,
     },
     KeyBinding {
         key: "Ctrl-X Ctrl-F",
         action: "file picker reserved",
+        implemented: false,
     },
     KeyBinding {
         key: "Ctrl-X Ctrl-T",
         action: "template picker reserved",
+        implemented: false,
     },
     KeyBinding {
         key: "Ctrl-X Ctrl-B",
         action: "git branch picker reserved",
+        implemented: false,
     },
     KeyBinding {
         key: "Ctrl-X Ctrl-V",
         action: "environment variable picker reserved",
+        implemented: false,
     },
 ];
 
@@ -125,5 +146,25 @@ mod tests {
         ] {
             assert!(keys.contains(&expected));
         }
+    }
+
+    #[test]
+    fn default_keybindings_distinguish_implemented_and_reserved_bindings() {
+        let bindings = default_keybindings();
+
+        assert!(
+            bindings
+                .iter()
+                .find(|binding| binding.key == "Ctrl-C")
+                .unwrap()
+                .implemented
+        );
+        assert!(
+            !bindings
+                .iter()
+                .find(|binding| binding.key == "Ctrl-X Ctrl-E")
+                .unwrap()
+                .implemented
+        );
     }
 }
