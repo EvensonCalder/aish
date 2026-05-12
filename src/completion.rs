@@ -1,5 +1,9 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+use crate::history::HistoryEntry;
+use crate::templates::TemplateEntry;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TokenContext {
@@ -16,6 +20,15 @@ pub struct CompletionCandidate {
     pub display: String,
     pub replacement: String,
     pub is_dir: bool,
+    pub source: CompletionSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CompletionSource {
+    Path,
+    Template,
+    History,
+    Executable,
 }
 
 pub fn current_token_context(line: &str, cursor: usize) -> TokenContext {
@@ -113,10 +126,92 @@ pub fn complete_path(token: &str, cwd: &Path) -> Vec<CompletionCandidate> {
             display: format!("{dir_token}{file_name}{suffix}"),
             replacement,
             is_dir,
+            source: CompletionSource::Path,
         });
     }
     candidates.sort_by(|left, right| left.display.cmp(&right.display));
     candidates
+}
+
+pub fn complete_first_token(
+    prefix: &str,
+    templates: &[TemplateEntry],
+    history_newest_first: &[HistoryEntry],
+    path_dirs: &[PathBuf],
+) -> Vec<CompletionCandidate> {
+    let mut candidates = Vec::new();
+    let mut seen_templates = HashSet::new();
+    for template in templates {
+        if template.name.starts_with(prefix) && seen_templates.insert(template.name.as_str()) {
+            candidates.push(CompletionCandidate {
+                display: template.name.clone(),
+                replacement: template.body.clone(),
+                is_dir: false,
+                source: CompletionSource::Template,
+            });
+        }
+    }
+
+    let mut seen_history = HashSet::new();
+    for entry in history_newest_first {
+        if entry.command.starts_with(prefix) && seen_history.insert(entry.command.as_str()) {
+            candidates.push(CompletionCandidate {
+                display: entry.command.clone(),
+                replacement: entry.command.clone(),
+                is_dir: false,
+                source: CompletionSource::History,
+            });
+        }
+    }
+
+    let mut executable_candidates = complete_path_executables(prefix, path_dirs);
+    candidates.append(&mut executable_candidates);
+    candidates
+}
+
+fn complete_path_executables(prefix: &str, path_dirs: &[PathBuf]) -> Vec<CompletionCandidate> {
+    let mut seen = HashSet::new();
+    let mut candidates = Vec::new();
+    for dir in path_dirs {
+        let Ok(entries) = fs::read_dir(dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(file_name) = entry.file_name().into_string() else {
+                continue;
+            };
+            if !file_name.starts_with(prefix) || !seen.insert(file_name.clone()) {
+                continue;
+            }
+            let path = entry.path();
+            if !is_executable_file(&path) {
+                continue;
+            }
+            candidates.push(CompletionCandidate {
+                display: file_name.clone(),
+                replacement: file_name,
+                is_dir: false,
+                source: CompletionSource::Executable,
+            });
+        }
+    }
+    candidates.sort_by(|left, right| left.display.cmp(&right.display));
+    candidates
+}
+
+#[cfg(unix)]
+fn is_executable_file(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+
+    let Ok(metadata) = fs::metadata(path) else {
+        return false;
+    };
+    metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
+}
+
+#[cfg(not(unix))]
+fn is_executable_file(path: &Path) -> bool {
+    path.is_file()
 }
 
 fn strip_opening_quote(token: &str) -> (&str, &str) {
@@ -269,11 +364,13 @@ mod tests {
                     display: "alpha.txt".to_string(),
                     replacement: "alpha.txt".to_string(),
                     is_dir: false,
+                    source: CompletionSource::Path,
                 },
                 CompletionCandidate {
                     display: "app/".to_string(),
                     replacement: "app/".to_string(),
                     is_dir: true,
+                    source: CompletionSource::Path,
                 },
             ]
         );
@@ -292,6 +389,7 @@ mod tests {
                 display: "src/main.rs".to_string(),
                 replacement: "src/main.rs".to_string(),
                 is_dir: false,
+                source: CompletionSource::Path,
             }]
         );
     }
@@ -307,7 +405,98 @@ mod tests {
                 display: "my file.txt".to_string(),
                 replacement: "'my file.txt".to_string(),
                 is_dir: false,
+                source: CompletionSource::Path,
             }]
+        );
+    }
+
+    #[test]
+    fn complete_first_token_orders_templates_history_then_executables() {
+        let temp = tempfile::tempdir().unwrap();
+        let bin = temp.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        let executable = bin.join("git-now");
+        std::fs::write(&executable, "#!/bin/sh\n").unwrap();
+        make_executable(&executable);
+        let templates = vec![TemplateEntry {
+            name: "git-save".to_string(),
+            body: "git add . && git commit".to_string(),
+        }];
+        let history = vec![HistoryEntry {
+            t: 2,
+            command: "git status".to_string(),
+            exit_code: Some(0),
+            source: crate::history::HistorySource::User,
+        }];
+
+        assert_eq!(
+            complete_first_token("git", &templates, &history, &[bin]),
+            [
+                CompletionCandidate {
+                    display: "git-save".to_string(),
+                    replacement: "git add . && git commit".to_string(),
+                    is_dir: false,
+                    source: CompletionSource::Template,
+                },
+                CompletionCandidate {
+                    display: "git status".to_string(),
+                    replacement: "git status".to_string(),
+                    is_dir: false,
+                    source: CompletionSource::History,
+                },
+                CompletionCandidate {
+                    display: "git-now".to_string(),
+                    replacement: "git-now".to_string(),
+                    is_dir: false,
+                    source: CompletionSource::Executable,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn complete_first_token_deduplicates_each_source() {
+        let templates = vec![
+            TemplateEntry {
+                name: "deploy".to_string(),
+                body: "old".to_string(),
+            },
+            TemplateEntry {
+                name: "deploy".to_string(),
+                body: "new".to_string(),
+            },
+        ];
+        let history = vec![
+            HistoryEntry {
+                t: 2,
+                command: "docker ps".to_string(),
+                exit_code: Some(0),
+                source: crate::history::HistorySource::User,
+            },
+            HistoryEntry {
+                t: 1,
+                command: "docker ps".to_string(),
+                exit_code: Some(0),
+                source: crate::history::HistorySource::User,
+            },
+        ];
+
+        assert_eq!(
+            complete_first_token("d", &templates, &history, &[]),
+            [
+                CompletionCandidate {
+                    display: "deploy".to_string(),
+                    replacement: "old".to_string(),
+                    is_dir: false,
+                    source: CompletionSource::Template,
+                },
+                CompletionCandidate {
+                    display: "docker ps".to_string(),
+                    replacement: "docker ps".to_string(),
+                    is_dir: false,
+                    source: CompletionSource::History,
+                },
+            ]
         );
     }
 
@@ -322,4 +511,16 @@ mod tests {
     fn cursor_is_snapped_to_previous_utf8_boundary() {
         assert_eq!(current_token_context("echo λ", 6).end, 5);
     }
+
+    #[cfg(unix)]
+    fn make_executable(path: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut permissions = std::fs::metadata(path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(path, permissions).unwrap();
+    }
+
+    #[cfg(not(unix))]
+    fn make_executable(_path: &Path) {}
 }

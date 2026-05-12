@@ -432,16 +432,16 @@ This is a future configurable enhancement. It must not replace the default faith
 - [x] Implement weak shell lexer for current token detection.
 - [x] Detect path-like token.
 - [x] Implement path completion helper.
-- [ ] Implement first-token completion:
-  - [ ] templates
-  - [ ] history commands
-  - [ ] PATH executables
+- [x] Implement first-token completion helper:
+  - [x] templates
+  - [x] history commands
+  - [x] PATH executables
 - [ ] Implement non-first-token completion:
   - [x] paths
   - [ ] history arguments
   - [ ] template placeholders
 - [ ] Implement ignore-space matching.
-- [ ] Implement newest-to-oldest history sorting.
+- [x] Preserve newest-to-oldest history order in first-token helper.
 - [ ] Implement `completion.max_results`.
 - [ ] Render completion candidates below input.
 - [ ] Implement ghost suggestion display-only behavior.
