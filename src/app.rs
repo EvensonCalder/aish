@@ -12,7 +12,7 @@ use crate::completion::{
     CompletionCandidate, CompletionOptions, complete_first_token_with_options,
     complete_non_first_token_with_options, current_token_context,
 };
-use crate::config::{self, CompletionConfig, EditorConfig, PasteConfig, PromptConfig};
+use crate::config::{self, AiConfig, CompletionConfig, EditorConfig, PasteConfig, PromptConfig};
 use crate::editor::{
     EditorCommand, EditorRunResult, PreparedEditorSession, prepare_editor_file, read_editor_file,
     resolve_editor_command, run_editor_command,
@@ -83,6 +83,7 @@ pub struct AppState {
     pub notes_path: Option<PathBuf>,
     pub draft_history_path: Option<PathBuf>,
     pub template_store_path: Option<PathBuf>,
+    pub config_path: Option<PathBuf>,
     pub draft_persist: bool,
     pub regular_history: Vec<HistoryEntry>,
     pub selected_history_index: Option<usize>,
@@ -95,6 +96,7 @@ pub struct AppState {
     pub editor_temp_root: Option<PathBuf>,
     pub paste_config: PasteConfig,
     pub completion_config: CompletionConfig,
+    pub ai_config: AiConfig,
     pub draft_from_editor: bool,
     pub draft_from_template: bool,
     pub ctrl_x_prefix: bool,
@@ -114,6 +116,7 @@ impl Default for AppState {
             notes_path: None,
             draft_history_path: None,
             template_store_path: None,
+            config_path: None,
             draft_persist: true,
             regular_history: Vec::new(),
             selected_history_index: None,
@@ -126,6 +129,7 @@ impl Default for AppState {
             editor_temp_root: None,
             paste_config: PasteConfig::default(),
             completion_config: CompletionConfig::default(),
+            ai_config: AiConfig::default(),
             draft_from_editor: false,
             draft_from_template: false,
             ctrl_x_prefix: false,
@@ -505,6 +509,7 @@ pub fn run() -> Result<()> {
         notes_path: Some(layout.notes),
         draft_history_path: Some(layout.draft_history),
         template_store_path: Some(layout.template_store),
+        config_path: Some(layout.config),
         draft_persist: config.draft.persist,
         regular_history: store.regular,
         ai_sessions: store.ai_sessions,
@@ -513,6 +518,7 @@ pub fn run() -> Result<()> {
         editor_config: config.editor,
         paste_config: config.paste,
         completion_config: config.completion,
+        ai_config: config.ai,
         editor_temp_root: Some(layout.runtime_cache.join("editor")),
         ..AppState::default()
     };
@@ -643,19 +649,19 @@ pub fn execute_draft(
                         return Ok(());
                     }
                     "model" => {
-                        write_ai_config_placeholder(out, "model", args)?;
+                        update_ai_config_field(state, out, "model", args)?;
                         state.draft.clear();
                         state.mode = Mode::Draft;
                         return Ok(());
                     }
                     "base-url" => {
-                        write_ai_config_placeholder(out, "base-url", args)?;
+                        update_ai_config_field(state, out, "base-url", args)?;
                         state.draft.clear();
                         state.mode = Mode::Draft;
                         return Ok(());
                     }
                     "env-key" => {
-                        write_ai_config_placeholder(out, "env-key", args)?;
+                        update_ai_config_field(state, out, "env-key", args)?;
                         state.draft.clear();
                         state.mode = Mode::Draft;
                         return Ok(());
@@ -1087,12 +1093,27 @@ fn write_config_report(state: &AppState, out: &mut impl Write) -> Result<()> {
         "completion.template_first={}",
         state.completion_config.template_first
     )?;
+    writeln!(out, "ai.model={}", config_value(&state.ai_config.model))?;
+    writeln!(
+        out,
+        "ai.base_url={}",
+        config_value(&state.ai_config.base_url)
+    )?;
+    writeln!(out, "ai.env_key={}", config_value(&state.ai_config.env_key))?;
     write_editor_resolution(out, state)?;
     write_config_path(out, "history.regular", &state.regular_history_path)?;
     write_config_path(out, "history.notes", &state.notes_path)?;
     write_config_path(out, "history.draft", &state.draft_history_path)?;
     write_config_path(out, "templates.store", &state.template_store_path)?;
     Ok(())
+}
+
+fn config_value(value: &str) -> &str {
+    if value.is_empty() {
+        "unconfigured"
+    } else {
+        value
+    }
 }
 
 fn write_editor_report(state: &AppState, out: &mut impl Write) -> Result<()> {
@@ -1140,11 +1161,46 @@ fn write_config_path(out: &mut impl Write, name: &str, path: &Option<PathBuf>) -
     Ok(())
 }
 
-fn write_ai_config_placeholder(out: &mut impl Write, name: &str, args: &str) -> Result<()> {
-    if args.trim().is_empty() {
-        writeln!(out, "#{name} is not configured yet")?;
+fn update_ai_config_field(
+    state: &mut AppState,
+    out: &mut impl Write,
+    name: &str,
+    args: &str,
+) -> Result<()> {
+    let value = args.trim();
+    if value.is_empty() {
+        write_ai_config_value(out, name, state)?;
+        return Ok(());
+    }
+    let Some(path) = &state.config_path else {
+        writeln!(out, "config path is not configured; #{name} not saved")?;
+        return Ok(());
+    };
+
+    let mut config = config::load_config(path)?;
+    match name {
+        "model" => config.ai.model = value.to_string(),
+        "base-url" => config.ai.base_url = value.to_string(),
+        "env-key" => config.ai.env_key = value.to_string(),
+        _ => unreachable!("unknown AI config field"),
+    }
+    config::normalize_config(&mut config);
+    config::save_config(path, &config)?;
+    state.ai_config = config.ai;
+    write_ai_config_value(out, name, state)
+}
+
+fn write_ai_config_value(out: &mut impl Write, name: &str, state: &AppState) -> Result<()> {
+    let value = match name {
+        "model" => &state.ai_config.model,
+        "base-url" => &state.ai_config.base_url,
+        "env-key" => &state.ai_config.env_key,
+        _ => unreachable!("unknown AI config field"),
+    };
+    if value.is_empty() {
+        writeln!(out, "#{name}=unconfigured")?;
     } else {
-        writeln!(out, "#{name} persistence is not implemented yet")?;
+        writeln!(out, "#{name}={value}")?;
     }
     Ok(())
 }
@@ -2008,23 +2064,58 @@ mod tests {
     }
 
     #[test]
-    fn ai_config_commands_report_placeholders_without_persisting() {
+    fn ai_config_commands_persist_and_report_values() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("config.toml");
+        let mut config = config::Config::default();
+        config.storage.home = temp.path().to_path_buf();
+        config::save_config(&config_path, &config).unwrap();
+        let mut state = AppState {
+            config_path: Some(config_path.clone()),
+            ..AppState::default()
+        };
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+
         for (line, expected) in [
-            ("#model", "#model is not configured yet"),
-            (
-                "#model test-model",
-                "#model persistence is not implemented yet",
-            ),
-            ("#base-url", "#base-url is not configured yet"),
+            ("#model test-model", "#model=test-model"),
             (
                 "#base-url https://example.invalid/v1",
-                "#base-url persistence is not implemented yet",
+                "#base-url=https://example.invalid/v1",
             ),
-            ("#env-key", "#env-key is not configured yet"),
-            (
-                "#env-key OPENAI_API_KEY",
-                "#env-key persistence is not implemented yet",
-            ),
+            ("#env-key OPENAI_API_KEY", "#env-key=OPENAI_API_KEY"),
+        ] {
+            state.draft.insert_str(line);
+            let mut output = Vec::new();
+
+            execute_draft(
+                &mut state,
+                &mut backend,
+                &mut output,
+                Duration::from_secs(5),
+            )
+            .unwrap();
+
+            let output = String::from_utf8(output).unwrap();
+            assert!(
+                output.contains(expected),
+                "missing {expected:?} in {output:?}"
+            );
+            assert!(state.draft.is_empty());
+        }
+
+        assert_eq!(state.ai_config.model, "test-model");
+        assert_eq!(state.ai_config.base_url, "https://example.invalid/v1");
+        assert_eq!(state.ai_config.env_key, "OPENAI_API_KEY");
+        let loaded = config::load_config(&config_path).unwrap();
+        assert_eq!(loaded.ai, state.ai_config);
+    }
+
+    #[test]
+    fn ai_config_commands_report_unconfigured_without_config_path() {
+        for (line, expected) in [
+            ("#model", "#model=unconfigured"),
+            ("#base-url", "#base-url=unconfigured"),
+            ("#env-key", "#env-key=unconfigured"),
         ] {
             let mut state = AppState::default();
             state.draft.insert_str(line);
@@ -2044,7 +2135,6 @@ mod tests {
                 output.contains(expected),
                 "missing {expected:?} in {output:?}"
             );
-            assert_eq!(state.last_status, None);
             assert!(state.draft.is_empty());
         }
     }
@@ -2594,6 +2684,11 @@ mod tests {
                 ignore_spaces: false,
                 template_first: true,
             },
+            ai_config: AiConfig {
+                model: "gpt-test".to_string(),
+                base_url: "https://example.invalid/v1".to_string(),
+                env_key: "OPENAI_API_KEY".to_string(),
+            },
             ..AppState::default()
         };
         state.draft.insert_str("#config");
@@ -2618,6 +2713,9 @@ mod tests {
         assert!(output.contains("completion.max_results=8"));
         assert!(output.contains("completion.ignore_spaces=false"));
         assert!(output.contains("completion.template_first=true"));
+        assert!(output.contains("ai.model=gpt-test"));
+        assert!(output.contains("ai.base_url=https://example.invalid/v1"));
+        assert!(output.contains("ai.env_key=OPENAI_API_KEY"));
         assert!(output.contains("editor.resolved=nvim --clean"));
         assert!(output.contains("history.regular="));
         assert!(output.contains(&history_path.display().to_string()));

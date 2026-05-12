@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 223 library unit tests.
+- 224 library unit tests.
 - 18 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
@@ -267,7 +267,7 @@ Implemented:
 - `Ctrl-X Ctrl-E` resolves to an external-editor launch action without editing draft state.
 - `Ctrl-X` advanced picker chords resolve to launch actions without editing draft state before the picker returns a selection.
 - `#status` reports the default keybinding count.
-- AI configuration commands are recognized as placeholders but do not persist config or read secrets yet.
+- AI configuration commands `#model`, `#base-url`, and `#env-key` persist to `config.toml`; `#key` commands remain placeholders and do not store, read, or remove secrets yet.
 - Key commands are recognized as placeholders but do not store, read, or remove secrets yet.
 - `#completion` remains a private-command placeholder, but the internal completion engine is active for draft completion display and acceptance; log commands remain placeholders.
 - Completion has pure current-token detection helpers that handle first-token classification, non-first-token classification, quoted whitespace, escaped whitespace, cursor-in-line contexts, path-like tokens, and UTF-8 cursor snapping.
@@ -362,7 +362,8 @@ Tests:
 - `app::tests::private_config_prints_read_only_runtime_config`
 - `app::tests::private_doctor_prints_read_only_diagnostics`
 - `app::tests::private_context_reports_disabled_placeholder`
-- `app::tests::ai_config_commands_report_placeholders_without_persisting`
+- `app::tests::ai_config_commands_persist_and_report_values`
+- `app::tests::ai_config_commands_report_unconfigured_without_config_path`
 - `app::tests::key_commands_report_placeholders_without_secret_side_effects`
 - `app::tests::subsystem_commands_report_placeholders`
 - `app::tests::private_editor_reports_resolution_without_launching_editor`

@@ -505,9 +505,9 @@ Status: implemented for v0.1.0 via external `fzf`. Picker actions are intentiona
 ### Tasks
 
 - [ ] Implement AI config:
-  - [ ] `#base-url`
-  - [ ] `#model`
-  - [ ] `#env-key`
+  - [x] `#base-url`
+  - [x] `#model`
+  - [x] `#env-key`
   - [ ] `#key set`
 - [ ] Normalize final chat completions URL.
 - [ ] Read API key from configured environment variable.

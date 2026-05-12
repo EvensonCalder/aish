@@ -14,6 +14,7 @@ pub struct Config {
     pub editor: EditorConfig,
     pub paste: PasteConfig,
     pub completion: CompletionConfig,
+    pub ai: AiConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -63,6 +64,14 @@ pub struct CompletionConfig {
     pub max_results: usize,
     pub ignore_spaces: bool,
     pub template_first: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AiConfig {
+    pub model: String,
+    pub base_url: String,
+    pub env_key: String,
 }
 
 impl Default for ShellConfig {
@@ -261,6 +270,9 @@ pub fn normalize_config(config: &mut Config) {
     if config.completion.max_results == 0 {
         config.completion.max_results = CompletionConfig::default().max_results;
     }
+    config.ai.model = config.ai.model.trim().to_string();
+    config.ai.base_url = config.ai.base_url.trim().to_string();
+    config.ai.env_key = config.ai.env_key.trim().to_string();
 }
 
 #[cfg(test)]
@@ -283,6 +295,7 @@ mod tests {
         assert_eq!(config.completion.max_results, 5);
         assert!(config.completion.ignore_spaces);
         assert!(config.completion.template_first);
+        assert_eq!(config.ai, AiConfig::default());
         assert!(config.storage.home.ends_with(".aish"));
     }
 
@@ -314,12 +327,22 @@ mod tests {
                 ignore_spaces: true,
                 template_first: true,
             },
+            ai: AiConfig {
+                model: "  gpt-test  ".to_string(),
+                base_url: "  https://example.invalid/v1  ".to_string(),
+                env_key: "  OPENAI_API_KEY  ".to_string(),
+            },
         };
 
         normalize_config(&mut config);
 
         let mut expected = Config::default();
         expected.editor.command = vec!["vim".to_string()];
+        expected.ai = AiConfig {
+            model: "gpt-test".to_string(),
+            base_url: "https://example.invalid/v1".to_string(),
+            env_key: "OPENAI_API_KEY".to_string(),
+        };
         assert_eq!(config, expected);
     }
 
