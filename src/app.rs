@@ -24,6 +24,7 @@ use crate::history::{
 use crate::input::InputBuffer;
 use crate::keybindings::default_keybindings;
 use crate::modes::Mode;
+use crate::picker::{PickerAction, apply_picker_result};
 use crate::pty::PtyBackend;
 use crate::templates::{
     TemplateEntry, append_template, apply_template_values_with_usage, find_template_by_name,
@@ -309,6 +310,19 @@ impl AppState {
                 &templates,
                 options,
             ))
+        }
+    }
+
+    pub fn apply_picker_selection(&mut self, value: &str, action: PickerAction) -> bool {
+        if self.mode != Mode::Draft || self.draft_from_editor {
+            return false;
+        }
+        let edit = apply_picker_result(self.draft.as_str(), self.draft.cursor(), value, action);
+        if self.draft.replace(edit.line, edit.cursor) {
+            self.draft_from_template = false;
+            true
+        } else {
+            false
         }
     }
 
@@ -1353,6 +1367,36 @@ mod tests {
         state.draft_from_editor = false;
         state.mode = Mode::History;
         assert!(state.completion_candidates().unwrap().is_empty());
+    }
+
+    #[test]
+    fn apply_picker_selection_replaces_current_token_with_quoted_value() {
+        let mut state = AppState::default();
+        state.draft.insert_str("cat old.txt");
+        state.draft.move_left();
+        state.draft.move_left();
+        state.draft.move_left();
+
+        assert!(state.apply_picker_selection(
+            "my file.txt",
+            crate::picker::PickerAction::ReplaceCurrentToken
+        ));
+
+        assert_eq!(state.draft.as_str(), "cat 'my file.txt'");
+        assert_eq!(state.draft.cursor(), "cat 'my file.txt'".len());
+    }
+
+    #[test]
+    fn apply_picker_selection_skips_editor_and_read_only_modes() {
+        let mut state = AppState::default();
+        state.draft.insert_str("cat ");
+        state.draft_from_editor = true;
+        assert!(!state.apply_picker_selection("file", crate::picker::PickerAction::InsertAtCursor));
+        assert_eq!(state.draft.as_str(), "cat ");
+
+        state.draft_from_editor = false;
+        state.mode = Mode::History;
+        assert!(!state.apply_picker_selection("file", crate::picker::PickerAction::InsertAtCursor));
     }
 
     #[test]

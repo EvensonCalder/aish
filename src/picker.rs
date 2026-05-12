@@ -1,4 +1,5 @@
 use std::io::Write;
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, bail};
@@ -21,6 +22,37 @@ pub struct PickerEdit {
 pub struct PickerRunResult {
     pub selected: Option<String>,
     pub exit_code: Option<i32>,
+}
+
+pub fn file_picker_candidates(root: &Path) -> Result<Vec<String>> {
+    let mut candidates = Vec::new();
+    collect_file_candidates(root, root, &mut candidates)?;
+    candidates.sort();
+    Ok(candidates)
+}
+
+fn collect_file_candidates(root: &Path, dir: &Path, candidates: &mut Vec<String>) -> Result<()> {
+    for entry in
+        std::fs::read_dir(dir).with_context(|| format!("failed to read {}", dir.display()))?
+    {
+        let entry = entry?;
+        let path = entry.path();
+        let Ok(relative) = path.strip_prefix(root) else {
+            continue;
+        };
+        if relative.as_os_str().is_empty() {
+            continue;
+        }
+        let mut display = relative.display().to_string();
+        if entry.file_type()?.is_dir() {
+            display.push('/');
+            candidates.push(display);
+            collect_file_candidates(root, &path, candidates)?;
+        } else {
+            candidates.push(display);
+        }
+    }
+    Ok(())
 }
 
 pub fn default_fzf_command() -> Vec<String> {
@@ -294,5 +326,18 @@ mod tests {
     #[test]
     fn default_fzf_command_uses_external_fzf() {
         assert_eq!(default_fzf_command(), ["fzf"]);
+    }
+
+    #[test]
+    fn file_picker_candidates_returns_sorted_relative_files_and_dirs() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(temp.path().join("src")).unwrap();
+        std::fs::write(temp.path().join("src/main.rs"), "").unwrap();
+        std::fs::write(temp.path().join("README.md"), "").unwrap();
+
+        assert_eq!(
+            file_picker_candidates(temp.path()).unwrap(),
+            ["README.md", "src/", "src/main.rs"]
+        );
     }
 }
