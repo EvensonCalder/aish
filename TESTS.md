@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 98 library unit tests.
+- 99 library unit tests.
 - 14 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
@@ -259,6 +259,7 @@ Implemented:
 - Unknown private commands are not sent to shell.
 - Unknown private commands suggest the nearest implemented command when there is a close match.
 - Minimal private commands: `#help`, `#status`, `#config`, `#doctor`, `#model`, `#base-url`, `#env-key`, `#key set`, `#key clear`, `#context`, `#completion`, `#log`, `#editor`, `#mt`, `#template list`, `#template rm`, `#encrypt`, `#set-remote`, `#push`, `#sync`, `#exit`, `#quit`, `#history <count>`.
+- `#help` prints private commands and the default keybinding map.
 - AI configuration commands are recognized as placeholders but do not persist config or read secrets yet.
 - Key commands are recognized as placeholders but do not store, read, or remove secrets yet.
 - Completion, log, and editor commands are recognized as placeholders but do not activate those subsystems yet.
@@ -283,6 +284,7 @@ Tests:
 - `execute_draft_does_not_send_line_leading_hash_to_backend_shell`
 - `execute_draft_does_not_run_context_pseudo_pipe_command`
 - `app::tests::private_help_prints_available_commands`
+- `keybindings::tests::default_keybindings_include_common_and_advanced_bindings`
 - `app::tests::private_status_prints_mode_and_last_status`
 - `app::tests::private_config_prints_read_only_runtime_config`
 - `app::tests::private_doctor_prints_read_only_diagnostics`

@@ -7,6 +7,7 @@ pub mod editor;
 pub mod encryption;
 pub mod history;
 pub mod input;
+pub mod keybindings;
 pub mod log;
 pub mod modes;
 pub mod paste;

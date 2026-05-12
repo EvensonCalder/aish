@@ -14,6 +14,7 @@ use crate::history::{
     HistoryStore, NoteEntry, ai_command_indices, append_jsonl, load_jsonl, trim_combined_history,
 };
 use crate::input::InputBuffer;
+use crate::keybindings::default_keybindings;
 use crate::modes::Mode;
 use crate::pty::PtyBackend;
 use crate::templates::{
@@ -397,6 +398,10 @@ pub fn execute_draft(
                             .collect::<Vec<_>>()
                             .join(", ")
                     )?;
+                    writeln!(out, "Default keybindings:")?;
+                    for binding in default_keybindings() {
+                        writeln!(out, "{} - {}", binding.key, binding.action)?;
+                    }
                     state.draft.clear();
                     state.mode = Mode::Draft;
                     return Ok(());
@@ -1275,6 +1280,9 @@ mod tests {
         assert!(output.contains("#exit"));
         assert!(output.contains("#quit"));
         assert!(output.contains("#history"));
+        assert!(output.contains("Default keybindings:"));
+        assert!(output.contains("Ctrl-C - clear or cancel draft"));
+        assert!(output.contains("Ctrl-X Ctrl-E - external editor reserved"));
         assert!(state.draft.is_empty());
     }
 

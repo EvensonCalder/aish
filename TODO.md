@@ -171,31 +171,31 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
 
 ### Tasks
 
-- [ ] Define keybinding map structure.
-- [ ] Implement default non-conflicting keybindings.
+- [x] Define keybinding map structure.
+- [x] Implement default non-conflicting keybindings.
 - [ ] Preserve common keys:
-  - [ ] `Ctrl-C`
-  - [ ] `Ctrl-D`
-  - [ ] `Ctrl-L`
-  - [ ] `Ctrl-A`
-  - [ ] `Ctrl-E`
-  - [ ] `Ctrl-U`
-  - [ ] `Ctrl-K`
-  - [ ] `Ctrl-W`
-  - [ ] `Alt-B`
-  - [ ] `Alt-F`
-  - [ ] `Alt-Left`
-  - [ ] `Alt-Right`
-  - [ ] `Ctrl-R`
-  - [ ] `Tab`
-  - [ ] `Esc`
-  - [ ] `Up/Down`
+  - [x] `Ctrl-C`
+  - [x] `Ctrl-D`
+  - [x] `Ctrl-L`
+  - [x] `Ctrl-A`
+  - [x] `Ctrl-E`
+  - [x] `Ctrl-U`
+  - [x] `Ctrl-K`
+  - [x] `Ctrl-W`
+  - [x] `Alt-B`
+  - [x] `Alt-F`
+  - [x] `Alt-Left`
+  - [x] `Alt-Right`
+  - [x] `Ctrl-R`
+  - [x] `Tab`
+  - [x] `Esc`
+  - [x] `Up/Down`
 - [ ] Implement advanced bindings:
-  - [ ] `Ctrl-X Ctrl-E` external editor
-  - [ ] `Ctrl-X Ctrl-F` file picker
-  - [ ] `Ctrl-X Ctrl-T` template picker
-  - [ ] `Ctrl-X Ctrl-B` git branch picker
-  - [ ] `Ctrl-X Ctrl-V` env var picker
+  - [x] `Ctrl-X Ctrl-E` external editor
+  - [x] `Ctrl-X Ctrl-F` file picker
+  - [x] `Ctrl-X Ctrl-T` template picker
+  - [x] `Ctrl-X Ctrl-B` git branch picker
+  - [x] `Ctrl-X Ctrl-V` env var picker
 - [ ] Add config support for user key rebinding.
 
 ### Acceptance criteria
