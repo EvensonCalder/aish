@@ -139,7 +139,7 @@ fn handle_key(
         }
         KeyAction::Submit => {
             execute!(out, MoveToColumn(state.render_prompt_line().len() as u16))?;
-            writeln!(out)?;
+            write!(out, "\r\n")?;
             execute_draft(state, backend, out, command_timeout)?;
             if state.exit_requested {
                 return Ok(true);
@@ -147,7 +147,7 @@ fn handle_key(
         }
         KeyAction::ConfirmContext(accepted) => {
             execute!(out, MoveToColumn(state.render_prompt_line().len() as u16))?;
-            writeln!(out)?;
+            write!(out, "\r\n")?;
             answer_context_confirmation(state, accepted, out, command_timeout)?;
         }
         KeyAction::Continue => {}
@@ -844,7 +844,7 @@ mod tests {
 
         let output = String::from_utf8(output).unwrap();
         assert!(
-            output.contains("\u{1b}[13G\nhello"),
+            output.contains("\u{1b}[13G\r\nhello"),
             "output was {output:?}"
         );
     }

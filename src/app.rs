@@ -580,6 +580,7 @@ pub fn run() -> Result<()> {
     let store = HistoryStore::load(&layout)?;
     let mut backend = PtyBackend::spawn(&config.shell.backend)?;
     let mut state = AppState {
+        current_cwd: initial_current_cwd(),
         regular_history_path: Some(layout.regular_history),
         ai_history_path: Some(layout.ai_history),
         notes_path: Some(layout.notes),
@@ -1344,6 +1345,10 @@ fn config_value(value: &str) -> &str {
     }
 }
 
+pub fn initial_current_cwd() -> Option<PathBuf> {
+    std::env::current_dir().ok()
+}
+
 fn write_editor_report(state: &AppState, out: &mut impl Write) -> Result<()> {
     writeln!(out, "Aish editor")?;
     writeln!(
@@ -1614,7 +1619,7 @@ fn prompt_host() -> String {
 }
 
 fn display_cwd(cwd: &std::path::Path) -> String {
-    let Some(home) = dirs::home_dir() else {
+    let Some(home) = prompt_home_dir() else {
         return cwd.display().to_string();
     };
     if cwd == home {
@@ -1629,6 +1634,13 @@ fn display_cwd(cwd: &std::path::Path) -> String {
     } else {
         cwd.display().to_string()
     }
+}
+
+fn prompt_home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .filter(|home| !home.is_empty())
+        .map(PathBuf::from)
+        .or_else(dirs::home_dir)
 }
 
 pub fn save_draft_if_configured(state: &AppState) -> Result<bool> {
