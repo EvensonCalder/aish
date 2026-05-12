@@ -351,7 +351,7 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
 - [ ] Multi-line paste follows `paste.multiline`:
   - [x] `editor`
   - [ ] `execute`
-  - [ ] `discard`
+  - [x] `discard`
 - [ ] Implement PasteReviewEditor mode.
 - [ ] Add execution warning when configured.
 - [x] Ensure multi-line paste enters opaque editor draft by default without execution.

@@ -166,7 +166,7 @@ pub fn apply_paste_to_state(text: &str, state: &mut AppState) {
             state.draft_from_editor = false;
         }
         state.draft.insert_str(text);
-    } else {
+    } else if state.paste_config.multiline == "editor" {
         state.replace_draft_from_editor_text(normalize_paste_newlines(text));
     }
 }
@@ -720,6 +720,24 @@ mod tests {
                 .render_prompt_line()
                 .contains("[editor draft: 2 line(s)")
         );
+    }
+
+    #[test]
+    fn multiline_paste_discard_config_ignores_content() {
+        let mut state = AppState {
+            paste_config: crate::config::PasteConfig {
+                multiline: "discard".to_string(),
+                confirm_execute: true,
+            },
+            ..AppState::default()
+        };
+        state.draft.insert_str("existing");
+
+        apply_paste_to_state("echo one\necho two", &mut state);
+
+        assert_eq!(state.mode, Mode::Draft);
+        assert_eq!(state.draft.as_str(), "existing");
+        assert!(!state.draft_from_editor);
     }
 
     #[test]
