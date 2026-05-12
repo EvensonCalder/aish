@@ -316,13 +316,13 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
   - [x] `nvim`
   - [x] `vim`
   - [x] `vi`
-- [ ] Implement `Ctrl-X Ctrl-E`.
+- [x] Implement `Ctrl-X Ctrl-E`.
 - [x] Create secure temporary edit file.
 - [x] Write current draft/current selected item.
 - [x] Compose prepare/run/read-back helper.
-- [ ] Suspend Aish raw mode.
+- [x] Suspend Aish raw mode.
 - [x] Run editor and wait.
-- [ ] Restore raw mode.
+- [x] Restore raw mode.
 - [x] Read file content.
 - [x] Replace draft buffer.
 - [ ] Do not execute by default.

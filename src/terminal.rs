@@ -11,6 +11,7 @@ use crossterm::terminal::{
 };
 
 use crate::app::{AppState, execute_draft, save_draft_if_configured};
+use crate::editor::resolve_editor_command;
 use crate::pty::PtyBackend;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,7 +98,7 @@ fn handle_key(
             writeln!(out, "history search is not implemented yet")?;
         }
         KeyAction::ExternalEditor => {
-            writeln!(out, "external editor launch is not wired yet")?;
+            run_external_editor(state, out)?;
         }
         KeyAction::AdvancedKeyPlaceholder(name) => {
             writeln!(out, "{name} is not implemented yet")?;
@@ -113,6 +114,43 @@ fn handle_key(
     }
     redraw(state, out)?;
     Ok(false)
+}
+
+pub fn run_external_editor(state: &mut AppState, out: &mut impl Write) -> Result<()> {
+    let Some(command) = resolve_editor_command(&state.editor_config) else {
+        writeln!(out, "editor.resolved=unavailable")?;
+        return Ok(());
+    };
+    let Some(temp_root) = state.editor_temp_root.clone() else {
+        writeln!(out, "editor temp directory is not configured")?;
+        return Ok(());
+    };
+
+    let raw_mode_was_enabled = is_raw_mode_enabled()?;
+    if raw_mode_was_enabled {
+        disable_raw_mode()?;
+    }
+
+    let result = state.run_editor_roundtrip(&temp_root, &command);
+
+    if raw_mode_was_enabled {
+        enable_raw_mode()?;
+    }
+
+    let result = result?;
+    if result.exit_code == Some(0) {
+        writeln!(out, "editor saved draft")?;
+    } else {
+        writeln!(
+            out,
+            "editor exited without saving draft: status={}",
+            result
+                .exit_code
+                .map(|code| code.to_string())
+                .unwrap_or_else(|| "signal".to_string())
+        )?;
+    }
+    Ok(())
 }
 
 pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
@@ -262,7 +300,9 @@ pub fn redraw(state: &AppState, out: &mut impl Write) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::EditorConfig;
     use crate::modes::Mode;
+    use std::path::Path;
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
@@ -441,6 +481,75 @@ mod tests {
         assert!(!state.ctrl_x_prefix);
         assert_eq!(state.mode, Mode::Draft);
         assert_eq!(state.draft.as_str(), "git status");
+    }
+
+    #[test]
+    fn run_external_editor_replaces_draft_after_success() {
+        let temp = tempfile::tempdir().unwrap();
+        let script = temp.path().join("fake-editor.sh");
+        std::fs::write(&script, "#!/bin/sh\nprintf 'echo edited' > \"$1\"\n").unwrap();
+        make_executable(&script);
+        let mut state = AppState {
+            editor_config: EditorConfig {
+                command: vec![script.display().to_string()],
+                execute_after_save: false,
+            },
+            editor_temp_root: Some(temp.path().join("editor")),
+            ..AppState::default()
+        };
+        state.draft.insert_str("old draft");
+        let mut output = Vec::new();
+
+        run_external_editor(&mut state, &mut output).unwrap();
+
+        assert_eq!(state.draft.as_str(), "echo edited");
+        assert_eq!(state.draft.cursor(), "echo edited".len());
+        assert_eq!(String::from_utf8(output).unwrap(), "editor saved draft\n");
+    }
+
+    #[test]
+    fn run_external_editor_keeps_draft_after_editor_failure() {
+        let temp = tempfile::tempdir().unwrap();
+        let script = temp.path().join("fake-editor.sh");
+        std::fs::write(&script, "#!/bin/sh\nprintf changed > \"$1\"\nexit 4\n").unwrap();
+        make_executable(&script);
+        let mut state = AppState {
+            editor_config: EditorConfig {
+                command: vec![script.display().to_string()],
+                execute_after_save: false,
+            },
+            editor_temp_root: Some(temp.path().join("editor")),
+            ..AppState::default()
+        };
+        state.draft.insert_str("old draft");
+        let mut output = Vec::new();
+
+        run_external_editor(&mut state, &mut output).unwrap();
+
+        assert_eq!(state.draft.as_str(), "old draft");
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            "editor exited without saving draft: status=4\n"
+        );
+    }
+
+    #[test]
+    fn run_external_editor_reports_missing_editor() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut state = AppState {
+            editor_config: EditorConfig {
+                command: vec!["/definitely/missing/aish-editor".to_string()],
+                execute_after_save: false,
+            },
+            editor_temp_root: Some(temp.path().join("editor")),
+            ..AppState::default()
+        };
+        let mut output = Vec::new();
+
+        let error = run_external_editor(&mut state, &mut output).unwrap_err();
+
+        assert!(error.to_string().contains("failed to run editor command"));
+        assert!(state.draft.is_empty());
     }
 
     #[test]
@@ -628,5 +737,15 @@ mod tests {
         assert_eq!(state.mode, Mode::Ai);
         assert!(state.draft.is_empty());
         assert_eq!(state.selected_ai_command(), Some("git status"));
+    }
+
+    fn make_executable(path: &Path) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = std::fs::metadata(path).unwrap().permissions();
+            permissions.set_mode(0o700);
+            std::fs::set_permissions(path, permissions).unwrap();
+        }
     }
 }

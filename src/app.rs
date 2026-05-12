@@ -83,6 +83,7 @@ pub struct AppState {
     pub output_ring: VecDeque<OutputEntry>,
     pub prompt_templates: PromptTemplates,
     pub editor_config: EditorConfig,
+    pub editor_temp_root: Option<PathBuf>,
     pub ctrl_x_prefix: bool,
     pub clock: fn() -> i64,
 }
@@ -109,6 +110,7 @@ impl Default for AppState {
             output_ring: VecDeque::new(),
             prompt_templates: PromptTemplates::default(),
             editor_config: EditorConfig::default(),
+            editor_temp_root: None,
             ctrl_x_prefix: false,
             clock: unix_timestamp,
         }
@@ -369,6 +371,7 @@ pub fn run() -> Result<()> {
         ai_command_indices: store.ai_command_indices,
         prompt_templates: config.prompt.into(),
         editor_config: config.editor,
+        editor_temp_root: Some(layout.runtime_cache.join("editor")),
         ..AppState::default()
     };
     crate::terminal::run(
@@ -924,7 +927,11 @@ fn write_editor_report(state: &AppState, out: &mut impl Write) -> Result<()> {
         format_editor_command(&state.editor_config.command)
     )?;
     write_editor_resolution(out, state)?;
-    writeln!(out, "external editor launch is not implemented yet")?;
+    if state.editor_temp_root.is_some() {
+        writeln!(out, "external editor launch is wired to Ctrl-X Ctrl-E")?;
+    } else {
+        writeln!(out, "editor temp directory is not configured")?;
+    }
     Ok(())
 }
 
@@ -1612,7 +1619,7 @@ mod tests {
         for (line, expected) in [
             ("#completion", "completion engine is not implemented yet"),
             ("#log", "event log is not implemented yet"),
-            ("#editor", "external editor launch is not implemented yet"),
+            ("#editor", "editor temp directory is not configured"),
         ] {
             let mut state = AppState::default();
             state.draft.insert_str(line);
@@ -2163,6 +2170,7 @@ mod tests {
                 command: vec!["code".to_string(), "--wait".to_string()],
                 execute_after_save: false,
             },
+            editor_temp_root: Some(std::env::temp_dir().join("aish-editor-test")),
             ..AppState::default()
         };
         state.draft.insert_str("#editor");
@@ -2181,7 +2189,7 @@ mod tests {
         assert!(output.contains("Aish editor"));
         assert!(output.contains("configured=code --wait"));
         assert!(output.contains("editor.resolved=code --wait"));
-        assert!(output.contains("external editor launch is not implemented yet"));
+        assert!(output.contains("external editor launch is wired to Ctrl-X Ctrl-E"));
         assert_eq!(state.last_status, None);
         assert!(state.draft.is_empty());
     }

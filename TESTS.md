@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 120 library unit tests.
+- 123 library unit tests.
 - 14 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
@@ -274,6 +274,7 @@ Implemented:
 - Editor process runner appends the prepared file path to the resolved command and waits for exit status without reading or executing content.
 - Editor read-back replaces the draft buffer with saved file content without executing it.
 - Editor roundtrip helper prepares a file, runs a fake editor, and reads successful edits back into draft while preserving the original draft on editor failure.
+- `Ctrl-X Ctrl-E` terminal handling resolves the editor, suspends raw mode when needed, runs the roundtrip, restores raw mode when needed, and reports success/failure.
 - Template commands are recognized as placeholders but do not read or write template storage yet.
 - Encryption and sync commands are recognized as placeholders but do not change files, encryption state, remotes, or run git commands yet.
 - `#context` reports that context collection is currently disabled/not implemented.
@@ -301,6 +302,9 @@ Tests:
 - `terminal::tests::ctrl_r_returns_history_search_placeholder_without_editing_draft`
 - `terminal::tests::ctrl_x_prefix_resolves_editor_chord_to_launch_action`
 - `terminal::tests::ctrl_x_prefix_resolves_other_advanced_chords_to_placeholders`
+- `terminal::tests::run_external_editor_replaces_draft_after_success`
+- `terminal::tests::run_external_editor_keeps_draft_after_editor_failure`
+- `terminal::tests::run_external_editor_reports_missing_editor`
 - `terminal::tests::ctrl_x_prefix_cancels_on_unknown_chord_without_editing_draft`
 - `app::tests::private_status_prints_mode_and_last_status`
 - `app::tests::private_config_prints_read_only_runtime_config`
