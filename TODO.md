@@ -429,8 +429,8 @@ This is a future configurable enhancement. It must not replace the default faith
 
 ### Tasks
 
-- [ ] Implement weak shell lexer for current token detection.
-- [ ] Detect path-like token.
+- [x] Implement weak shell lexer for current token detection.
+- [x] Detect path-like token.
 - [ ] Implement path completion.
 - [ ] Implement first-token completion:
   - [ ] templates

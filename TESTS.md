@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 152 library unit tests.
+- 159 library unit tests.
 - 18 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
@@ -270,6 +270,7 @@ Implemented:
 - AI configuration commands are recognized as placeholders but do not persist config or read secrets yet.
 - Key commands are recognized as placeholders but do not store, read, or remove secrets yet.
 - Completion and log commands are recognized as placeholders but do not activate those subsystems yet.
+- Completion has pure current-token detection helpers that handle first-token classification, non-first-token classification, quoted whitespace, escaped whitespace, cursor-in-line contexts, path-like tokens, and UTF-8 cursor snapping.
 - Editor command resolution supports config, `$VISUAL`, `$EDITOR`, and PATH fallback candidates.
 - Editor session preparation writes draft/history/AI selected content to a secure temporary file.
 - Editor process runner appends the prepared file path to the resolved command and waits for exit status without reading or executing content.
@@ -368,6 +369,13 @@ Tests:
 - `app::tests::private_history_without_count_prints_usage`
 - `app::tests::private_exit_requests_app_exit`
 - `app::tests::unknown_private_command_prints_suggestion`
+- `completion::tests::current_token_detects_first_token_prefix`
+- `completion::tests::current_token_detects_non_first_token_at_cursor`
+- `completion::tests::current_token_keeps_quoted_whitespace_inside_token`
+- `completion::tests::current_token_keeps_escaped_whitespace_inside_token`
+- `completion::tests::current_token_handles_cursor_inside_line`
+- `completion::tests::path_like_detection_covers_common_shell_path_prefixes`
+- `completion::tests::cursor_is_snapped_to_previous_utf8_boundary`
 
 Status:
 
