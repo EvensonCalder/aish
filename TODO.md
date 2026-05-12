@@ -509,15 +509,15 @@ Status: implemented for v0.1.0 via external `fzf`. Picker actions are intentiona
   - [x] `#model`
   - [x] `#env-key`
   - [ ] `#key set`
-- [ ] Normalize final chat completions URL.
-- [ ] Read API key from configured environment variable.
+- [x] Normalize final chat completions URL.
+- [x] Read API key from configured environment variable.
 - [ ] Implement GPG-backed key storage later; initially support env key.
-- [ ] Build request body for chat completions-compatible endpoint.
-- [ ] Write strict system prompt requiring JSON only.
-- [ ] Discard thinking/reasoning fields if provider returns them.
-- [ ] Parse JSON response.
-- [ ] Validate `items` array.
-- [ ] Reject empty or invalid output with clear error.
+- [x] Build request body for chat completions-compatible endpoint.
+- [x] Write strict system prompt requiring JSON only.
+- [x] Discard thinking/reasoning fields if provider returns them.
+- [x] Parse JSON response.
+- [x] Validate `items` array.
+- [x] Reject empty or invalid output with clear error.
 - [ ] Store AI session in `ai.jsonl`.
 - [ ] Switch to `%` AI mode at first generated item.
 

@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 224 library unit tests.
+- 229 library unit tests.
 - 18 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
@@ -268,6 +268,7 @@ Implemented:
 - `Ctrl-X` advanced picker chords resolve to launch actions without editing draft state before the picker returns a selection.
 - `#status` reports the default keybinding count.
 - AI configuration commands `#model`, `#base-url`, and `#env-key` persist to `config.toml`; `#key` commands remain placeholders and do not store, read, or remove secrets yet.
+- AI helpers normalize chat-completions URLs, read API keys from configured environment variables, build strict JSON-only chat request bodies, and parse/validate structured AI item JSON without relying on newline boundaries.
 - Key commands are recognized as placeholders but do not store, read, or remove secrets yet.
 - `#completion` remains a private-command placeholder, but the internal completion engine is active for draft completion display and acceptance; log commands remain placeholders.
 - Completion has pure current-token detection helpers that handle first-token classification, non-first-token classification, quoted whitespace, escaped whitespace, cursor-in-line contexts, path-like tokens, and UTF-8 cursor snapping.
@@ -364,6 +365,11 @@ Tests:
 - `app::tests::private_context_reports_disabled_placeholder`
 - `app::tests::ai_config_commands_persist_and_report_values`
 - `app::tests::ai_config_commands_report_unconfigured_without_config_path`
+- `ai::tests::normalize_chat_completions_url_appends_endpoint`
+- `ai::tests::normalize_chat_completions_url_rejects_missing_scheme_or_empty`
+- `ai::tests::build_chat_completions_body_uses_strict_json_prompt`
+- `ai::tests::parse_ai_items_accepts_command_and_template_items`
+- `ai::tests::parse_ai_items_rejects_empty_or_invalid_items`
 - `app::tests::key_commands_report_placeholders_without_secret_side_effects`
 - `app::tests::subsystem_commands_report_placeholders`
 - `app::tests::private_editor_reports_resolution_without_launching_editor`
