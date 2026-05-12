@@ -19,6 +19,7 @@ pub enum KeyAction {
     Exit,
     ClearScreen,
     HistorySearchPlaceholder,
+    AdvancedKeyPlaceholder(&'static str),
     Submit,
 }
 
@@ -94,6 +95,9 @@ fn handle_key(
         KeyAction::HistorySearchPlaceholder => {
             writeln!(out, "history search is not implemented yet")?;
         }
+        KeyAction::AdvancedKeyPlaceholder(name) => {
+            writeln!(out, "{name} is not implemented yet")?;
+        }
         KeyAction::Submit => {
             writeln!(out)?;
             execute_draft(state, backend, out, command_timeout)?;
@@ -112,7 +116,32 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
         state.mode,
         crate::modes::Mode::History | crate::modes::Mode::Ai
     );
+    if state.ctrl_x_prefix {
+        state.ctrl_x_prefix = false;
+        return match (key.modifiers, key.code) {
+            (KeyModifiers::CONTROL, KeyCode::Char('e')) => {
+                KeyAction::AdvancedKeyPlaceholder("external editor")
+            }
+            (KeyModifiers::CONTROL, KeyCode::Char('f')) => {
+                KeyAction::AdvancedKeyPlaceholder("file picker")
+            }
+            (KeyModifiers::CONTROL, KeyCode::Char('t')) => {
+                KeyAction::AdvancedKeyPlaceholder("template picker")
+            }
+            (KeyModifiers::CONTROL, KeyCode::Char('b')) => {
+                KeyAction::AdvancedKeyPlaceholder("git branch picker")
+            }
+            (KeyModifiers::CONTROL, KeyCode::Char('v')) => {
+                KeyAction::AdvancedKeyPlaceholder("environment variable picker")
+            }
+            _ => KeyAction::Continue,
+        };
+    }
     match (key.modifiers, key.code) {
+        (KeyModifiers::CONTROL, KeyCode::Char('x')) => {
+            state.ctrl_x_prefix = true;
+            KeyAction::Continue
+        }
         (KeyModifiers::CONTROL, KeyCode::Char('d')) if state.draft.is_empty() => KeyAction::Exit,
         (KeyModifiers::CONTROL, KeyCode::Char('d')) => {
             state.draft.delete();
@@ -351,6 +380,41 @@ mod tests {
             KeyAction::HistorySearchPlaceholder
         );
 
+        assert_eq!(state.mode, Mode::Draft);
+        assert_eq!(state.draft.as_str(), "git status");
+    }
+
+    #[test]
+    fn ctrl_x_prefix_resolves_advanced_chords_to_placeholders() {
+        let mut state = AppState::default();
+        state.draft.insert_str("git status");
+
+        assert_eq!(
+            apply_key_to_state(ctrl('x'), &mut state),
+            KeyAction::Continue
+        );
+        assert!(state.ctrl_x_prefix);
+        assert_eq!(
+            apply_key_to_state(ctrl('e'), &mut state),
+            KeyAction::AdvancedKeyPlaceholder("external editor")
+        );
+
+        assert!(!state.ctrl_x_prefix);
+        assert_eq!(state.draft.as_str(), "git status");
+    }
+
+    #[test]
+    fn ctrl_x_prefix_cancels_on_unknown_chord_without_editing_draft() {
+        let mut state = AppState::default();
+        state.draft.insert_str("git status");
+
+        apply_key_to_state(ctrl('x'), &mut state);
+        assert_eq!(
+            apply_key_to_state(ctrl('q'), &mut state),
+            KeyAction::Continue
+        );
+
+        assert!(!state.ctrl_x_prefix);
         assert_eq!(state.mode, Mode::Draft);
         assert_eq!(state.draft.as_str(), "git status");
     }

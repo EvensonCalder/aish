@@ -78,6 +78,7 @@ pub struct AppState {
     pub selected_ai_index: Option<usize>,
     pub output_ring: VecDeque<OutputEntry>,
     pub prompt_templates: PromptTemplates,
+    pub ctrl_x_prefix: bool,
     pub clock: fn() -> i64,
 }
 
@@ -102,6 +103,7 @@ impl Default for AppState {
             selected_ai_index: None,
             output_ring: VecDeque::new(),
             prompt_templates: PromptTemplates::default(),
+            ctrl_x_prefix: false,
             clock: unix_timestamp,
         }
     }
@@ -1288,7 +1290,7 @@ mod tests {
         assert!(output.contains("#history"));
         assert!(output.contains("Default keybindings:"));
         assert!(output.contains("Ctrl-C [implemented] - clear or cancel draft"));
-        assert!(output.contains("Ctrl-X Ctrl-E [reserved] - external editor reserved"));
+        assert!(output.contains("Ctrl-X Ctrl-E [implemented] - external editor placeholder"));
         assert!(state.draft.is_empty());
     }
 

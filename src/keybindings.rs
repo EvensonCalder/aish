@@ -83,28 +83,28 @@ pub const DEFAULT_KEYBINDINGS: &[KeyBinding] = &[
     },
     KeyBinding {
         key: "Ctrl-X Ctrl-E",
-        action: "external editor reserved",
-        implemented: false,
+        action: "external editor placeholder",
+        implemented: true,
     },
     KeyBinding {
         key: "Ctrl-X Ctrl-F",
-        action: "file picker reserved",
-        implemented: false,
+        action: "file picker placeholder",
+        implemented: true,
     },
     KeyBinding {
         key: "Ctrl-X Ctrl-T",
-        action: "template picker reserved",
-        implemented: false,
+        action: "template picker placeholder",
+        implemented: true,
     },
     KeyBinding {
         key: "Ctrl-X Ctrl-B",
-        action: "git branch picker reserved",
-        implemented: false,
+        action: "git branch picker placeholder",
+        implemented: true,
     },
     KeyBinding {
         key: "Ctrl-X Ctrl-V",
-        action: "environment variable picker reserved",
-        implemented: false,
+        action: "environment variable picker placeholder",
+        implemented: true,
     },
 ];
 
@@ -174,7 +174,7 @@ mod tests {
                 .implemented
         );
         assert!(
-            !bindings
+            bindings
                 .iter()
                 .find(|binding| binding.key == "Ctrl-X Ctrl-E")
                 .unwrap()
