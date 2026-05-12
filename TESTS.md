@@ -12,8 +12,8 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 125 library unit tests.
-- 15 draft execution integration tests.
+- 126 library unit tests.
+- 16 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
 - 1 ignored zsh PTY integration test.
@@ -273,8 +273,10 @@ Implemented:
 - Editor session preparation writes draft/history/AI selected content to a secure temporary file.
 - Editor process runner appends the prepared file path to the resolved command and waits for exit status without reading or executing content.
 - Editor read-back replaces the draft buffer with saved file content without executing it.
-- Editor read-back filters line-leading `#` lines by default.
-- `editor.allow_raw_hash_lines = true` preserves line-leading `#` lines in draft and lets the resulting editor draft submit raw shell content.
+- Editor read-back preserves saved content as an editor draft without filtering line-leading `#` lines.
+- Editor drafts submit raw shell content without Aish private `#` parsing, while ordinary typed line-leading `#` input remains protected.
+- Editor drafts render as opaque prompt summaries and direct inline editing keys leave the hidden editor content unchanged.
+- Editor draft submission preserves multi-line backslash continuation and lets the backend shell interpret it.
 - Editor roundtrip helper prepares a file, runs a fake editor, and reads successful edits back into draft while preserving the original draft on editor failure.
 - `Ctrl-X Ctrl-E` terminal handling resolves the editor, suspends raw mode when needed, runs the roundtrip, restores raw mode when needed, and reports success/failure.
 - Template commands are recognized as placeholders but do not read or write template storage yet.
@@ -297,6 +299,7 @@ Tests:
 - `commands::tests::notes_are_detected_with_or_without_space_after_hash`
 - `execute_draft_does_not_send_line_leading_hash_to_backend_shell`
 - `editor_draft_can_send_line_leading_hash_when_configured`
+- `editor_draft_sends_multiline_backslash_continuation_to_shell`
 - `execute_draft_does_not_run_context_pseudo_pipe_command`
 - `app::tests::private_help_prints_available_commands`
 - `keybindings::tests::default_keybindings_include_common_and_advanced_bindings`
@@ -308,6 +311,7 @@ Tests:
 - `terminal::tests::run_external_editor_replaces_draft_after_success`
 - `terminal::tests::run_external_editor_keeps_draft_after_editor_failure`
 - `terminal::tests::run_external_editor_reports_missing_editor`
+- `terminal::tests::editor_draft_ignores_inline_editing_keys`
 - `terminal::tests::ctrl_x_prefix_cancels_on_unknown_chord_without_editing_draft`
 - `app::tests::private_status_prints_mode_and_last_status`
 - `app::tests::private_config_prints_read_only_runtime_config`
@@ -328,8 +332,8 @@ Tests:
 - `app::tests::prepare_editor_session_writes_draft_text`
 - `app::tests::prepare_editor_session_copies_history_selection_to_draft_and_file`
 - `app::tests::prepare_editor_session_copies_ai_selection_to_draft_and_file`
-- `app::tests::replace_draft_from_editor_session_filters_hash_lines_by_default`
-- `app::tests::replace_draft_from_editor_session_can_preserve_hash_lines`
+- `app::tests::replace_draft_from_editor_session_preserves_editor_content`
+- `app::tests::editor_draft_renders_as_opaque_summary`
 - `app::tests::run_editor_roundtrip_replaces_draft_after_success`
 - `app::tests::run_editor_roundtrip_keeps_original_draft_after_editor_failure`
 - `app::tests::template_commands_report_placeholders_without_storage_side_effects`

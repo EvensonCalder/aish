@@ -3,7 +3,6 @@ use std::time::Duration;
 
 use aish::app::{AppState, execute_draft};
 use aish::commands::NoteTag;
-use aish::config::EditorConfig;
 use aish::editor::prepare_editor_file;
 use aish::history::{
     AiCommandIndex, AiItem, AiItemKind, AiSession, HistoryEntry, HistorySource, NoteEntry,
@@ -158,13 +157,7 @@ fn editor_draft_can_send_line_leading_hash_when_configured() {
         format!("# shell comment\ntouch {}", marker.display()),
     )
     .unwrap();
-    let mut state = AppState {
-        editor_config: EditorConfig {
-            allow_raw_hash_lines: true,
-            ..EditorConfig::default()
-        },
-        ..AppState::default()
-    };
+    let mut state = AppState::default();
     state.replace_draft_from_editor_session(&session).unwrap();
     let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
     let mut output = Vec::new();
@@ -180,6 +173,31 @@ fn editor_draft_can_send_line_leading_hash_when_configured() {
     assert!(marker.exists());
     assert_eq!(state.last_status, Some(0));
     assert!(!state.draft_from_editor);
+    assert!(state.draft.is_empty());
+}
+
+#[test]
+fn editor_draft_sends_multiline_backslash_continuation_to_shell() {
+    let _guard = pty_execution_guard();
+    let temp = tempfile::tempdir().unwrap();
+    let session = prepare_editor_file(temp.path(), "").unwrap();
+    std::fs::write(&session.path, "printf '%s\\n' \\\n+editor-continuation").unwrap();
+    let mut state = AppState::default();
+    state.replace_draft_from_editor_session(&session).unwrap();
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.contains("editor-continuation"));
+    assert_eq!(state.last_status, Some(0));
     assert!(state.draft.is_empty());
 }
 

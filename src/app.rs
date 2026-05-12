@@ -239,13 +239,8 @@ impl AppState {
         session: &PreparedEditorSession,
     ) -> Result<()> {
         let content = read_editor_file(session)?;
-        let content = if self.editor_config.allow_raw_hash_lines {
-            content
-        } else {
-            filter_editor_hash_lines(&content)
-        };
         self.draft = InputBuffer::from(content);
-        self.draft_from_editor = self.editor_config.allow_raw_hash_lines;
+        self.draft_from_editor = true;
         self.mode = Mode::Draft;
         Ok(())
     }
@@ -342,6 +337,9 @@ impl AppState {
         let text = match self.mode {
             Mode::History => self.selected_history_command().unwrap_or(""),
             Mode::Ai => self.selected_ai_command().unwrap_or(""),
+            Mode::Draft if self.draft_from_editor => {
+                return format!("{}{}", self.prompt_prefix(), self.editor_draft_summary());
+            }
             _ => self.draft.as_str(),
         };
         format!("{}{}", self.prompt_prefix(), text)
@@ -351,10 +349,19 @@ impl AppState {
         let cursor = match self.mode {
             Mode::History => self.selected_history_command().unwrap_or("").len(),
             Mode::Ai => self.selected_ai_command().unwrap_or("").len(),
+            Mode::Draft if self.draft_from_editor => self.editor_draft_summary().len(),
             _ => self.draft.cursor(),
         };
         let column = self.prompt_prefix().len() + cursor;
         column.min(u16::MAX as usize) as u16
+    }
+
+    fn editor_draft_summary(&self) -> String {
+        let bytes = self.draft.as_str().len();
+        let lines = self.draft.as_str().lines().count().max(1);
+        format!(
+            "[editor draft: {lines} line(s), {bytes} byte(s); Ctrl-X Ctrl-E to edit, Enter to run]"
+        )
     }
 
     fn push_output_entry(&mut self, entry: OutputEntry) {
@@ -870,14 +877,6 @@ pub fn execute_draft(
     Ok(())
 }
 
-fn filter_editor_hash_lines(content: &str) -> String {
-    content
-        .lines()
-        .filter(|line| !line.starts_with('#'))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 fn write_doctor_report(state: &AppState, out: &mut impl Write) -> Result<()> {
     writeln!(out, "Aish doctor")?;
     writeln!(out, "mode={}", state.mode.symbol())?;
@@ -924,11 +923,6 @@ fn write_config_report(state: &AppState, out: &mut impl Write) -> Result<()> {
     )?;
     writeln!(
         out,
-        "editor.allow_raw_hash_lines={}",
-        state.editor_config.allow_raw_hash_lines
-    )?;
-    writeln!(
-        out,
         "editor.command={}",
         format_editor_command(&state.editor_config.command)
     )?;
@@ -946,11 +940,6 @@ fn write_editor_report(state: &AppState, out: &mut impl Write) -> Result<()> {
         out,
         "execute_after_save={}",
         state.editor_config.execute_after_save
-    )?;
-    writeln!(
-        out,
-        "allow_raw_hash_lines={}",
-        state.editor_config.allow_raw_hash_lines
     )?;
     writeln!(
         out,
@@ -1402,7 +1391,7 @@ mod tests {
     }
 
     #[test]
-    fn replace_draft_from_editor_session_filters_hash_lines_by_default() {
+    fn replace_draft_from_editor_session_preserves_editor_content() {
         let temp = tempfile::tempdir().unwrap();
         let mut state = AppState::default();
         state.draft.insert_str("old draft");
@@ -1412,31 +1401,30 @@ mod tests {
         state.replace_draft_from_editor_session(&session).unwrap();
 
         assert_eq!(state.mode, Mode::Draft);
-        assert_eq!(state.draft.as_str(), "echo edited\n echo kept");
+        assert_eq!(state.draft.as_str(), "echo edited\n# filtered\n echo kept");
         assert_eq!(state.draft.cursor(), state.draft.as_str().len());
-        assert!(!state.draft_from_editor);
+        assert!(state.draft_from_editor);
         assert_eq!(state.last_status, None);
         assert!(state.regular_history.is_empty());
     }
 
     #[test]
-    fn replace_draft_from_editor_session_can_preserve_hash_lines() {
+    fn editor_draft_renders_as_opaque_summary() {
         let temp = tempfile::tempdir().unwrap();
-        let mut state = AppState {
-            editor_config: EditorConfig {
-                allow_raw_hash_lines: true,
-                ..EditorConfig::default()
-            },
-            ..AppState::default()
-        };
-        state.draft.insert_str("old draft");
+        let mut state = AppState::default();
         let session = state.prepare_editor_session(temp.path()).unwrap();
-        std::fs::write(&session.path, "echo edited\n# raw shell content").unwrap();
+        std::fs::write(&session.path, "echo one\necho two").unwrap();
 
         state.replace_draft_from_editor_session(&session).unwrap();
 
-        assert_eq!(state.draft.as_str(), "echo edited\n# raw shell content");
-        assert!(state.draft_from_editor);
+        assert_eq!(
+            state.render_prompt_line(),
+            "> [editor draft: 2 line(s), 17 byte(s); Ctrl-X Ctrl-E to edit, Enter to run]"
+        );
+        assert_eq!(
+            state.terminal_cursor_column(),
+            state.render_prompt_line().len() as u16
+        );
     }
 
     #[test]
@@ -2108,7 +2096,6 @@ mod tests {
             editor_config: EditorConfig {
                 command: vec!["nvim".to_string(), "--clean".to_string()],
                 execute_after_save: false,
-                allow_raw_hash_lines: false,
             },
             ..AppState::default()
         };
@@ -2128,7 +2115,6 @@ mod tests {
         assert!(output.contains("Aish config"));
         assert!(output.contains("draft.persist=false"));
         assert!(output.contains("editor.execute_after_save=false"));
-        assert!(output.contains("editor.allow_raw_hash_lines=false"));
         assert!(output.contains("editor.command=nvim --clean"));
         assert!(output.contains("editor.resolved=nvim --clean"));
         assert!(output.contains("history.regular="));
@@ -2158,7 +2144,6 @@ mod tests {
             editor_config: EditorConfig {
                 command: vec!["vim".to_string()],
                 execute_after_save: false,
-                allow_raw_hash_lines: false,
             },
             regular_history_path: Some(history_path.clone()),
             notes_path: Some(notes_path.clone()),
@@ -2224,7 +2209,6 @@ mod tests {
             editor_config: EditorConfig {
                 command: vec!["code".to_string(), "--wait".to_string()],
                 execute_after_save: false,
-                allow_raw_hash_lines: false,
             },
             editor_temp_root: Some(std::env::temp_dir().join("aish-editor-test")),
             ..AppState::default()
@@ -2244,7 +2228,6 @@ mod tests {
         let output = String::from_utf8(output).unwrap();
         assert!(output.contains("Aish editor"));
         assert!(output.contains("configured=code --wait"));
-        assert!(output.contains("allow_raw_hash_lines=false"));
         assert!(output.contains("editor.resolved=code --wait"));
         assert!(output.contains("external editor launch is wired to Ctrl-X Ctrl-E"));
         assert_eq!(state.last_status, None);

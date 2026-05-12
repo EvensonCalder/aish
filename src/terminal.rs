@@ -161,6 +161,7 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
         state.mode,
         crate::modes::Mode::History | crate::modes::Mode::Ai
     );
+    let is_editor_draft = state.mode == crate::modes::Mode::Draft && state.draft_from_editor;
     if state.ctrl_x_prefix {
         state.ctrl_x_prefix = false;
         return match (key.modifiers, key.code) {
@@ -186,6 +187,7 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
             KeyAction::Continue
         }
         (KeyModifiers::CONTROL, KeyCode::Char('d')) if state.draft.is_empty() => KeyAction::Exit,
+        (KeyModifiers::CONTROL, KeyCode::Char('d')) if is_editor_draft => KeyAction::Continue,
         (KeyModifiers::CONTROL, KeyCode::Char('d')) => {
             state.draft.delete();
             KeyAction::Continue
@@ -198,15 +200,18 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
         (KeyModifiers::CONTROL, KeyCode::Char('l')) => KeyAction::ClearScreen,
         (KeyModifiers::CONTROL, KeyCode::Char('r')) => KeyAction::HistorySearchPlaceholder,
         (KeyModifiers::CONTROL, KeyCode::Char('a')) => {
-            if !is_read_only_mode {
+            if !is_read_only_mode && !is_editor_draft {
                 state.draft.move_start();
             }
             KeyAction::Continue
         }
         (KeyModifiers::CONTROL, KeyCode::Char('e')) => {
-            if !is_read_only_mode {
+            if !is_read_only_mode && !is_editor_draft {
                 state.draft.move_end();
             }
+            KeyAction::Continue
+        }
+        (KeyModifiers::CONTROL, KeyCode::Char('u' | 'k' | 'w')) if is_editor_draft => {
             KeyAction::Continue
         }
         (KeyModifiers::CONTROL, KeyCode::Char('u')) => {
@@ -225,13 +230,13 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
             KeyAction::Continue
         }
         (KeyModifiers::ALT, KeyCode::Char('b') | KeyCode::Left) => {
-            if !is_read_only_mode {
+            if !is_read_only_mode && !is_editor_draft {
                 state.draft.move_previous_word();
             }
             KeyAction::Continue
         }
         (KeyModifiers::ALT, KeyCode::Char('f') | KeyCode::Right) => {
-            if !is_read_only_mode {
+            if !is_read_only_mode && !is_editor_draft {
                 state.draft.move_next_word();
             }
             KeyAction::Continue
@@ -253,15 +258,18 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
             KeyAction::Continue
         }
         (_, KeyCode::Left) => {
-            if !is_read_only_mode {
+            if !is_read_only_mode && !is_editor_draft {
                 state.draft.move_left();
             }
             KeyAction::Continue
         }
         (_, KeyCode::Right) => {
-            if !is_read_only_mode {
+            if !is_read_only_mode && !is_editor_draft {
                 state.draft.move_right();
             }
+            KeyAction::Continue
+        }
+        (_, KeyCode::Backspace | KeyCode::Delete | KeyCode::Char(_)) if is_editor_draft => {
             KeyAction::Continue
         }
         (_, KeyCode::Backspace) => {
@@ -507,7 +515,6 @@ mod tests {
             editor_config: EditorConfig {
                 command: vec![script.display().to_string()],
                 execute_after_save: false,
-                allow_raw_hash_lines: false,
             },
             editor_temp_root: Some(temp.path().join("editor")),
             ..AppState::default()
@@ -532,7 +539,6 @@ mod tests {
             editor_config: EditorConfig {
                 command: vec![script.display().to_string()],
                 execute_after_save: false,
-                allow_raw_hash_lines: false,
             },
             editor_temp_root: Some(temp.path().join("editor")),
             ..AppState::default()
@@ -556,7 +562,6 @@ mod tests {
             editor_config: EditorConfig {
                 command: vec!["/definitely/missing/aish-editor".to_string()],
                 execute_after_save: false,
-                allow_raw_hash_lines: false,
             },
             editor_temp_root: Some(temp.path().join("editor")),
             ..AppState::default()
@@ -567,6 +572,21 @@ mod tests {
 
         assert!(error.to_string().contains("failed to run editor command"));
         assert!(state.draft.is_empty());
+    }
+
+    #[test]
+    fn editor_draft_ignores_inline_editing_keys() {
+        let mut state = AppState::default();
+        state.draft.insert_str("echo one\necho two");
+        state.draft_from_editor = true;
+
+        apply_key_to_state(key(KeyCode::Char('x')), &mut state);
+        apply_key_to_state(key(KeyCode::Backspace), &mut state);
+        apply_key_to_state(ctrl('u'), &mut state);
+        apply_key_to_state(key(KeyCode::Left), &mut state);
+
+        assert_eq!(state.draft.as_str(), "echo one\necho two");
+        assert!(state.draft_from_editor);
     }
 
     #[test]
