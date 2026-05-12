@@ -19,6 +19,7 @@ pub enum KeyAction {
     Exit,
     ClearScreen,
     HistorySearchPlaceholder,
+    ExternalEditor,
     AdvancedKeyPlaceholder(&'static str),
     Submit,
 }
@@ -95,6 +96,9 @@ fn handle_key(
         KeyAction::HistorySearchPlaceholder => {
             writeln!(out, "history search is not implemented yet")?;
         }
+        KeyAction::ExternalEditor => {
+            writeln!(out, "external editor launch is not wired yet")?;
+        }
         KeyAction::AdvancedKeyPlaceholder(name) => {
             writeln!(out, "{name} is not implemented yet")?;
         }
@@ -119,9 +123,7 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
     if state.ctrl_x_prefix {
         state.ctrl_x_prefix = false;
         return match (key.modifiers, key.code) {
-            (KeyModifiers::CONTROL, KeyCode::Char('e')) => {
-                KeyAction::AdvancedKeyPlaceholder("external editor")
-            }
+            (KeyModifiers::CONTROL, KeyCode::Char('e')) => KeyAction::ExternalEditor,
             (KeyModifiers::CONTROL, KeyCode::Char('f')) => {
                 KeyAction::AdvancedKeyPlaceholder("file picker")
             }
@@ -385,7 +387,7 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_x_prefix_resolves_advanced_chords_to_placeholders() {
+    fn ctrl_x_prefix_resolves_editor_chord_to_launch_action() {
         let mut state = AppState::default();
         state.draft.insert_str("git status");
 
@@ -396,11 +398,33 @@ mod tests {
         assert!(state.ctrl_x_prefix);
         assert_eq!(
             apply_key_to_state(ctrl('e'), &mut state),
-            KeyAction::AdvancedKeyPlaceholder("external editor")
+            KeyAction::ExternalEditor
         );
 
         assert!(!state.ctrl_x_prefix);
         assert_eq!(state.draft.as_str(), "git status");
+    }
+
+    #[test]
+    fn ctrl_x_prefix_resolves_other_advanced_chords_to_placeholders() {
+        for (ch, name) in [
+            ('f', "file picker"),
+            ('t', "template picker"),
+            ('b', "git branch picker"),
+            ('v', "environment variable picker"),
+        ] {
+            let mut state = AppState::default();
+            state.draft.insert_str("git status");
+
+            apply_key_to_state(ctrl('x'), &mut state);
+
+            assert_eq!(
+                apply_key_to_state(ctrl(ch), &mut state),
+                KeyAction::AdvancedKeyPlaceholder(name)
+            );
+            assert!(!state.ctrl_x_prefix);
+            assert_eq!(state.draft.as_str(), "git status");
+        }
     }
 
     #[test]

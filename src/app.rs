@@ -1504,7 +1504,7 @@ mod tests {
         assert!(output.contains("#history"));
         assert!(output.contains("Default keybindings:"));
         assert!(output.contains("Ctrl-C [implemented] - clear or cancel draft"));
-        assert!(output.contains("Ctrl-X Ctrl-E [implemented] - external editor placeholder"));
+        assert!(output.contains("Ctrl-X Ctrl-E [implemented] - external editor"));
         assert!(state.draft.is_empty());
     }
 

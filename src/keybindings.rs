@@ -83,7 +83,7 @@ pub const DEFAULT_KEYBINDINGS: &[KeyBinding] = &[
     },
     KeyBinding {
         key: "Ctrl-X Ctrl-E",
-        action: "external editor placeholder",
+        action: "external editor",
         implemented: true,
     },
     KeyBinding {
