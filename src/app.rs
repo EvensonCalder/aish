@@ -16,6 +16,9 @@ use crate::completion::{
 use crate::config::{
     self, AiConfig, CompletionConfig, ContextConfig, EditorConfig, PasteConfig, PromptConfig,
 };
+use crate::context::{
+    build_contextual_ai_prompt, is_dangerous_context_command, run_context_command,
+};
 use crate::editor::{
     EditorCommand, EditorRunResult, PreparedEditorSession, prepare_editor_file, read_editor_file,
     resolve_editor_command, run_editor_command,
@@ -1004,13 +1007,8 @@ pub fn execute_draft(
                 return Ok(());
             }
             ParsedLine::AiPromptWithContext { prompt, command } => {
-                writeln!(
-                    out,
-                    "AI prompts with context are not implemented yet; context command not executed: {command}"
-                )?;
-                writeln!(out, "prompt: {prompt}")?;
+                submit_ai_prompt_with_context(state, prompt, command, out, timeout)?;
                 state.draft.clear();
-                state.mode = Mode::Draft;
                 return Ok(());
             }
         }
@@ -1077,6 +1075,60 @@ fn submit_ai_prompt(state: &mut AppState, prompt: &str, out: &mut impl Write) ->
         }
     }
     Ok(())
+}
+
+fn submit_ai_prompt_with_context(
+    state: &mut AppState,
+    prompt: &str,
+    command: &str,
+    out: &mut impl Write,
+    timeout: Duration,
+) -> Result<()> {
+    if !state.context_config.enabled {
+        writeln!(
+            out,
+            "context collection is disabled; context command not executed: {command}"
+        )?;
+        state.mode = Mode::Draft;
+        return Ok(());
+    }
+    if is_dangerous_context_command(command) {
+        writeln!(
+            out,
+            "context command requires confirmation and was not executed: {command}"
+        )?;
+        state.mode = Mode::Draft;
+        return Ok(());
+    }
+    if state.context_config.confirm {
+        writeln!(out, "aish will run this command to collect context:")?;
+        writeln!(out)?;
+        writeln!(out, "  {command}")?;
+        writeln!(out)?;
+        writeln!(out, "Run context command? [Y/n]")?;
+        writeln!(
+            out,
+            "context confirmation is not interactive yet; command not executed"
+        )?;
+        state.mode = Mode::Draft;
+        return Ok(());
+    }
+
+    let result = run_context_command(
+        command,
+        state.current_cwd.as_deref(),
+        state.context_config.max_bytes,
+        timeout,
+    )?;
+    if result.truncated {
+        writeln!(
+            out,
+            "context output truncated to {} bytes",
+            state.context_config.max_bytes
+        )?;
+    }
+    let contextual_prompt = build_contextual_ai_prompt(prompt, command, &result);
+    submit_ai_prompt(state, &contextual_prompt, out)
 }
 
 fn write_doctor_report(state: &AppState, out: &mut impl Write) -> Result<()> {
@@ -2359,6 +2411,84 @@ mod tests {
             config::load_config(&config_path).unwrap().context,
             ContextConfig::default()
         );
+    }
+
+    #[test]
+    fn ai_prompt_with_context_waits_for_confirmation_by_default() {
+        let mut state = AppState::default();
+        state.draft.insert_str("# explain < printf context");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("aish will run this command to collect context"));
+        assert!(output.contains("Run context command? [Y/n]"));
+        assert!(output.contains("context confirmation is not interactive yet"));
+        assert!(state.draft.is_empty());
+        assert!(state.ai_sessions.is_empty());
+    }
+
+    #[test]
+    fn ai_prompt_with_context_disabled_does_not_execute_command() {
+        let mut state = AppState {
+            context_config: ContextConfig {
+                enabled: false,
+                ..ContextConfig::default()
+            },
+            ..AppState::default()
+        };
+        state.draft.insert_str("# explain < printf context");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("context collection is disabled"));
+        assert!(output.contains("context command not executed: printf context"));
+        assert!(state.draft.is_empty());
+        assert!(state.ai_sessions.is_empty());
+    }
+
+    #[test]
+    fn ai_prompt_with_context_blocks_dangerous_command_even_without_confirmation() {
+        let mut state = AppState {
+            context_config: ContextConfig {
+                confirm: false,
+                ..ContextConfig::default()
+            },
+            ..AppState::default()
+        };
+        state.draft.insert_str("# explain < rm -rf /tmp/aish-test");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("context command requires confirmation and was not executed"));
+        assert!(state.draft.is_empty());
+        assert!(state.ai_sessions.is_empty());
     }
 
     #[test]

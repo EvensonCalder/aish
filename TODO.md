@@ -536,17 +536,17 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 
 ### Tasks
 
-- [ ] Parse `# prompt < command`.
+- [x] Parse `# prompt < command`.
 - [x] Implement `#context on|off`.
 - [x] Implement `#context confirm on|off`.
 - [x] Implement `#context <bytes>`.
-- [ ] Execute context command through backend shell or a controlled shell subprocess.
-- [ ] Capture stdout/stderr.
-- [ ] Apply max byte cap.
-- [ ] Add truncation notice.
-- [ ] Add dangerous command detection.
+- [x] Execute context command through backend shell or a controlled shell subprocess.
+- [x] Capture stdout/stderr.
+- [x] Apply max byte cap.
+- [x] Add truncation notice.
+- [x] Add dangerous command detection.
 - [ ] Force confirmation for dangerous context commands.
-- [ ] Include context in AI request.
+- [x] Include context in AI request.
 
 ### Acceptance criteria
 

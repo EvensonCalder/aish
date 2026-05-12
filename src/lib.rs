@@ -3,6 +3,7 @@ pub mod app;
 pub mod commands;
 pub mod completion;
 pub mod config;
+pub mod context;
 pub mod editor;
 pub mod encryption;
 pub mod history;
