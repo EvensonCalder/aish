@@ -385,6 +385,39 @@ impl AppState {
         Ok(true)
     }
 
+    pub fn store_ai_session_from_items(
+        &mut self,
+        prompt: &str,
+        model: &str,
+        items: Vec<AiItem>,
+    ) -> Result<bool> {
+        let session = AiSession {
+            id: format!("ai-{}-{}", (self.clock)(), self.ai_sessions.len() + 1),
+            t: (self.clock)(),
+            prompt: prompt.to_string(),
+            ctx: false,
+            model: model.to_string(),
+            items,
+        };
+        if let Some(path) = &self.ai_history_path {
+            append_jsonl(path, &session)?;
+        }
+        let new_session_index = self.ai_sessions.len();
+        self.ai_sessions.push(session);
+        self.ai_command_indices = ai_command_indices(&self.ai_sessions);
+        self.selected_ai_index = self
+            .ai_command_indices
+            .iter()
+            .position(|index| index.session_index == new_session_index);
+        if self.selected_ai_index.is_some() {
+            self.mode = Mode::Ai;
+            Ok(true)
+        } else {
+            self.mode = Mode::Draft;
+            Ok(false)
+        }
+    }
+
     fn selected_ai_item(&self) -> Option<(&AiSession, &AiItem)> {
         let index = self.ai_command_indices.get(self.selected_ai_index?)?;
         let session = self.ai_sessions.get(index.session_index)?;
@@ -1640,6 +1673,84 @@ mod tests {
         assert_eq!(state.draft.as_str(), "rsync {from} {to}");
         assert!(state.draft_from_template);
         assert!(!state.draft_from_editor);
+    }
+
+    #[test]
+    fn store_ai_session_from_items_persists_and_selects_first_command() {
+        let temp = tempfile::tempdir().unwrap();
+        let ai_path = temp.path().join("history/ai.jsonl");
+        let mut state = AppState {
+            ai_history_path: Some(ai_path.clone()),
+            ai_sessions: vec![AiSession {
+                id: "old".to_string(),
+                t: 1,
+                prompt: "old prompt".to_string(),
+                ctx: false,
+                model: "old-model".to_string(),
+                items: vec![AiItem {
+                    kind: AiItemKind::Command,
+                    text: "old command".to_string(),
+                    name: None,
+                }],
+            }],
+            clock: || 42,
+            ..AppState::default()
+        };
+
+        assert!(
+            state
+                .store_ai_session_from_items(
+                    "new prompt",
+                    "gpt-test",
+                    vec![
+                        AiItem {
+                            kind: AiItemKind::Template,
+                            text: "template body".to_string(),
+                            name: Some("tpl".to_string()),
+                        },
+                        AiItem {
+                            kind: AiItemKind::Command,
+                            text: "new command".to_string(),
+                            name: None,
+                        },
+                    ],
+                )
+                .unwrap()
+        );
+
+        assert_eq!(state.mode, Mode::Ai);
+        assert_eq!(state.selected_ai_index, Some(1));
+        assert_eq!(state.selected_ai_command(), Some("new command"));
+        assert_eq!(state.ai_sessions.len(), 2);
+        assert_eq!(state.ai_sessions[1].prompt, "new prompt");
+        assert_eq!(state.ai_sessions[1].model, "gpt-test");
+        let loaded = load_jsonl::<AiSession>(&ai_path).unwrap();
+        assert_eq!(loaded.items.len(), 1);
+        assert_eq!(loaded.items[0].prompt, "new prompt");
+    }
+
+    #[test]
+    fn store_ai_session_from_items_without_commands_stays_in_draft() {
+        let mut state = AppState::default();
+
+        assert!(
+            !state
+                .store_ai_session_from_items(
+                    "prompt",
+                    "gpt-test",
+                    vec![AiItem {
+                        kind: AiItemKind::Template,
+                        text: "template body".to_string(),
+                        name: Some("tpl".to_string()),
+                    }],
+                )
+                .unwrap()
+        );
+
+        assert_eq!(state.mode, Mode::Draft);
+        assert_eq!(state.selected_ai_index, None);
+        assert!(state.ai_command_indices.is_empty());
+        assert_eq!(state.ai_sessions.len(), 1);
     }
 
     #[test]

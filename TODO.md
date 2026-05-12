@@ -518,8 +518,8 @@ Status: implemented for v0.1.0 via external `fzf`. Picker actions are intentiona
 - [x] Parse JSON response.
 - [x] Validate `items` array.
 - [x] Reject empty or invalid output with clear error.
-- [ ] Store AI session in `ai.jsonl`.
-- [ ] Switch to `%` AI mode at first generated item.
+- [x] Store AI session in `ai.jsonl`.
+- [x] Switch to `%` AI mode at first generated item.
 
 ### Acceptance criteria
 
