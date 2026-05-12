@@ -70,14 +70,7 @@ pub fn run(
                 break;
             }
             Event::Paste(text) => {
-                if !text.contains('\n') && !text.contains('\r') {
-                    if state.draft.is_empty() {
-                        state.draft_from_editor = false;
-                    }
-                    state.draft.insert_str(&text);
-                } else {
-                    state.replace_draft_from_editor_text(normalize_paste_newlines(&text));
-                }
+                apply_paste_to_state(&text, state);
                 redraw(state, out)?;
             }
             _ => {}
@@ -164,6 +157,18 @@ pub fn run_external_editor(
         )?;
     }
     Ok(())
+}
+
+pub fn apply_paste_to_state(text: &str, state: &mut AppState) {
+    if !text.contains('\n') && !text.contains('\r') {
+        state.copy_read_only_selection_to_draft();
+        if state.draft.is_empty() {
+            state.draft_from_editor = false;
+        }
+        state.draft.insert_str(text);
+    } else {
+        state.replace_draft_from_editor_text(normalize_paste_newlines(text));
+    }
 }
 
 fn normalize_paste_newlines(text: &str) -> String {
@@ -665,6 +670,55 @@ mod tests {
         assert_eq!(
             normalize_paste_newlines("one\r\ntwo\rthree"),
             "one\ntwo\nthree"
+        );
+    }
+
+    #[test]
+    fn single_line_paste_inserts_into_draft() {
+        let mut state = AppState::default();
+        state.draft.insert_str("git ");
+
+        apply_paste_to_state("status", &mut state);
+
+        assert_eq!(state.mode, Mode::Draft);
+        assert_eq!(state.draft.as_str(), "git status");
+        assert!(!state.draft_from_editor);
+    }
+
+    #[test]
+    fn single_line_paste_copies_history_selection_first() {
+        let mut state = AppState {
+            mode: Mode::History,
+            regular_history: vec![crate::history::HistoryEntry {
+                t: 1,
+                command: "git statu".to_string(),
+                exit_code: Some(0),
+                source: crate::history::HistorySource::User,
+            }],
+            selected_history_index: Some(0),
+            ..AppState::default()
+        };
+
+        apply_paste_to_state("s", &mut state);
+
+        assert_eq!(state.mode, Mode::Draft);
+        assert_eq!(state.draft.as_str(), "git status");
+        assert!(!state.draft_from_editor);
+    }
+
+    #[test]
+    fn multiline_paste_creates_opaque_editor_draft() {
+        let mut state = AppState::default();
+
+        apply_paste_to_state("echo one\r\necho two", &mut state);
+
+        assert_eq!(state.mode, Mode::Draft);
+        assert!(state.draft_from_editor);
+        assert_eq!(state.draft.as_str(), "echo one\necho two");
+        assert!(
+            state
+                .render_prompt_line()
+                .contains("[editor draft: 2 line(s)")
         );
     }
 

@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 129 library unit tests.
+- 132 library unit tests.
 - 18 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
@@ -277,6 +277,7 @@ Implemented:
 - Editor drafts submit raw shell content without Aish private `#` parsing, while ordinary typed line-leading `#` input remains protected.
 - Editor drafts render as opaque prompt summaries and direct inline editing keys leave the hidden editor content unchanged.
 - Multi-line paste content is normalized and stored as an opaque editor draft by default.
+- Single-line paste copies read-only history/AI selections to draft before inserting pasted text.
 - Editor draft submission preserves multi-line backslash continuation and lets the backend shell interpret it.
 - Ordinary and editor draft history preserve backslash continuations as one submitted command string.
 - Editor roundtrip helper prepares a file, runs a fake editor, and reads successful edits back into draft while preserving the original draft on editor failure.
@@ -319,6 +320,9 @@ Tests:
 - `terminal::tests::run_external_editor_executes_after_save_when_configured`
 - `terminal::tests::editor_draft_ignores_inline_editing_keys`
 - `terminal::tests::normalize_paste_newlines_canonicalizes_crlf_and_cr`
+- `terminal::tests::single_line_paste_inserts_into_draft`
+- `terminal::tests::single_line_paste_copies_history_selection_first`
+- `terminal::tests::multiline_paste_creates_opaque_editor_draft`
 - `app::tests::replace_draft_from_editor_text_creates_opaque_editor_draft`
 - `terminal::tests::ctrl_x_prefix_cancels_on_unknown_chord_without_editing_draft`
 - `app::tests::private_status_prints_mode_and_last_status`
