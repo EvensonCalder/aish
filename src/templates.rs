@@ -78,6 +78,22 @@ pub fn replace_template(path: &Path, entry: TemplateEntry) -> Result<TemplateRem
 
 pub fn template_placeholders(body: &str) -> Vec<String> {
     let mut placeholders = Vec::new();
+    for placeholder in parse_template_placeholders(body) {
+        if !placeholders.iter().any(|item| item == &placeholder.name) {
+            placeholders.push(placeholder.name);
+        }
+    }
+    placeholders
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ParsedPlaceholder {
+    raw: String,
+    name: String,
+}
+
+fn parse_template_placeholders(body: &str) -> Vec<ParsedPlaceholder> {
+    let mut placeholders = Vec::new();
     let mut rest = body;
     while let Some(start) = rest.find('{') {
         rest = &rest[start + 1..];
@@ -85,8 +101,11 @@ pub fn template_placeholders(body: &str) -> Vec<String> {
             break;
         };
         let candidate = &rest[..end];
-        if is_placeholder_name(candidate) && !placeholders.iter().any(|item| item == candidate) {
-            placeholders.push(candidate.to_string());
+        if let Some(name) = placeholder_name(candidate) {
+            placeholders.push(ParsedPlaceholder {
+                raw: format!("{{{candidate}}}"),
+                name: name.to_string(),
+            });
         }
         rest = &rest[end + 1..];
     }
@@ -103,10 +122,12 @@ pub fn apply_template_values_with_usage(
 ) -> (String, Vec<String>) {
     let mut rendered = body.to_string();
     let mut used = Vec::new();
-    for placeholder in template_placeholders(body) {
-        if let Some(value) = values.get(&placeholder) {
-            rendered = rendered.replace(&format!("{{{placeholder}}}"), value);
-            used.push(placeholder);
+    for placeholder in parse_template_placeholders(body) {
+        if let Some(value) = values.get(&placeholder.name) {
+            rendered = rendered.replace(&placeholder.raw, value);
+            if !used.iter().any(|item| item == &placeholder.name) {
+                used.push(placeholder.name);
+            }
         }
     }
     (rendered, used)
@@ -117,6 +138,14 @@ fn is_placeholder_name(candidate: &str) -> bool {
         && candidate
             .chars()
             .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+}
+
+fn placeholder_name(candidate: &str) -> Option<&str> {
+    let name = candidate
+        .strip_suffix("...")
+        .or_else(|| candidate.split_once(':').map(|(name, _)| name))
+        .unwrap_or(candidate);
+    is_placeholder_name(name).then_some(name)
 }
 
 #[cfg(test)]
@@ -228,6 +257,16 @@ mod tests {
     }
 
     #[test]
+    fn template_placeholders_support_descriptions_and_variadic_markers() {
+        assert_eq!(
+            template_placeholders(
+                "git commit -m {message:commit message} -- {paths...} {message} {bad name:ignored}"
+            ),
+            ["message", "paths"]
+        );
+    }
+
+    #[test]
     fn apply_template_values_replaces_known_placeholders_and_leaves_unknown() {
         let values = HashMap::from([
             ("from".to_string(), "src".to_string()),
@@ -252,5 +291,21 @@ mod tests {
 
         assert_eq!(rendered, "cp src dst {mode}");
         assert_eq!(used, ["from", "to"]);
+    }
+
+    #[test]
+    fn apply_template_values_replaces_described_and_variadic_placeholders_by_name() {
+        let values = HashMap::from([
+            ("message".to_string(), "ship it".to_string()),
+            ("paths".to_string(), "src tests".to_string()),
+        ]);
+
+        let (rendered, used) = apply_template_values_with_usage(
+            "git commit -m {message:commit message} -- {paths...} {message}",
+            &values,
+        );
+
+        assert_eq!(rendered, "git commit -m ship it -- src tests ship it");
+        assert_eq!(used, ["message", "paths"]);
     }
 }

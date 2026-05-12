@@ -175,6 +175,7 @@ pub fn apply_paste_to_state(text: &str, state: &mut AppState) -> PasteAction {
         state.copy_read_only_selection_to_draft();
         if state.draft.is_empty() {
             state.draft_from_editor = false;
+            state.draft_from_template = false;
         }
         state.draft.insert_str(text);
         return PasteAction::Continue;
@@ -236,6 +237,7 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
         (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
             state.draft.clear();
             state.draft_from_editor = false;
+            state.draft_from_template = false;
             KeyAction::Continue
         }
         (KeyModifiers::CONTROL, KeyCode::Char('l')) => KeyAction::ClearScreen,
@@ -318,6 +320,7 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
             state.draft.backspace();
             if state.draft.is_empty() {
                 state.draft_from_editor = false;
+                state.draft_from_template = false;
             }
             KeyAction::Continue
         }
@@ -326,12 +329,14 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
             state.draft.delete();
             if state.draft.is_empty() {
                 state.draft_from_editor = false;
+                state.draft_from_template = false;
             }
             KeyAction::Continue
         }
         (_, KeyCode::Esc) => {
             state.draft.clear();
             state.draft_from_editor = false;
+            state.draft_from_template = false;
             state.mode = crate::modes::Mode::Draft;
             KeyAction::Continue
         }
@@ -344,6 +349,7 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
             state.copy_read_only_selection_to_draft();
             if state.draft.is_empty() {
                 state.draft_from_editor = false;
+                state.draft_from_template = false;
             }
             state.draft.insert_char(ch);
             KeyAction::Continue

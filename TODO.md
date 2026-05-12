@@ -402,26 +402,26 @@ This is a future configurable enhancement. It must not replace the default faith
 
 ### Tasks
 
-- [ ] Implement `#mt <name> <template>`.
-- [ ] Implement multi-line `#mt` continuation.
-- [ ] Store templates in `templates/templates.jsonl`.
-- [ ] Implement `#template list`.
-- [ ] Implement `#template rm <name>`.
+- [x] Implement `#mt <name> <template>`.
+- [x] Implement multi-line `#mt` continuation.
+- [x] Store templates in `templates/templates.jsonl`.
+- [x] Implement `#template list`.
+- [x] Implement `#template rm <name>`.
 - [ ] Parse placeholders:
-  - [ ] `{name}`
-  - [ ] `{name:description}`
-  - [ ] `{name...}`
+  - [x] `{name}`
+  - [x] `{name:description}`
+  - [x] `{name...}`
 - [ ] Implement placeholder spans in editor buffer.
 - [ ] Implement whole-placeholder deletion from outside.
 - [ ] Implement expanded placeholder behavior when edited internally.
-- [ ] Block execution of unresolved placeholders.
+- [x] Block execution of unresolved placeholders in template drafts.
 
 ### Acceptance criteria
 
 - Templates can be created manually.
 - AI-suggested templates are not auto-saved.
 - Template candidates appear in completion.
-- Unresolved placeholders cannot be executed.
+- Unresolved placeholders in template drafts cannot be executed.
 
 ---
 

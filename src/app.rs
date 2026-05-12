@@ -86,6 +86,7 @@ pub struct AppState {
     pub editor_temp_root: Option<PathBuf>,
     pub paste_config: PasteConfig,
     pub draft_from_editor: bool,
+    pub draft_from_template: bool,
     pub ctrl_x_prefix: bool,
     pub clock: fn() -> i64,
 }
@@ -115,6 +116,7 @@ impl Default for AppState {
             editor_temp_root: None,
             paste_config: PasteConfig::default(),
             draft_from_editor: false,
+            draft_from_template: false,
             ctrl_x_prefix: false,
             clock: unix_timestamp,
         }
@@ -173,6 +175,7 @@ impl AppState {
         };
         self.draft = InputBuffer::from(command);
         self.draft_from_editor = false;
+        self.draft_from_template = false;
         self.mode = Mode::Draft;
         true
     }
@@ -215,6 +218,7 @@ impl AppState {
         };
         self.draft = InputBuffer::from(command);
         self.draft_from_editor = false;
+        self.draft_from_template = false;
         self.mode = Mode::Draft;
         true
     }
@@ -243,6 +247,7 @@ impl AppState {
         let content = read_editor_file(session)?;
         self.draft = InputBuffer::from(content);
         self.draft_from_editor = true;
+        self.draft_from_template = false;
         self.mode = Mode::Draft;
         Ok(())
     }
@@ -263,6 +268,7 @@ impl AppState {
     pub fn replace_draft_from_editor_text(&mut self, content: impl Into<String>) {
         self.draft = InputBuffer::from(content.into());
         self.draft_from_editor = true;
+        self.draft_from_template = false;
         self.mode = Mode::Draft;
     }
 
@@ -427,6 +433,18 @@ pub fn execute_draft(
     }
 
     let command = state.draft.as_str().to_string();
+    if state.draft_from_template {
+        let unresolved = template_placeholders(&command);
+        if !unresolved.is_empty() {
+            writeln!(
+                out,
+                "cannot execute unresolved template placeholders: {}",
+                unresolved.join(", ")
+            )?;
+            state.mode = Mode::Draft;
+            return Ok(());
+        }
+    }
     if !state.draft_from_editor {
         match parse_line(&command) {
             ParsedLine::Ordinary(_) => {}
@@ -728,6 +746,8 @@ pub fn execute_draft(
                                                         &values,
                                                     );
                                                 state.draft = InputBuffer::from(rendered);
+                                                state.draft_from_editor = false;
+                                                state.draft_from_template = true;
                                                 keep_draft = true;
                                                 writeln!(out, "template copied to draft: {name}")?;
                                                 let placeholders =
@@ -876,6 +896,7 @@ pub fn execute_draft(
     }
     state.draft.clear();
     state.draft_from_editor = false;
+    state.draft_from_template = false;
     if executing_ai && result.exit_code == 0 {
         state.advance_after_ai_success();
     } else if executing_ai {
@@ -1992,6 +2013,69 @@ mod tests {
         assert_eq!(state.last_status, None);
         assert_eq!(state.mode, Mode::Draft);
         assert_eq!(state.draft.as_str(), "echo hello world && cd /tmp/my dir");
+    }
+
+    #[test]
+    fn template_use_supports_described_and_variadic_placeholders() {
+        let temp = tempfile::tempdir().unwrap();
+        let template_path = temp.path().join("templates/templates.jsonl");
+        append_template(
+            &template_path,
+            &TemplateEntry {
+                name: "commit".to_string(),
+                body: "git commit -m {message:commit message} -- {paths...}".to_string(),
+            },
+        )
+        .unwrap();
+        let mut state = AppState {
+            template_store_path: Some(template_path),
+            ..AppState::default()
+        };
+        state
+            .draft
+            .insert_str("#template use commit message='ship it' paths='src tests'");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("template placeholders: message, paths"));
+        assert_eq!(state.last_status, None);
+        assert_eq!(state.mode, Mode::Draft);
+        assert_eq!(state.draft.as_str(), "git commit -m ship it -- src tests");
+        assert!(state.draft_from_template);
+    }
+
+    #[test]
+    fn unresolved_template_placeholders_do_not_execute() {
+        let mut state = AppState {
+            draft_from_template: true,
+            ..AppState::default()
+        };
+        state.draft.insert_str("echo {message}");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("cannot execute unresolved template placeholders: message"));
+        assert_eq!(state.last_status, None);
+        assert_eq!(state.mode, Mode::Draft);
+        assert_eq!(state.draft.as_str(), "echo {message}");
     }
 
     #[test]

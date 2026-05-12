@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 144 library unit tests.
+- 147 library unit tests.
 - 18 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
@@ -292,7 +292,9 @@ Implemented:
 - Editor roundtrip helper prepares a file, runs a fake editor, and reads successful edits back into draft while preserving the original draft on editor failure.
 - `Ctrl-X Ctrl-E` terminal handling resolves the editor, suspends raw mode when needed, runs the roundtrip, restores raw mode when needed, and reports success/failure.
 - `editor.execute_after_save = true` runs a successfully saved editor draft immediately with raw editor-draft semantics.
-- Template commands are recognized as placeholders but do not read or write template storage yet.
+- Template commands can create, list, remove, replace, show, and use JSONL-backed templates.
+- Template placeholders support `{name}`, `{name:description}`, and `{name...}` syntax.
+- Template use copies rendered content to a protected template draft and blocks execution while placeholders remain unresolved.
 - Encryption and sync commands are recognized as placeholders but do not change files, encryption state, remotes, or run git commands yet.
 - `#context` reports that context collection is currently disabled/not implemented.
 - `#config` prints read-only runtime configuration and does not create missing storage files.
@@ -541,10 +543,12 @@ Implemented:
 - `#template replace <name> <body>` removes existing matches and appends one replacement entry.
 - `#template use <name>` copies the newest matching template body into draft without executing it.
 - `#template use <name>` reports simple `{placeholder}` names found in the copied body.
+- `#template use <name>` supports `{name}`, `{name:description}`, and `{name...}` placeholders.
 - `#template use <name> key=value...` applies explicit placeholder substitutions before copying to draft.
 - `#template use <name> key="value with spaces"` and single-quoted variants are supported.
 - `#template use <name> key=value` reports unused keys that do not match any `{placeholder}`.
 - `#template use <name>` reports unresolved placeholders that remain after explicit substitution.
+- Template drafts with unresolved placeholders are not executed.
 - Placeholder and unused-key reports are emitted in sorted order for stable output.
 
 Tests:
@@ -552,8 +556,10 @@ Tests:
 - `templates::tests::template_entry_roundtrips_through_jsonl`
 - `templates::tests::find_template_by_name_returns_newest_match`
 - `templates::tests::template_placeholders_returns_unique_simple_names_in_order`
+- `templates::tests::template_placeholders_support_descriptions_and_variadic_markers`
 - `templates::tests::apply_template_values_replaces_known_placeholders_and_leaves_unknown`
 - `templates::tests::apply_template_values_with_usage_reports_used_keys`
+- `templates::tests::apply_template_values_replaces_described_and_variadic_placeholders_by_name`
 - `app::tests::mt_command_persists_template_entry`
 - `app::tests::template_list_prints_stored_template_names`
 - `app::tests::template_show_prints_newest_matching_body`
@@ -563,6 +569,8 @@ Tests:
 - `app::tests::template_replace_rewrites_matching_templates`
 - `app::tests::template_use_copies_newest_matching_body_to_draft`
 - `app::tests::template_use_supports_quoted_values_with_spaces`
+- `app::tests::template_use_supports_described_and_variadic_placeholders`
+- `app::tests::unresolved_template_placeholders_do_not_execute`
 - `app::tests::template_use_reports_missing_template_without_changing_draft`
 - `app::tests::template_commands_report_usage_for_invalid_input`
 
