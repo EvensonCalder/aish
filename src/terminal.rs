@@ -13,6 +13,7 @@ use crossterm::terminal::{
 use crate::app::{AppState, execute_draft, save_draft_if_configured};
 use crate::completion::{accept_completion, current_token_context, render_completion_candidates};
 use crate::editor::resolve_editor_command;
+use crate::picker::{PickerAction, PickerRunResult, file_picker_candidates, run_fzf_picker};
 use crate::pty::PtyBackend;
 use crate::templates::template_placeholder_spans;
 
@@ -23,6 +24,7 @@ pub enum KeyAction {
     ClearScreen,
     HistorySearchPlaceholder,
     ExternalEditor,
+    FilePicker,
     AdvancedKeyPlaceholder(&'static str),
     Submit,
     ShowCompletions,
@@ -107,6 +109,9 @@ fn handle_key(
         KeyAction::ExternalEditor => {
             run_external_editor(state, backend, out, command_timeout)?;
         }
+        KeyAction::FilePicker => {
+            run_file_picker(state, out)?;
+        }
         KeyAction::AdvancedKeyPlaceholder(name) => {
             writeln!(out, "{name} is not implemented yet")?;
         }
@@ -174,6 +179,52 @@ pub fn run_external_editor(
     Ok(())
 }
 
+pub fn run_file_picker(state: &mut AppState, out: &mut impl Write) -> Result<()> {
+    let root = state
+        .current_cwd
+        .clone()
+        .unwrap_or(std::env::current_dir()?);
+    let candidates = file_picker_candidates(&root)?;
+    if candidates.is_empty() {
+        writeln!(out, "file picker has no candidates")?;
+        return Ok(());
+    }
+
+    let result = run_external_picker(|| run_fzf_picker(&candidates))?;
+    apply_file_picker_result(state, result, out)
+}
+
+fn apply_file_picker_result(
+    state: &mut AppState,
+    result: PickerRunResult,
+    out: &mut impl Write,
+) -> Result<()> {
+    let Some(selected) = result.selected else {
+        writeln!(out, "file picker cancelled")?;
+        return Ok(());
+    };
+
+    if !state.apply_picker_selection(&selected, PickerAction::ReplaceCurrentToken) {
+        writeln!(out, "file picker could not update draft")?;
+    }
+    Ok(())
+}
+
+fn run_external_picker(run: impl FnOnce() -> Result<PickerRunResult>) -> Result<PickerRunResult> {
+    let raw_mode_was_enabled = is_raw_mode_enabled()?;
+    if raw_mode_was_enabled {
+        disable_raw_mode()?;
+    }
+
+    let result = run();
+
+    if raw_mode_was_enabled {
+        enable_raw_mode()?;
+    }
+
+    result
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PasteAction {
     Continue,
@@ -218,9 +269,7 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
         state.ctrl_x_prefix = false;
         return match (key.modifiers, key.code) {
             (KeyModifiers::CONTROL, KeyCode::Char('e')) => KeyAction::ExternalEditor,
-            (KeyModifiers::CONTROL, KeyCode::Char('f')) => {
-                KeyAction::AdvancedKeyPlaceholder("file picker")
-            }
+            (KeyModifiers::CONTROL, KeyCode::Char('f')) => KeyAction::FilePicker,
             (KeyModifiers::CONTROL, KeyCode::Char('t')) => {
                 KeyAction::AdvancedKeyPlaceholder("template picker")
             }
@@ -689,9 +738,23 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_x_prefix_resolves_file_picker_chord_to_launch_action() {
+        let mut state = AppState::default();
+        state.draft.insert_str("cat old.txt");
+
+        apply_key_to_state(ctrl('x'), &mut state);
+
+        assert_eq!(
+            apply_key_to_state(ctrl('f'), &mut state),
+            KeyAction::FilePicker
+        );
+        assert!(!state.ctrl_x_prefix);
+        assert_eq!(state.draft.as_str(), "cat old.txt");
+    }
+
+    #[test]
     fn ctrl_x_prefix_resolves_other_advanced_chords_to_placeholders() {
         for (ch, name) in [
-            ('f', "file picker"),
             ('t', "template picker"),
             ('b', "git branch picker"),
             ('v', "environment variable picker"),
@@ -708,6 +771,52 @@ mod tests {
             assert!(!state.ctrl_x_prefix);
             assert_eq!(state.draft.as_str(), "git status");
         }
+    }
+
+    #[test]
+    fn apply_file_picker_result_replaces_current_token() {
+        let mut state = AppState::default();
+        state.draft.insert_str("cat old.txt");
+        state.draft.move_left();
+        state.draft.move_left();
+        state.draft.move_left();
+        let mut output = Vec::new();
+
+        apply_file_picker_result(
+            &mut state,
+            PickerRunResult {
+                selected: Some("new file.txt".to_string()),
+                exit_code: Some(0),
+            },
+            &mut output,
+        )
+        .unwrap();
+
+        assert_eq!(state.draft.as_str(), "cat 'new file.txt'");
+        assert!(String::from_utf8(output).unwrap().is_empty());
+    }
+
+    #[test]
+    fn apply_file_picker_result_reports_cancel_without_editing() {
+        let mut state = AppState::default();
+        state.draft.insert_str("cat old.txt");
+        let mut output = Vec::new();
+
+        apply_file_picker_result(
+            &mut state,
+            PickerRunResult {
+                selected: None,
+                exit_code: Some(130),
+            },
+            &mut output,
+        )
+        .unwrap();
+
+        assert_eq!(state.draft.as_str(), "cat old.txt");
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            "file picker cancelled\n"
+        );
     }
 
     #[test]

@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 197 library unit tests.
+- 200 library unit tests.
 - 18 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
@@ -283,6 +283,7 @@ Implemented:
 - Picker helpers support shell quoting and pure result edits for insert-at-cursor, replace-current-token, append-as-argument, and replace-line actions.
 - Picker command runner uses external `fzf` by default, can feed candidates to a command, capture the selected stdout line, report cancel status as no selection, and reject empty commands.
 - File picker helpers collect sorted relative file/path candidates and can apply selected paths to draft with shell quoting.
+- `Ctrl-X Ctrl-F` launches the file picker action, and selected file picker values replace the current token while cancel leaves the draft unchanged.
 - Editor command resolution supports config, `$VISUAL`, `$EDITOR`, and PATH fallback candidates.
 - Editor session preparation writes draft/history/AI selected content to a secure temporary file.
 - Editor process runner appends the prepared file path to the resolved command and waits for exit status without reading or executing content.
@@ -426,6 +427,9 @@ Tests:
 - `picker::tests::file_picker_candidates_returns_sorted_relative_files_and_dirs`
 - `app::tests::apply_picker_selection_replaces_current_token_with_quoted_value`
 - `app::tests::apply_picker_selection_skips_editor_and_read_only_modes`
+- `terminal::tests::ctrl_x_prefix_resolves_file_picker_chord_to_launch_action`
+- `terminal::tests::apply_file_picker_result_replaces_current_token`
+- `terminal::tests::apply_file_picker_result_reports_cancel_without_editing`
 
 Status:
 
