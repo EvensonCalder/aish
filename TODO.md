@@ -436,10 +436,10 @@ This is a future configurable enhancement. It must not replace the default faith
   - [x] templates
   - [x] history commands
   - [x] PATH executables
-- [ ] Implement non-first-token completion:
+- [x] Implement non-first-token completion helper:
   - [x] paths
-  - [ ] history arguments
-  - [ ] template placeholders
+  - [x] history arguments
+  - [x] template placeholders
 - [ ] Implement ignore-space matching.
 - [x] Preserve newest-to-oldest history order in first-token helper.
 - [ ] Implement `completion.max_results`.

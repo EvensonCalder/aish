@@ -29,6 +29,7 @@ pub enum CompletionSource {
     Template,
     History,
     Executable,
+    TemplatePlaceholder,
 }
 
 pub fn current_token_context(line: &str, cursor: usize) -> TokenContext {
@@ -167,6 +168,118 @@ pub fn complete_first_token(
     let mut executable_candidates = complete_path_executables(prefix, path_dirs);
     candidates.append(&mut executable_candidates);
     candidates
+}
+
+pub fn complete_non_first_token(
+    token: &str,
+    cwd: &Path,
+    history_newest_first: &[HistoryEntry],
+    templates: &[TemplateEntry],
+) -> Vec<CompletionCandidate> {
+    let mut candidates = Vec::new();
+    if is_path_like_token(token) {
+        candidates.extend(complete_path(token, cwd));
+    }
+    candidates.extend(complete_history_arguments(token, history_newest_first));
+    candidates.extend(complete_template_placeholders(token, templates));
+    candidates
+}
+
+fn complete_history_arguments(
+    prefix: &str,
+    history_newest_first: &[HistoryEntry],
+) -> Vec<CompletionCandidate> {
+    let mut seen = HashSet::new();
+    let mut candidates = Vec::new();
+    for entry in history_newest_first {
+        for argument in command_arguments(&entry.command) {
+            if argument.starts_with(prefix) && seen.insert(argument.to_string()) {
+                candidates.push(CompletionCandidate {
+                    display: argument.to_string(),
+                    replacement: argument.to_string(),
+                    is_dir: false,
+                    source: CompletionSource::History,
+                });
+            }
+        }
+    }
+    candidates
+}
+
+fn complete_template_placeholders(
+    prefix: &str,
+    templates: &[TemplateEntry],
+) -> Vec<CompletionCandidate> {
+    let mut seen = HashSet::new();
+    let mut candidates = Vec::new();
+    for template in templates {
+        for placeholder in crate::templates::template_placeholders(&template.body) {
+            if placeholder.starts_with(prefix) && seen.insert(placeholder.clone()) {
+                candidates.push(CompletionCandidate {
+                    display: placeholder.clone(),
+                    replacement: placeholder,
+                    is_dir: false,
+                    source: CompletionSource::TemplatePlaceholder,
+                });
+            }
+        }
+    }
+    candidates
+}
+
+fn command_arguments(command: &str) -> Vec<&str> {
+    let mut arguments = Vec::new();
+    let mut token_start = 0;
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    let mut token_index = 0;
+    let mut token_seen = false;
+
+    for (index, ch) in command.char_indices() {
+        if escaped {
+            escaped = false;
+            token_seen = true;
+            continue;
+        }
+        match quote {
+            Some(active) if ch == active => {
+                quote = None;
+                token_seen = true;
+            }
+            Some(_) => {
+                if ch == '\\' && quote == Some('"') {
+                    escaped = true;
+                }
+                token_seen = true;
+            }
+            None if ch == '\\' => {
+                escaped = true;
+                token_seen = true;
+            }
+            None if ch == '\'' || ch == '"' => {
+                quote = Some(ch);
+                token_seen = true;
+            }
+            None if ch.is_whitespace() => {
+                if token_seen {
+                    if token_index > 0 {
+                        arguments.push(command[token_start..index].trim_matches(['\'', '"']));
+                    }
+                    token_index += 1;
+                }
+                token_seen = false;
+                token_start = index + ch.len_utf8();
+            }
+            None => {
+                token_seen = true;
+            }
+        }
+    }
+
+    if token_seen && token_index > 0 {
+        arguments.push(command[token_start..].trim_matches(['\'', '"']));
+    }
+    arguments
 }
 
 fn complete_path_executables(prefix: &str, path_dirs: &[PathBuf]) -> Vec<CompletionCandidate> {
@@ -497,6 +610,86 @@ mod tests {
                     source: CompletionSource::History,
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn complete_non_first_token_orders_path_candidates_before_history_arguments() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(temp.path().join("src")).unwrap();
+        std::fs::write(temp.path().join("src/main.rs"), "").unwrap();
+        let history = vec![HistoryEntry {
+            t: 2,
+            command: "git add src/lib.rs".to_string(),
+            exit_code: Some(0),
+            source: crate::history::HistorySource::User,
+        }];
+
+        assert_eq!(
+            complete_non_first_token("src/", temp.path(), &history, &[]),
+            [
+                CompletionCandidate {
+                    display: "src/main.rs".to_string(),
+                    replacement: "src/main.rs".to_string(),
+                    is_dir: false,
+                    source: CompletionSource::Path,
+                },
+                CompletionCandidate {
+                    display: "src/lib.rs".to_string(),
+                    replacement: "src/lib.rs".to_string(),
+                    is_dir: false,
+                    source: CompletionSource::History,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn complete_non_first_token_includes_history_arguments_without_path_prefix() {
+        let history = vec![
+            HistoryEntry {
+                t: 2,
+                command: "kubectl get pods".to_string(),
+                exit_code: Some(0),
+                source: crate::history::HistorySource::User,
+            },
+            HistoryEntry {
+                t: 1,
+                command: "docker get pods".to_string(),
+                exit_code: Some(0),
+                source: crate::history::HistorySource::User,
+            },
+        ];
+
+        let templates = vec![TemplateEntry {
+            name: "logs".to_string(),
+            body: "kubectl logs {pod_name}".to_string(),
+        }];
+
+        assert_eq!(
+            complete_non_first_token("po", Path::new("/"), &history, &templates),
+            [
+                CompletionCandidate {
+                    display: "pods".to_string(),
+                    replacement: "pods".to_string(),
+                    is_dir: false,
+                    source: CompletionSource::History,
+                },
+                CompletionCandidate {
+                    display: "pod_name".to_string(),
+                    replacement: "pod_name".to_string(),
+                    is_dir: false,
+                    source: CompletionSource::TemplatePlaceholder,
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn command_arguments_preserve_quoted_argument_spaces() {
+        assert_eq!(
+            command_arguments("git commit -m 'hello world' -- file"),
+            ["commit", "-m", "hello world", "--", "file"]
         );
     }
 

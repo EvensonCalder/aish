@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 165 library unit tests.
+- 168 library unit tests.
 - 18 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
@@ -273,6 +273,7 @@ Implemented:
 - Completion has pure current-token detection helpers that handle first-token classification, non-first-token classification, quoted whitespace, escaped whitespace, cursor-in-line contexts, path-like tokens, and UTF-8 cursor snapping.
 - Completion has a pure path completion helper that reads matching file and directory candidates, preserves directory prefixes, sorts candidates, marks directories with trailing `/`, preserves opening quotes in replacements, and handles missing directories as no matches.
 - Completion has a pure first-token helper that returns template candidates before newest-first history commands before PATH executables, with per-source deduplication.
+- Completion has a pure non-first-token helper that returns path candidates, history argument candidates, and template placeholder candidates in spec order with per-source deduplication.
 - Editor command resolution supports config, `$VISUAL`, `$EDITOR`, and PATH fallback candidates.
 - Editor session preparation writes draft/history/AI selected content to a secure temporary file.
 - Editor process runner appends the prepared file path to the resolved command and waits for exit status without reading or executing content.
@@ -384,6 +385,9 @@ Tests:
 - `completion::tests::complete_path_returns_empty_for_missing_directory`
 - `completion::tests::complete_first_token_orders_templates_history_then_executables`
 - `completion::tests::complete_first_token_deduplicates_each_source`
+- `completion::tests::complete_non_first_token_orders_path_candidates_before_history_arguments`
+- `completion::tests::complete_non_first_token_includes_history_arguments_without_path_prefix`
+- `completion::tests::command_arguments_preserve_quoted_argument_spaces`
 
 Status:
 
