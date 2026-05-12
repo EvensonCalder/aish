@@ -158,6 +158,7 @@ mod tests {
         let config = EditorConfig {
             command: vec!["nvim".to_string(), "--clean".to_string()],
             execute_after_save: false,
+            allow_raw_hash_lines: false,
         };
 
         let command = resolve_editor_command(&config).unwrap();

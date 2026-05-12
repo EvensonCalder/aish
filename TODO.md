@@ -325,9 +325,9 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
 - [x] Restore raw mode.
 - [x] Read file content.
 - [x] Replace draft buffer.
-- [ ] Do not execute by default.
+- [x] Do not execute by default.
 - [ ] Add optional `editor.execute_after_save` support.
-- [ ] Ensure editor content bypasses Aish `#` parsing when submitted.
+- [x] Ensure configured raw editor content bypasses Aish `#` parsing when submitted.
 
 ### Acceptance criteria
 

@@ -3,6 +3,8 @@ use std::time::Duration;
 
 use aish::app::{AppState, execute_draft};
 use aish::commands::NoteTag;
+use aish::config::EditorConfig;
+use aish::editor::prepare_editor_file;
 use aish::history::{
     AiCommandIndex, AiItem, AiItemKind, AiSession, HistoryEntry, HistorySource, NoteEntry,
     append_jsonl, load_jsonl,
@@ -142,6 +144,42 @@ fn execute_draft_does_not_send_line_leading_hash_to_backend_shell() {
     assert!(output.contains("Aish command not implemented yet"));
     assert_eq!(state.last_status, None);
     assert_eq!(state.mode, Mode::Draft);
+    assert!(state.draft.is_empty());
+}
+
+#[test]
+fn editor_draft_can_send_line_leading_hash_when_configured() {
+    let _guard = pty_execution_guard();
+    let temp = tempfile::tempdir().unwrap();
+    let session = prepare_editor_file(temp.path(), "").unwrap();
+    let marker = temp.path().join("editor-raw-ran");
+    std::fs::write(
+        &session.path,
+        format!("# shell comment\ntouch {}", marker.display()),
+    )
+    .unwrap();
+    let mut state = AppState {
+        editor_config: EditorConfig {
+            allow_raw_hash_lines: true,
+            ..EditorConfig::default()
+        },
+        ..AppState::default()
+    };
+    state.replace_draft_from_editor_session(&session).unwrap();
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    assert!(marker.exists());
+    assert_eq!(state.last_status, Some(0));
+    assert!(!state.draft_from_editor);
     assert!(state.draft.is_empty());
 }
 

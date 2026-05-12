@@ -84,6 +84,7 @@ pub struct AppState {
     pub prompt_templates: PromptTemplates,
     pub editor_config: EditorConfig,
     pub editor_temp_root: Option<PathBuf>,
+    pub draft_from_editor: bool,
     pub ctrl_x_prefix: bool,
     pub clock: fn() -> i64,
 }
@@ -111,6 +112,7 @@ impl Default for AppState {
             prompt_templates: PromptTemplates::default(),
             editor_config: EditorConfig::default(),
             editor_temp_root: None,
+            draft_from_editor: false,
             ctrl_x_prefix: false,
             clock: unix_timestamp,
         }
@@ -168,6 +170,7 @@ impl AppState {
             return false;
         };
         self.draft = InputBuffer::from(command);
+        self.draft_from_editor = false;
         self.mode = Mode::Draft;
         true
     }
@@ -209,6 +212,7 @@ impl AppState {
             return false;
         };
         self.draft = InputBuffer::from(command);
+        self.draft_from_editor = false;
         self.mode = Mode::Draft;
         true
     }
@@ -235,7 +239,13 @@ impl AppState {
         session: &PreparedEditorSession,
     ) -> Result<()> {
         let content = read_editor_file(session)?;
+        let content = if self.editor_config.allow_raw_hash_lines {
+            content
+        } else {
+            filter_editor_hash_lines(&content)
+        };
         self.draft = InputBuffer::from(content);
+        self.draft_from_editor = self.editor_config.allow_raw_hash_lines;
         self.mode = Mode::Draft;
         Ok(())
     }
@@ -401,420 +411,422 @@ pub fn execute_draft(
     }
 
     let command = state.draft.as_str().to_string();
-    match parse_line(&command) {
-        ParsedLine::Ordinary(_) => {}
-        ParsedLine::EmptyPrivate => {
-            writeln!(out, "empty Aish command")?;
-            state.draft.clear();
-            state.mode = Mode::Draft;
-            return Ok(());
-        }
-        ParsedLine::Note { tag, text } => {
-            if let Some(path) = &state.notes_path {
-                append_jsonl(
-                    path,
-                    &NoteEntry {
-                        tag,
-                        text: text.to_string(),
-                    },
-                )?;
+    if !state.draft_from_editor {
+        match parse_line(&command) {
+            ParsedLine::Ordinary(_) => {}
+            ParsedLine::EmptyPrivate => {
+                writeln!(out, "empty Aish command")?;
+                state.draft.clear();
+                state.mode = Mode::Draft;
+                return Ok(());
             }
-            writeln!(out, "note stored")?;
-            state.draft.clear();
-            state.mode = Mode::Draft;
-            return Ok(());
-        }
-        ParsedLine::Private { name, args } => {
-            match name {
-                "exit" | "quit" => {
-                    state.exit_requested = true;
-                    state.draft.clear();
-                    state.mode = Mode::Draft;
-                    return Ok(());
-                }
-                "help" => {
-                    writeln!(
-                        out,
-                        "Aish private commands: {}",
-                        IMPLEMENTED_PRIVATE_COMMANDS
-                            .iter()
-                            .map(|name| format!("#{name}"))
-                            .collect::<Vec<_>>()
-                            .join(", ")
+            ParsedLine::Note { tag, text } => {
+                if let Some(path) = &state.notes_path {
+                    append_jsonl(
+                        path,
+                        &NoteEntry {
+                            tag,
+                            text: text.to_string(),
+                        },
                     )?;
-                    writeln!(out, "Default keybindings:")?;
-                    for binding in default_keybindings() {
-                        let status = if binding.implemented {
-                            "implemented"
-                        } else {
-                            "reserved"
-                        };
-                        writeln!(out, "{} [{}] - {}", binding.key, status, binding.action)?;
+                }
+                writeln!(out, "note stored")?;
+                state.draft.clear();
+                state.mode = Mode::Draft;
+                return Ok(());
+            }
+            ParsedLine::Private { name, args } => {
+                match name {
+                    "exit" | "quit" => {
+                        state.exit_requested = true;
+                        state.draft.clear();
+                        state.mode = Mode::Draft;
+                        return Ok(());
                     }
-                    state.draft.clear();
-                    state.mode = Mode::Draft;
-                    return Ok(());
-                }
-                "status" => {
-                    writeln!(
-                        out,
-                        "mode={} last_status={} cwd={} keybindings={}",
-                        state.mode.symbol(),
-                        state
-                            .last_status
-                            .map(|status| status.to_string())
-                            .unwrap_or_else(|| "none".to_string()),
-                        state
-                            .current_cwd
-                            .as_ref()
-                            .map(|cwd| cwd.display().to_string())
-                            .unwrap_or_else(|| "unknown".to_string()),
-                        default_keybindings().len()
-                    )?;
-                    state.draft.clear();
-                    state.mode = Mode::Draft;
-                    return Ok(());
-                }
-                "config" => {
-                    write_config_report(state, out)?;
-                    state.draft.clear();
-                    state.mode = Mode::Draft;
-                    return Ok(());
-                }
-                "doctor" => {
-                    write_doctor_report(state, out)?;
-                    state.draft.clear();
-                    state.mode = Mode::Draft;
-                    return Ok(());
-                }
-                "model" => {
-                    write_ai_config_placeholder(out, "model", args)?;
-                    state.draft.clear();
-                    state.mode = Mode::Draft;
-                    return Ok(());
-                }
-                "base-url" => {
-                    write_ai_config_placeholder(out, "base-url", args)?;
-                    state.draft.clear();
-                    state.mode = Mode::Draft;
-                    return Ok(());
-                }
-                "env-key" => {
-                    write_ai_config_placeholder(out, "env-key", args)?;
-                    state.draft.clear();
-                    state.mode = Mode::Draft;
-                    return Ok(());
-                }
-                "key" => {
-                    match args.split_whitespace().next() {
-                        Some("set") => {
-                            writeln!(out, "#key set is not implemented yet; no key stored")?
+                    "help" => {
+                        writeln!(
+                            out,
+                            "Aish private commands: {}",
+                            IMPLEMENTED_PRIVATE_COMMANDS
+                                .iter()
+                                .map(|name| format!("#{name}"))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )?;
+                        writeln!(out, "Default keybindings:")?;
+                        for binding in default_keybindings() {
+                            let status = if binding.implemented {
+                                "implemented"
+                            } else {
+                                "reserved"
+                            };
+                            writeln!(out, "{} [{}] - {}", binding.key, status, binding.action)?;
                         }
-                        Some("clear") => {
-                            writeln!(out, "#key clear is not implemented yet; no key removed")?
-                        }
-                        _ => writeln!(out, "usage: #key set | #key clear")?,
+                        state.draft.clear();
+                        state.mode = Mode::Draft;
+                        return Ok(());
                     }
-                    state.draft.clear();
-                    state.mode = Mode::Draft;
-                    return Ok(());
-                }
-                "context" => {
-                    writeln!(
-                        out,
-                        "context.enabled=false context.confirm=true context.max_bytes=0"
-                    )?;
-                    writeln!(out, "context collection is not implemented yet")?;
-                    state.draft.clear();
-                    state.mode = Mode::Draft;
-                    return Ok(());
-                }
-                "completion" => {
-                    writeln!(out, "completion.enabled=false")?;
-                    writeln!(out, "completion engine is not implemented yet")?;
-                    state.draft.clear();
-                    state.mode = Mode::Draft;
-                    return Ok(());
-                }
-                "log" => {
-                    writeln!(out, "event log is not implemented yet")?;
-                    state.draft.clear();
-                    state.mode = Mode::Draft;
-                    return Ok(());
-                }
-                "editor" => {
-                    write_editor_report(state, out)?;
-                    state.draft.clear();
-                    state.mode = Mode::Draft;
-                    return Ok(());
-                }
-                "history" => {
-                    let count = args.parse::<usize>();
-                    match (count, &state.regular_history_path, &state.ai_history_path) {
-                        (Ok(count), Some(regular_path), Some(ai_path)) => {
-                            let loaded = trim_combined_history(regular_path, ai_path, count)?;
-                            let keep_from = loaded.regular.items.len().saturating_sub(count);
-                            state.regular_history = loaded.regular.items[keep_from..].to_vec();
-                            state.ai_sessions = load_jsonl::<AiSession>(ai_path)?.items;
-                            state.ai_command_indices = ai_command_indices(&state.ai_sessions);
-                            state.selected_history_index = None;
-                            state.selected_ai_index = None;
-                            writeln!(
-                                out,
-                                "history trimmed to {count}; skipped {} bad regular line(s), {} bad ai line(s)",
-                                loaded.regular.errors.len(),
-                                loaded.ai_sessions.errors.len()
-                            )?;
-                        }
-                        (Ok(_), _, _) => writeln!(out, "history storage is not configured")?,
-                        (Err(_), _, _) => writeln!(out, "usage: #history <count>")?,
+                    "status" => {
+                        writeln!(
+                            out,
+                            "mode={} last_status={} cwd={} keybindings={}",
+                            state.mode.symbol(),
+                            state
+                                .last_status
+                                .map(|status| status.to_string())
+                                .unwrap_or_else(|| "none".to_string()),
+                            state
+                                .current_cwd
+                                .as_ref()
+                                .map(|cwd| cwd.display().to_string())
+                                .unwrap_or_else(|| "unknown".to_string()),
+                            default_keybindings().len()
+                        )?;
+                        state.draft.clear();
+                        state.mode = Mode::Draft;
+                        return Ok(());
                     }
-                    state.draft.clear();
-                    state.mode = Mode::Draft;
-                    return Ok(());
-                }
-                "mt" => {
-                    match parse_template_args(args) {
-                        Some((name, body)) => match &state.template_store_path {
-                            Some(path) => {
-                                append_template(
-                                    path,
-                                    &TemplateEntry {
-                                        name: name.to_string(),
-                                        body: body.to_string(),
-                                    },
+                    "config" => {
+                        write_config_report(state, out)?;
+                        state.draft.clear();
+                        state.mode = Mode::Draft;
+                        return Ok(());
+                    }
+                    "doctor" => {
+                        write_doctor_report(state, out)?;
+                        state.draft.clear();
+                        state.mode = Mode::Draft;
+                        return Ok(());
+                    }
+                    "model" => {
+                        write_ai_config_placeholder(out, "model", args)?;
+                        state.draft.clear();
+                        state.mode = Mode::Draft;
+                        return Ok(());
+                    }
+                    "base-url" => {
+                        write_ai_config_placeholder(out, "base-url", args)?;
+                        state.draft.clear();
+                        state.mode = Mode::Draft;
+                        return Ok(());
+                    }
+                    "env-key" => {
+                        write_ai_config_placeholder(out, "env-key", args)?;
+                        state.draft.clear();
+                        state.mode = Mode::Draft;
+                        return Ok(());
+                    }
+                    "key" => {
+                        match args.split_whitespace().next() {
+                            Some("set") => {
+                                writeln!(out, "#key set is not implemented yet; no key stored")?
+                            }
+                            Some("clear") => {
+                                writeln!(out, "#key clear is not implemented yet; no key removed")?
+                            }
+                            _ => writeln!(out, "usage: #key set | #key clear")?,
+                        }
+                        state.draft.clear();
+                        state.mode = Mode::Draft;
+                        return Ok(());
+                    }
+                    "context" => {
+                        writeln!(
+                            out,
+                            "context.enabled=false context.confirm=true context.max_bytes=0"
+                        )?;
+                        writeln!(out, "context collection is not implemented yet")?;
+                        state.draft.clear();
+                        state.mode = Mode::Draft;
+                        return Ok(());
+                    }
+                    "completion" => {
+                        writeln!(out, "completion.enabled=false")?;
+                        writeln!(out, "completion engine is not implemented yet")?;
+                        state.draft.clear();
+                        state.mode = Mode::Draft;
+                        return Ok(());
+                    }
+                    "log" => {
+                        writeln!(out, "event log is not implemented yet")?;
+                        state.draft.clear();
+                        state.mode = Mode::Draft;
+                        return Ok(());
+                    }
+                    "editor" => {
+                        write_editor_report(state, out)?;
+                        state.draft.clear();
+                        state.mode = Mode::Draft;
+                        return Ok(());
+                    }
+                    "history" => {
+                        let count = args.parse::<usize>();
+                        match (count, &state.regular_history_path, &state.ai_history_path) {
+                            (Ok(count), Some(regular_path), Some(ai_path)) => {
+                                let loaded = trim_combined_history(regular_path, ai_path, count)?;
+                                let keep_from = loaded.regular.items.len().saturating_sub(count);
+                                state.regular_history = loaded.regular.items[keep_from..].to_vec();
+                                state.ai_sessions = load_jsonl::<AiSession>(ai_path)?.items;
+                                state.ai_command_indices = ai_command_indices(&state.ai_sessions);
+                                state.selected_history_index = None;
+                                state.selected_ai_index = None;
+                                writeln!(
+                                    out,
+                                    "history trimmed to {count}; skipped {} bad regular line(s), {} bad ai line(s)",
+                                    loaded.regular.errors.len(),
+                                    loaded.ai_sessions.errors.len()
                                 )?;
-                                writeln!(out, "template stored: {name}")?;
                             }
-                            None => writeln!(out, "template storage is not configured")?,
-                        },
-                        None => writeln!(out, "usage: #mt <name> <body>")?,
+                            (Ok(_), _, _) => writeln!(out, "history storage is not configured")?,
+                            (Err(_), _, _) => writeln!(out, "usage: #history <count>")?,
+                        }
+                        state.draft.clear();
+                        state.mode = Mode::Draft;
+                        return Ok(());
                     }
-                    state.draft.clear();
-                    state.mode = Mode::Draft;
-                    return Ok(());
-                }
-                "template" => {
-                    let mut keep_draft = false;
-                    match args.split_whitespace().next() {
-                        Some("list") => match &state.template_store_path {
-                            Some(path) => {
-                                let loaded = load_templates(path)?;
-                                if loaded.items.is_empty() {
-                                    writeln!(out, "no templates stored")?;
-                                } else {
-                                    for template in loaded.items {
-                                        writeln!(out, "{}", template.name)?;
-                                    }
-                                }
-                                if !loaded.errors.is_empty() {
-                                    writeln!(
-                                        out,
-                                        "skipped {} bad template line(s)",
-                                        loaded.errors.len()
-                                    )?;
-                                }
-                            }
-                            None => writeln!(out, "template storage is not configured")?,
-                        },
-                        Some("rm") => match args.split_whitespace().nth(1) {
-                            Some(name) => match &state.template_store_path {
-                                Some(path) => {
-                                    let removal = remove_templates_by_name(path, name)?;
-                                    writeln!(
-                                        out,
-                                        "template removed: {name} ({})",
-                                        removal.removed
-                                    )?;
-                                    if !removal.errors.is_empty() {
-                                        writeln!(
-                                            out,
-                                            "skipped {} bad template line(s)",
-                                            removal.errors.len()
-                                        )?;
-                                    }
-                                }
-                                None => writeln!(out, "template storage is not configured")?,
-                            },
-                            None => writeln!(out, "{}", template_usage())?,
-                        },
-                        Some("replace") => match parse_template_subcommand_args(args) {
+                    "mt" => {
+                        match parse_template_args(args) {
                             Some((name, body)) => match &state.template_store_path {
                                 Some(path) => {
-                                    let removal = replace_template(
+                                    append_template(
                                         path,
-                                        TemplateEntry {
+                                        &TemplateEntry {
                                             name: name.to_string(),
                                             body: body.to_string(),
                                         },
                                     )?;
-                                    writeln!(
-                                        out,
-                                        "template replaced: {name} (removed {})",
-                                        removal.removed
-                                    )?;
-                                    if !removal.errors.is_empty() {
-                                        writeln!(
-                                            out,
-                                            "skipped {} bad template line(s)",
-                                            removal.errors.len()
-                                        )?;
-                                    }
+                                    writeln!(out, "template stored: {name}")?;
                                 }
                                 None => writeln!(out, "template storage is not configured")?,
                             },
-                            None => writeln!(out, "{}", template_usage())?,
-                        },
-                        Some("show") => match args.split_whitespace().nth(1) {
-                            Some(name) => match &state.template_store_path {
-                                Some(path) => {
-                                    let loaded = find_template_by_name(path, name)?;
-                                    match loaded.items.first() {
-                                        Some(template) => {
-                                            writeln!(out, "template: {}", template.name)?;
-                                            writeln!(out, "{}", template.body)?;
-                                        }
-                                        None => writeln!(out, "template not found: {name}")?,
-                                    }
-                                    if !loaded.errors.is_empty() {
-                                        writeln!(
-                                            out,
-                                            "skipped {} bad template line(s)",
-                                            loaded.errors.len()
-                                        )?;
-                                    }
-                                }
-                                None => writeln!(out, "template storage is not configured")?,
-                            },
-                            None => writeln!(out, "{}", template_usage())?,
-                        },
-                        Some("use") => match args.split_whitespace().nth(1) {
-                            Some(name) => match &state.template_store_path {
-                                Some(path) => {
-                                    let loaded = find_template_by_name(path, name)?;
-                                    match loaded.items.first() {
-                                        Some(template) => {
-                                            let values = parse_template_values(args);
-                                            let (rendered, used_keys) =
-                                                apply_template_values_with_usage(
-                                                    &template.body,
-                                                    &values,
-                                                );
-                                            state.draft = InputBuffer::from(rendered);
-                                            keep_draft = true;
-                                            writeln!(out, "template copied to draft: {name}")?;
-                                            let placeholders =
-                                                template_placeholders(&template.body);
-                                            if !placeholders.is_empty() {
-                                                writeln!(
-                                                    out,
-                                                    "template placeholders: {}",
-                                                    placeholders.join(", ")
-                                                )?;
-                                            }
-                                            let mut unresolved =
-                                                template_placeholders(state.draft.as_str());
-                                            unresolved.sort();
-                                            if !unresolved.is_empty() {
-                                                writeln!(
-                                                    out,
-                                                    "unresolved template placeholders: {}",
-                                                    unresolved.join(", ")
-                                                )?;
-                                            }
-                                            let mut unused_keys: Vec<_> = values
-                                                .keys()
-                                                .filter(|key| {
-                                                    !used_keys.iter().any(|used| used == *key)
-                                                })
-                                                .cloned()
-                                                .collect();
-                                            unused_keys.sort();
-                                            if !unused_keys.is_empty() {
-                                                writeln!(
-                                                    out,
-                                                    "unused template values: {}",
-                                                    unused_keys.join(", ")
-                                                )?;
-                                            }
-                                        }
-                                        None => writeln!(out, "template not found: {name}")?,
-                                    }
-                                    if !loaded.errors.is_empty() {
-                                        writeln!(
-                                            out,
-                                            "skipped {} bad template line(s)",
-                                            loaded.errors.len()
-                                        )?;
-                                    }
-                                }
-                                None => writeln!(out, "template storage is not configured")?,
-                            },
-                            None => writeln!(out, "{}", template_usage())?,
-                        },
-                        _ => writeln!(out, "{}", template_usage())?,
-                    }
-                    if !keep_draft {
+                            None => writeln!(out, "usage: #mt <name> <body>")?,
+                        }
                         state.draft.clear();
+                        state.mode = Mode::Draft;
+                        return Ok(());
                     }
-                    state.mode = Mode::Draft;
-                    return Ok(());
+                    "template" => {
+                        let mut keep_draft = false;
+                        match args.split_whitespace().next() {
+                            Some("list") => match &state.template_store_path {
+                                Some(path) => {
+                                    let loaded = load_templates(path)?;
+                                    if loaded.items.is_empty() {
+                                        writeln!(out, "no templates stored")?;
+                                    } else {
+                                        for template in loaded.items {
+                                            writeln!(out, "{}", template.name)?;
+                                        }
+                                    }
+                                    if !loaded.errors.is_empty() {
+                                        writeln!(
+                                            out,
+                                            "skipped {} bad template line(s)",
+                                            loaded.errors.len()
+                                        )?;
+                                    }
+                                }
+                                None => writeln!(out, "template storage is not configured")?,
+                            },
+                            Some("rm") => match args.split_whitespace().nth(1) {
+                                Some(name) => match &state.template_store_path {
+                                    Some(path) => {
+                                        let removal = remove_templates_by_name(path, name)?;
+                                        writeln!(
+                                            out,
+                                            "template removed: {name} ({})",
+                                            removal.removed
+                                        )?;
+                                        if !removal.errors.is_empty() {
+                                            writeln!(
+                                                out,
+                                                "skipped {} bad template line(s)",
+                                                removal.errors.len()
+                                            )?;
+                                        }
+                                    }
+                                    None => writeln!(out, "template storage is not configured")?,
+                                },
+                                None => writeln!(out, "{}", template_usage())?,
+                            },
+                            Some("replace") => match parse_template_subcommand_args(args) {
+                                Some((name, body)) => match &state.template_store_path {
+                                    Some(path) => {
+                                        let removal = replace_template(
+                                            path,
+                                            TemplateEntry {
+                                                name: name.to_string(),
+                                                body: body.to_string(),
+                                            },
+                                        )?;
+                                        writeln!(
+                                            out,
+                                            "template replaced: {name} (removed {})",
+                                            removal.removed
+                                        )?;
+                                        if !removal.errors.is_empty() {
+                                            writeln!(
+                                                out,
+                                                "skipped {} bad template line(s)",
+                                                removal.errors.len()
+                                            )?;
+                                        }
+                                    }
+                                    None => writeln!(out, "template storage is not configured")?,
+                                },
+                                None => writeln!(out, "{}", template_usage())?,
+                            },
+                            Some("show") => match args.split_whitespace().nth(1) {
+                                Some(name) => match &state.template_store_path {
+                                    Some(path) => {
+                                        let loaded = find_template_by_name(path, name)?;
+                                        match loaded.items.first() {
+                                            Some(template) => {
+                                                writeln!(out, "template: {}", template.name)?;
+                                                writeln!(out, "{}", template.body)?;
+                                            }
+                                            None => writeln!(out, "template not found: {name}")?,
+                                        }
+                                        if !loaded.errors.is_empty() {
+                                            writeln!(
+                                                out,
+                                                "skipped {} bad template line(s)",
+                                                loaded.errors.len()
+                                            )?;
+                                        }
+                                    }
+                                    None => writeln!(out, "template storage is not configured")?,
+                                },
+                                None => writeln!(out, "{}", template_usage())?,
+                            },
+                            Some("use") => match args.split_whitespace().nth(1) {
+                                Some(name) => match &state.template_store_path {
+                                    Some(path) => {
+                                        let loaded = find_template_by_name(path, name)?;
+                                        match loaded.items.first() {
+                                            Some(template) => {
+                                                let values = parse_template_values(args);
+                                                let (rendered, used_keys) =
+                                                    apply_template_values_with_usage(
+                                                        &template.body,
+                                                        &values,
+                                                    );
+                                                state.draft = InputBuffer::from(rendered);
+                                                keep_draft = true;
+                                                writeln!(out, "template copied to draft: {name}")?;
+                                                let placeholders =
+                                                    template_placeholders(&template.body);
+                                                if !placeholders.is_empty() {
+                                                    writeln!(
+                                                        out,
+                                                        "template placeholders: {}",
+                                                        placeholders.join(", ")
+                                                    )?;
+                                                }
+                                                let mut unresolved =
+                                                    template_placeholders(state.draft.as_str());
+                                                unresolved.sort();
+                                                if !unresolved.is_empty() {
+                                                    writeln!(
+                                                        out,
+                                                        "unresolved template placeholders: {}",
+                                                        unresolved.join(", ")
+                                                    )?;
+                                                }
+                                                let mut unused_keys: Vec<_> = values
+                                                    .keys()
+                                                    .filter(|key| {
+                                                        !used_keys.iter().any(|used| used == *key)
+                                                    })
+                                                    .cloned()
+                                                    .collect();
+                                                unused_keys.sort();
+                                                if !unused_keys.is_empty() {
+                                                    writeln!(
+                                                        out,
+                                                        "unused template values: {}",
+                                                        unused_keys.join(", ")
+                                                    )?;
+                                                }
+                                            }
+                                            None => writeln!(out, "template not found: {name}")?,
+                                        }
+                                        if !loaded.errors.is_empty() {
+                                            writeln!(
+                                                out,
+                                                "skipped {} bad template line(s)",
+                                                loaded.errors.len()
+                                            )?;
+                                        }
+                                    }
+                                    None => writeln!(out, "template storage is not configured")?,
+                                },
+                                None => writeln!(out, "{}", template_usage())?,
+                            },
+                            _ => writeln!(out, "{}", template_usage())?,
+                        }
+                        if !keep_draft {
+                            state.draft.clear();
+                        }
+                        state.mode = Mode::Draft;
+                        return Ok(());
+                    }
+                    "encrypt" => {
+                        writeln!(out, "encryption is not implemented yet; no data changed")?;
+                        state.draft.clear();
+                        state.mode = Mode::Draft;
+                        return Ok(());
+                    }
+                    "set-remote" => {
+                        writeln!(
+                            out,
+                            "sync remote configuration is not implemented yet; no remote changed"
+                        )?;
+                        state.draft.clear();
+                        state.mode = Mode::Draft;
+                        return Ok(());
+                    }
+                    "push" => {
+                        writeln!(out, "sync push is not implemented yet; no git command run")?;
+                        state.draft.clear();
+                        state.mode = Mode::Draft;
+                        return Ok(());
+                    }
+                    "sync" => {
+                        writeln!(out, "sync is not implemented yet; no git command run")?;
+                        state.draft.clear();
+                        state.mode = Mode::Draft;
+                        return Ok(());
+                    }
+                    _ => {}
                 }
-                "encrypt" => {
-                    writeln!(out, "encryption is not implemented yet; no data changed")?;
-                    state.draft.clear();
-                    state.mode = Mode::Draft;
-                    return Ok(());
-                }
-                "set-remote" => {
-                    writeln!(
+                match suggest_private_command(name) {
+                    Some(suggestion) => writeln!(
                         out,
-                        "sync remote configuration is not implemented yet; no remote changed"
-                    )?;
-                    state.draft.clear();
-                    state.mode = Mode::Draft;
-                    return Ok(());
+                        "Aish command not implemented yet: #{name}. Did you mean #{suggestion}?"
+                    )?,
+                    None => writeln!(out, "Aish command not implemented yet: #{name}")?,
                 }
-                "push" => {
-                    writeln!(out, "sync push is not implemented yet; no git command run")?;
-                    state.draft.clear();
-                    state.mode = Mode::Draft;
-                    return Ok(());
-                }
-                "sync" => {
-                    writeln!(out, "sync is not implemented yet; no git command run")?;
-                    state.draft.clear();
-                    state.mode = Mode::Draft;
-                    return Ok(());
-                }
-                _ => {}
+                state.draft.clear();
+                state.mode = Mode::Draft;
+                return Ok(());
             }
-            match suggest_private_command(name) {
-                Some(suggestion) => writeln!(
+            ParsedLine::AiPrompt(_) => {
+                writeln!(out, "AI prompts are not implemented yet")?;
+                state.draft.clear();
+                state.mode = Mode::Draft;
+                return Ok(());
+            }
+            ParsedLine::AiPromptWithContext { prompt, command } => {
+                writeln!(
                     out,
-                    "Aish command not implemented yet: #{name}. Did you mean #{suggestion}?"
-                )?,
-                None => writeln!(out, "Aish command not implemented yet: #{name}")?,
+                    "AI prompts with context are not implemented yet; context command not executed: {command}"
+                )?;
+                writeln!(out, "prompt: {prompt}")?;
+                state.draft.clear();
+                state.mode = Mode::Draft;
+                return Ok(());
             }
-            state.draft.clear();
-            state.mode = Mode::Draft;
-            return Ok(());
-        }
-        ParsedLine::AiPrompt(_) => {
-            writeln!(out, "AI prompts are not implemented yet")?;
-            state.draft.clear();
-            state.mode = Mode::Draft;
-            return Ok(());
-        }
-        ParsedLine::AiPromptWithContext { prompt, command } => {
-            writeln!(
-                out,
-                "AI prompts with context are not implemented yet; context command not executed: {command}"
-            )?;
-            writeln!(out, "prompt: {prompt}")?;
-            state.draft.clear();
-            state.mode = Mode::Draft;
-            return Ok(());
         }
     }
 
@@ -847,6 +859,7 @@ pub fn execute_draft(
         state.current_cwd = Some(PathBuf::from(cwd));
     }
     state.draft.clear();
+    state.draft_from_editor = false;
     if executing_ai && result.exit_code == 0 {
         state.advance_after_ai_success();
     } else if executing_ai {
@@ -855,6 +868,14 @@ pub fn execute_draft(
         state.mode = Mode::Draft;
     }
     Ok(())
+}
+
+fn filter_editor_hash_lines(content: &str) -> String {
+    content
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn write_doctor_report(state: &AppState, out: &mut impl Write) -> Result<()> {
@@ -903,6 +924,11 @@ fn write_config_report(state: &AppState, out: &mut impl Write) -> Result<()> {
     )?;
     writeln!(
         out,
+        "editor.allow_raw_hash_lines={}",
+        state.editor_config.allow_raw_hash_lines
+    )?;
+    writeln!(
+        out,
         "editor.command={}",
         format_editor_command(&state.editor_config.command)
     )?;
@@ -920,6 +946,11 @@ fn write_editor_report(state: &AppState, out: &mut impl Write) -> Result<()> {
         out,
         "execute_after_save={}",
         state.editor_config.execute_after_save
+    )?;
+    writeln!(
+        out,
+        "allow_raw_hash_lines={}",
+        state.editor_config.allow_raw_hash_lines
     )?;
     writeln!(
         out,
@@ -1371,20 +1402,41 @@ mod tests {
     }
 
     #[test]
-    fn replace_draft_from_editor_session_reads_file_without_executing() {
+    fn replace_draft_from_editor_session_filters_hash_lines_by_default() {
         let temp = tempfile::tempdir().unwrap();
         let mut state = AppState::default();
+        state.draft.insert_str("old draft");
+        let session = state.prepare_editor_session(temp.path()).unwrap();
+        std::fs::write(&session.path, "echo edited\n# filtered\n echo kept").unwrap();
+
+        state.replace_draft_from_editor_session(&session).unwrap();
+
+        assert_eq!(state.mode, Mode::Draft);
+        assert_eq!(state.draft.as_str(), "echo edited\n echo kept");
+        assert_eq!(state.draft.cursor(), state.draft.as_str().len());
+        assert!(!state.draft_from_editor);
+        assert_eq!(state.last_status, None);
+        assert!(state.regular_history.is_empty());
+    }
+
+    #[test]
+    fn replace_draft_from_editor_session_can_preserve_hash_lines() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut state = AppState {
+            editor_config: EditorConfig {
+                allow_raw_hash_lines: true,
+                ..EditorConfig::default()
+            },
+            ..AppState::default()
+        };
         state.draft.insert_str("old draft");
         let session = state.prepare_editor_session(temp.path()).unwrap();
         std::fs::write(&session.path, "echo edited\n# raw shell content").unwrap();
 
         state.replace_draft_from_editor_session(&session).unwrap();
 
-        assert_eq!(state.mode, Mode::Draft);
         assert_eq!(state.draft.as_str(), "echo edited\n# raw shell content");
-        assert_eq!(state.draft.cursor(), state.draft.as_str().len());
-        assert_eq!(state.last_status, None);
-        assert!(state.regular_history.is_empty());
+        assert!(state.draft_from_editor);
     }
 
     #[test]
@@ -2056,6 +2108,7 @@ mod tests {
             editor_config: EditorConfig {
                 command: vec!["nvim".to_string(), "--clean".to_string()],
                 execute_after_save: false,
+                allow_raw_hash_lines: false,
             },
             ..AppState::default()
         };
@@ -2075,6 +2128,7 @@ mod tests {
         assert!(output.contains("Aish config"));
         assert!(output.contains("draft.persist=false"));
         assert!(output.contains("editor.execute_after_save=false"));
+        assert!(output.contains("editor.allow_raw_hash_lines=false"));
         assert!(output.contains("editor.command=nvim --clean"));
         assert!(output.contains("editor.resolved=nvim --clean"));
         assert!(output.contains("history.regular="));
@@ -2104,6 +2158,7 @@ mod tests {
             editor_config: EditorConfig {
                 command: vec!["vim".to_string()],
                 execute_after_save: false,
+                allow_raw_hash_lines: false,
             },
             regular_history_path: Some(history_path.clone()),
             notes_path: Some(notes_path.clone()),
@@ -2169,6 +2224,7 @@ mod tests {
             editor_config: EditorConfig {
                 command: vec!["code".to_string(), "--wait".to_string()],
                 execute_after_save: false,
+                allow_raw_hash_lines: false,
             },
             editor_temp_root: Some(std::env::temp_dir().join("aish-editor-test")),
             ..AppState::default()
@@ -2188,6 +2244,7 @@ mod tests {
         let output = String::from_utf8(output).unwrap();
         assert!(output.contains("Aish editor"));
         assert!(output.contains("configured=code --wait"));
+        assert!(output.contains("allow_raw_hash_lines=false"));
         assert!(output.contains("editor.resolved=code --wait"));
         assert!(output.contains("external editor launch is wired to Ctrl-X Ctrl-E"));
         assert_eq!(state.last_status, None);

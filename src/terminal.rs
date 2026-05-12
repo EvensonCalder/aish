@@ -71,6 +71,9 @@ pub fn run(
             }
             Event::Paste(text) => {
                 if !text.contains('\n') && !text.contains('\r') {
+                    if state.draft.is_empty() {
+                        state.draft_from_editor = false;
+                    }
                     state.draft.insert_str(&text);
                 }
                 redraw(state, out)?;
@@ -189,6 +192,7 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
         }
         (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
             state.draft.clear();
+            state.draft_from_editor = false;
             KeyAction::Continue
         }
         (KeyModifiers::CONTROL, KeyCode::Char('l')) => KeyAction::ClearScreen,
@@ -263,15 +267,22 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
         (_, KeyCode::Backspace) => {
             state.copy_read_only_selection_to_draft();
             state.draft.backspace();
+            if state.draft.is_empty() {
+                state.draft_from_editor = false;
+            }
             KeyAction::Continue
         }
         (_, KeyCode::Delete) => {
             state.copy_read_only_selection_to_draft();
             state.draft.delete();
+            if state.draft.is_empty() {
+                state.draft_from_editor = false;
+            }
             KeyAction::Continue
         }
         (_, KeyCode::Esc) => {
             state.draft.clear();
+            state.draft_from_editor = false;
             state.mode = crate::modes::Mode::Draft;
             KeyAction::Continue
         }
@@ -282,6 +293,9 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
         (_, KeyCode::Enter) => KeyAction::Submit,
         (_, KeyCode::Char(ch)) => {
             state.copy_read_only_selection_to_draft();
+            if state.draft.is_empty() {
+                state.draft_from_editor = false;
+            }
             state.draft.insert_char(ch);
             KeyAction::Continue
         }
@@ -493,6 +507,7 @@ mod tests {
             editor_config: EditorConfig {
                 command: vec![script.display().to_string()],
                 execute_after_save: false,
+                allow_raw_hash_lines: false,
             },
             editor_temp_root: Some(temp.path().join("editor")),
             ..AppState::default()
@@ -517,6 +532,7 @@ mod tests {
             editor_config: EditorConfig {
                 command: vec![script.display().to_string()],
                 execute_after_save: false,
+                allow_raw_hash_lines: false,
             },
             editor_temp_root: Some(temp.path().join("editor")),
             ..AppState::default()
@@ -540,6 +556,7 @@ mod tests {
             editor_config: EditorConfig {
                 command: vec!["/definitely/missing/aish-editor".to_string()],
                 execute_after_save: false,
+                allow_raw_hash_lines: false,
             },
             editor_temp_root: Some(temp.path().join("editor")),
             ..AppState::default()

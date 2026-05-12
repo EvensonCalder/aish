@@ -46,6 +46,7 @@ pub struct DraftConfig {
 pub struct EditorConfig {
     pub command: Vec<String>,
     pub execute_after_save: bool,
+    pub allow_raw_hash_lines: bool,
 }
 
 impl Default for ShellConfig {
@@ -233,6 +234,7 @@ mod tests {
         assert!(!config.draft.sync);
         assert!(config.editor.command.is_empty());
         assert!(!config.editor.execute_after_save);
+        assert!(!config.editor.allow_raw_hash_lines);
         assert!(config.storage.home.ends_with(".aish"));
     }
 
@@ -254,6 +256,7 @@ mod tests {
             editor: EditorConfig {
                 command: vec![String::new(), "vim".to_string()],
                 execute_after_save: false,
+                allow_raw_hash_lines: false,
             },
         };
 
