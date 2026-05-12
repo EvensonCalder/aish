@@ -10,7 +10,7 @@ use crossterm::terminal::{
     Clear, ClearType, disable_raw_mode, enable_raw_mode, is_raw_mode_enabled,
 };
 
-use crate::app::{AppState, execute_draft, save_draft_if_configured};
+use crate::app::{AppState, answer_context_confirmation, execute_draft, save_draft_if_configured};
 use crate::completion::{accept_completion, current_token_context, render_completion_candidates};
 use crate::editor::resolve_editor_command;
 use crate::picker::{
@@ -33,6 +33,7 @@ pub enum KeyAction {
     EnvVarPicker,
     AdvancedKeyPlaceholder(&'static str),
     Submit,
+    ConfirmContext(bool),
     ShowCompletions,
     AcceptCompletion,
 }
@@ -142,6 +143,10 @@ fn handle_key(
             if state.exit_requested {
                 return Ok(true);
             }
+        }
+        KeyAction::ConfirmContext(accepted) => {
+            writeln!(out)?;
+            answer_context_confirmation(state, accepted, out, command_timeout)?;
         }
         KeyAction::Continue => {}
     }
@@ -394,6 +399,17 @@ fn normalize_paste_newlines(text: &str) -> String {
 }
 
 pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
+    if state.pending_context.is_some() {
+        return match (key.modifiers, key.code) {
+            (_, KeyCode::Enter) => KeyAction::ConfirmContext(true),
+            (_, KeyCode::Char('y' | 'Y')) => KeyAction::ConfirmContext(true),
+            (_, KeyCode::Char('n' | 'N')) => KeyAction::ConfirmContext(false),
+            (_, KeyCode::Esc) => KeyAction::ConfirmContext(false),
+            (KeyModifiers::CONTROL, KeyCode::Char('c')) => KeyAction::ConfirmContext(false),
+            _ => KeyAction::Continue,
+        };
+    }
+
     let is_read_only_mode = matches!(
         state.mode,
         crate::modes::Mode::History | crate::modes::Mode::Ai
@@ -804,6 +820,39 @@ mod tests {
         assert_eq!(
             apply_key_to_state(ctrl('d'), &mut state),
             KeyAction::Continue
+        );
+    }
+
+    #[test]
+    fn pending_context_confirmation_keys_return_confirmation_actions() {
+        let mut state = AppState {
+            pending_context: Some(crate::app::PendingContextPrompt {
+                prompt: "explain".to_string(),
+                command: "printf context".to_string(),
+                dangerous: false,
+            }),
+            ..AppState::default()
+        };
+
+        assert_eq!(
+            apply_key_to_state(key(KeyCode::Char('y')), &mut state),
+            KeyAction::ConfirmContext(true)
+        );
+        assert_eq!(
+            apply_key_to_state(key(KeyCode::Enter), &mut state),
+            KeyAction::ConfirmContext(true)
+        );
+        assert_eq!(
+            apply_key_to_state(key(KeyCode::Char('n')), &mut state),
+            KeyAction::ConfirmContext(false)
+        );
+        assert_eq!(
+            apply_key_to_state(key(KeyCode::Esc), &mut state),
+            KeyAction::ConfirmContext(false)
+        );
+        assert_eq!(
+            apply_key_to_state(ctrl('c'), &mut state),
+            KeyAction::ConfirmContext(false)
         );
     }
 

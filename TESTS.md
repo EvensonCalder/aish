@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 243 library unit tests.
+- 246 library unit tests.
 - 18 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
@@ -271,7 +271,7 @@ Implemented:
 - AI helpers normalize chat-completions URLs, read API keys from configured environment variables, build strict JSON-only chat request bodies, and parse/validate structured AI item JSON without relying on newline boundaries.
 - AI session helpers persist parsed AI items to `ai.jsonl`, rebuild command indexes, and switch to `%` AI mode at the first command from the new session.
 - Direct `# prompt` AI requests are wired to the configured chat-completions request path; missing config reports a readable error without crashing or mutating AI history.
-- Context configuration persists `#context on|off`, `#context confirm on|off`, and `#context <bytes>` to `config.toml`; default context confirmation still prevents execution until an interactive confirmation flow is implemented.
+- Context configuration persists `#context on|off`, `#context confirm on|off`, and `#context <bytes>` to `config.toml`; context confirmation stores a pending prompt and accepts `Y`/`Enter` or skips with `n`/`Esc`/`Ctrl-C`.
 - Context pseudo-pipe helpers run context commands through a controlled `/bin/sh -c` subprocess, capture stdout and stderr, cap output by configured byte limit, disclose truncation, detect dangerous command patterns, and build contextual AI prompts.
 - Key commands are recognized as placeholders but do not store, read, or remove secrets yet.
 - `#completion` remains a private-command placeholder, but the internal completion engine is active for draft completion display and acceptance; log commands remain placeholders.
@@ -372,6 +372,7 @@ Tests:
 - `app::tests::ai_prompt_with_context_waits_for_confirmation_by_default`
 - `app::tests::ai_prompt_with_context_disabled_does_not_execute_command`
 - `app::tests::ai_prompt_with_context_blocks_dangerous_command_even_without_confirmation`
+- `app::tests::answer_context_confirmation_can_skip_pending_command`
 - `app::tests::ai_config_commands_persist_and_report_values`
 - `app::tests::ai_config_commands_report_unconfigured_without_config_path`
 - `ai::tests::normalize_chat_completions_url_appends_endpoint`

@@ -57,6 +57,13 @@ pub struct PromptTemplates {
     pub ai: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingContextPrompt {
+    pub prompt: String,
+    pub command: String,
+    pub dangerous: bool,
+}
+
 impl Default for PromptTemplates {
     fn default() -> Self {
         Self {
@@ -104,6 +111,7 @@ pub struct AppState {
     pub completion_config: CompletionConfig,
     pub ai_config: AiConfig,
     pub context_config: ContextConfig,
+    pub pending_context: Option<PendingContextPrompt>,
     pub draft_from_editor: bool,
     pub draft_from_template: bool,
     pub ctrl_x_prefix: bool,
@@ -138,6 +146,7 @@ impl Default for AppState {
             completion_config: CompletionConfig::default(),
             ai_config: AiConfig::default(),
             context_config: ContextConfig::default(),
+            pending_context: None,
             draft_from_editor: false,
             draft_from_template: false,
             ctrl_x_prefix: false,
@@ -502,6 +511,14 @@ impl AppState {
     }
 
     pub fn render_prompt_line(&self) -> String {
+        if let Some(pending) = &self.pending_context {
+            let marker = if pending.dangerous {
+                "[dangerous context confirmation: Y/n]"
+            } else {
+                "[context confirmation: Y/n]"
+            };
+            return format!("{}{}", self.prompt_prefix(), marker);
+        }
         let text = match self.mode {
             Mode::History => self.selected_history_command().unwrap_or(""),
             Mode::Ai => self.selected_ai_command().unwrap_or(""),
@@ -514,6 +531,14 @@ impl AppState {
     }
 
     pub fn terminal_cursor_column(&self) -> u16 {
+        if let Some(pending) = &self.pending_context {
+            let marker = if pending.dangerous {
+                "[dangerous context confirmation: Y/n]"
+            } else {
+                "[context confirmation: Y/n]"
+            };
+            return (self.prompt_prefix().len() + marker.len()).min(u16::MAX as usize) as u16;
+        }
         let cursor = match self.mode {
             Mode::History => self.selected_history_command().unwrap_or("").len(),
             Mode::Ai => self.selected_ai_command().unwrap_or("").len(),
@@ -578,6 +603,12 @@ pub fn execute_draft(
     out: &mut impl Write,
     timeout: Duration,
 ) -> Result<()> {
+    if state.pending_context.is_some() {
+        writeln!(out, "context confirmation is pending; answer Y or n")?;
+        state.mode = Mode::Draft;
+        return Ok(());
+    }
+
     if state.draft.is_empty() && state.mode == Mode::History {
         state.copy_selected_history_to_draft();
     }
@@ -1055,6 +1086,23 @@ pub fn execute_draft(
     Ok(())
 }
 
+pub fn answer_context_confirmation(
+    state: &mut AppState,
+    accepted: bool,
+    out: &mut impl Write,
+    timeout: Duration,
+) -> Result<()> {
+    let Some(pending) = state.pending_context.take() else {
+        return Ok(());
+    };
+    state.mode = Mode::Draft;
+    if !accepted {
+        writeln!(out, "context command skipped: {}", pending.command)?;
+        return Ok(());
+    }
+    submit_confirmed_ai_prompt_with_context(state, &pending.prompt, &pending.command, out, timeout)
+}
+
 fn submit_ai_prompt(state: &mut AppState, prompt: &str, out: &mut impl Write) -> Result<()> {
     match request_ai_items(&state.ai_config, prompt) {
         Ok(items) => {
@@ -1095,8 +1143,13 @@ fn submit_ai_prompt_with_context(
     if is_dangerous_context_command(command) {
         writeln!(
             out,
-            "context command requires confirmation and was not executed: {command}"
+            "dangerous context command requires confirmation: {command}"
         )?;
+        state.pending_context = Some(PendingContextPrompt {
+            prompt: prompt.to_string(),
+            command: command.to_string(),
+            dangerous: true,
+        });
         state.mode = Mode::Draft;
         return Ok(());
     }
@@ -1106,14 +1159,26 @@ fn submit_ai_prompt_with_context(
         writeln!(out, "  {command}")?;
         writeln!(out)?;
         writeln!(out, "Run context command? [Y/n]")?;
-        writeln!(
-            out,
-            "context confirmation is not interactive yet; command not executed"
-        )?;
+        writeln!(out, "answer Y to run context command or n to skip")?;
+        state.pending_context = Some(PendingContextPrompt {
+            prompt: prompt.to_string(),
+            command: command.to_string(),
+            dangerous: false,
+        });
         state.mode = Mode::Draft;
         return Ok(());
     }
 
+    submit_confirmed_ai_prompt_with_context(state, prompt, command, out, timeout)
+}
+
+fn submit_confirmed_ai_prompt_with_context(
+    state: &mut AppState,
+    prompt: &str,
+    command: &str,
+    out: &mut impl Write,
+    timeout: Duration,
+) -> Result<()> {
     let result = run_context_command(
         command,
         state.current_cwd.as_deref(),
@@ -1577,6 +1642,27 @@ mod tests {
 
         state.mode = Mode::Ai;
         assert_eq!(state.render_prompt_line(), "ai % ");
+    }
+
+    #[test]
+    fn prompt_line_renders_pending_context_confirmation() {
+        let state = AppState {
+            pending_context: Some(PendingContextPrompt {
+                prompt: "explain".to_string(),
+                command: "printf context".to_string(),
+                dangerous: true,
+            }),
+            ..AppState::default()
+        };
+
+        assert_eq!(
+            state.render_prompt_line(),
+            "> [dangerous context confirmation: Y/n]"
+        );
+        assert_eq!(
+            state.terminal_cursor_column(),
+            state.render_prompt_line().len() as u16
+        );
     }
 
     #[test]
@@ -2431,7 +2517,15 @@ mod tests {
         let output = String::from_utf8(output).unwrap();
         assert!(output.contains("aish will run this command to collect context"));
         assert!(output.contains("Run context command? [Y/n]"));
-        assert!(output.contains("context confirmation is not interactive yet"));
+        assert!(output.contains("answer Y to run context command or n to skip"));
+        assert_eq!(
+            state.pending_context,
+            Some(PendingContextPrompt {
+                prompt: "explain".to_string(),
+                command: "printf context".to_string(),
+                dangerous: false,
+            })
+        );
         assert!(state.draft.is_empty());
         assert!(state.ai_sessions.is_empty());
     }
@@ -2486,8 +2580,37 @@ mod tests {
         .unwrap();
 
         let output = String::from_utf8(output).unwrap();
-        assert!(output.contains("context command requires confirmation and was not executed"));
+        assert!(output.contains("dangerous context command requires confirmation"));
+        assert_eq!(
+            state.pending_context,
+            Some(PendingContextPrompt {
+                prompt: "explain".to_string(),
+                command: "rm -rf /tmp/aish-test".to_string(),
+                dangerous: true,
+            })
+        );
         assert!(state.draft.is_empty());
+        assert!(state.ai_sessions.is_empty());
+    }
+
+    #[test]
+    fn answer_context_confirmation_can_skip_pending_command() {
+        let mut state = AppState {
+            pending_context: Some(PendingContextPrompt {
+                prompt: "explain".to_string(),
+                command: "printf context".to_string(),
+                dangerous: false,
+            }),
+            ..AppState::default()
+        };
+        let mut output = Vec::new();
+
+        answer_context_confirmation(&mut state, false, &mut output, Duration::from_secs(5))
+            .unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("context command skipped: printf context"));
+        assert_eq!(state.pending_context, None);
         assert!(state.ai_sessions.is_empty());
     }
 

@@ -545,7 +545,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 - [x] Apply max byte cap.
 - [x] Add truncation notice.
 - [x] Add dangerous command detection.
-- [ ] Force confirmation for dangerous context commands.
+- [x] Force confirmation for dangerous context commands.
 - [x] Include context in AI request.
 
 ### Acceptance criteria
