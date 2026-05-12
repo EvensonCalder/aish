@@ -70,6 +70,30 @@ pub fn template_picker_candidates(templates: &[TemplateEntry]) -> Vec<String> {
     candidates
 }
 
+pub fn git_branch_picker_candidates(cwd: &Path) -> Result<Vec<String>> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(cwd)
+        .arg("branch")
+        .arg("--format=%(refname:short)")
+        .output()
+        .with_context(|| format!("failed to list git branches in {}", cwd.display()))?;
+
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+
+    let mut candidates: Vec<_> = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect();
+    candidates.sort();
+    candidates.dedup();
+    Ok(candidates)
+}
+
 fn collect_file_candidates(root: &Path, dir: &Path, candidates: &mut Vec<String>) -> Result<()> {
     for entry in
         std::fs::read_dir(dir).with_context(|| format!("failed to read {}", dir.display()))?
@@ -447,6 +471,58 @@ mod tests {
         assert_eq!(
             template_picker_candidates(&templates),
             vec!["deploy", "logs"]
+        );
+    }
+
+    #[test]
+    fn git_branch_picker_candidates_return_sorted_branches() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(temp.path().join("repo")).unwrap();
+        let repo = temp.path().join("repo");
+        std::process::Command::new("git")
+            .args(["init", "-b", "main"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        std::fs::write(repo.join("README.md"), "test").unwrap();
+        std::process::Command::new("git")
+            .args(["add", "README.md"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args([
+                "-c",
+                "user.name=Aish Test",
+                "-c",
+                "user.email=aish@example.test",
+                "commit",
+                "-m",
+                "init",
+            ])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["branch", "feature/test"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+
+        assert_eq!(
+            git_branch_picker_candidates(&repo).unwrap(),
+            vec!["feature/test", "main"]
+        );
+    }
+
+    #[test]
+    fn git_branch_picker_candidates_return_empty_outside_repo() {
+        let temp = tempfile::tempdir().unwrap();
+
+        assert!(
+            git_branch_picker_candidates(temp.path())
+                .unwrap()
+                .is_empty()
         );
     }
 }

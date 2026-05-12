@@ -13,7 +13,10 @@ use crossterm::terminal::{
 use crate::app::{AppState, execute_draft, save_draft_if_configured};
 use crate::completion::{accept_completion, current_token_context, render_completion_candidates};
 use crate::editor::resolve_editor_command;
-use crate::picker::{PickerAction, PickerRunResult, file_picker_candidates, run_fzf_picker};
+use crate::picker::{
+    PickerAction, PickerRunResult, file_picker_candidates, git_branch_picker_candidates,
+    run_fzf_picker,
+};
 use crate::pty::PtyBackend;
 use crate::templates::template_placeholder_spans;
 
@@ -26,6 +29,7 @@ pub enum KeyAction {
     ExternalEditor,
     FilePicker,
     TemplatePicker,
+    GitBranchPicker,
     AdvancedKeyPlaceholder(&'static str),
     Submit,
     ShowCompletions,
@@ -115,6 +119,9 @@ fn handle_key(
         }
         KeyAction::TemplatePicker => {
             run_template_picker(state, out)?;
+        }
+        KeyAction::GitBranchPicker => {
+            run_git_branch_picker(state, out)?;
         }
         KeyAction::AdvancedKeyPlaceholder(name) => {
             writeln!(out, "{name} is not implemented yet")?;
@@ -218,6 +225,37 @@ pub fn run_template_picker(state: &mut AppState, out: &mut impl Write) -> Result
 
     let result = run_external_picker(|| run_fzf_picker(&candidates))?;
     apply_template_picker_result(state, result, out)
+}
+
+pub fn run_git_branch_picker(state: &mut AppState, out: &mut impl Write) -> Result<()> {
+    let root = state
+        .current_cwd
+        .clone()
+        .unwrap_or(std::env::current_dir()?);
+    let candidates = git_branch_picker_candidates(&root)?;
+    if candidates.is_empty() {
+        writeln!(out, "git branch picker has no candidates")?;
+        return Ok(());
+    }
+
+    let result = run_external_picker(|| run_fzf_picker(&candidates))?;
+    apply_git_branch_picker_result(state, result, out)
+}
+
+fn apply_git_branch_picker_result(
+    state: &mut AppState,
+    result: PickerRunResult,
+    out: &mut impl Write,
+) -> Result<()> {
+    let Some(selected) = result.selected else {
+        writeln!(out, "git branch picker cancelled")?;
+        return Ok(());
+    };
+
+    if !state.apply_picker_selection(&selected, PickerAction::ReplaceCurrentToken) {
+        writeln!(out, "git branch picker could not update draft")?;
+    }
+    Ok(())
 }
 
 fn apply_template_picker_result(
@@ -329,9 +367,7 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
             (KeyModifiers::CONTROL, KeyCode::Char('e')) => KeyAction::ExternalEditor,
             (KeyModifiers::CONTROL, KeyCode::Char('f')) => KeyAction::FilePicker,
             (KeyModifiers::CONTROL, KeyCode::Char('t')) => KeyAction::TemplatePicker,
-            (KeyModifiers::CONTROL, KeyCode::Char('b')) => {
-                KeyAction::AdvancedKeyPlaceholder("git branch picker")
-            }
+            (KeyModifiers::CONTROL, KeyCode::Char('b')) => KeyAction::GitBranchPicker,
             (KeyModifiers::CONTROL, KeyCode::Char('v')) => {
                 KeyAction::AdvancedKeyPlaceholder("environment variable picker")
             }
@@ -824,23 +860,33 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_x_prefix_resolves_git_branch_picker_chord_to_launch_action() {
+        let mut state = AppState::default();
+        state.draft.insert_str("git checkout main");
+
+        apply_key_to_state(ctrl('x'), &mut state);
+
+        assert_eq!(
+            apply_key_to_state(ctrl('b'), &mut state),
+            KeyAction::GitBranchPicker
+        );
+        assert!(!state.ctrl_x_prefix);
+        assert_eq!(state.draft.as_str(), "git checkout main");
+    }
+
+    #[test]
     fn ctrl_x_prefix_resolves_other_advanced_chords_to_placeholders() {
-        for (ch, name) in [
-            ('b', "git branch picker"),
-            ('v', "environment variable picker"),
-        ] {
-            let mut state = AppState::default();
-            state.draft.insert_str("git status");
+        let mut state = AppState::default();
+        state.draft.insert_str("git status");
 
-            apply_key_to_state(ctrl('x'), &mut state);
+        apply_key_to_state(ctrl('x'), &mut state);
 
-            assert_eq!(
-                apply_key_to_state(ctrl(ch), &mut state),
-                KeyAction::AdvancedKeyPlaceholder(name)
-            );
-            assert!(!state.ctrl_x_prefix);
-            assert_eq!(state.draft.as_str(), "git status");
-        }
+        assert_eq!(
+            apply_key_to_state(ctrl('v'), &mut state),
+            KeyAction::AdvancedKeyPlaceholder("environment variable picker")
+        );
+        assert!(!state.ctrl_x_prefix);
+        assert_eq!(state.draft.as_str(), "git status");
     }
 
     #[test]
@@ -989,6 +1035,51 @@ mod tests {
         assert_eq!(
             String::from_utf8(output).unwrap(),
             "template picker cancelled\n"
+        );
+    }
+
+    #[test]
+    fn apply_git_branch_picker_result_replaces_current_token() {
+        let mut state = AppState::default();
+        state.draft.insert_str("git checkout old");
+        state.draft.move_left();
+        state.draft.move_left();
+        let mut output = Vec::new();
+
+        apply_git_branch_picker_result(
+            &mut state,
+            PickerRunResult {
+                selected: Some("feature/new branch".to_string()),
+                exit_code: Some(0),
+            },
+            &mut output,
+        )
+        .unwrap();
+
+        assert_eq!(state.draft.as_str(), "git checkout 'feature/new branch'");
+        assert!(String::from_utf8(output).unwrap().is_empty());
+    }
+
+    #[test]
+    fn apply_git_branch_picker_result_reports_cancel_without_editing() {
+        let mut state = AppState::default();
+        state.draft.insert_str("git checkout old");
+        let mut output = Vec::new();
+
+        apply_git_branch_picker_result(
+            &mut state,
+            PickerRunResult {
+                selected: None,
+                exit_code: Some(130),
+            },
+            &mut output,
+        )
+        .unwrap();
+
+        assert_eq!(state.draft.as_str(), "git checkout old");
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            "git branch picker cancelled\n"
         );
     }
 
