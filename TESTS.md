@@ -269,7 +269,7 @@ Implemented:
 - `#status` reports the default keybinding count.
 - AI configuration commands are recognized as placeholders but do not persist config or read secrets yet.
 - Key commands are recognized as placeholders but do not store, read, or remove secrets yet.
-- Completion and log commands are recognized as placeholders but do not activate those subsystems yet.
+- `#completion` remains a private-command placeholder, but the internal completion engine is active for draft completion display and acceptance; log commands remain placeholders.
 - Completion has pure current-token detection helpers that handle first-token classification, non-first-token classification, quoted whitespace, escaped whitespace, cursor-in-line contexts, path-like tokens, and UTF-8 cursor snapping.
 - Completion has a pure path completion helper that reads matching file and directory candidates, preserves directory prefixes, sorts candidates, marks directories with trailing `/`, preserves opening quotes in replacements, and handles missing directories as no matches.
 - Completion has a pure first-token helper that returns template candidates before newest-first history commands before PATH executables, with per-source deduplication.

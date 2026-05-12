@@ -427,6 +427,8 @@ This is a future configurable enhancement. It must not replace the default faith
 
 ## Phase 13: Completion engine
 
+Status: implemented for v0.1.0 terminal draft completion. Candidate ranking, candidate display, and first-candidate acceptance are intentionally simple; richer interactive selection can build on the picker phase.
+
 ### Tasks
 
 - [x] Implement weak shell lexer for current token detection.
