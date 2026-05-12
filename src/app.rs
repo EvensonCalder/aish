@@ -8,6 +8,10 @@ use anyhow::Result;
 use crate::commands::{
     IMPLEMENTED_PRIVATE_COMMANDS, ParsedLine, parse_line, suggest_private_command,
 };
+use crate::completion::{
+    CompletionCandidate, CompletionOptions, complete_first_token_with_options,
+    complete_non_first_token_with_options, current_token_context,
+};
 use crate::config::{self, CompletionConfig, EditorConfig, PasteConfig, PromptConfig};
 use crate::editor::{
     EditorCommand, EditorRunResult, PreparedEditorSession, prepare_editor_file, read_editor_file,
@@ -272,6 +276,40 @@ impl AppState {
         self.draft_from_editor = true;
         self.draft_from_template = false;
         self.mode = Mode::Draft;
+    }
+
+    pub fn completion_candidates(&self) -> Result<Vec<CompletionCandidate>> {
+        if self.mode != Mode::Draft || self.draft_from_editor {
+            return Ok(Vec::new());
+        }
+        let token = current_token_context(self.draft.as_str(), self.draft.cursor());
+        let templates = match &self.template_store_path {
+            Some(path) => load_templates(path)?.items,
+            None => Vec::new(),
+        };
+        let history_newest_first: Vec<_> = self.regular_history.iter().rev().cloned().collect();
+        let options = CompletionOptions {
+            max_results: self.completion_config.max_results,
+            ignore_spaces: self.completion_config.ignore_spaces,
+        };
+
+        if token.is_first_token && !token.path_like {
+            Ok(complete_first_token_with_options(
+                &token.text,
+                &templates,
+                &history_newest_first,
+                &path_dirs(),
+                options,
+            ))
+        } else {
+            Ok(complete_non_first_token_with_options(
+                &token.text,
+                &completion_cwd(&self.current_cwd),
+                &history_newest_first,
+                &templates,
+                options,
+            ))
+        }
     }
 
     fn selected_ai_item(&self) -> Option<(&AiSession, &AiItem)> {
@@ -1117,6 +1155,19 @@ fn template_usage() -> &'static str {
     "usage: #template list | #template show <name> | #template use <name> | #template rm <name> | #template replace <name> <body>"
 }
 
+fn completion_cwd(current_cwd: &Option<PathBuf>) -> PathBuf {
+    current_cwd
+        .clone()
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn path_dirs() -> Vec<PathBuf> {
+    std::env::var_os("PATH")
+        .map(|path| std::env::split_paths(&path).collect())
+        .unwrap_or_default()
+}
+
 fn write_path_status(out: &mut impl Write, name: &str, path: &Option<PathBuf>) -> Result<()> {
     match path {
         Some(path) => writeln!(out, "{name}={} exists={}", path.display(), path.exists())?,
@@ -1225,6 +1276,83 @@ mod tests {
 
         state.mode = Mode::Ai;
         assert_eq!(state.render_prompt_line(), "ai % ");
+    }
+
+    #[test]
+    fn completion_candidates_use_templates_before_history_for_first_token() {
+        let temp = tempfile::tempdir().unwrap();
+        let template_path = temp.path().join("templates/templates.jsonl");
+        append_template(
+            &template_path,
+            &TemplateEntry {
+                name: "git-save".to_string(),
+                body: "git add . && git commit".to_string(),
+            },
+        )
+        .unwrap();
+        let mut state = AppState {
+            template_store_path: Some(template_path),
+            regular_history: vec![HistoryEntry {
+                t: 1,
+                command: "git status".to_string(),
+                exit_code: Some(0),
+                source: HistorySource::User,
+            }],
+            completion_config: CompletionConfig {
+                max_results: 2,
+                ignore_spaces: true,
+                template_first: true,
+            },
+            ..AppState::default()
+        };
+        state.draft.insert_str("git");
+
+        let candidates = state.completion_candidates().unwrap();
+
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0].display, "git-save");
+        assert_eq!(
+            candidates[0].source,
+            crate::completion::CompletionSource::Template
+        );
+        assert_eq!(candidates[1].display, "git status");
+        assert_eq!(
+            candidates[1].source,
+            crate::completion::CompletionSource::History
+        );
+    }
+
+    #[test]
+    fn completion_candidates_use_path_completion_for_path_like_token() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(temp.path().join("src")).unwrap();
+        std::fs::write(temp.path().join("src/main.rs"), "").unwrap();
+        let mut state = AppState {
+            current_cwd: Some(temp.path().to_path_buf()),
+            ..AppState::default()
+        };
+        state.draft.insert_str("cat src/m");
+
+        let candidates = state.completion_candidates().unwrap();
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].display, "src/main.rs");
+        assert_eq!(
+            candidates[0].source,
+            crate::completion::CompletionSource::Path
+        );
+    }
+
+    #[test]
+    fn completion_candidates_skip_editor_drafts_and_read_only_modes() {
+        let mut state = AppState::default();
+        state.draft.insert_str("git");
+        state.draft_from_editor = true;
+        assert!(state.completion_candidates().unwrap().is_empty());
+
+        state.draft_from_editor = false;
+        state.mode = Mode::History;
+        assert!(state.completion_candidates().unwrap().is_empty());
     }
 
     #[test]

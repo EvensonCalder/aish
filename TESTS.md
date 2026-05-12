@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 174 library unit tests.
+- 177 library unit tests.
 - 18 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
@@ -276,6 +276,7 @@ Implemented:
 - Completion has a pure non-first-token helper that returns path candidates, history argument candidates, and template placeholder candidates in spec order with per-source deduplication.
 - Completion helpers support ignore-spaces matching and max-result limiting; config defaults expose `completion.max_results = 5`, `completion.ignore_spaces = true`, and `completion.template_first = true`.
 - Runtime state carries completion config and `#config` reports completion settings read-only.
+- Runtime state can build completion candidates from current draft, templates, in-memory history, cwd, PATH, and completion config without mutating input or terminal UI.
 - Completion helpers can render labeled candidate rows, compute display-only ghost suffixes, and return accepted completion text/cursor without mutating input state.
 - Editor command resolution supports config, `$VISUAL`, `$EDITOR`, and PATH fallback candidates.
 - Editor session preparation writes draft/history/AI selected content to a secure temporary file.
@@ -397,6 +398,9 @@ Tests:
 - `completion::tests::render_completion_candidates_labels_sources_without_mutating_input`
 - `completion::tests::ghost_completion_suffix_is_display_only_tail`
 - `completion::tests::accept_completion_replaces_token_and_returns_new_cursor`
+- `app::tests::completion_candidates_use_templates_before_history_for_first_token`
+- `app::tests::completion_candidates_use_path_completion_for_path_like_token`
+- `app::tests::completion_candidates_skip_editor_drafts_and_read_only_modes`
 
 Status:
 
