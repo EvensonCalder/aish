@@ -13,7 +13,7 @@ cargo clippy --all-targets -- -D warnings
 Current test inventory:
 
 - 126 library unit tests.
-- 16 draft execution integration tests.
+- 17 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
 - 1 ignored zsh PTY integration test.
@@ -277,6 +277,7 @@ Implemented:
 - Editor drafts submit raw shell content without Aish private `#` parsing, while ordinary typed line-leading `#` input remains protected.
 - Editor drafts render as opaque prompt summaries and direct inline editing keys leave the hidden editor content unchanged.
 - Editor draft submission preserves multi-line backslash continuation and lets the backend shell interpret it.
+- Editor draft execution writes regular history as individual non-empty, non-comment lines.
 - Editor roundtrip helper prepares a file, runs a fake editor, and reads successful edits back into draft while preserving the original draft on editor failure.
 - `Ctrl-X Ctrl-E` terminal handling resolves the editor, suspends raw mode when needed, runs the roundtrip, restores raw mode when needed, and reports success/failure.
 - Template commands are recognized as placeholders but do not read or write template storage yet.
@@ -300,6 +301,7 @@ Tests:
 - `execute_draft_does_not_send_line_leading_hash_to_backend_shell`
 - `editor_draft_can_send_line_leading_hash_when_configured`
 - `editor_draft_sends_multiline_backslash_continuation_to_shell`
+- `editor_draft_records_history_as_individual_lines`
 - `execute_draft_does_not_run_context_pseudo_pipe_command`
 - `app::tests::private_help_prints_available_commands`
 - `keybindings::tests::default_keybindings_include_common_and_advanced_bindings`
