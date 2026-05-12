@@ -2,7 +2,7 @@ use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process;
+use std::process::{self, Command};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::config::EditorConfig;
@@ -16,6 +16,11 @@ pub struct EditorCommand {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreparedEditorSession {
     pub path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditorRunResult {
+    pub exit_code: Option<i32>,
 }
 
 pub fn resolve_editor_command(config: &EditorConfig) -> Option<EditorCommand> {
@@ -74,6 +79,25 @@ pub fn prepare_editor_file(root: &Path, initial_text: &str) -> Result<PreparedEd
         "failed to allocate unique editor temp file in {}",
         root.display()
     )
+}
+
+pub fn run_editor_command(
+    command: &EditorCommand,
+    session: &PreparedEditorSession,
+) -> Result<EditorRunResult> {
+    let Some(program) = command.argv.first() else {
+        bail!("editor command is empty");
+    };
+
+    let status = Command::new(program)
+        .args(&command.argv[1..])
+        .arg(&session.path)
+        .status()
+        .with_context(|| format!("failed to run editor command `{program}`"))?;
+
+    Ok(EditorRunResult {
+        exit_code: status.code(),
+    })
 }
 
 fn unique_editor_id() -> String {
@@ -195,12 +219,83 @@ mod tests {
         }
     }
 
+    #[test]
+    fn run_editor_command_appends_session_path_and_waits() {
+        let temp = tempfile::tempdir().unwrap();
+        let script = temp.path().join("fake-editor.sh");
+        let output = temp.path().join("editor-output.txt");
+        fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nprintf '%s|%s|%s' \"$1\" \"$2\" \"$3\" > '{}'\n",
+                output.display()
+            ),
+        )
+        .unwrap();
+        make_executable(&script);
+        let session = prepare_editor_file(temp.path(), "draft").unwrap();
+        let command = EditorCommand {
+            argv: vec![
+                script.display().to_string(),
+                "--flag".to_string(),
+                "value".to_string(),
+            ],
+        };
+
+        let result = run_editor_command(&command, &session).unwrap();
+
+        assert_eq!(result.exit_code, Some(0));
+        assert_eq!(
+            fs::read_to_string(output).unwrap(),
+            format!("--flag|value|{}", session.path.display())
+        );
+        assert_eq!(fs::read_to_string(session.path).unwrap(), "draft");
+    }
+
+    #[test]
+    fn run_editor_command_returns_nonzero_status_without_reading_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let script = temp.path().join("fake-editor.sh");
+        fs::write(&script, "#!/bin/sh\nprintf changed > \"$1\"\nexit 7\n").unwrap();
+        make_executable(&script);
+        let session = prepare_editor_file(temp.path(), "draft").unwrap();
+        let command = EditorCommand {
+            argv: vec![script.display().to_string()],
+        };
+
+        let result = run_editor_command(&command, &session).unwrap();
+
+        assert_eq!(result.exit_code, Some(7));
+        assert_eq!(fs::read_to_string(session.path).unwrap(), "changed");
+    }
+
+    #[test]
+    fn run_editor_command_rejects_empty_argv() {
+        let temp = tempfile::tempdir().unwrap();
+        let session = prepare_editor_file(temp.path(), "draft").unwrap();
+        let command = EditorCommand { argv: Vec::new() };
+
+        let error = run_editor_command(&command, &session).unwrap_err();
+
+        assert!(error.to_string().contains("editor command is empty"));
+    }
+
     fn restore_env(name: &str, value: Option<std::ffi::OsString>) {
         unsafe {
             match value {
                 Some(value) => env::set_var(name, value),
                 None => env::remove_var(name),
             }
+        }
+    }
+
+    fn make_executable(path: &Path) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = fs::metadata(path).unwrap().permissions();
+            permissions.set_mode(0o700);
+            fs::set_permissions(path, permissions).unwrap();
         }
     }
 }

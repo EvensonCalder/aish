@@ -320,7 +320,7 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
 - [x] Create secure temporary edit file.
 - [x] Write current draft/current selected item.
 - [ ] Suspend Aish raw mode.
-- [ ] Run editor and wait.
+- [x] Run editor and wait.
 - [ ] Restore raw mode.
 - [ ] Read file content.
 - [ ] Replace draft buffer.
