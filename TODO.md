@@ -443,9 +443,10 @@ This is a future configurable enhancement. It must not replace the default faith
 - [x] Implement ignore-space matching helper.
 - [x] Preserve newest-to-oldest history order in first-token helper.
 - [x] Implement `completion.max_results` helper/config default.
-- [ ] Render completion candidates below input.
-- [ ] Implement ghost suggestion display-only behavior.
-- [ ] Implement accept suggestion key.
+- [x] Add pure candidate rendering helper for below-input display.
+- [x] Implement ghost suggestion display-only helper.
+- [x] Implement accept suggestion helper.
+- [ ] Wire completion rendering and accept key into terminal UI.
 
 ### Acceptance criteria
 

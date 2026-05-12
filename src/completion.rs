@@ -38,6 +38,12 @@ pub struct CompletionCandidate {
     pub source: CompletionSource,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AcceptedCompletion {
+    pub line: String,
+    pub cursor: usize,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CompletionSource {
     Path,
@@ -326,6 +332,57 @@ pub fn limit_candidates(
 ) -> Vec<CompletionCandidate> {
     candidates.truncate(max_results);
     candidates
+}
+
+pub fn render_completion_candidates(candidates: &[CompletionCandidate]) -> Vec<String> {
+    candidates
+        .iter()
+        .map(|candidate| {
+            format!(
+                "{}\t{}",
+                completion_source_label(candidate.source),
+                candidate.display
+            )
+        })
+        .collect()
+}
+
+pub fn ghost_completion_suffix(
+    token: &TokenContext,
+    candidate: &CompletionCandidate,
+) -> Option<String> {
+    candidate
+        .replacement
+        .strip_prefix(&token.text)
+        .filter(|suffix| !suffix.is_empty())
+        .map(str::to_string)
+}
+
+pub fn accept_completion(
+    line: &str,
+    token: &TokenContext,
+    candidate: &CompletionCandidate,
+) -> AcceptedCompletion {
+    let mut accepted =
+        String::with_capacity(line.len() - (token.end - token.start) + candidate.replacement.len());
+    accepted.push_str(&line[..token.start]);
+    accepted.push_str(&candidate.replacement);
+    accepted.push_str(&line[token.end..]);
+    let cursor = token.start + candidate.replacement.len();
+    AcceptedCompletion {
+        line: accepted,
+        cursor,
+    }
+}
+
+fn completion_source_label(source: CompletionSource) -> &'static str {
+    match source {
+        CompletionSource::Path => "path",
+        CompletionSource::Template => "template",
+        CompletionSource::History => "history",
+        CompletionSource::Executable => "exec",
+        CompletionSource::TemplatePlaceholder => "placeholder",
+    }
 }
 
 fn remove_spaces(value: &str) -> String {
@@ -876,6 +933,65 @@ mod tests {
     fn matches_completion_prefix_can_ignore_spaces() {
         assert!(matches_completion_prefix("git status", "g s", true));
         assert!(!matches_completion_prefix("git status", "g s", false));
+    }
+
+    #[test]
+    fn render_completion_candidates_labels_sources_without_mutating_input() {
+        let candidates = vec![
+            CompletionCandidate {
+                display: "deploy".to_string(),
+                replacement: "kubectl apply -f {file}".to_string(),
+                is_dir: false,
+                source: CompletionSource::Template,
+            },
+            CompletionCandidate {
+                display: "src/main.rs".to_string(),
+                replacement: "src/main.rs".to_string(),
+                is_dir: false,
+                source: CompletionSource::Path,
+            },
+        ];
+
+        assert_eq!(
+            render_completion_candidates(&candidates),
+            ["template\tdeploy", "path\tsrc/main.rs"]
+        );
+    }
+
+    #[test]
+    fn ghost_completion_suffix_is_display_only_tail() {
+        let token = current_token_context("git sta", "git sta".len());
+        let candidate = CompletionCandidate {
+            display: "status".to_string(),
+            replacement: "status".to_string(),
+            is_dir: false,
+            source: CompletionSource::History,
+        };
+
+        assert_eq!(
+            ghost_completion_suffix(&token, &candidate),
+            Some("tus".to_string())
+        );
+    }
+
+    #[test]
+    fn accept_completion_replaces_token_and_returns_new_cursor() {
+        let line = "git sta --short";
+        let token = current_token_context(line, 7);
+        let candidate = CompletionCandidate {
+            display: "status".to_string(),
+            replacement: "status".to_string(),
+            is_dir: false,
+            source: CompletionSource::History,
+        };
+
+        assert_eq!(
+            accept_completion(line, &token, &candidate),
+            AcceptedCompletion {
+                line: "git status --short".to_string(),
+                cursor: 10,
+            }
+        );
     }
 
     #[test]
