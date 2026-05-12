@@ -126,7 +126,7 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
   - [x] `>` draft
   - [x] `$` history
   - [x] `%` AI
-- [ ] Implement customizable prompt variables.
+- [x] Implement customizable prompt variables.
 
 ### Acceptance criteria
 

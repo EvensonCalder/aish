@@ -8,7 +8,7 @@ use anyhow::Result;
 use crate::commands::{
     IMPLEMENTED_PRIVATE_COMMANDS, ParsedLine, parse_line, suggest_private_command,
 };
-use crate::config;
+use crate::config::{self, PromptConfig};
 use crate::history::{
     AiCommandIndex, AiItem, AiItemKind, AiSession, DraftEntry, HistoryEntry, HistorySource,
     HistoryStore, NoteEntry, ai_command_indices, append_jsonl, load_jsonl, trim_combined_history,
@@ -30,6 +30,33 @@ pub struct OutputEntry {
     pub exit_code: i32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptTemplates {
+    pub draft: String,
+    pub history: String,
+    pub ai: String,
+}
+
+impl Default for PromptTemplates {
+    fn default() -> Self {
+        Self {
+            draft: "{mode} ".to_string(),
+            history: "{mode} ".to_string(),
+            ai: "{mode} ".to_string(),
+        }
+    }
+}
+
+impl From<PromptConfig> for PromptTemplates {
+    fn from(config: PromptConfig) -> Self {
+        Self {
+            draft: config.draft,
+            history: config.history,
+            ai: config.ai,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct AppState {
     pub mode: Mode,
@@ -49,6 +76,7 @@ pub struct AppState {
     pub ai_command_indices: Vec<AiCommandIndex>,
     pub selected_ai_index: Option<usize>,
     pub output_ring: VecDeque<OutputEntry>,
+    pub prompt_templates: PromptTemplates,
     pub clock: fn() -> i64,
 }
 
@@ -72,6 +100,7 @@ impl Default for AppState {
             ai_command_indices: Vec::new(),
             selected_ai_index: None,
             output_ring: VecDeque::new(),
+            prompt_templates: PromptTemplates::default(),
             clock: unix_timestamp,
         }
     }
@@ -220,7 +249,40 @@ impl AppState {
     }
 
     pub fn prompt_prefix(&self) -> String {
-        format!("{} ", self.mode.symbol())
+        let template = match self.mode {
+            Mode::History => &self.prompt_templates.history,
+            Mode::Ai => &self.prompt_templates.ai,
+            _ => &self.prompt_templates.draft,
+        };
+        self.render_prompt_template(template)
+    }
+
+    fn render_prompt_template(&self, template: &str) -> String {
+        let mode = self.mode.symbol().to_string();
+        let cwd = self
+            .current_cwd
+            .as_ref()
+            .map(|cwd| cwd.display().to_string())
+            .unwrap_or_default();
+        let basename = self
+            .current_cwd
+            .as_ref()
+            .and_then(|cwd| cwd.file_name())
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        template
+            .replace("{user}", &prompt_user())
+            .replace("{host}", &prompt_host())
+            .replace("{cwd}", &cwd)
+            .replace("{basename}", basename)
+            .replace("{mode}", &mode)
+            .replace(
+                "{last_status}",
+                &self
+                    .last_status
+                    .map(|status| status.to_string())
+                    .unwrap_or_else(|| "none".to_string()),
+            )
     }
 
     pub fn render_prompt_line(&self) -> String {
@@ -264,6 +326,7 @@ pub fn run() -> Result<()> {
         regular_history: store.regular,
         ai_sessions: store.ai_sessions,
         ai_command_indices: store.ai_command_indices,
+        prompt_templates: config.prompt.into(),
         ..AppState::default()
     };
     crate::terminal::run(
@@ -891,6 +954,18 @@ pub fn unix_timestamp() -> i64 {
         .unwrap_or(0)
 }
 
+fn prompt_user() -> String {
+    std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .unwrap_or_default()
+}
+
+fn prompt_host() -> String {
+    std::env::var("HOSTNAME")
+        .or_else(|_| std::env::var("HOST"))
+        .unwrap_or_default()
+}
+
 pub fn save_draft_if_configured(state: &AppState) -> Result<bool> {
     if !state.draft_persist || state.draft.is_empty() {
         return Ok(false);
@@ -943,6 +1018,34 @@ mod tests {
 
         state.mode = Mode::Ai;
         assert_eq!(state.render_prompt_line(), "% ");
+    }
+
+    #[test]
+    fn prompt_line_renders_configured_prompt_variables() {
+        let temp = tempfile::tempdir().unwrap();
+        let cwd = temp.path().join("repo");
+        let mut state = AppState {
+            current_cwd: Some(cwd.clone()),
+            last_status: Some(7),
+            prompt_templates: PromptTemplates {
+                draft: "[{mode}:{basename}:{last_status}] ".to_string(),
+                history: "hist {cwd} {mode} ".to_string(),
+                ai: "ai {mode} ".to_string(),
+            },
+            ..AppState::default()
+        };
+        state.draft.insert_str("git status");
+
+        assert_eq!(state.render_prompt_line(), "[>:repo:7] git status");
+
+        state.mode = Mode::History;
+        assert_eq!(
+            state.render_prompt_line(),
+            format!("hist {} $ ", cwd.display())
+        );
+
+        state.mode = Mode::Ai;
+        assert_eq!(state.render_prompt_line(), "ai % ");
     }
 
     #[test]

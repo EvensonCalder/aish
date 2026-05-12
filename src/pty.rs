@@ -265,7 +265,10 @@ fn shell_launch(configured_shell: &str) -> ShellLaunch {
 fn parse_marker_output(raw: &str, marker: &str) -> Result<(String, i32, Option<String>)> {
     let marker_pos = find_complete_marker(raw, marker)
         .context("backend shell output did not contain prompt marker")?;
-    let output = normalize_pty_newlines(raw[..marker_pos].trim_matches(['\r', '\n']));
+    let output = clean_marker_echo(
+        &normalize_pty_newlines(raw[..marker_pos].trim_matches(['\r', '\n'])),
+        marker,
+    );
     let status_start = marker_pos + marker.len();
     let status: String = raw[status_start..]
         .chars()
@@ -291,6 +294,14 @@ fn parse_marker_output(raw: &str, marker: &str) -> Result<(String, i32, Option<S
 
 fn normalize_pty_newlines(text: &str) -> String {
     text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+fn clean_marker_echo(output: &str, marker: &str) -> String {
+    output
+        .lines()
+        .filter(|line| !(line.contains("__aish_status=$?") && line.contains(marker)))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[cfg(test)]
@@ -359,12 +370,12 @@ mod tests {
     #[test]
     fn parser_uses_real_marker_when_command_echo_contains_marker() {
         let marker = "__AISH_STATUS__123__";
-        let raw = format!(
-            "__aish_status=$?; printf '\\n%s%s\\n' '{marker}' \"$__aish_status\"\r\nactual\r\n{marker}0\r\n"
-        );
-        let (output, status, _) = parse_marker_output(&raw, marker).unwrap();
-        assert!(output.contains("actual"));
+        let raw =
+            format!("__aish_status=$?; printf marker {marker}\r\nactual\r\n{marker}0\t/tmp\r\n");
+        let (output, status, cwd) = parse_marker_output(&raw, marker).unwrap();
+        assert_eq!(output, "actual");
         assert_eq!(status, 0);
+        assert_eq!(cwd.as_deref(), Some("/tmp"));
     }
 
     #[test]
