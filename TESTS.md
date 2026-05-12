@@ -69,6 +69,7 @@ Implemented:
 
 - Default `~/.aish` layout.
 - `AISH_HOME` override for tests and isolated runs.
+- Paste config defaults: `multiline = "editor"`, `confirm_execute = true`.
 - First-run directory creation.
 - Missing config creates default `config.toml`.
 - Invalid config returns a readable error.

@@ -8,7 +8,7 @@ use anyhow::Result;
 use crate::commands::{
     IMPLEMENTED_PRIVATE_COMMANDS, ParsedLine, parse_line, suggest_private_command,
 };
-use crate::config::{self, EditorConfig, PromptConfig};
+use crate::config::{self, EditorConfig, PasteConfig, PromptConfig};
 use crate::editor::{
     EditorCommand, EditorRunResult, PreparedEditorSession, prepare_editor_file, read_editor_file,
     resolve_editor_command, run_editor_command,
@@ -84,6 +84,7 @@ pub struct AppState {
     pub prompt_templates: PromptTemplates,
     pub editor_config: EditorConfig,
     pub editor_temp_root: Option<PathBuf>,
+    pub paste_config: PasteConfig,
     pub draft_from_editor: bool,
     pub ctrl_x_prefix: bool,
     pub clock: fn() -> i64,
@@ -112,6 +113,7 @@ impl Default for AppState {
             prompt_templates: PromptTemplates::default(),
             editor_config: EditorConfig::default(),
             editor_temp_root: None,
+            paste_config: PasteConfig::default(),
             draft_from_editor: false,
             ctrl_x_prefix: false,
             clock: unix_timestamp,
@@ -394,6 +396,7 @@ pub fn run() -> Result<()> {
         ai_command_indices: store.ai_command_indices,
         prompt_templates: config.prompt.into(),
         editor_config: config.editor,
+        paste_config: config.paste,
         editor_temp_root: Some(layout.runtime_cache.join("editor")),
         ..AppState::default()
     };
@@ -931,6 +934,12 @@ fn write_config_report(state: &AppState, out: &mut impl Write) -> Result<()> {
         out,
         "editor.command={}",
         format_editor_command(&state.editor_config.command)
+    )?;
+    writeln!(out, "paste.multiline={}", state.paste_config.multiline)?;
+    writeln!(
+        out,
+        "paste.confirm_execute={}",
+        state.paste_config.confirm_execute
     )?;
     write_editor_resolution(out, state)?;
     write_config_path(out, "history.regular", &state.regular_history_path)?;
@@ -2138,6 +2147,8 @@ mod tests {
         assert!(output.contains("draft.persist=false"));
         assert!(output.contains("editor.execute_after_save=false"));
         assert!(output.contains("editor.command=nvim --clean"));
+        assert!(output.contains("paste.multiline=editor"));
+        assert!(output.contains("paste.confirm_execute=true"));
         assert!(output.contains("editor.resolved=nvim --clean"));
         assert!(output.contains("history.regular="));
         assert!(output.contains(&history_path.display().to_string()));

@@ -347,6 +347,7 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
 - [ ] Enable bracketed paste mode.
 - [x] Detect single-line vs multi-line paste.
 - [x] Single-line paste inserts at cursor.
+- [x] Add `paste.multiline` and `paste.confirm_execute` config defaults.
 - [ ] Multi-line paste follows `paste.multiline`:
   - [x] `editor`
   - [ ] `execute`

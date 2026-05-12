@@ -12,6 +12,7 @@ pub struct Config {
     pub storage: StorageConfig,
     pub draft: DraftConfig,
     pub editor: EditorConfig,
+    pub paste: PasteConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -48,6 +49,13 @@ pub struct EditorConfig {
     pub execute_after_save: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PasteConfig {
+    pub multiline: String,
+    pub confirm_execute: bool,
+}
+
 impl Default for ShellConfig {
     fn default() -> Self {
         Self {
@@ -79,6 +87,15 @@ impl Default for DraftConfig {
         Self {
             persist: true,
             sync: false,
+        }
+    }
+}
+
+impl Default for PasteConfig {
+    fn default() -> Self {
+        Self {
+            multiline: "editor".to_string(),
+            confirm_execute: true,
         }
     }
 }
@@ -216,6 +233,12 @@ pub fn normalize_config(config: &mut Config) {
         config.storage.home = default_aish_dir();
     }
     config.editor.command.retain(|part| !part.trim().is_empty());
+    if !matches!(
+        config.paste.multiline.as_str(),
+        "editor" | "execute" | "discard"
+    ) {
+        config.paste.multiline = PasteConfig::default().multiline;
+    }
 }
 
 #[cfg(test)]
@@ -233,6 +256,8 @@ mod tests {
         assert!(!config.draft.sync);
         assert!(config.editor.command.is_empty());
         assert!(!config.editor.execute_after_save);
+        assert_eq!(config.paste.multiline, "editor");
+        assert!(config.paste.confirm_execute);
         assert!(config.storage.home.ends_with(".aish"));
     }
 
@@ -254,6 +279,10 @@ mod tests {
             editor: EditorConfig {
                 command: vec![String::new(), "vim".to_string()],
                 execute_after_save: false,
+            },
+            paste: PasteConfig {
+                multiline: "unknown".to_string(),
+                confirm_execute: true,
             },
         };
 
