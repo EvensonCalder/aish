@@ -202,44 +202,6 @@ fn editor_draft_sends_multiline_backslash_continuation_to_shell() {
 }
 
 #[test]
-fn editor_draft_records_history_as_individual_lines() {
-    let _guard = pty_execution_guard();
-    let temp = tempfile::tempdir().unwrap();
-    let session = prepare_editor_file(temp.path(), "").unwrap();
-    std::fs::write(
-        &session.path,
-        "# comment\nprintf 'one\\n'\n\nprintf 'two\\n'",
-    )
-    .unwrap();
-    let history_path = temp.path().join("history/regular.jsonl");
-    let mut state = AppState {
-        regular_history_path: Some(history_path.clone()),
-        clock: fixed_clock,
-        ..AppState::default()
-    };
-    state.replace_draft_from_editor_session(&session).unwrap();
-    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
-    let mut output = Vec::new();
-
-    execute_draft(
-        &mut state,
-        &mut backend,
-        &mut output,
-        Duration::from_secs(5),
-    )
-    .unwrap();
-
-    let output = String::from_utf8(output).unwrap();
-    assert!(output.contains("one\ntwo"));
-    let loaded = load_jsonl::<HistoryEntry>(&history_path).unwrap();
-    assert_eq!(loaded.errors, []);
-    assert_eq!(loaded.items.len(), 2);
-    assert_eq!(loaded.items[0].command, "printf 'one\\n'");
-    assert_eq!(loaded.items[1].command, "printf 'two\\n'");
-    assert_eq!(state.regular_history, loaded.items);
-}
-
-#[test]
 fn execute_draft_does_not_run_context_pseudo_pipe_command() {
     let _guard = pty_execution_guard();
     let temp = tempfile::tempdir().unwrap();

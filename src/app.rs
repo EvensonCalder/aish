@@ -418,8 +418,7 @@ pub fn execute_draft(
     }
 
     let command = state.draft.as_str().to_string();
-    let editor_draft = state.draft_from_editor;
-    if !editor_draft {
+    if !state.draft_from_editor {
         match parse_line(&command) {
             ParsedLine::Ordinary(_) => {}
             ParsedLine::EmptyPrivate => {
@@ -849,25 +848,18 @@ pub fn execute_draft(
         exit_code: result.exit_code,
     });
     if let Some(path) = &state.regular_history_path {
-        let commands = if editor_draft {
-            editor_history_commands(&result.command)
-        } else {
-            vec![result.command.clone()]
+        let entry = HistoryEntry {
+            command: result.command.clone(),
+            t: (state.clock)(),
+            exit_code: Some(result.exit_code),
+            source: if executing_ai {
+                HistorySource::Ai
+            } else {
+                HistorySource::User
+            },
         };
-        for command in commands {
-            let entry = HistoryEntry {
-                command,
-                t: (state.clock)(),
-                exit_code: Some(result.exit_code),
-                source: if executing_ai {
-                    HistorySource::Ai
-                } else {
-                    HistorySource::User
-                },
-            };
-            append_jsonl(path, &entry)?;
-            state.regular_history.push(entry);
-        }
+        append_jsonl(path, &entry)?;
+        state.regular_history.push(entry);
     }
     state.last_status = Some(result.exit_code);
     if let Some(cwd) = result.cwd {
@@ -883,15 +875,6 @@ pub fn execute_draft(
         state.mode = Mode::Draft;
     }
     Ok(())
-}
-
-fn editor_history_commands(command: &str) -> Vec<String> {
-    command
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with('#'))
-        .map(str::to_string)
-        .collect()
 }
 
 fn write_doctor_report(state: &AppState, out: &mut impl Write) -> Result<()> {
