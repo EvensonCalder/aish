@@ -310,12 +310,12 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
 ### Tasks
 
 - [ ] Resolve editor command:
-  - [ ] config
-  - [ ] `$VISUAL`
-  - [ ] `$EDITOR`
-  - [ ] `nvim`
-  - [ ] `vim`
-  - [ ] `vi`
+  - [x] config
+  - [x] `$VISUAL`
+  - [x] `$EDITOR`
+  - [x] `nvim`
+  - [x] `vim`
+  - [x] `vi`
 - [ ] Implement `Ctrl-X Ctrl-E`.
 - [ ] Create secure temporary edit file.
 - [ ] Write current draft/current selected item.

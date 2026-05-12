@@ -11,6 +11,7 @@ pub struct Config {
     pub prompt: PromptConfig,
     pub storage: StorageConfig,
     pub draft: DraftConfig,
+    pub editor: EditorConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -38,6 +39,13 @@ pub struct StorageConfig {
 pub struct DraftConfig {
     pub persist: bool,
     pub sync: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct EditorConfig {
+    pub command: Vec<String>,
+    pub execute_after_save: bool,
 }
 
 impl Default for ShellConfig {
@@ -207,6 +215,7 @@ pub fn normalize_config(config: &mut Config) {
     if config.storage.home.as_os_str().is_empty() {
         config.storage.home = default_aish_dir();
     }
+    config.editor.command.retain(|part| !part.trim().is_empty());
 }
 
 #[cfg(test)]
@@ -222,6 +231,8 @@ mod tests {
         assert_eq!(config.prompt.ai, "{user}@{host} {cwd} % ");
         assert!(config.draft.persist);
         assert!(!config.draft.sync);
+        assert!(config.editor.command.is_empty());
+        assert!(!config.editor.execute_after_save);
         assert!(config.storage.home.ends_with(".aish"));
     }
 
@@ -240,11 +251,17 @@ mod tests {
                 home: PathBuf::new(),
             },
             draft: DraftConfig::default(),
+            editor: EditorConfig {
+                command: vec![String::new(), "vim".to_string()],
+                execute_after_save: false,
+            },
         };
 
         normalize_config(&mut config);
 
-        assert_eq!(config, Config::default());
+        let mut expected = Config::default();
+        expected.editor.command = vec!["vim".to_string()];
+        assert_eq!(config, expected);
     }
 
     #[test]

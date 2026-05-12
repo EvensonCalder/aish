@@ -8,7 +8,8 @@ use anyhow::Result;
 use crate::commands::{
     IMPLEMENTED_PRIVATE_COMMANDS, ParsedLine, parse_line, suggest_private_command,
 };
-use crate::config::{self, PromptConfig};
+use crate::config::{self, EditorConfig, PromptConfig};
+use crate::editor::resolve_editor_command;
 use crate::history::{
     AiCommandIndex, AiItem, AiItemKind, AiSession, DraftEntry, HistoryEntry, HistorySource,
     HistoryStore, NoteEntry, ai_command_indices, append_jsonl, load_jsonl, trim_combined_history,
@@ -78,6 +79,7 @@ pub struct AppState {
     pub selected_ai_index: Option<usize>,
     pub output_ring: VecDeque<OutputEntry>,
     pub prompt_templates: PromptTemplates,
+    pub editor_config: EditorConfig,
     pub ctrl_x_prefix: bool,
     pub clock: fn() -> i64,
 }
@@ -103,6 +105,7 @@ impl Default for AppState {
             selected_ai_index: None,
             output_ring: VecDeque::new(),
             prompt_templates: PromptTemplates::default(),
+            editor_config: EditorConfig::default(),
             ctrl_x_prefix: false,
             clock: unix_timestamp,
         }
@@ -330,6 +333,7 @@ pub fn run() -> Result<()> {
         ai_sessions: store.ai_sessions,
         ai_command_indices: store.ai_command_indices,
         prompt_templates: config.prompt.into(),
+        editor_config: config.editor,
         ..AppState::default()
     };
     crate::terminal::run(
@@ -501,7 +505,7 @@ pub fn execute_draft(
                     return Ok(());
                 }
                 "editor" => {
-                    writeln!(out, "external editor integration is not implemented yet")?;
+                    write_editor_report(state, out)?;
                     state.draft.clear();
                     state.mode = Mode::Draft;
                     return Ok(());
@@ -844,6 +848,7 @@ fn write_doctor_report(state: &AppState, out: &mut impl Write) -> Result<()> {
     writeln!(out, "ai_sessions={}", state.ai_sessions.len())?;
     writeln!(out, "ai_commands={}", state.ai_command_indices.len())?;
     writeln!(out, "output_ring_entries={}", state.output_ring.len())?;
+    write_editor_resolution(out, state)?;
     write_path_status(out, "regular_history_path", &state.regular_history_path)?;
     write_path_status(out, "notes_path", &state.notes_path)?;
     write_path_status(out, "draft_history_path", &state.draft_history_path)?;
@@ -853,11 +858,55 @@ fn write_doctor_report(state: &AppState, out: &mut impl Write) -> Result<()> {
 fn write_config_report(state: &AppState, out: &mut impl Write) -> Result<()> {
     writeln!(out, "Aish config")?;
     writeln!(out, "draft.persist={}", state.draft_persist)?;
+    writeln!(
+        out,
+        "editor.execute_after_save={}",
+        state.editor_config.execute_after_save
+    )?;
+    writeln!(
+        out,
+        "editor.command={}",
+        format_editor_command(&state.editor_config.command)
+    )?;
+    write_editor_resolution(out, state)?;
     write_config_path(out, "history.regular", &state.regular_history_path)?;
     write_config_path(out, "history.notes", &state.notes_path)?;
     write_config_path(out, "history.draft", &state.draft_history_path)?;
     write_config_path(out, "templates.store", &state.template_store_path)?;
     Ok(())
+}
+
+fn write_editor_report(state: &AppState, out: &mut impl Write) -> Result<()> {
+    writeln!(out, "Aish editor")?;
+    writeln!(
+        out,
+        "execute_after_save={}",
+        state.editor_config.execute_after_save
+    )?;
+    writeln!(
+        out,
+        "configured={}",
+        format_editor_command(&state.editor_config.command)
+    )?;
+    write_editor_resolution(out, state)?;
+    writeln!(out, "external editor launch is not implemented yet")?;
+    Ok(())
+}
+
+fn write_editor_resolution(out: &mut impl Write, state: &AppState) -> Result<()> {
+    match resolve_editor_command(&state.editor_config) {
+        Some(command) => writeln!(out, "editor.resolved={}", command.argv.join(" "))?,
+        None => writeln!(out, "editor.resolved=unavailable")?,
+    }
+    Ok(())
+}
+
+fn format_editor_command(command: &[String]) -> String {
+    if command.is_empty() {
+        "unconfigured".to_string()
+    } else {
+        command.join(" ")
+    }
 }
 
 fn write_config_path(out: &mut impl Write, name: &str, path: &Option<PathBuf>) -> Result<()> {
@@ -1398,10 +1447,7 @@ mod tests {
         for (line, expected) in [
             ("#completion", "completion engine is not implemented yet"),
             ("#log", "event log is not implemented yet"),
-            (
-                "#editor",
-                "external editor integration is not implemented yet",
-            ),
+            ("#editor", "external editor launch is not implemented yet"),
         ] {
             let mut state = AppState::default();
             state.draft.insert_str(line);
@@ -1835,6 +1881,10 @@ mod tests {
             draft_history_path: Some(draft_path.clone()),
             template_store_path: Some(template_path.clone()),
             draft_persist: false,
+            editor_config: EditorConfig {
+                command: vec!["nvim".to_string(), "--clean".to_string()],
+                execute_after_save: false,
+            },
             ..AppState::default()
         };
         state.draft.insert_str("#config");
@@ -1852,6 +1902,9 @@ mod tests {
         let output = String::from_utf8(output).unwrap();
         assert!(output.contains("Aish config"));
         assert!(output.contains("draft.persist=false"));
+        assert!(output.contains("editor.execute_after_save=false"));
+        assert!(output.contains("editor.command=nvim --clean"));
+        assert!(output.contains("editor.resolved=nvim --clean"));
         assert!(output.contains("history.regular="));
         assert!(output.contains(&history_path.display().to_string()));
         assert!(output.contains("history.notes="));
@@ -1876,6 +1929,10 @@ mod tests {
         let mut state = AppState {
             last_status: Some(7),
             current_cwd: Some(temp.path().to_path_buf()),
+            editor_config: EditorConfig {
+                command: vec!["vim".to_string()],
+                execute_after_save: false,
+            },
             regular_history_path: Some(history_path.clone()),
             notes_path: Some(notes_path.clone()),
             draft_history_path: Some(draft_path.clone()),
@@ -1925,11 +1982,42 @@ mod tests {
         assert!(output.contains("ai_sessions=1"));
         assert!(output.contains("ai_commands=1"));
         assert!(output.contains("output_ring_entries=0"));
+        assert!(output.contains("editor.resolved=vim"));
         assert!(output.contains("regular_history_path="));
         assert!(output.contains("exists=false"));
         assert!(!history_path.exists());
         assert!(!notes_path.exists());
         assert!(!draft_path.exists());
+        assert!(state.draft.is_empty());
+    }
+
+    #[test]
+    fn private_editor_reports_resolution_without_launching_editor() {
+        let mut state = AppState {
+            editor_config: EditorConfig {
+                command: vec!["code".to_string(), "--wait".to_string()],
+                execute_after_save: false,
+            },
+            ..AppState::default()
+        };
+        state.draft.insert_str("#editor");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("Aish editor"));
+        assert!(output.contains("configured=code --wait"));
+        assert!(output.contains("editor.resolved=code --wait"));
+        assert!(output.contains("external editor launch is not implemented yet"));
+        assert_eq!(state.last_status, None);
         assert!(state.draft.is_empty());
     }
 

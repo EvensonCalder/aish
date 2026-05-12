@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 104 library unit tests.
+- 108 library unit tests.
 - 14 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
@@ -267,7 +267,8 @@ Implemented:
 - `#status` reports the default keybinding count.
 - AI configuration commands are recognized as placeholders but do not persist config or read secrets yet.
 - Key commands are recognized as placeholders but do not store, read, or remove secrets yet.
-- Completion, log, and editor commands are recognized as placeholders but do not activate those subsystems yet.
+- Completion and log commands are recognized as placeholders but do not activate those subsystems yet.
+- Editor command resolution supports config, `$VISUAL`, `$EDITOR`, and PATH fallback candidates without launching an editor yet.
 - Template commands are recognized as placeholders but do not read or write template storage yet.
 - Encryption and sync commands are recognized as placeholders but do not change files, encryption state, remotes, or run git commands yet.
 - `#context` reports that context collection is currently disabled/not implemented.
@@ -302,6 +303,10 @@ Tests:
 - `app::tests::ai_config_commands_report_placeholders_without_persisting`
 - `app::tests::key_commands_report_placeholders_without_secret_side_effects`
 - `app::tests::subsystem_commands_report_placeholders`
+- `app::tests::private_editor_reports_resolution_without_launching_editor`
+- `editor::tests::resolve_editor_prefers_config_command`
+- `editor::tests::resolve_editor_uses_visual_before_editor`
+- `editor::tests::resolve_editor_falls_back_to_path_candidates`
 - `app::tests::template_commands_report_placeholders_without_storage_side_effects`
 - `app::tests::encryption_and_sync_commands_report_placeholders_without_side_effects`
 - `app::tests::private_history_without_count_prints_usage`
