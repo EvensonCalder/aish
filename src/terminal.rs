@@ -70,7 +70,12 @@ pub fn run(
                 break;
             }
             Event::Paste(text) => {
-                apply_paste_to_state(&text, state);
+                if apply_paste_to_state(&text, state) == PasteAction::Submit {
+                    execute_draft(state, backend, out, command_timeout)?;
+                    if state.exit_requested {
+                        return Ok(());
+                    }
+                }
                 redraw(state, out)?;
             }
             _ => {}
@@ -159,15 +164,32 @@ pub fn run_external_editor(
     Ok(())
 }
 
-pub fn apply_paste_to_state(text: &str, state: &mut AppState) {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PasteAction {
+    Continue,
+    Submit,
+}
+
+pub fn apply_paste_to_state(text: &str, state: &mut AppState) -> PasteAction {
     if !text.contains('\n') && !text.contains('\r') {
         state.copy_read_only_selection_to_draft();
         if state.draft.is_empty() {
             state.draft_from_editor = false;
         }
         state.draft.insert_str(text);
-    } else if state.paste_config.multiline == "editor" {
-        state.replace_draft_from_editor_text(normalize_paste_newlines(text));
+        return PasteAction::Continue;
+    }
+
+    match state.paste_config.multiline.as_str() {
+        "editor" | "execute" if state.paste_config.confirm_execute => {
+            state.replace_draft_from_editor_text(normalize_paste_newlines(text));
+            PasteAction::Continue
+        }
+        "execute" => {
+            state.replace_draft_from_editor_text(normalize_paste_newlines(text));
+            PasteAction::Submit
+        }
+        _ => PasteAction::Continue,
     }
 }
 
@@ -678,7 +700,10 @@ mod tests {
         let mut state = AppState::default();
         state.draft.insert_str("git ");
 
-        apply_paste_to_state("status", &mut state);
+        assert_eq!(
+            apply_paste_to_state("status", &mut state),
+            PasteAction::Continue
+        );
 
         assert_eq!(state.mode, Mode::Draft);
         assert_eq!(state.draft.as_str(), "git status");
@@ -699,7 +724,7 @@ mod tests {
             ..AppState::default()
         };
 
-        apply_paste_to_state("s", &mut state);
+        assert_eq!(apply_paste_to_state("s", &mut state), PasteAction::Continue);
 
         assert_eq!(state.mode, Mode::Draft);
         assert_eq!(state.draft.as_str(), "git status");
@@ -710,7 +735,10 @@ mod tests {
     fn multiline_paste_creates_opaque_editor_draft() {
         let mut state = AppState::default();
 
-        apply_paste_to_state("echo one\r\necho two", &mut state);
+        assert_eq!(
+            apply_paste_to_state("echo one\r\necho two", &mut state),
+            PasteAction::Continue
+        );
 
         assert_eq!(state.mode, Mode::Draft);
         assert!(state.draft_from_editor);
@@ -733,11 +761,52 @@ mod tests {
         };
         state.draft.insert_str("existing");
 
-        apply_paste_to_state("echo one\necho two", &mut state);
+        assert_eq!(
+            apply_paste_to_state("echo one\necho two", &mut state),
+            PasteAction::Continue
+        );
 
         assert_eq!(state.mode, Mode::Draft);
         assert_eq!(state.draft.as_str(), "existing");
         assert!(!state.draft_from_editor);
+    }
+
+    #[test]
+    fn multiline_paste_execute_with_confirm_creates_editor_draft() {
+        let mut state = AppState {
+            paste_config: crate::config::PasteConfig {
+                multiline: "execute".to_string(),
+                confirm_execute: true,
+            },
+            ..AppState::default()
+        };
+
+        assert_eq!(
+            apply_paste_to_state("echo one\necho two", &mut state),
+            PasteAction::Continue
+        );
+
+        assert!(state.draft_from_editor);
+        assert_eq!(state.draft.as_str(), "echo one\necho two");
+    }
+
+    #[test]
+    fn multiline_paste_execute_without_confirm_requests_submit() {
+        let mut state = AppState {
+            paste_config: crate::config::PasteConfig {
+                multiline: "execute".to_string(),
+                confirm_execute: false,
+            },
+            ..AppState::default()
+        };
+
+        assert_eq!(
+            apply_paste_to_state("echo one\necho two", &mut state),
+            PasteAction::Submit
+        );
+
+        assert!(state.draft_from_editor);
+        assert_eq!(state.draft.as_str(), "echo one\necho two");
     }
 
     #[test]

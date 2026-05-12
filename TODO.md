@@ -350,12 +350,12 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
 - [x] Add `paste.multiline` and `paste.confirm_execute` config defaults.
 - [ ] Multi-line paste follows `paste.multiline`:
   - [x] `editor`
-  - [ ] `execute`
+  - [x] `execute`
   - [x] `discard`
 - [ ] Implement PasteReviewEditor mode.
-- [ ] Add execution warning when configured.
+- [x] Add safe execute confirmation behavior using editor draft when configured.
 - [x] Ensure multi-line paste enters opaque editor draft by default without execution.
-- [ ] Implement raw submission to backend shell.
+- [x] Implement raw submission to backend shell.
 - [ ] Keep raw multi-line submission history faithful by default.
 
 ### Acceptance criteria

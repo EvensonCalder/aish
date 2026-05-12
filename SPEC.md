@@ -420,9 +420,9 @@ confirm_execute = true
 
 `multiline = "execute"`:
 
-1. Optionally warn.
-2. Send raw pasted content to backend shell.
-3. Do not store pasted content as draft.
+1. If `confirm_execute = true`, convert pasted content to an editor draft and wait for `Enter`.
+2. If `confirm_execute = false`, submit pasted content immediately as raw editor-draft content.
+3. Store executed content in history as the exact submitted command string.
 
 `multiline = "discard"`:
 
