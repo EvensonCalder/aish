@@ -34,6 +34,20 @@ fn pty_backend_runs_commands_and_preserves_shell_state() {
 }
 
 #[test]
+fn pty_backend_resizes_visible_columns_for_child_commands() {
+    let _guard = pty_test_guard();
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    backend.resize(aish::pty::pty_size(132, 40)).unwrap();
+
+    let size = backend
+        .run_command("stty size", Duration::from_secs(5))
+        .unwrap();
+
+    assert_eq!(size.exit_code, 0);
+    assert_eq!(size.output.trim(), "40 132");
+}
+
+#[test]
 fn pty_backend_captures_failed_command_exit_status() {
     let _guard = pty_test_guard();
     let mut backend = PtyBackend::spawn("/bin/bash").unwrap();

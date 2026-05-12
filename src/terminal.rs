@@ -7,7 +7,7 @@ use crossterm::cursor::MoveToColumn;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
-    Clear, ClearType, disable_raw_mode, enable_raw_mode, is_raw_mode_enabled,
+    Clear, ClearType, disable_raw_mode, enable_raw_mode, is_raw_mode_enabled, size,
 };
 
 use crate::app::{AppState, answer_context_confirmation, execute_draft, save_draft_if_configured};
@@ -17,7 +17,7 @@ use crate::picker::{
     PickerAction, PickerRunResult, env_var_picker_candidates, file_picker_candidates,
     git_branch_picker_candidates, run_fzf_picker, shell_env_var_reference,
 };
-use crate::pty::PtyBackend;
+use crate::pty::{PtyBackend, pty_size};
 use crate::templates::template_placeholder_spans;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,6 +105,7 @@ pub fn run(
 ) -> Result<()> {
     install_panic_cleanup();
     let _guard = TerminalGuard::enter()?;
+    sync_backend_pty_size(backend)?;
     redraw(state, out)?;
 
     loop {
@@ -123,11 +124,20 @@ pub fn run(
                 }
                 redraw(state, out)?;
             }
+            Event::Resize(cols, rows) => {
+                backend.resize(pty_size(cols, rows))?;
+                redraw(state, out)?;
+            }
             _ => {}
         }
     }
 
     Ok(())
+}
+
+fn sync_backend_pty_size(backend: &mut PtyBackend) -> Result<()> {
+    let (cols, rows) = size()?;
+    backend.resize(pty_size(cols, rows))
 }
 
 fn handle_key(

@@ -6,7 +6,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
-use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
+use portable_pty::{CommandBuilder, MasterPty, NativePtySystem, PtySize, PtySystem};
 
 const MARKER_PREFIX: &str = "__AISH_STATUS__";
 const READY_MARKER: &str = "__AISH_READY__";
@@ -21,6 +21,7 @@ pub struct CommandResult {
 }
 
 pub struct PtyBackend {
+    master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     output: Receiver<Vec<u8>>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
@@ -32,22 +33,10 @@ impl PtyBackend {
         let launch = shell_launch(configured_shell);
         let pty_system = NativePtySystem::default();
         let pair = pty_system
-            .openpty(PtySize {
-                rows: 24,
-                cols: 80,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
+            .openpty(default_pty_size())
             .context("failed to create PTY")?;
 
-        let mut command = CommandBuilder::new(&launch.program);
-        for arg in &launch.args {
-            command.arg(arg);
-        }
-        command.env("PS1", "");
-        command.env("PROMPT", "");
-        command.env("RPROMPT", "");
-        command.env("BASH_SILENCE_DEPRECATION_WARNING", "1");
+        let command = shell_command_builder(&launch);
 
         let child = pair
             .slave
@@ -80,6 +69,7 @@ impl PtyBackend {
         });
 
         let mut backend = Self {
+            master: pair.master,
             writer,
             output: rx,
             child,
@@ -99,6 +89,14 @@ impl PtyBackend {
 
     pub fn initial_cwd(&self) -> Option<&str> {
         self.initial_cwd.as_deref()
+    }
+
+    pub fn resize(&mut self, size: PtySize) -> Result<()> {
+        self.master.resize(size).context("failed to resize PTY")
+    }
+
+    pub fn size(&self) -> Result<PtySize> {
+        self.master.get_size().context("failed to read PTY size")
     }
 
     pub fn write_raw(&mut self, text: &str) -> Result<()> {
@@ -189,6 +187,30 @@ impl PtyBackend {
     }
 }
 
+pub fn pty_size(cols: u16, rows: u16) -> PtySize {
+    PtySize {
+        rows,
+        cols,
+        pixel_width: 0,
+        pixel_height: 0,
+    }
+}
+
+fn default_pty_size() -> PtySize {
+    pty_size(
+        std::env::var("COLUMNS")
+            .ok()
+            .and_then(|value| value.parse::<u16>().ok())
+            .filter(|cols| *cols > 0)
+            .unwrap_or(80),
+        std::env::var("LINES")
+            .ok()
+            .and_then(|value| value.parse::<u16>().ok())
+            .filter(|rows| *rows > 0)
+            .unwrap_or(24),
+    )
+}
+
 impl Drop for PtyBackend {
     fn drop(&mut self) {
         let _ = self.child.kill();
@@ -269,6 +291,21 @@ fn shell_launch(configured_shell: &str) -> ShellLaunch {
     }
 }
 
+fn shell_command_builder(launch: &ShellLaunch) -> CommandBuilder {
+    let mut command = CommandBuilder::new(&launch.program);
+    for arg in &launch.args {
+        command.arg(arg);
+    }
+    if let Ok(cwd) = env::current_dir() {
+        command.cwd(cwd);
+    }
+    command.env("PS1", "");
+    command.env("PROMPT", "");
+    command.env("RPROMPT", "");
+    command.env("BASH_SILENCE_DEPRECATION_WARNING", "1");
+    command
+}
+
 fn parse_marker_output(raw: &str, marker: &str) -> Result<(String, i32, Option<String>)> {
     let marker_pos = find_complete_marker(raw, marker)
         .context("backend shell output did not contain prompt marker")?;
@@ -327,6 +364,18 @@ mod tests {
     #[test]
     fn resolves_configured_shell_before_environment() {
         assert_eq!(resolve_shell("/bin/custom-shell"), "/bin/custom-shell");
+    }
+
+    #[test]
+    fn shell_command_builder_inherits_current_directory() {
+        let cwd = env::current_dir().unwrap();
+        let launch = shell_launch("/bin/bash");
+        let command = shell_command_builder(&launch);
+
+        assert_eq!(
+            command.get_cwd().map(|cwd| cwd.as_os_str()),
+            Some(cwd.as_os_str())
+        );
     }
 
     #[test]

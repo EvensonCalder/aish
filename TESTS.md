@@ -12,11 +12,12 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 257 library unit tests.
+- 258 library unit tests.
 - 18 draft execution integration tests.
 - 1 first-run integration test.
-- 3 active bash PTY integration tests.
+- 4 active bash PTY integration tests.
 - Bash PTY startup records the backend shell's initial cwd so the first prompt matches the shell state before any command executes.
+- Backend PTY startup inherits Aish's current directory and can be resized so child commands such as `ls` see the real terminal width.
 - 1 ignored zsh PTY integration test.
 - 0 doctests.
 
