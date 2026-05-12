@@ -94,6 +94,35 @@ pub fn git_branch_picker_candidates(cwd: &Path) -> Result<Vec<String>> {
     Ok(candidates)
 }
 
+pub fn env_var_picker_candidates() -> Vec<String> {
+    env_var_picker_candidates_from_names(std::env::vars().map(|(name, _)| name))
+}
+
+pub fn env_var_picker_candidates_from_names(
+    names: impl IntoIterator<Item = String>,
+) -> Vec<String> {
+    let mut candidates: Vec<_> = names
+        .into_iter()
+        .filter(|name| is_shell_variable_name(name))
+        .collect();
+    candidates.sort();
+    candidates.dedup();
+    candidates
+}
+
+pub fn shell_env_var_reference(name: &str) -> Option<String> {
+    is_shell_variable_name(name).then(|| format!("${name}"))
+}
+
+fn is_shell_variable_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first.is_ascii_alphabetic() || first == '_')
+        && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+}
+
 fn collect_file_candidates(root: &Path, dir: &Path, candidates: &mut Vec<String>) -> Result<()> {
     for entry in
         std::fs::read_dir(dir).with_context(|| format!("failed to read {}", dir.display()))?
@@ -173,13 +202,27 @@ pub fn apply_picker_result(
 ) -> PickerEdit {
     let cursor = previous_char_boundary(line, cursor.min(line.len()));
     let quoted = shell_quote(value);
+    apply_picker_edit(line, cursor, &quoted, action)
+}
+
+pub fn apply_raw_picker_result(
+    line: &str,
+    cursor: usize,
+    value: &str,
+    action: PickerAction,
+) -> PickerEdit {
+    let cursor = previous_char_boundary(line, cursor.min(line.len()));
+    apply_picker_edit(line, cursor, value, action)
+}
+
+fn apply_picker_edit(line: &str, cursor: usize, value: &str, action: PickerAction) -> PickerEdit {
     match action {
-        PickerAction::InsertAtCursor => insert_at(line, cursor, &quoted),
-        PickerAction::ReplaceCurrentToken => replace_token(line, cursor, &quoted),
-        PickerAction::AppendAsArgument => append_argument(line, &quoted),
+        PickerAction::InsertAtCursor => insert_at(line, cursor, value),
+        PickerAction::ReplaceCurrentToken => replace_token(line, cursor, value),
+        PickerAction::AppendAsArgument => append_argument(line, value),
         PickerAction::ReplaceLine => PickerEdit {
-            line: quoted.clone(),
-            cursor: quoted.len(),
+            line: value.to_string(),
+            cursor: value.len(),
         },
     }
 }
@@ -523,6 +566,38 @@ mod tests {
             git_branch_picker_candidates(temp.path())
                 .unwrap()
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn env_var_picker_candidates_keep_shell_compatible_names_sorted() {
+        assert_eq!(
+            env_var_picker_candidates_from_names([
+                "ZED".to_string(),
+                "BAD-NAME".to_string(),
+                "_AISH".to_string(),
+                "1BAD".to_string(),
+                "ZED".to_string(),
+            ]),
+            vec!["ZED", "_AISH"]
+        );
+    }
+
+    #[test]
+    fn shell_env_var_reference_requires_valid_shell_name() {
+        assert_eq!(shell_env_var_reference("HOME"), Some("$HOME".to_string()));
+        assert_eq!(shell_env_var_reference("BAD-NAME"), None);
+        assert_eq!(shell_env_var_reference("1BAD"), None);
+    }
+
+    #[test]
+    fn apply_raw_picker_result_does_not_shell_quote_value() {
+        assert_eq!(
+            apply_raw_picker_result("echo OLD", 6, "$HOME", PickerAction::ReplaceCurrentToken),
+            PickerEdit {
+                line: "echo $HOME".to_string(),
+                cursor: 10,
+            }
         );
     }
 }

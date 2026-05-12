@@ -14,8 +14,8 @@ use crate::app::{AppState, execute_draft, save_draft_if_configured};
 use crate::completion::{accept_completion, current_token_context, render_completion_candidates};
 use crate::editor::resolve_editor_command;
 use crate::picker::{
-    PickerAction, PickerRunResult, file_picker_candidates, git_branch_picker_candidates,
-    run_fzf_picker,
+    PickerAction, PickerRunResult, env_var_picker_candidates, file_picker_candidates,
+    git_branch_picker_candidates, run_fzf_picker, shell_env_var_reference,
 };
 use crate::pty::PtyBackend;
 use crate::templates::template_placeholder_spans;
@@ -30,6 +30,7 @@ pub enum KeyAction {
     FilePicker,
     TemplatePicker,
     GitBranchPicker,
+    EnvVarPicker,
     AdvancedKeyPlaceholder(&'static str),
     Submit,
     ShowCompletions,
@@ -122,6 +123,9 @@ fn handle_key(
         }
         KeyAction::GitBranchPicker => {
             run_git_branch_picker(state, out)?;
+        }
+        KeyAction::EnvVarPicker => {
+            run_env_var_picker(state, out)?;
         }
         KeyAction::AdvancedKeyPlaceholder(name) => {
             writeln!(out, "{name} is not implemented yet")?;
@@ -240,6 +244,40 @@ pub fn run_git_branch_picker(state: &mut AppState, out: &mut impl Write) -> Resu
 
     let result = run_external_picker(|| run_fzf_picker(&candidates))?;
     apply_git_branch_picker_result(state, result, out)
+}
+
+pub fn run_env_var_picker(state: &mut AppState, out: &mut impl Write) -> Result<()> {
+    let candidates = env_var_picker_candidates();
+    if candidates.is_empty() {
+        writeln!(out, "environment variable picker has no candidates")?;
+        return Ok(());
+    }
+
+    let result = run_external_picker(|| run_fzf_picker(&candidates))?;
+    apply_env_var_picker_result(state, result, out)
+}
+
+fn apply_env_var_picker_result(
+    state: &mut AppState,
+    result: PickerRunResult,
+    out: &mut impl Write,
+) -> Result<()> {
+    let Some(selected) = result.selected else {
+        writeln!(out, "environment variable picker cancelled")?;
+        return Ok(());
+    };
+    let Some(reference) = shell_env_var_reference(&selected) else {
+        writeln!(
+            out,
+            "environment variable picker rejected invalid name: {selected}"
+        )?;
+        return Ok(());
+    };
+
+    if !state.apply_raw_picker_selection(&reference, PickerAction::ReplaceCurrentToken) {
+        writeln!(out, "environment variable picker could not update draft")?;
+    }
+    Ok(())
 }
 
 fn apply_git_branch_picker_result(
@@ -368,9 +406,7 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
             (KeyModifiers::CONTROL, KeyCode::Char('f')) => KeyAction::FilePicker,
             (KeyModifiers::CONTROL, KeyCode::Char('t')) => KeyAction::TemplatePicker,
             (KeyModifiers::CONTROL, KeyCode::Char('b')) => KeyAction::GitBranchPicker,
-            (KeyModifiers::CONTROL, KeyCode::Char('v')) => {
-                KeyAction::AdvancedKeyPlaceholder("environment variable picker")
-            }
+            (KeyModifiers::CONTROL, KeyCode::Char('v')) => KeyAction::EnvVarPicker,
             _ => KeyAction::Continue,
         };
     }
@@ -875,7 +911,7 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_x_prefix_resolves_other_advanced_chords_to_placeholders() {
+    fn ctrl_x_prefix_resolves_env_var_picker_chord_to_launch_action() {
         let mut state = AppState::default();
         state.draft.insert_str("git status");
 
@@ -883,7 +919,7 @@ mod tests {
 
         assert_eq!(
             apply_key_to_state(ctrl('v'), &mut state),
-            KeyAction::AdvancedKeyPlaceholder("environment variable picker")
+            KeyAction::EnvVarPicker
         );
         assert!(!state.ctrl_x_prefix);
         assert_eq!(state.draft.as_str(), "git status");
@@ -1080,6 +1116,74 @@ mod tests {
         assert_eq!(
             String::from_utf8(output).unwrap(),
             "git branch picker cancelled\n"
+        );
+    }
+
+    #[test]
+    fn apply_env_var_picker_result_replaces_current_token_with_reference() {
+        let mut state = AppState::default();
+        state.draft.insert_str("echo OLD");
+        state.draft.move_left();
+        state.draft.move_left();
+        let mut output = Vec::new();
+
+        apply_env_var_picker_result(
+            &mut state,
+            PickerRunResult {
+                selected: Some("AISH_TEST_VAR".to_string()),
+                exit_code: Some(0),
+            },
+            &mut output,
+        )
+        .unwrap();
+
+        assert_eq!(state.draft.as_str(), "echo $AISH_TEST_VAR");
+        assert!(String::from_utf8(output).unwrap().is_empty());
+    }
+
+    #[test]
+    fn apply_env_var_picker_result_rejects_invalid_names_without_editing() {
+        let mut state = AppState::default();
+        state.draft.insert_str("echo OLD");
+        let mut output = Vec::new();
+
+        apply_env_var_picker_result(
+            &mut state,
+            PickerRunResult {
+                selected: Some("BAD-NAME".to_string()),
+                exit_code: Some(0),
+            },
+            &mut output,
+        )
+        .unwrap();
+
+        assert_eq!(state.draft.as_str(), "echo OLD");
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            "environment variable picker rejected invalid name: BAD-NAME\n"
+        );
+    }
+
+    #[test]
+    fn apply_env_var_picker_result_reports_cancel_without_editing() {
+        let mut state = AppState::default();
+        state.draft.insert_str("echo OLD");
+        let mut output = Vec::new();
+
+        apply_env_var_picker_result(
+            &mut state,
+            PickerRunResult {
+                selected: None,
+                exit_code: Some(130),
+            },
+            &mut output,
+        )
+        .unwrap();
+
+        assert_eq!(state.draft.as_str(), "echo OLD");
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            "environment variable picker cancelled\n"
         );
     }
 

@@ -481,13 +481,13 @@ Status: implemented for v0.1.0 terminal draft completion. Candidate ranking, can
 - [x] Implement history search picker for `Ctrl-R`.
 - [x] Implement template picker.
 - [x] Implement git branch picker.
-- [ ] Implement env var picker.
+- [x] Implement env var picker.
 - [ ] Support keybindings:
   - [x] `Ctrl-X Ctrl-F`
   - [x] `Ctrl-R`
   - [x] `Ctrl-X Ctrl-T`
   - [x] `Ctrl-X Ctrl-B`
-  - [ ] `Ctrl-X Ctrl-V`
+  - [x] `Ctrl-X Ctrl-V`
 
 ### Acceptance criteria
 

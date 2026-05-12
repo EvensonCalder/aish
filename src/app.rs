@@ -25,7 +25,7 @@ use crate::input::InputBuffer;
 use crate::keybindings::default_keybindings;
 use crate::modes::Mode;
 use crate::picker::{
-    PickerAction, ai_history_picker_candidates, apply_picker_result,
+    PickerAction, ai_history_picker_candidates, apply_picker_result, apply_raw_picker_result,
     combined_history_picker_candidates, regular_history_picker_candidates,
     template_picker_candidates,
 };
@@ -322,6 +322,19 @@ impl AppState {
             return false;
         }
         let edit = apply_picker_result(self.draft.as_str(), self.draft.cursor(), value, action);
+        if self.draft.replace(edit.line, edit.cursor) {
+            self.draft_from_template = false;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn apply_raw_picker_selection(&mut self, value: &str, action: PickerAction) -> bool {
+        if self.mode != Mode::Draft || self.draft_from_editor {
+            return false;
+        }
+        let edit = apply_raw_picker_result(self.draft.as_str(), self.draft.cursor(), value, action);
         if self.draft.replace(edit.line, edit.cursor) {
             self.draft_from_template = false;
             true
@@ -1439,6 +1452,24 @@ mod tests {
         state.draft_from_editor = false;
         state.mode = Mode::History;
         assert!(!state.apply_picker_selection("file", crate::picker::PickerAction::InsertAtCursor));
+    }
+
+    #[test]
+    fn apply_raw_picker_selection_replaces_without_shell_quoting() {
+        let mut state = AppState::default();
+        state.draft.insert_str("echo OLD");
+        state.draft.move_left();
+        state.draft.move_left();
+
+        assert!(
+            state.apply_raw_picker_selection(
+                "$HOME",
+                crate::picker::PickerAction::ReplaceCurrentToken
+            )
+        );
+
+        assert_eq!(state.draft.as_str(), "echo $HOME");
+        assert_eq!(state.draft.cursor(), "echo $HOME".len());
     }
 
     #[test]

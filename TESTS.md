@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 216 library unit tests.
+- 223 library unit tests.
 - 18 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
@@ -287,6 +287,7 @@ Implemented:
 - `Ctrl-R` launches the history search action, scopes candidates by current mode, and selected commands replace the draft line without shell quoting.
 - `Ctrl-X Ctrl-T` launches the template picker action, scopes candidates to newest unique template names, and selected templates become protected template drafts.
 - `Ctrl-X Ctrl-B` launches the git branch picker action, lists branches from the current git repository, and selected branch names replace the current token with shell quoting.
+- `Ctrl-X Ctrl-V` launches the environment variable picker action, lists shell-compatible environment variable names, and selected names replace the current token as raw `$NAME` references.
 - Editor command resolution supports config, `$VISUAL`, `$EDITOR`, and PATH fallback candidates.
 - Editor session preparation writes draft/history/AI selected content to a secure temporary file.
 - Editor process runner appends the prepared file path to the resolved command and waits for exit status without reading or executing content.
@@ -450,6 +451,14 @@ Tests:
 - `terminal::tests::ctrl_x_prefix_resolves_git_branch_picker_chord_to_launch_action`
 - `terminal::tests::apply_git_branch_picker_result_replaces_current_token`
 - `terminal::tests::apply_git_branch_picker_result_reports_cancel_without_editing`
+- `picker::tests::env_var_picker_candidates_keep_shell_compatible_names_sorted`
+- `picker::tests::shell_env_var_reference_requires_valid_shell_name`
+- `picker::tests::apply_raw_picker_result_does_not_shell_quote_value`
+- `app::tests::apply_raw_picker_selection_replaces_without_shell_quoting`
+- `terminal::tests::ctrl_x_prefix_resolves_env_var_picker_chord_to_launch_action`
+- `terminal::tests::apply_env_var_picker_result_replaces_current_token_with_reference`
+- `terminal::tests::apply_env_var_picker_result_rejects_invalid_names_without_editing`
+- `terminal::tests::apply_env_var_picker_result_reports_cancel_without_editing`
 
 Status:
 
