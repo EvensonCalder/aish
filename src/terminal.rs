@@ -18,6 +18,7 @@ pub enum KeyAction {
     Continue,
     Exit,
     ClearScreen,
+    HistorySearchPlaceholder,
     Submit,
 }
 
@@ -90,6 +91,9 @@ fn handle_key(
         KeyAction::ClearScreen => {
             execute!(out, Clear(ClearType::All), MoveToColumn(0))?;
         }
+        KeyAction::HistorySearchPlaceholder => {
+            writeln!(out, "history search is not implemented yet")?;
+        }
         KeyAction::Submit => {
             writeln!(out)?;
             execute_draft(state, backend, out, command_timeout)?;
@@ -119,6 +123,7 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
             KeyAction::Continue
         }
         (KeyModifiers::CONTROL, KeyCode::Char('l')) => KeyAction::ClearScreen,
+        (KeyModifiers::CONTROL, KeyCode::Char('r')) => KeyAction::HistorySearchPlaceholder,
         (KeyModifiers::CONTROL, KeyCode::Char('a')) => {
             if !is_read_only_mode {
                 state.draft.move_start();
@@ -334,6 +339,20 @@ mod tests {
         assert_eq!(state.mode, Mode::Draft);
         assert!(state.draft.is_empty());
         assert_eq!(state.selected_history_index, Some(0));
+    }
+
+    #[test]
+    fn ctrl_r_returns_history_search_placeholder_without_editing_draft() {
+        let mut state = AppState::default();
+        state.draft.insert_str("git status");
+
+        assert_eq!(
+            apply_key_to_state(ctrl('r'), &mut state),
+            KeyAction::HistorySearchPlaceholder
+        );
+
+        assert_eq!(state.mode, Mode::Draft);
+        assert_eq!(state.draft.as_str(), "git status");
     }
 
     #[test]

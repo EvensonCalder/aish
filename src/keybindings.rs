@@ -73,8 +73,8 @@ pub const DEFAULT_KEYBINDINGS: &[KeyBinding] = &[
     },
     KeyBinding {
         key: "Ctrl-R",
-        action: "history search reserved",
-        implemented: false,
+        action: "history search placeholder",
+        implemented: true,
     },
     KeyBinding {
         key: "Esc",
@@ -163,6 +163,13 @@ mod tests {
             bindings
                 .iter()
                 .find(|binding| binding.key == "Esc")
+                .unwrap()
+                .implemented
+        );
+        assert!(
+            bindings
+                .iter()
+                .find(|binding| binding.key == "Ctrl-R")
                 .unwrap()
                 .implemented
         );
