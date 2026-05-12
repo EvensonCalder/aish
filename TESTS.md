@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 142 library unit tests.
+- 144 library unit tests.
 - 18 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
@@ -287,6 +287,7 @@ Implemented:
 - Optional shell logical splitter helper splits simple lines while preserving backslash continuations; it is not wired into default history behavior.
 - Optional shell logical splitter ignores standalone comments and preserves inline `#` content.
 - Optional shell logical splitter preserves single-quoted and double-quoted newlines.
+- Optional shell logical splitter preserves heredoc blocks.
 - Editor roundtrip helper prepares a file, runs a fake editor, and reads successful edits back into draft while preserving the original draft on editor failure.
 - `Ctrl-X Ctrl-E` terminal handling resolves the editor, suspends raw mode when needed, runs the roundtrip, restores raw mode when needed, and reports success/failure.
 - `editor.execute_after_save = true` runs a successfully saved editor draft immediately with raw editor-draft semantics.
@@ -591,6 +592,8 @@ Tests:
 - `history::tests::split_logical_commands_preserves_single_quoted_newlines`
 - `history::tests::split_logical_commands_preserves_double_quoted_newlines`
 - `history::tests::split_logical_commands_ignores_escaped_quotes`
+- `history::tests::split_logical_commands_preserves_heredoc_blocks`
+- `history::tests::split_logical_commands_preserves_quoted_heredoc_delimiter`
 
 Status:
 

@@ -176,6 +176,7 @@ pub fn split_logical_commands(input: &str) -> Vec<String> {
     let mut commands = Vec::new();
     let mut current = String::new();
     let mut quote_state = ShellQuoteState::default();
+    let mut heredoc_delimiter: Option<String> = None;
 
     for line in input.lines() {
         let trimmed = line.trim();
@@ -186,8 +187,26 @@ pub fn split_logical_commands(input: &str) -> Vec<String> {
             current.push('\n');
         }
         current.push_str(line);
+        if let Some(delimiter) = heredoc_delimiter.as_deref() {
+            if trimmed == delimiter {
+                let command = current.trim();
+                if !command.is_empty() {
+                    commands.push(command.to_string());
+                }
+                current.clear();
+                quote_state = ShellQuoteState::default();
+                heredoc_delimiter = None;
+            }
+            continue;
+        }
         quote_state.update_line(line);
-        if !line_ends_with_continuation(line) && !quote_state.is_open() {
+        if !quote_state.is_open() {
+            heredoc_delimiter = parse_heredoc_delimiter(line);
+        }
+        if heredoc_delimiter.is_none()
+            && !line_ends_with_continuation(line)
+            && !quote_state.is_open()
+        {
             let command = current.trim();
             if !command.is_empty() {
                 commands.push(command.to_string());
@@ -207,6 +226,15 @@ pub fn split_logical_commands(input: &str) -> Vec<String> {
 
 fn line_ends_with_continuation(line: &str) -> bool {
     line.trim_end().ends_with('\\')
+}
+
+fn parse_heredoc_delimiter(line: &str) -> Option<String> {
+    let marker = line.split_once("<<")?.1.trim_start();
+    if marker.starts_with('<') || marker.is_empty() {
+        return None;
+    }
+    let token = marker.split_whitespace().next()?.trim_matches(['\'', '"']);
+    (!token.is_empty()).then_some(token.to_string())
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -885,6 +913,22 @@ mod tests {
         let commands = split_logical_commands("echo \"one \\\"two\\\"\"\npwd");
 
         assert_eq!(commands, ["echo \"one \\\"two\\\"\"", "pwd"]);
+    }
+
+    #[test]
+    fn split_logical_commands_preserves_heredoc_blocks() {
+        let input = "cat <<EOF\none\ntwo\nEOF\npwd";
+        let commands = split_logical_commands(input);
+
+        assert_eq!(commands, ["cat <<EOF\none\ntwo\nEOF", "pwd"]);
+    }
+
+    #[test]
+    fn split_logical_commands_preserves_quoted_heredoc_delimiter() {
+        let input = "cat <<'EOF'\n$literal\nEOF\npwd";
+        let commands = split_logical_commands(input);
+
+        assert_eq!(commands, ["cat <<'EOF'\n$literal\nEOF", "pwd"]);
     }
 
     #[test]
