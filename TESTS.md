@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 115 library unit tests.
+- 117 library unit tests.
 - 14 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
@@ -271,6 +271,7 @@ Implemented:
 - Editor command resolution supports config, `$VISUAL`, `$EDITOR`, and PATH fallback candidates without launching an editor yet.
 - Editor session preparation writes draft/history/AI selected content to a secure temporary file.
 - Editor process runner appends the prepared file path to the resolved command and waits for exit status without reading or executing content.
+- Editor read-back replaces the draft buffer with saved file content without executing it.
 - Template commands are recognized as placeholders but do not read or write template storage yet.
 - Encryption and sync commands are recognized as placeholders but do not change files, encryption state, remotes, or run git commands yet.
 - `#context` reports that context collection is currently disabled/not implemented.
@@ -313,9 +314,11 @@ Tests:
 - `editor::tests::run_editor_command_appends_session_path_and_waits`
 - `editor::tests::run_editor_command_returns_nonzero_status_without_reading_file`
 - `editor::tests::run_editor_command_rejects_empty_argv`
+- `editor::tests::read_editor_file_returns_saved_content`
 - `app::tests::prepare_editor_session_writes_draft_text`
 - `app::tests::prepare_editor_session_copies_history_selection_to_draft_and_file`
 - `app::tests::prepare_editor_session_copies_ai_selection_to_draft_and_file`
+- `app::tests::replace_draft_from_editor_session_reads_file_without_executing`
 - `app::tests::template_commands_report_placeholders_without_storage_side_effects`
 - `app::tests::encryption_and_sync_commands_report_placeholders_without_side_effects`
 - `app::tests::private_history_without_count_prints_usage`

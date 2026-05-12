@@ -9,7 +9,9 @@ use crate::commands::{
     IMPLEMENTED_PRIVATE_COMMANDS, ParsedLine, parse_line, suggest_private_command,
 };
 use crate::config::{self, EditorConfig, PromptConfig};
-use crate::editor::{PreparedEditorSession, prepare_editor_file, resolve_editor_command};
+use crate::editor::{
+    PreparedEditorSession, prepare_editor_file, read_editor_file, resolve_editor_command,
+};
 use crate::history::{
     AiCommandIndex, AiItem, AiItemKind, AiSession, DraftEntry, HistoryEntry, HistorySource,
     HistoryStore, NoteEntry, ai_command_indices, append_jsonl, load_jsonl, trim_combined_history,
@@ -223,6 +225,16 @@ impl AppState {
         self.copy_read_only_selection_to_draft();
         self.mode = Mode::Draft;
         prepare_editor_file(temp_root, self.draft.as_str())
+    }
+
+    pub fn replace_draft_from_editor_session(
+        &mut self,
+        session: &PreparedEditorSession,
+    ) -> Result<()> {
+        let content = read_editor_file(session)?;
+        self.draft = InputBuffer::from(content);
+        self.mode = Mode::Draft;
+        Ok(())
     }
 
     fn selected_ai_item(&self) -> Option<(&AiSession, &AiItem)> {
@@ -1334,6 +1346,23 @@ mod tests {
         assert_eq!(state.mode, Mode::Draft);
         assert_eq!(state.draft.as_str(), "git status");
         assert_eq!(std::fs::read_to_string(session.path).unwrap(), "git status");
+    }
+
+    #[test]
+    fn replace_draft_from_editor_session_reads_file_without_executing() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut state = AppState::default();
+        state.draft.insert_str("old draft");
+        let session = state.prepare_editor_session(temp.path()).unwrap();
+        std::fs::write(&session.path, "echo edited\n# raw shell content").unwrap();
+
+        state.replace_draft_from_editor_session(&session).unwrap();
+
+        assert_eq!(state.mode, Mode::Draft);
+        assert_eq!(state.draft.as_str(), "echo edited\n# raw shell content");
+        assert_eq!(state.draft.cursor(), state.draft.as_str().len());
+        assert_eq!(state.last_status, None);
+        assert!(state.regular_history.is_empty());
     }
 
     #[test]

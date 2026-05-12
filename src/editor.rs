@@ -100,6 +100,11 @@ pub fn run_editor_command(
     })
 }
 
+pub fn read_editor_file(session: &PreparedEditorSession) -> Result<String> {
+    fs::read_to_string(&session.path)
+        .with_context(|| format!("failed to read editor temp file {}", session.path.display()))
+}
+
 fn unique_editor_id() -> String {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -278,6 +283,17 @@ mod tests {
         let error = run_editor_command(&command, &session).unwrap_err();
 
         assert!(error.to_string().contains("editor command is empty"));
+    }
+
+    #[test]
+    fn read_editor_file_returns_saved_content() {
+        let temp = tempfile::tempdir().unwrap();
+        let session = prepare_editor_file(temp.path(), "initial").unwrap();
+        fs::write(&session.path, "echo one\n# raw shell content").unwrap();
+
+        let content = read_editor_file(&session).unwrap();
+
+        assert_eq!(content, "echo one\n# raw shell content");
     }
 
     fn restore_env(name: &str, value: Option<std::ffi::OsString>) {
