@@ -267,7 +267,7 @@ Implemented:
 - `Ctrl-X Ctrl-E` resolves to an external-editor launch action without editing draft state.
 - `Ctrl-X` advanced picker chords resolve to launch actions without editing draft state before the picker returns a selection.
 - `#status` reports the default keybinding count.
-- AI configuration commands `#model`, `#base-url`, and `#env-key` persist to `config.toml`; `#key` commands remain placeholders and do not store, read, or remove secrets yet.
+- AI configuration commands `#model`, `#base-url`, and `#env-key` persist to `config.toml`; `#base-url` stores the normalized final chat-completions URL; `#key` commands remain placeholders for Phase 18 and do not store, read, or remove secrets yet.
 - AI helpers normalize chat-completions URLs, read API keys from configured environment variables, build strict JSON-only chat request bodies, and parse/validate structured AI item JSON without relying on newline boundaries.
 - AI session helpers persist parsed AI items to `ai.jsonl`, rebuild command indexes, and switch to `%` AI mode at the first command from the new session.
 - Direct `# prompt` AI requests are wired to the configured chat-completions request path; missing config reports a readable error without crashing or mutating AI history.

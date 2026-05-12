@@ -5,7 +5,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 
-use crate::ai::request_ai_items;
+use crate::ai::{normalize_chat_completions_url, request_ai_items};
 use crate::commands::{
     IMPLEMENTED_PRIVATE_COMMANDS, ParsedLine, parse_line, suggest_private_command,
 };
@@ -1235,7 +1235,7 @@ fn update_ai_config_field(
     let mut config = config::load_config(path)?;
     match name {
         "model" => config.ai.model = value.to_string(),
-        "base-url" => config.ai.base_url = value.to_string(),
+        "base-url" => config.ai.base_url = normalize_chat_completions_url(value)?,
         "env-key" => config.ai.env_key = value.to_string(),
         _ => unreachable!("unknown AI config field"),
     }
@@ -2235,7 +2235,7 @@ mod tests {
             ("#model test-model", "#model=test-model"),
             (
                 "#base-url https://example.invalid/v1",
-                "#base-url=https://example.invalid/v1",
+                "#base-url=https://example.invalid/v1/chat/completions",
             ),
             ("#env-key OPENAI_API_KEY", "#env-key=OPENAI_API_KEY"),
         ] {
@@ -2259,7 +2259,10 @@ mod tests {
         }
 
         assert_eq!(state.ai_config.model, "test-model");
-        assert_eq!(state.ai_config.base_url, "https://example.invalid/v1");
+        assert_eq!(
+            state.ai_config.base_url,
+            "https://example.invalid/v1/chat/completions"
+        );
         assert_eq!(state.ai_config.env_key, "OPENAI_API_KEY");
         let loaded = config::load_config(&config_path).unwrap();
         assert_eq!(loaded.ai, state.ai_config);

@@ -511,7 +511,7 @@ Status: implemented for v0.1.0 via external `fzf`. Picker actions are intentiona
   - [ ] `#key set`
 - [x] Normalize final chat completions URL.
 - [x] Read API key from configured environment variable.
-- [ ] Implement GPG-backed key storage later; initially support env key.
+- [x] Implement GPG-backed key storage later; initially support env key.
 - [x] Build request body for chat completions-compatible endpoint.
 - [x] Write strict system prompt requiring JSON only.
 - [x] Discard thinking/reasoning fields if provider returns them.
