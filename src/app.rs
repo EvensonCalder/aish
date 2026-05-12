@@ -8,7 +8,7 @@ use anyhow::Result;
 use crate::commands::{
     IMPLEMENTED_PRIVATE_COMMANDS, ParsedLine, parse_line, suggest_private_command,
 };
-use crate::config::{self, EditorConfig, PasteConfig, PromptConfig};
+use crate::config::{self, CompletionConfig, EditorConfig, PasteConfig, PromptConfig};
 use crate::editor::{
     EditorCommand, EditorRunResult, PreparedEditorSession, prepare_editor_file, read_editor_file,
     resolve_editor_command, run_editor_command,
@@ -85,6 +85,7 @@ pub struct AppState {
     pub editor_config: EditorConfig,
     pub editor_temp_root: Option<PathBuf>,
     pub paste_config: PasteConfig,
+    pub completion_config: CompletionConfig,
     pub draft_from_editor: bool,
     pub draft_from_template: bool,
     pub ctrl_x_prefix: bool,
@@ -115,6 +116,7 @@ impl Default for AppState {
             editor_config: EditorConfig::default(),
             editor_temp_root: None,
             paste_config: PasteConfig::default(),
+            completion_config: CompletionConfig::default(),
             draft_from_editor: false,
             draft_from_template: false,
             ctrl_x_prefix: false,
@@ -403,6 +405,7 @@ pub fn run() -> Result<()> {
         prompt_templates: config.prompt.into(),
         editor_config: config.editor,
         paste_config: config.paste,
+        completion_config: config.completion,
         editor_temp_root: Some(layout.runtime_cache.join("editor")),
         ..AppState::default()
     };
@@ -961,6 +964,21 @@ fn write_config_report(state: &AppState, out: &mut impl Write) -> Result<()> {
         out,
         "paste.confirm_execute={}",
         state.paste_config.confirm_execute
+    )?;
+    writeln!(
+        out,
+        "completion.max_results={}",
+        state.completion_config.max_results
+    )?;
+    writeln!(
+        out,
+        "completion.ignore_spaces={}",
+        state.completion_config.ignore_spaces
+    )?;
+    writeln!(
+        out,
+        "completion.template_first={}",
+        state.completion_config.template_first
     )?;
     write_editor_resolution(out, state)?;
     write_config_path(out, "history.regular", &state.regular_history_path)?;
@@ -2212,6 +2230,11 @@ mod tests {
                 command: vec!["nvim".to_string(), "--clean".to_string()],
                 execute_after_save: false,
             },
+            completion_config: CompletionConfig {
+                max_results: 8,
+                ignore_spaces: false,
+                template_first: true,
+            },
             ..AppState::default()
         };
         state.draft.insert_str("#config");
@@ -2233,6 +2256,9 @@ mod tests {
         assert!(output.contains("editor.command=nvim --clean"));
         assert!(output.contains("paste.multiline=editor"));
         assert!(output.contains("paste.confirm_execute=true"));
+        assert!(output.contains("completion.max_results=8"));
+        assert!(output.contains("completion.ignore_spaces=false"));
+        assert!(output.contains("completion.template_first=true"));
         assert!(output.contains("editor.resolved=nvim --clean"));
         assert!(output.contains("history.regular="));
         assert!(output.contains(&history_path.display().to_string()));

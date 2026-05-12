@@ -443,6 +443,7 @@ This is a future configurable enhancement. It must not replace the default faith
 - [x] Implement ignore-space matching helper.
 - [x] Preserve newest-to-oldest history order in first-token helper.
 - [x] Implement `completion.max_results` helper/config default.
+- [x] Add completion config to runtime state and `#config` report.
 - [x] Add pure candidate rendering helper for below-input display.
 - [x] Implement ghost suggestion display-only helper.
 - [x] Implement accept suggestion helper.

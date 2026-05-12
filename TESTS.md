@@ -275,6 +275,7 @@ Implemented:
 - Completion has a pure first-token helper that returns template candidates before newest-first history commands before PATH executables, with per-source deduplication.
 - Completion has a pure non-first-token helper that returns path candidates, history argument candidates, and template placeholder candidates in spec order with per-source deduplication.
 - Completion helpers support ignore-spaces matching and max-result limiting; config defaults expose `completion.max_results = 5`, `completion.ignore_spaces = true`, and `completion.template_first = true`.
+- Runtime state carries completion config and `#config` reports completion settings read-only.
 - Completion helpers can render labeled candidate rows, compute display-only ghost suffixes, and return accepted completion text/cursor without mutating input state.
 - Editor command resolution supports config, `$VISUAL`, `$EDITOR`, and PATH fallback candidates.
 - Editor session preparation writes draft/history/AI selected content to a secure temporary file.
