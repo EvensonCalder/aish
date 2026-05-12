@@ -90,24 +90,46 @@ pub fn template_placeholders(body: &str) -> Vec<String> {
 struct ParsedPlaceholder {
     raw: String,
     name: String,
+    start: usize,
+    end: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlaceholderSpan {
+    pub start: usize,
+    pub end: usize,
+}
+
+pub fn template_placeholder_spans(body: &str) -> Vec<PlaceholderSpan> {
+    parse_template_placeholders(body)
+        .into_iter()
+        .map(|placeholder| PlaceholderSpan {
+            start: placeholder.start,
+            end: placeholder.end,
+        })
+        .collect()
 }
 
 fn parse_template_placeholders(body: &str) -> Vec<ParsedPlaceholder> {
     let mut placeholders = Vec::new();
-    let mut rest = body;
-    while let Some(start) = rest.find('{') {
-        rest = &rest[start + 1..];
-        let Some(end) = rest.find('}') else {
+    let mut offset = 0;
+    while let Some(relative_start) = body[offset..].find('{') {
+        let start = offset + relative_start;
+        let content_start = start + 1;
+        let Some(relative_end) = body[content_start..].find('}') else {
             break;
         };
-        let candidate = &rest[..end];
+        let end = content_start + relative_end;
+        let candidate = &body[content_start..end];
         if let Some(name) = placeholder_name(candidate) {
             placeholders.push(ParsedPlaceholder {
                 raw: format!("{{{candidate}}}"),
                 name: name.to_string(),
+                start,
+                end: end + 1,
             });
         }
-        rest = &rest[end + 1..];
+        offset = end + 1;
     }
     placeholders
 }
@@ -263,6 +285,17 @@ mod tests {
                 "git commit -m {message:commit message} -- {paths...} {message} {bad name:ignored}"
             ),
             ["message", "paths"]
+        );
+    }
+
+    #[test]
+    fn template_placeholder_spans_return_valid_byte_ranges() {
+        assert_eq!(
+            template_placeholder_spans("echo {name} {paths...}"),
+            [
+                PlaceholderSpan { start: 5, end: 11 },
+                PlaceholderSpan { start: 12, end: 22 },
+            ]
         );
     }
 

@@ -407,13 +407,13 @@ This is a future configurable enhancement. It must not replace the default faith
 - [x] Store templates in `templates/templates.jsonl`.
 - [x] Implement `#template list`.
 - [x] Implement `#template rm <name>`.
-- [ ] Parse placeholders:
+- [x] Parse placeholders:
   - [x] `{name}`
   - [x] `{name:description}`
   - [x] `{name...}`
-- [ ] Implement placeholder spans in editor buffer.
-- [ ] Implement whole-placeholder deletion from outside.
-- [ ] Implement expanded placeholder behavior when edited internally.
+- [x] Implement placeholder spans in editor buffer.
+- [x] Implement whole-placeholder deletion from outside.
+- [x] Implement expanded placeholder behavior when edited internally.
 - [x] Block execution of unresolved placeholders in template drafts.
 
 ### Acceptance criteria

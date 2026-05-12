@@ -60,6 +60,19 @@ impl InputBuffer {
         true
     }
 
+    pub fn drain_range(&mut self, start: usize, end: usize) -> bool {
+        if start > end
+            || end > self.text.len()
+            || !self.text.is_char_boundary(start)
+            || !self.text.is_char_boundary(end)
+        {
+            return false;
+        }
+        self.text.drain(start..end);
+        self.cursor = start;
+        true
+    }
+
     pub fn move_left(&mut self) -> bool {
         let Some(prev) = self.previous_boundary() else {
             return false;
@@ -228,6 +241,16 @@ mod tests {
         buffer.move_previous_word();
         buffer.delete_to_end();
         assert_eq!(buffer.as_str(), "cargo test ");
+    }
+
+    #[test]
+    fn drain_range_removes_byte_span_and_moves_cursor_to_start() {
+        let mut buffer = InputBuffer::from("echo {name} now");
+
+        assert!(buffer.drain_range(5, 12));
+
+        assert_eq!(buffer.as_str(), "echo now");
+        assert_eq!(buffer.cursor(), 5);
     }
 
     #[test]

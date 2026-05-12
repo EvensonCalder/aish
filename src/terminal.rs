@@ -13,6 +13,7 @@ use crossterm::terminal::{
 use crate::app::{AppState, execute_draft, save_draft_if_configured};
 use crate::editor::resolve_editor_command;
 use crate::pty::PtyBackend;
+use crate::templates::template_placeholder_spans;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyAction {
@@ -231,7 +232,9 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
         (KeyModifiers::CONTROL, KeyCode::Char('d')) if state.draft.is_empty() => KeyAction::Exit,
         (KeyModifiers::CONTROL, KeyCode::Char('d')) if is_editor_draft => KeyAction::Continue,
         (KeyModifiers::CONTROL, KeyCode::Char('d')) => {
-            state.draft.delete();
+            if !delete_template_placeholder_after_cursor(state) {
+                state.draft.delete();
+            }
             KeyAction::Continue
         }
         (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
@@ -317,7 +320,10 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
         }
         (_, KeyCode::Backspace) => {
             state.copy_read_only_selection_to_draft();
-            state.draft.backspace();
+            if !delete_template_placeholder_before_cursor(state) {
+                expand_template_draft_if_inside_placeholder(state);
+                state.draft.backspace();
+            }
             if state.draft.is_empty() {
                 state.draft_from_editor = false;
                 state.draft_from_template = false;
@@ -326,7 +332,10 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
         }
         (_, KeyCode::Delete) => {
             state.copy_read_only_selection_to_draft();
-            state.draft.delete();
+            if !delete_template_placeholder_after_cursor(state) {
+                expand_template_draft_if_inside_placeholder(state);
+                state.draft.delete();
+            }
             if state.draft.is_empty() {
                 state.draft_from_editor = false;
                 state.draft_from_template = false;
@@ -351,10 +360,50 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
                 state.draft_from_editor = false;
                 state.draft_from_template = false;
             }
+            expand_template_draft_if_inside_placeholder(state);
             state.draft.insert_char(ch);
             KeyAction::Continue
         }
         _ => KeyAction::Continue,
+    }
+}
+
+fn delete_template_placeholder_before_cursor(state: &mut AppState) -> bool {
+    if !state.draft_from_template {
+        return false;
+    }
+    let cursor = state.draft.cursor();
+    for span in template_placeholder_spans(state.draft.as_str()) {
+        if span.end == cursor {
+            return state.draft.drain_range(span.start, span.end);
+        }
+    }
+    false
+}
+
+fn delete_template_placeholder_after_cursor(state: &mut AppState) -> bool {
+    if !state.draft_from_template {
+        return false;
+    }
+    let cursor = state.draft.cursor();
+    for span in template_placeholder_spans(state.draft.as_str()) {
+        if span.start == cursor {
+            return state.draft.drain_range(span.start, span.end);
+        }
+    }
+    false
+}
+
+fn expand_template_draft_if_inside_placeholder(state: &mut AppState) {
+    if !state.draft_from_template {
+        return;
+    }
+    let cursor = state.draft.cursor();
+    if template_placeholder_spans(state.draft.as_str())
+        .into_iter()
+        .any(|span| span.start < cursor && cursor < span.end)
+    {
+        state.draft_from_template = false;
     }
 }
 
@@ -691,6 +740,62 @@ mod tests {
 
         assert_eq!(state.draft.as_str(), "echo one\necho two");
         assert!(state.draft_from_editor);
+    }
+
+    #[test]
+    fn template_draft_backspace_deletes_placeholder_from_outside() {
+        let mut state = AppState {
+            draft_from_template: true,
+            ..AppState::default()
+        };
+        state.draft.insert_str("echo {name} now");
+        state.draft.move_left();
+        state.draft.move_left();
+        state.draft.move_left();
+        state.draft.move_left();
+
+        apply_key_to_state(key(KeyCode::Backspace), &mut state);
+
+        assert_eq!(state.draft.as_str(), "echo  now");
+        assert_eq!(state.draft.cursor(), 5);
+        assert!(state.draft_from_template);
+    }
+
+    #[test]
+    fn template_draft_delete_deletes_placeholder_from_outside() {
+        let mut state = AppState {
+            draft_from_template: true,
+            ..AppState::default()
+        };
+        state.draft.insert_str("echo {name} now");
+        state.draft.move_start();
+        for _ in 0..5 {
+            state.draft.move_right();
+        }
+
+        apply_key_to_state(key(KeyCode::Delete), &mut state);
+
+        assert_eq!(state.draft.as_str(), "echo  now");
+        assert_eq!(state.draft.cursor(), 5);
+        assert!(state.draft_from_template);
+    }
+
+    #[test]
+    fn template_draft_edit_inside_placeholder_expands_to_plain_draft() {
+        let mut state = AppState {
+            draft_from_template: true,
+            ..AppState::default()
+        };
+        state.draft.insert_str("echo {name}");
+        state.draft.move_start();
+        for _ in 0..7 {
+            state.draft.move_right();
+        }
+
+        apply_key_to_state(key(KeyCode::Char('X')), &mut state);
+
+        assert_eq!(state.draft.as_str(), "echo {nXame}");
+        assert!(!state.draft_from_template);
     }
 
     #[test]
