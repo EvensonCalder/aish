@@ -409,7 +409,7 @@ pub fn execute_draft(
                 "status" => {
                     writeln!(
                         out,
-                        "mode={} last_status={} cwd={}",
+                        "mode={} last_status={} cwd={} keybindings={}",
                         state.mode.symbol(),
                         state
                             .last_status
@@ -419,7 +419,8 @@ pub fn execute_draft(
                             .current_cwd
                             .as_ref()
                             .map(|cwd| cwd.display().to_string())
-                            .unwrap_or_else(|| "unknown".to_string())
+                            .unwrap_or_else(|| "unknown".to_string()),
+                        default_keybindings().len()
                     )?;
                     state.draft.clear();
                     state.mode = Mode::Draft;
@@ -1970,6 +1971,7 @@ mod tests {
         assert!(output.contains("mode=>"));
         assert!(output.contains("last_status=7"));
         assert!(output.contains(&format!("cwd={}", std::env::temp_dir().display())));
+        assert!(output.contains("keybindings=20"));
         assert!(state.draft.is_empty());
     }
 

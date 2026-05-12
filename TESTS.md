@@ -260,6 +260,7 @@ Implemented:
 - Unknown private commands suggest the nearest implemented command when there is a close match.
 - Minimal private commands: `#help`, `#status`, `#config`, `#doctor`, `#model`, `#base-url`, `#env-key`, `#key set`, `#key clear`, `#context`, `#completion`, `#log`, `#editor`, `#mt`, `#template list`, `#template rm`, `#encrypt`, `#set-remote`, `#push`, `#sync`, `#exit`, `#quit`, `#history <count>`.
 - `#help` prints private commands and the default keybinding map.
+- `#status` reports the default keybinding count.
 - AI configuration commands are recognized as placeholders but do not persist config or read secrets yet.
 - Key commands are recognized as placeholders but do not store, read, or remove secrets yet.
 - Completion, log, and editor commands are recognized as placeholders but do not activate those subsystems yet.
