@@ -378,13 +378,14 @@ This is a future configurable enhancement. It must not replace the default faith
 - [ ] Preserve quoted multi-line strings.
 - [ ] Preserve heredoc blocks.
 - [ ] Ignore blank lines.
+- [x] Ignore standalone comment lines in splitter output.
 - [ ] Store comment-only lines as notes if enabled.
 - [ ] Add tests for common cases:
   - [x] two simple lines
   - [x] backslash continuation
   - [ ] quoted newline
   - [ ] heredoc
-  - [ ] comments
+  - [x] comments
   - [ ] mixed commands
 
 ### Acceptance criteria

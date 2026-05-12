@@ -177,7 +177,8 @@ pub fn split_logical_commands(input: &str) -> Vec<String> {
     let mut current = String::new();
 
     for line in input.lines() {
-        if line.trim().is_empty() && current.is_empty() {
+        let trimmed = line.trim();
+        if (trimmed.is_empty() || trimmed.starts_with('#')) && current.is_empty() {
             continue;
         }
         if !current.is_empty() {
@@ -815,6 +816,20 @@ mod tests {
         let commands = split_logical_commands("echo foo \\\n+bar\npwd");
 
         assert_eq!(commands, ["echo foo \\\n+bar", "pwd"]);
+    }
+
+    #[test]
+    fn split_logical_commands_skips_standalone_comments() {
+        let commands = split_logical_commands("# comment\npwd\n  # another\necho done");
+
+        assert_eq!(commands, ["pwd", "echo done"]);
+    }
+
+    #[test]
+    fn split_logical_commands_preserves_inline_hash_content() {
+        let commands = split_logical_commands("echo '# not a comment'\necho value # inline");
+
+        assert_eq!(commands, ["echo '# not a comment'", "echo value # inline"]);
     }
 
     #[test]
