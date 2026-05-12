@@ -431,13 +431,13 @@ This is a future configurable enhancement. It must not replace the default faith
 
 - [x] Implement weak shell lexer for current token detection.
 - [x] Detect path-like token.
-- [ ] Implement path completion.
+- [x] Implement path completion helper.
 - [ ] Implement first-token completion:
   - [ ] templates
   - [ ] history commands
   - [ ] PATH executables
 - [ ] Implement non-first-token completion:
-  - [ ] paths
+  - [x] paths
   - [ ] history arguments
   - [ ] template placeholders
 - [ ] Implement ignore-space matching.

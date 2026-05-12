@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 159 library unit tests.
+- 163 library unit tests.
 - 18 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
@@ -271,6 +271,7 @@ Implemented:
 - Key commands are recognized as placeholders but do not store, read, or remove secrets yet.
 - Completion and log commands are recognized as placeholders but do not activate those subsystems yet.
 - Completion has pure current-token detection helpers that handle first-token classification, non-first-token classification, quoted whitespace, escaped whitespace, cursor-in-line contexts, path-like tokens, and UTF-8 cursor snapping.
+- Completion has a pure path completion helper that reads matching file and directory candidates, preserves directory prefixes, sorts candidates, marks directories with trailing `/`, preserves opening quotes in replacements, and handles missing directories as no matches.
 - Editor command resolution supports config, `$VISUAL`, `$EDITOR`, and PATH fallback candidates.
 - Editor session preparation writes draft/history/AI selected content to a secure temporary file.
 - Editor process runner appends the prepared file path to the resolved command and waits for exit status without reading or executing content.
@@ -376,6 +377,10 @@ Tests:
 - `completion::tests::current_token_handles_cursor_inside_line`
 - `completion::tests::path_like_detection_covers_common_shell_path_prefixes`
 - `completion::tests::cursor_is_snapped_to_previous_utf8_boundary`
+- `completion::tests::complete_path_returns_sorted_matching_file_and_directory_candidates`
+- `completion::tests::complete_path_uses_relative_directory_prefix`
+- `completion::tests::complete_path_preserves_opening_quote_in_replacement_only`
+- `completion::tests::complete_path_returns_empty_for_missing_directory`
 
 Status:
 
