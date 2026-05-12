@@ -240,9 +240,7 @@ pub fn complete_non_first_token_with_options(
     options: CompletionOptions,
 ) -> Vec<CompletionCandidate> {
     let mut candidates = Vec::new();
-    if is_path_like_token(token) {
-        candidates.extend(complete_path(token, cwd));
-    }
+    candidates.extend(complete_path(token, cwd));
     candidates.extend(complete_history_arguments(
         token,
         history_newest_first,
@@ -853,6 +851,24 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn complete_non_first_token_includes_plain_path_prefixes() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("one.txt"), "").unwrap();
+
+        let candidates = complete_non_first_token_with_options(
+            "o",
+            temp.path(),
+            &[],
+            &[],
+            CompletionOptions::default(),
+        );
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].display, "one.txt");
+        assert_eq!(candidates[0].source, CompletionSource::Path);
     }
 
     #[test]

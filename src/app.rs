@@ -308,6 +308,13 @@ impl AppState {
     }
 
     pub fn completion_candidates(&self) -> Result<Vec<CompletionCandidate>> {
+        self.completion_candidates_with_max_results(self.completion_config.max_results)
+    }
+
+    pub fn completion_candidates_with_max_results(
+        &self,
+        max_results: usize,
+    ) -> Result<Vec<CompletionCandidate>> {
         if self.mode != Mode::Draft || self.draft_from_editor {
             return Ok(Vec::new());
         }
@@ -318,7 +325,7 @@ impl AppState {
         };
         let history_newest_first: Vec<_> = self.regular_history.iter().rev().cloned().collect();
         let options = CompletionOptions {
-            max_results: self.completion_config.max_results,
+            max_results,
             ignore_spaces: self.completion_config.ignore_spaces,
         };
 

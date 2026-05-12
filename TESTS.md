@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 258 library unit tests.
+- 262 library unit tests.
 - 18 draft execution integration tests.
 - 1 first-run integration test.
 - 4 active bash PTY integration tests.
@@ -287,7 +287,7 @@ Implemented:
 - Prompt cwd rendering abbreviates the user home directory as `~` and paths inside it as `~/...`.
 - Raw-terminal display writes normalize line feeds to CRLF through a terminal display writer, so multi-line shell output and UI messages return to column zero without corrupting stored command output.
 - Runtime state can build completion candidates from current draft, templates, in-memory history, cwd, PATH, and completion config without mutating input or terminal UI.
-- Non-empty Tab requests completion display without editing input; terminal completion display prints labeled candidate rows.
+- Non-empty Tab accepts the single completion candidate immediately, shows zero/multiple candidates below the prompt without appending to the active prompt line, and terminal completion display prints labeled candidate rows.
 - Right at end-of-line accepts the first completion candidate; Right inside the line keeps ordinary cursor movement.
 - Completion helpers can render labeled candidate rows, compute display-only ghost suffixes, and return accepted completion text/cursor without mutating input state.
 - Picker helpers support shell quoting and pure result edits for insert-at-cursor, replace-current-token, append-as-argument, and replace-line actions.

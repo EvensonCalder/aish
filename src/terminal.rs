@@ -34,7 +34,7 @@ pub enum KeyAction {
     AdvancedKeyPlaceholder(&'static str),
     Submit,
     ConfirmContext(bool),
-    ShowCompletions,
+    CompleteOrShow,
     AcceptCompletion,
 }
 
@@ -180,9 +180,8 @@ fn handle_key(
             let mut display_out = CrLfWriter::new(out);
             writeln!(display_out, "{name} is not implemented yet")?;
         }
-        KeyAction::ShowCompletions => {
-            let mut display_out = CrLfWriter::new(out);
-            write_completion_candidates(state, &mut display_out)?;
+        KeyAction::CompleteOrShow => {
+            complete_or_show_candidates(state, out)?;
         }
         KeyAction::AcceptCompletion => {
             accept_first_completion(state)?;
@@ -613,7 +612,7 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
         }
         (_, KeyCode::Tab) => {
             if !state.draft.is_empty() && state.mode == crate::modes::Mode::Draft {
-                return KeyAction::ShowCompletions;
+                return KeyAction::CompleteOrShow;
             }
             state.handle_empty_tab();
             KeyAction::Continue
@@ -692,10 +691,38 @@ pub fn write_completion_candidates(state: &AppState, out: &mut impl Write) -> Re
     Ok(())
 }
 
+pub fn complete_or_show_candidates(state: &mut AppState, out: &mut impl Write) -> Result<()> {
+    let decision_candidates = state.completion_candidates_with_max_results(
+        state.completion_config.max_results.saturating_add(1),
+    )?;
+    match decision_candidates.len() {
+        0 => write_completion_panel(state, out),
+        1 => {
+            accept_completion_candidate(state, decision_candidates.into_iter().next().unwrap())?;
+            Ok(())
+        }
+        _ => write_completion_panel(state, out),
+    }
+}
+
+fn write_completion_panel(state: &AppState, out: &mut impl Write) -> Result<()> {
+    execute!(out, MoveToColumn(state.render_prompt_line().len() as u16))?;
+    write!(out, "\r\n")?;
+    let mut display_out = CrLfWriter::new(out);
+    write_completion_candidates(state, &mut display_out)
+}
+
 pub fn accept_first_completion(state: &mut AppState) -> Result<bool> {
     let Some(candidate) = state.completion_candidates()?.into_iter().next() else {
         return Ok(false);
     };
+    accept_completion_candidate(state, candidate)
+}
+
+fn accept_completion_candidate(
+    state: &mut AppState,
+    candidate: crate::completion::CompletionCandidate,
+) -> Result<bool> {
     let token = current_token_context(state.draft.as_str(), state.draft.cursor());
     let accepted = accept_completion(state.draft.as_str(), &token, &candidate);
     if state.draft.replace(accepted.line, accepted.cursor) {
@@ -783,11 +810,77 @@ mod tests {
 
         assert_eq!(
             apply_key_to_state(key(KeyCode::Tab), &mut state),
-            KeyAction::ShowCompletions
+            KeyAction::CompleteOrShow
         );
 
         assert_eq!(state.mode, Mode::Draft);
         assert_eq!(state.draft.as_str(), "git");
+    }
+
+    #[test]
+    fn tab_accepts_single_completion_candidate() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut state = AppState {
+            current_cwd: Some(temp.path().to_path_buf()),
+            ..AppState::default()
+        };
+        std::fs::write(temp.path().join("single.txt"), "").unwrap();
+        state.draft.insert_str("cat si");
+        let mut output = Vec::new();
+
+        complete_or_show_candidates(&mut state, &mut output).unwrap();
+
+        assert!(output.is_empty());
+        assert_eq!(state.draft.as_str(), "cat single.txt");
+    }
+
+    #[test]
+    fn tab_shows_multiple_completion_candidates_below_prompt() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut state = AppState {
+            current_cwd: Some(temp.path().to_path_buf()),
+            ..AppState::default()
+        };
+        std::fs::write(temp.path().join("one.txt"), "").unwrap();
+        std::fs::write(temp.path().join("only.log"), "").unwrap();
+        state.draft.insert_str("cat o");
+        let mut output = Vec::new();
+
+        complete_or_show_candidates(&mut state, &mut output).unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.starts_with("\u{1b}[8G\r\n"), "output was {output:?}");
+        assert!(
+            output.contains("path\tone.txt\r\n"),
+            "output was {output:?}"
+        );
+        assert!(
+            output.contains("path\tonly.log\r\n"),
+            "output was {output:?}"
+        );
+        assert_eq!(state.draft.as_str(), "cat o");
+    }
+
+    #[test]
+    fn tab_display_respects_completion_max_results() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut state = AppState {
+            current_cwd: Some(temp.path().to_path_buf()),
+            completion_config: crate::config::CompletionConfig {
+                max_results: 1,
+                ..crate::config::CompletionConfig::default()
+            },
+            ..AppState::default()
+        };
+        std::fs::write(temp.path().join("one.txt"), "").unwrap();
+        std::fs::write(temp.path().join("only.log"), "").unwrap();
+        state.draft.insert_str("cat o");
+        let mut output = Vec::new();
+
+        complete_or_show_candidates(&mut state, &mut output).unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert_eq!(output.matches("path\t").count(), 1, "output was {output:?}");
     }
 
     #[test]

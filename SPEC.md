@@ -696,6 +696,15 @@ For command completion:
 - Matching ignores spaces when configured.
 - Display at most `completion.max_results` candidates.
 
+### 10.3 Tab behavior
+
+- Empty draft `Tab` switches modes.
+- Non-empty draft `Tab` computes completion candidates for the current token.
+- If there are no candidates, Aish displays `no completions` below the prompt and redraws the current draft.
+- If there is exactly one candidate, Aish accepts it immediately.
+- If there are multiple candidates, Aish displays at most `completion.max_results` candidates below the prompt and redraws the current draft.
+- Candidate display must not append text to the active prompt line.
+
 Config:
 
 ```toml
@@ -711,7 +720,7 @@ Command:
 #completion max 8
 ```
 
-### 10.3 Ghost suggestions
+### 10.4 Ghost suggestions
 
 Ghost suggestions are display-only.
 
