@@ -15,6 +15,7 @@ pub struct Config {
     pub paste: PasteConfig,
     pub completion: CompletionConfig,
     pub ai: AiConfig,
+    pub context: ContextConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -72,6 +73,24 @@ pub struct AiConfig {
     pub model: String,
     pub base_url: String,
     pub env_key: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ContextConfig {
+    pub enabled: bool,
+    pub confirm: bool,
+    pub max_bytes: usize,
+}
+
+impl Default for ContextConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            confirm: true,
+            max_bytes: 65_536,
+        }
+    }
 }
 
 impl Default for ShellConfig {
@@ -273,6 +292,9 @@ pub fn normalize_config(config: &mut Config) {
     config.ai.model = config.ai.model.trim().to_string();
     config.ai.base_url = config.ai.base_url.trim().to_string();
     config.ai.env_key = config.ai.env_key.trim().to_string();
+    if config.context.max_bytes == 0 {
+        config.context.max_bytes = ContextConfig::default().max_bytes;
+    }
 }
 
 #[cfg(test)]
@@ -296,6 +318,7 @@ mod tests {
         assert!(config.completion.ignore_spaces);
         assert!(config.completion.template_first);
         assert_eq!(config.ai, AiConfig::default());
+        assert_eq!(config.context, ContextConfig::default());
         assert!(config.storage.home.ends_with(".aish"));
     }
 
@@ -332,6 +355,11 @@ mod tests {
                 base_url: "  https://example.invalid/v1  ".to_string(),
                 env_key: "  OPENAI_API_KEY  ".to_string(),
             },
+            context: ContextConfig {
+                enabled: false,
+                confirm: false,
+                max_bytes: 0,
+            },
         };
 
         normalize_config(&mut config);
@@ -342,6 +370,11 @@ mod tests {
             model: "gpt-test".to_string(),
             base_url: "https://example.invalid/v1".to_string(),
             env_key: "OPENAI_API_KEY".to_string(),
+        };
+        expected.context = ContextConfig {
+            enabled: false,
+            confirm: false,
+            max_bytes: 65_536,
         };
         assert_eq!(config, expected);
     }

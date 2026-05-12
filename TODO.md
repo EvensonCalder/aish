@@ -537,9 +537,9 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 ### Tasks
 
 - [ ] Parse `# prompt < command`.
-- [ ] Implement `#context on|off`.
-- [ ] Implement `#context confirm on|off`.
-- [ ] Implement `#context <bytes>`.
+- [x] Implement `#context on|off`.
+- [x] Implement `#context confirm on|off`.
+- [x] Implement `#context <bytes>`.
 - [ ] Execute context command through backend shell or a controlled shell subprocess.
 - [ ] Capture stdout/stderr.
 - [ ] Apply max byte cap.

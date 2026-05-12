@@ -13,7 +13,9 @@ use crate::completion::{
     CompletionCandidate, CompletionOptions, complete_first_token_with_options,
     complete_non_first_token_with_options, current_token_context,
 };
-use crate::config::{self, AiConfig, CompletionConfig, EditorConfig, PasteConfig, PromptConfig};
+use crate::config::{
+    self, AiConfig, CompletionConfig, ContextConfig, EditorConfig, PasteConfig, PromptConfig,
+};
 use crate::editor::{
     EditorCommand, EditorRunResult, PreparedEditorSession, prepare_editor_file, read_editor_file,
     resolve_editor_command, run_editor_command,
@@ -98,6 +100,7 @@ pub struct AppState {
     pub paste_config: PasteConfig,
     pub completion_config: CompletionConfig,
     pub ai_config: AiConfig,
+    pub context_config: ContextConfig,
     pub draft_from_editor: bool,
     pub draft_from_template: bool,
     pub ctrl_x_prefix: bool,
@@ -131,6 +134,7 @@ impl Default for AppState {
             paste_config: PasteConfig::default(),
             completion_config: CompletionConfig::default(),
             ai_config: AiConfig::default(),
+            context_config: ContextConfig::default(),
             draft_from_editor: false,
             draft_from_template: false,
             ctrl_x_prefix: false,
@@ -553,6 +557,7 @@ pub fn run() -> Result<()> {
         paste_config: config.paste,
         completion_config: config.completion,
         ai_config: config.ai,
+        context_config: config.context,
         editor_temp_root: Some(layout.runtime_cache.join("editor")),
         ..AppState::default()
     };
@@ -715,11 +720,7 @@ pub fn execute_draft(
                         return Ok(());
                     }
                     "context" => {
-                        writeln!(
-                            out,
-                            "context.enabled=false context.confirm=true context.max_bytes=0"
-                        )?;
-                        writeln!(out, "context collection is not implemented yet")?;
+                        update_context_config(state, out, args)?;
                         state.draft.clear();
                         state.mode = Mode::Draft;
                         return Ok(());
@@ -1155,6 +1156,9 @@ fn write_config_report(state: &AppState, out: &mut impl Write) -> Result<()> {
         config_value(&state.ai_config.base_url)
     )?;
     writeln!(out, "ai.env_key={}", config_value(&state.ai_config.env_key))?;
+    writeln!(out, "context.enabled={}", state.context_config.enabled)?;
+    writeln!(out, "context.confirm={}", state.context_config.confirm)?;
+    writeln!(out, "context.max_bytes={}", state.context_config.max_bytes)?;
     write_editor_resolution(out, state)?;
     write_config_path(out, "history.regular", &state.regular_history_path)?;
     write_config_path(out, "history.notes", &state.notes_path)?;
@@ -1257,6 +1261,71 @@ fn write_ai_config_value(out: &mut impl Write, name: &str, state: &AppState) -> 
     } else {
         writeln!(out, "#{name}={value}")?;
     }
+    Ok(())
+}
+
+fn update_context_config(state: &mut AppState, out: &mut impl Write, args: &str) -> Result<()> {
+    let mut parts = args.split_whitespace();
+    match (parts.next(), parts.next(), parts.next()) {
+        (None, None, None) => write_context_config(out, &state.context_config),
+        (Some("on"), None, None) => set_context_config(state, out, |config| {
+            config.context.enabled = true;
+            Ok(())
+        }),
+        (Some("off"), None, None) => set_context_config(state, out, |config| {
+            config.context.enabled = false;
+            Ok(())
+        }),
+        (Some("confirm"), Some("on"), None) => set_context_config(state, out, |config| {
+            config.context.confirm = true;
+            Ok(())
+        }),
+        (Some("confirm"), Some("off"), None) => set_context_config(state, out, |config| {
+            config.context.confirm = false;
+            Ok(())
+        }),
+        (Some(bytes), None, None) => {
+            let max_bytes = bytes.parse::<usize>()?;
+            if max_bytes == 0 {
+                writeln!(out, "context max bytes must be greater than 0")?;
+                return Ok(());
+            }
+            set_context_config(state, out, |config| {
+                config.context.max_bytes = max_bytes;
+                Ok(())
+            })
+        }
+        _ => writeln!(
+            out,
+            "usage: #context [on|off|confirm on|confirm off|<bytes>]"
+        )
+        .map_err(Into::into),
+    }
+}
+
+fn set_context_config(
+    state: &mut AppState,
+    out: &mut impl Write,
+    update: impl FnOnce(&mut config::Config) -> Result<()>,
+) -> Result<()> {
+    let Some(path) = &state.config_path else {
+        writeln!(out, "config path is not configured; #context not saved")?;
+        return Ok(());
+    };
+    let mut config = config::load_config(path)?;
+    update(&mut config)?;
+    config::normalize_config(&mut config);
+    config::save_config(path, &config)?;
+    state.context_config = config.context;
+    write_context_config(out, &state.context_config)
+}
+
+fn write_context_config(out: &mut impl Write, config: &ContextConfig) -> Result<()> {
+    writeln!(
+        out,
+        "context.enabled={} context.confirm={} context.max_bytes={}",
+        config.enabled, config.confirm, config.max_bytes
+    )?;
     Ok(())
 }
 
@@ -2196,7 +2265,7 @@ mod tests {
     }
 
     #[test]
-    fn private_context_reports_disabled_placeholder() {
+    fn private_context_reports_current_config() {
         let mut state = AppState::default();
         state.draft.insert_str("#context");
         let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
@@ -2211,11 +2280,85 @@ mod tests {
         .unwrap();
 
         let output = String::from_utf8(output).unwrap();
-        assert!(output.contains("context.enabled=false"));
+        assert!(output.contains("context.enabled=true"));
         assert!(output.contains("context.confirm=true"));
-        assert!(output.contains("context collection is not implemented yet"));
+        assert!(output.contains("context.max_bytes=65536"));
         assert_eq!(state.last_status, None);
         assert!(state.draft.is_empty());
+    }
+
+    #[test]
+    fn private_context_commands_persist_config() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("config.toml");
+        let mut config = config::Config::default();
+        config.storage.home = temp.path().to_path_buf();
+        config::save_config(&config_path, &config).unwrap();
+        let mut state = AppState {
+            config_path: Some(config_path.clone()),
+            ..AppState::default()
+        };
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+
+        for (line, expected) in [
+            ("#context off", "context.enabled=false"),
+            ("#context confirm off", "context.confirm=false"),
+            ("#context 1024", "context.max_bytes=1024"),
+            ("#context on", "context.enabled=true"),
+        ] {
+            state.draft.insert_str(line);
+            let mut output = Vec::new();
+            execute_draft(
+                &mut state,
+                &mut backend,
+                &mut output,
+                Duration::from_secs(5),
+            )
+            .unwrap();
+
+            let output = String::from_utf8(output).unwrap();
+            assert!(
+                output.contains(expected),
+                "missing {expected:?} in {output:?}"
+            );
+            assert!(state.draft.is_empty());
+        }
+
+        assert!(state.context_config.enabled);
+        assert!(!state.context_config.confirm);
+        assert_eq!(state.context_config.max_bytes, 1024);
+        let loaded = config::load_config(&config_path).unwrap();
+        assert_eq!(loaded.context, state.context_config);
+    }
+
+    #[test]
+    fn private_context_rejects_invalid_usage_without_persisting() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("config.toml");
+        config::save_config(&config_path, &config::Config::default()).unwrap();
+        let mut state = AppState {
+            config_path: Some(config_path.clone()),
+            ..AppState::default()
+        };
+        state.draft.insert_str("#context 0");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("context max bytes must be greater than 0"));
+        assert_eq!(state.context_config, ContextConfig::default());
+        assert_eq!(
+            config::load_config(&config_path).unwrap().context,
+            ContextConfig::default()
+        );
     }
 
     #[test]
@@ -2847,6 +2990,11 @@ mod tests {
                 base_url: "https://example.invalid/v1".to_string(),
                 env_key: "OPENAI_API_KEY".to_string(),
             },
+            context_config: ContextConfig {
+                enabled: false,
+                confirm: false,
+                max_bytes: 1024,
+            },
             ..AppState::default()
         };
         state.draft.insert_str("#config");
@@ -2874,6 +3022,9 @@ mod tests {
         assert!(output.contains("ai.model=gpt-test"));
         assert!(output.contains("ai.base_url=https://example.invalid/v1"));
         assert!(output.contains("ai.env_key=OPENAI_API_KEY"));
+        assert!(output.contains("context.enabled=false"));
+        assert!(output.contains("context.confirm=false"));
+        assert!(output.contains("context.max_bytes=1024"));
         assert!(output.contains("editor.resolved=nvim --clean"));
         assert!(output.contains("history.regular="));
         assert!(output.contains(&history_path.display().to_string()));
