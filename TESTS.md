@@ -280,6 +280,7 @@ Implemented:
 - Multi-line paste content is normalized and stored as an opaque editor draft by default.
 - `paste.multiline = "discard"` ignores multi-line paste without changing draft state.
 - `paste.multiline = "execute"` creates an editor draft when confirmation is enabled and requests immediate submission only when `confirm_execute = false`.
+- Phase 10 paste review is represented as opaque editor drafts rather than a separate inline paste editor.
 - Single-line paste copies read-only history/AI selections to draft before inserting pasted text.
 - Editor draft submission preserves multi-line backslash continuation and lets the backend shell interpret it.
 - Ordinary and editor draft history preserve backslash continuations as one submitted command string.

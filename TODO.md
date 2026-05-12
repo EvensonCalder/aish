@@ -344,19 +344,19 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
 
 ### Tasks
 
-- [ ] Enable bracketed paste mode.
+- [x] Enable bracketed paste mode.
 - [x] Detect single-line vs multi-line paste.
 - [x] Single-line paste inserts at cursor.
 - [x] Add `paste.multiline` and `paste.confirm_execute` config defaults.
-- [ ] Multi-line paste follows `paste.multiline`:
+- [x] Multi-line paste follows `paste.multiline`:
   - [x] `editor`
   - [x] `execute`
   - [x] `discard`
-- [ ] Implement PasteReviewEditor mode.
+- [x] Represent paste review as opaque editor draft.
 - [x] Add safe execute confirmation behavior using editor draft when configured.
 - [x] Ensure multi-line paste enters opaque editor draft by default without execution.
 - [x] Implement raw submission to backend shell.
-- [ ] Keep raw multi-line submission history faithful by default.
+- [x] Keep raw multi-line submission history faithful by default.
 
 ### Acceptance criteria
 

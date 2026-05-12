@@ -146,13 +146,13 @@ Triggered by `Ctrl-X Ctrl-E` or configured editor actions.
 
 #### PasteReviewEditor mode
 
-Triggered by multi-line paste when configured to `editor`.
+Legacy name for the multi-line paste review state. In the current design, this is represented as an opaque editor draft rather than a separate inline editor.
 
-- Opens editor with pasted content.
-- Saved content becomes a raw submission candidate, not a draft item.
-- After editor exits, Aish asks for execution confirmation by default.
-- If confirmed, content is sent to the backend shell as raw shell input.
-- If declined, content is discarded or optionally saved to a file, depending on future configuration.
+- Multi-line paste with `paste.multiline = "editor"` becomes an opaque editor draft.
+- The main prompt shows only the editor draft summary.
+- `Ctrl-X Ctrl-E` can open the external editor for that content.
+- `Enter` submits the raw editor draft to the backend shell.
+- `paste.multiline = "execute"` with `confirm_execute = true` also uses the editor draft as the confirmation step.
 
 #### Picker modes
 
