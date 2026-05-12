@@ -12,8 +12,8 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 95 library unit tests.
-- 13 draft execution integration tests.
+- 96 library unit tests.
+- 14 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
 - 1 ignored zsh PTY integration test.
@@ -183,6 +183,8 @@ Implemented:
 - Prompt symbols: `>`, `$`, `%`.
 - Empty-input `Tab` mode cycling.
 - Prompt line rendering.
+- Current cwd tracking from backend command completion markers.
+- `#status` and `#doctor` report cwd when known.
 
 Tests:
 
@@ -191,6 +193,8 @@ Tests:
 - `app::tests::empty_tab_cycles_modes`
 - `app::tests::non_empty_tab_does_not_switch_modes`
 - `app::tests::prompt_line_uses_current_mode_symbol`
+- `pty::tests::parses_marker_cwd_when_present`
+- `execute_draft_updates_current_cwd_from_backend_shell`
 
 Status:
 
@@ -200,7 +204,6 @@ Known gaps:
 
 - Selected history index is implemented for regular history mode only.
 - Selected AI session/item state is not implemented.
-- Current cwd tracking is not implemented.
 - Output ring buffer is not implemented.
 - Custom prompt variables are not implemented.
 

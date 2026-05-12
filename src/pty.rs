@@ -17,6 +17,7 @@ pub struct CommandResult {
     pub command: String,
     pub output: String,
     pub exit_code: i32,
+    pub cwd: Option<String>,
 }
 
 pub struct PtyBackend {
@@ -104,8 +105,9 @@ impl PtyBackend {
     pub fn run_command(&mut self, command: &str, timeout: Duration) -> Result<CommandResult> {
         let _ = self.drain_for(Duration::from_millis(25));
         let marker = next_marker();
-        let marker_command =
-            format!("__aish_status=$?; printf '\\n%s%s\\n' '{marker}' \"$__aish_status\"\n");
+        let marker_command = format!(
+            "__aish_status=$?; printf '\\n%s%s\\t%s\\n' '{marker}' \"$__aish_status\" \"$PWD\"; sh -c \"exit $__aish_status\"\n"
+        );
         self.write_raw(command)?;
         if !command.ends_with('\n') {
             self.write_raw("\n")?;
@@ -113,11 +115,12 @@ impl PtyBackend {
         self.write_raw(&marker_command)?;
 
         let raw = self.read_until_marker(&marker, timeout)?;
-        let (output, exit_code) = parse_marker_output(&raw, &marker)?;
+        let (output, exit_code, cwd) = parse_marker_output(&raw, &marker)?;
         Ok(CommandResult {
             command: command.trim_end_matches('\n').to_string(),
             output,
             exit_code,
+            cwd,
         })
     }
 
@@ -259,7 +262,7 @@ fn shell_launch(configured_shell: &str) -> ShellLaunch {
     }
 }
 
-fn parse_marker_output(raw: &str, marker: &str) -> Result<(String, i32)> {
+fn parse_marker_output(raw: &str, marker: &str) -> Result<(String, i32, Option<String>)> {
     let marker_pos = find_complete_marker(raw, marker)
         .context("backend shell output did not contain prompt marker")?;
     let output = normalize_pty_newlines(raw[..marker_pos].trim_matches(['\r', '\n']));
@@ -272,7 +275,18 @@ fn parse_marker_output(raw: &str, marker: &str) -> Result<(String, i32)> {
         bail!("backend shell prompt marker did not include exit status");
     }
     let exit_code = status.parse::<i32>().context("invalid shell exit status")?;
-    Ok((output, exit_code))
+    let cwd_start = status_start + status.len();
+    let cwd = raw[cwd_start..]
+        .strip_prefix('\t')
+        .map(|rest| {
+            normalize_pty_newlines(rest)
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .to_string()
+        })
+        .filter(|cwd| !cwd.is_empty());
+    Ok((output, exit_code, cwd))
 }
 
 fn normalize_pty_newlines(text: &str) -> String {
@@ -308,16 +322,27 @@ mod tests {
     fn parses_marker_and_hides_it_from_output() {
         let marker = "__AISH_STATUS__123__";
         let raw = format!("hello\r\n{marker}7\r\n");
-        let (output, status) = parse_marker_output(&raw, marker).unwrap();
+        let (output, status, cwd) = parse_marker_output(&raw, marker).unwrap();
         assert_eq!(output, "hello");
         assert_eq!(status, 7);
+        assert_eq!(cwd, None);
+    }
+
+    #[test]
+    fn parses_marker_cwd_when_present() {
+        let marker = "__AISH_STATUS__123__";
+        let raw = format!("hello\r\n{marker}7\t/tmp/aish\r\n");
+        let (output, status, cwd) = parse_marker_output(&raw, marker).unwrap();
+        assert_eq!(output, "hello");
+        assert_eq!(status, 7);
+        assert_eq!(cwd.as_deref(), Some("/tmp/aish"));
     }
 
     #[test]
     fn parser_ignores_old_fixed_marker_in_user_output() {
         let marker = "__AISH_STATUS__123__";
         let raw = format!("before __AISH_STATUS__ after\r\n{marker}0\r\n");
-        let (output, status) = parse_marker_output(&raw, marker).unwrap();
+        let (output, status, _) = parse_marker_output(&raw, marker).unwrap();
         assert_eq!(output, "before __AISH_STATUS__ after");
         assert_eq!(status, 0);
     }
@@ -326,7 +351,7 @@ mod tests {
     fn parser_normalizes_pty_newlines() {
         let marker = "__AISH_STATUS__123__";
         let raw = format!("one\r\ntwo\r\n{marker}0\r\n");
-        let (output, status) = parse_marker_output(&raw, marker).unwrap();
+        let (output, status, _) = parse_marker_output(&raw, marker).unwrap();
         assert_eq!(output, "one\ntwo");
         assert_eq!(status, 0);
     }
@@ -337,7 +362,7 @@ mod tests {
         let raw = format!(
             "__aish_status=$?; printf '\\n%s%s\\n' '{marker}' \"$__aish_status\"\r\nactual\r\n{marker}0\r\n"
         );
-        let (output, status) = parse_marker_output(&raw, marker).unwrap();
+        let (output, status, _) = parse_marker_output(&raw, marker).unwrap();
         assert!(output.contains("actual"));
         assert_eq!(status, 0);
     }

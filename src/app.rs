@@ -26,6 +26,7 @@ pub struct AppState {
     pub mode: Mode,
     pub draft: InputBuffer,
     pub last_status: Option<i32>,
+    pub current_cwd: Option<PathBuf>,
     pub exit_requested: bool,
     pub regular_history_path: Option<PathBuf>,
     pub ai_history_path: Option<PathBuf>,
@@ -47,6 +48,7 @@ impl Default for AppState {
             mode: Mode::Draft,
             draft: InputBuffer::new(),
             last_status: None,
+            current_cwd: None,
             exit_requested: false,
             regular_history_path: None,
             ai_history_path: None,
@@ -321,12 +323,17 @@ pub fn execute_draft(
                 "status" => {
                     writeln!(
                         out,
-                        "mode={} last_status={}",
+                        "mode={} last_status={} cwd={}",
                         state.mode.symbol(),
                         state
                             .last_status
                             .map(|status| status.to_string())
-                            .unwrap_or_else(|| "none".to_string())
+                            .unwrap_or_else(|| "none".to_string()),
+                        state
+                            .current_cwd
+                            .as_ref()
+                            .map(|cwd| cwd.display().to_string())
+                            .unwrap_or_else(|| "unknown".to_string())
                     )?;
                     state.draft.clear();
                     state.mode = Mode::Draft;
@@ -695,6 +702,9 @@ pub fn execute_draft(
         state.regular_history.push(entry);
     }
     state.last_status = Some(result.exit_code);
+    if let Some(cwd) = result.cwd {
+        state.current_cwd = Some(PathBuf::from(cwd));
+    }
     state.draft.clear();
     if executing_ai && result.exit_code == 0 {
         state.advance_after_ai_success();
@@ -716,6 +726,15 @@ fn write_doctor_report(state: &AppState, out: &mut impl Write) -> Result<()> {
             .last_status
             .map(|status| status.to_string())
             .unwrap_or_else(|| "none".to_string())
+    )?;
+    writeln!(
+        out,
+        "cwd={}",
+        state
+            .current_cwd
+            .as_ref()
+            .map(|cwd| cwd.display().to_string())
+            .unwrap_or_else(|| "unknown".to_string())
     )?;
     writeln!(out, "draft_persist={}", state.draft_persist)?;
     writeln!(
@@ -1693,6 +1712,7 @@ mod tests {
         let draft_path = temp.path().join("history/draft.jsonl");
         let mut state = AppState {
             last_status: Some(7),
+            current_cwd: Some(temp.path().to_path_buf()),
             regular_history_path: Some(history_path.clone()),
             notes_path: Some(notes_path.clone()),
             draft_history_path: Some(draft_path.clone()),
@@ -1736,6 +1756,7 @@ mod tests {
         assert!(output.contains("Aish doctor"));
         assert!(output.contains("mode=>"));
         assert!(output.contains("last_status=7"));
+        assert!(output.contains(&format!("cwd={}", temp.path().display())));
         assert!(output.contains("draft_persist=true"));
         assert!(output.contains("regular_history_entries=1"));
         assert!(output.contains("ai_sessions=1"));
@@ -1774,6 +1795,7 @@ mod tests {
     fn private_status_prints_mode_and_last_status() {
         let mut state = AppState {
             last_status: Some(7),
+            current_cwd: Some(std::env::temp_dir()),
             ..AppState::default()
         };
         state.draft.insert_str("#status");
@@ -1791,6 +1813,7 @@ mod tests {
         let output = String::from_utf8(output).unwrap();
         assert!(output.contains("mode=>"));
         assert!(output.contains("last_status=7"));
+        assert!(output.contains(&format!("cwd={}", std::env::temp_dir().display())));
         assert!(state.draft.is_empty());
     }
 

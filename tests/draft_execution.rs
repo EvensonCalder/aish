@@ -69,6 +69,32 @@ fn execute_draft_records_failed_status_and_returns_to_draft() {
 }
 
 #[test]
+fn execute_draft_updates_current_cwd_from_backend_shell() {
+    let _guard = pty_execution_guard();
+    let temp = tempfile::tempdir().unwrap();
+    let mut state = AppState::default();
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    state
+        .draft
+        .insert_str(&format!("cd {}", temp.path().display()));
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    assert_eq!(state.last_status, Some(0));
+    assert_eq!(state.current_cwd.as_deref(), Some(temp.path()));
+    assert_eq!(state.mode, Mode::Draft);
+    assert!(state.draft.is_empty());
+}
+
+#[test]
 fn execute_draft_sends_multiline_buffer_exactly_to_backend() {
     let _guard = pty_execution_guard();
     let mut state = AppState::default();
