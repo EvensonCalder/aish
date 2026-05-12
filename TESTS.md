@@ -288,6 +288,7 @@ Implemented:
 - Optional shell logical splitter ignores standalone comments and preserves inline `#` content.
 - Optional shell logical splitter preserves single-quoted and double-quoted newlines.
 - Optional shell logical splitter preserves heredoc blocks.
+- Optional shell logical splitter common-case coverage includes simple lines, blank lines, comments, backslash continuations, quotes, heredocs, and mixed command streams.
 - Editor roundtrip helper prepares a file, runs a fake editor, and reads successful edits back into draft while preserving the original draft on editor failure.
 - `Ctrl-X Ctrl-E` terminal handling resolves the editor, suspends raw mode when needed, runs the roundtrip, restores raw mode when needed, and reports success/failure.
 - `editor.execute_after_save = true` runs a successfully saved editor draft immediately with raw editor-draft semantics.

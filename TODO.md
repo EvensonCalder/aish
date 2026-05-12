@@ -377,16 +377,16 @@ This is a future configurable enhancement. It must not replace the default faith
 - [x] Preserve backslash continuations.
 - [x] Preserve quoted multi-line strings.
 - [x] Preserve heredoc blocks.
-- [ ] Ignore blank lines.
+- [x] Ignore blank lines.
 - [x] Ignore standalone comment lines in splitter output.
 - [ ] Store comment-only lines as notes if enabled.
-- [ ] Add tests for common cases:
+- [x] Add tests for common cases:
   - [x] two simple lines
   - [x] backslash continuation
   - [x] quoted newline
   - [x] heredoc
   - [x] comments
-  - [ ] mixed commands
+  - [x] mixed commands
 
 ### Acceptance criteria
 
