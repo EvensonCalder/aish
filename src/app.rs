@@ -490,7 +490,7 @@ impl AppState {
         let cwd = self
             .current_cwd
             .as_ref()
-            .map(|cwd| cwd.display().to_string())
+            .map(|cwd| display_cwd(cwd))
             .unwrap_or_default();
         let basename = self
             .current_cwd
@@ -1613,6 +1613,24 @@ fn prompt_host() -> String {
         .unwrap_or_default()
 }
 
+fn display_cwd(cwd: &std::path::Path) -> String {
+    let Some(home) = dirs::home_dir() else {
+        return cwd.display().to_string();
+    };
+    if cwd == home {
+        return "~".to_string();
+    }
+    if let Ok(rest) = cwd.strip_prefix(&home) {
+        if rest.as_os_str().is_empty() {
+            "~".to_string()
+        } else {
+            format!("~/{}", rest.display())
+        }
+    } else {
+        cwd.display().to_string()
+    }
+}
+
 pub fn save_draft_if_configured(state: &AppState) -> Result<bool> {
     if !state.draft_persist || state.draft.is_empty() {
         return Ok(false);
@@ -1694,6 +1712,27 @@ mod tests {
 
         state.mode = Mode::Ai;
         assert_eq!(state.render_prompt_line(), "ai % ");
+    }
+
+    #[test]
+    fn prompt_line_abbreviates_home_directory_as_tilde() {
+        let Some(home) = dirs::home_dir() else {
+            return;
+        };
+        let mut state = AppState {
+            current_cwd: Some(home.clone()),
+            prompt_templates: PromptTemplates {
+                draft: "{cwd} > ".to_string(),
+                history: "{cwd} $ ".to_string(),
+                ai: "{cwd} % ".to_string(),
+            },
+            ..AppState::default()
+        };
+
+        assert_eq!(state.render_prompt_line(), "~ > ");
+
+        state.current_cwd = Some(home.join("repo/project"));
+        assert_eq!(state.render_prompt_line(), "~/repo/project > ");
     }
 
     #[test]

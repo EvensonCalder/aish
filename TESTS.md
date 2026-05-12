@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 251 library unit tests.
+- 253 library unit tests.
 - 18 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
@@ -282,6 +282,8 @@ Implemented:
 - Completion has a pure non-first-token helper that returns path candidates, history argument candidates, and template placeholder candidates in spec order with per-source deduplication.
 - Completion helpers support ignore-spaces matching and max-result limiting; config defaults expose `completion.max_results = 5`, `completion.ignore_spaces = true`, and `completion.template_first = true`.
 - Runtime state carries completion config and `#config` reports completion settings read-only.
+- Prompt cwd rendering abbreviates the user home directory as `~` and paths inside it as `~/...`.
+- Command submission moves the cursor to the prompt line end before printing a newline, so shell output starts at column zero even when the draft cursor was edited in the middle of the line.
 - Runtime state can build completion candidates from current draft, templates, in-memory history, cwd, PATH, and completion config without mutating input or terminal UI.
 - Non-empty Tab requests completion display without editing input; terminal completion display prints labeled candidate rows.
 - Right at end-of-line accepts the first completion candidate; Right inside the line keeps ordinary cursor movement.

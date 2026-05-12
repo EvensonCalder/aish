@@ -138,6 +138,7 @@ fn handle_key(
             accept_first_completion(state)?;
         }
         KeyAction::Submit => {
+            execute!(out, MoveToColumn(state.render_prompt_line().len() as u16))?;
             writeln!(out)?;
             execute_draft(state, backend, out, command_timeout)?;
             if state.exit_requested {
@@ -145,6 +146,7 @@ fn handle_key(
             }
         }
         KeyAction::ConfirmContext(accepted) => {
+            execute!(out, MoveToColumn(state.render_prompt_line().len() as u16))?;
             writeln!(out)?;
             answer_context_confirmation(state, accepted, out, command_timeout)?;
         }
@@ -820,6 +822,30 @@ mod tests {
         assert_eq!(
             apply_key_to_state(ctrl('d'), &mut state),
             KeyAction::Continue
+        );
+    }
+
+    #[test]
+    fn submit_moves_cursor_to_prompt_line_end_before_newline() {
+        let mut state = AppState::default();
+        state.draft.insert_str("echo hello");
+        state.draft.move_start();
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        handle_key(
+            key(KeyCode::Enter),
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(
+            output.contains("\u{1b}[13G\nhello"),
+            "output was {output:?}"
         );
     }
 
