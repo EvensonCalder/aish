@@ -1,3 +1,8 @@
+use std::io::Write;
+use std::process::{Command, Stdio};
+
+use anyhow::{Context, Result, bail};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PickerAction {
     InsertAtCursor,
@@ -10,6 +15,59 @@ pub enum PickerAction {
 pub struct PickerEdit {
     pub line: String,
     pub cursor: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PickerRunResult {
+    pub selected: Option<String>,
+    pub exit_code: Option<i32>,
+}
+
+pub fn default_fzf_command() -> Vec<String> {
+    vec!["fzf".to_string()]
+}
+
+pub fn run_fzf_picker(candidates: &[String]) -> Result<PickerRunResult> {
+    run_picker_command(&default_fzf_command(), candidates)
+}
+
+pub fn run_picker_command(command: &[String], candidates: &[String]) -> Result<PickerRunResult> {
+    let Some((program, args)) = command.split_first() else {
+        bail!("picker command is empty");
+    };
+
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .with_context(|| format!("failed to run picker command {program}"))?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        for candidate in candidates {
+            writeln!(stdin, "{candidate}")?;
+        }
+    }
+
+    let output = child.wait_with_output()?;
+    let selected = output
+        .status
+        .success()
+        .then(|| first_output_line(&output.stdout))
+        .flatten();
+
+    Ok(PickerRunResult {
+        selected,
+        exit_code: output.status.code(),
+    })
+}
+
+fn first_output_line(output: &[u8]) -> Option<String> {
+    String::from_utf8_lossy(output)
+        .lines()
+        .next()
+        .map(str::to_string)
 }
 
 pub fn apply_picker_result(
@@ -184,5 +242,57 @@ mod tests {
                 cursor: 13,
             }
         );
+    }
+
+    #[test]
+    fn run_picker_command_returns_selected_stdout_line() {
+        let command = vec![
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            "sed -n '2p'".to_string(),
+        ];
+        let candidates = vec!["one".to_string(), "two".to_string(), "three".to_string()];
+
+        let result = run_picker_command(&command, &candidates).unwrap();
+
+        assert_eq!(
+            result,
+            PickerRunResult {
+                selected: Some("two".to_string()),
+                exit_code: Some(0),
+            }
+        );
+    }
+
+    #[test]
+    fn run_picker_command_returns_none_on_cancel_status() {
+        let command = vec![
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            "exit 130".to_string(),
+        ];
+        let candidates = vec!["one".to_string()];
+
+        let result = run_picker_command(&command, &candidates).unwrap();
+
+        assert_eq!(
+            result,
+            PickerRunResult {
+                selected: None,
+                exit_code: Some(130),
+            }
+        );
+    }
+
+    #[test]
+    fn run_picker_command_rejects_empty_command() {
+        let error = run_picker_command(&[], &[]).unwrap_err();
+
+        assert!(error.to_string().contains("picker command is empty"));
+    }
+
+    #[test]
+    fn default_fzf_command_uses_external_fzf() {
+        assert_eq!(default_fzf_command(), ["fzf"]);
     }
 }

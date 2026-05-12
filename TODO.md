@@ -473,6 +473,7 @@ Status: implemented for v0.1.0 terminal draft completion. Candidate ranking, can
   - [x] append as argument
   - [x] replace line
 - [x] Implement shell quoting for inserted values.
+- [x] Implement picker command runner boundary using external `fzf` by default.
 - [ ] Implement file/path picker, initially via `fzf`.
 - [ ] Implement history search picker for `Ctrl-R`.
 - [ ] Implement template picker.
