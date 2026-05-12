@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 200 library unit tests.
+- 205 library unit tests.
 - 18 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
@@ -284,6 +284,7 @@ Implemented:
 - Picker command runner uses external `fzf` by default, can feed candidates to a command, capture the selected stdout line, report cancel status as no selection, and reject empty commands.
 - File picker helpers collect sorted relative file/path candidates and can apply selected paths to draft with shell quoting.
 - `Ctrl-X Ctrl-F` launches the file picker action, and selected file picker values replace the current token while cancel leaves the draft unchanged.
+- `Ctrl-R` launches the history search action, scopes candidates by current mode, and selected commands replace the draft line without shell quoting.
 - Editor command resolution supports config, `$VISUAL`, `$EDITOR`, and PATH fallback candidates.
 - Editor session preparation writes draft/history/AI selected content to a secure temporary file.
 - Editor process runner appends the prepared file path to the resolved command and waits for exit status without reading or executing content.
@@ -430,6 +431,12 @@ Tests:
 - `terminal::tests::ctrl_x_prefix_resolves_file_picker_chord_to_launch_action`
 - `terminal::tests::apply_file_picker_result_replaces_current_token`
 - `terminal::tests::apply_file_picker_result_reports_cancel_without_editing`
+- `picker::tests::history_picker_candidates_follow_history_modes`
+- `app::tests::history_picker_candidates_follow_current_mode_scope`
+- `app::tests::replace_draft_from_history_picker_copies_raw_command_to_draft`
+- `terminal::tests::ctrl_r_returns_history_search_action_without_editing_draft`
+- `terminal::tests::apply_history_picker_result_replaces_draft_without_shell_quoting`
+- `terminal::tests::apply_history_picker_result_reports_cancel_without_editing`
 
 Status:
 

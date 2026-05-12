@@ -4,6 +4,8 @@ use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, bail};
 
+use crate::history::{AiItemKind, AiSession, HistoryEntry};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PickerAction {
     InsertAtCursor,
@@ -29,6 +31,32 @@ pub fn file_picker_candidates(root: &Path) -> Result<Vec<String>> {
     collect_file_candidates(root, root, &mut candidates)?;
     candidates.sort();
     Ok(candidates)
+}
+
+pub fn regular_history_picker_candidates(history: &[HistoryEntry]) -> Vec<String> {
+    history
+        .iter()
+        .rev()
+        .map(|entry| entry.command.clone())
+        .collect()
+}
+
+pub fn ai_history_picker_candidates(sessions: &[AiSession]) -> Vec<String> {
+    sessions
+        .iter()
+        .flat_map(|session| &session.items)
+        .filter(|item| item.kind == AiItemKind::Command)
+        .map(|item| item.text.clone())
+        .collect()
+}
+
+pub fn combined_history_picker_candidates(
+    history: &[HistoryEntry],
+    sessions: &[AiSession],
+) -> Vec<String> {
+    let mut candidates = regular_history_picker_candidates(history);
+    candidates.extend(ai_history_picker_candidates(sessions));
+    candidates
 }
 
 fn collect_file_candidates(root: &Path, dir: &Path, candidates: &mut Vec<String>) -> Result<()> {
@@ -338,6 +366,53 @@ mod tests {
         assert_eq!(
             file_picker_candidates(temp.path()).unwrap(),
             ["README.md", "src/", "src/main.rs"]
+        );
+    }
+
+    #[test]
+    fn history_picker_candidates_follow_history_modes() {
+        let history = vec![
+            HistoryEntry {
+                t: 1,
+                command: "one".to_string(),
+                exit_code: Some(0),
+                source: crate::history::HistorySource::User,
+            },
+            HistoryEntry {
+                t: 2,
+                command: "two".to_string(),
+                exit_code: Some(0),
+                source: crate::history::HistorySource::User,
+            },
+        ];
+        let sessions = vec![AiSession {
+            id: "s1".to_string(),
+            t: 3,
+            prompt: "prompt".to_string(),
+            ctx: false,
+            model: "test".to_string(),
+            items: vec![
+                crate::history::AiItem {
+                    kind: AiItemKind::Template,
+                    text: "template body".to_string(),
+                    name: Some("tpl".to_string()),
+                },
+                crate::history::AiItem {
+                    kind: AiItemKind::Command,
+                    text: "ai command".to_string(),
+                    name: None,
+                },
+            ],
+        }];
+
+        assert_eq!(
+            regular_history_picker_candidates(&history),
+            vec!["two", "one"]
+        );
+        assert_eq!(ai_history_picker_candidates(&sessions), vec!["ai command"]);
+        assert_eq!(
+            combined_history_picker_candidates(&history, &sessions),
+            vec!["two", "one", "ai command"]
         );
     }
 }

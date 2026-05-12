@@ -22,7 +22,7 @@ pub enum KeyAction {
     Continue,
     Exit,
     ClearScreen,
-    HistorySearchPlaceholder,
+    HistorySearch,
     ExternalEditor,
     FilePicker,
     AdvancedKeyPlaceholder(&'static str),
@@ -103,8 +103,8 @@ fn handle_key(
         KeyAction::ClearScreen => {
             execute!(out, Clear(ClearType::All), MoveToColumn(0))?;
         }
-        KeyAction::HistorySearchPlaceholder => {
-            writeln!(out, "history search is not implemented yet")?;
+        KeyAction::HistorySearch => {
+            run_history_picker(state, out)?;
         }
         KeyAction::ExternalEditor => {
             run_external_editor(state, backend, out, command_timeout)?;
@@ -192,6 +192,31 @@ pub fn run_file_picker(state: &mut AppState, out: &mut impl Write) -> Result<()>
 
     let result = run_external_picker(|| run_fzf_picker(&candidates))?;
     apply_file_picker_result(state, result, out)
+}
+
+pub fn run_history_picker(state: &mut AppState, out: &mut impl Write) -> Result<()> {
+    let candidates = state.history_picker_candidates();
+    if candidates.is_empty() {
+        writeln!(out, "history search has no candidates")?;
+        return Ok(());
+    }
+
+    let result = run_external_picker(|| run_fzf_picker(&candidates))?;
+    apply_history_picker_result(state, result, out)
+}
+
+fn apply_history_picker_result(
+    state: &mut AppState,
+    result: PickerRunResult,
+    out: &mut impl Write,
+) -> Result<()> {
+    let Some(selected) = result.selected else {
+        writeln!(out, "history search cancelled")?;
+        return Ok(());
+    };
+
+    state.replace_draft_from_history_picker(selected);
+    Ok(())
 }
 
 fn apply_file_picker_result(
@@ -302,7 +327,7 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
             KeyAction::Continue
         }
         (KeyModifiers::CONTROL, KeyCode::Char('l')) => KeyAction::ClearScreen,
-        (KeyModifiers::CONTROL, KeyCode::Char('r')) => KeyAction::HistorySearchPlaceholder,
+        (KeyModifiers::CONTROL, KeyCode::Char('r')) => KeyAction::HistorySearch,
         (KeyModifiers::CONTROL, KeyCode::Char('a')) => {
             if !is_read_only_mode && !is_editor_draft {
                 state.draft.move_start();
@@ -705,13 +730,13 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_r_returns_history_search_placeholder_without_editing_draft() {
+    fn ctrl_r_returns_history_search_action_without_editing_draft() {
         let mut state = AppState::default();
         state.draft.insert_str("git status");
 
         assert_eq!(
             apply_key_to_state(ctrl('r'), &mut state),
-            KeyAction::HistorySearchPlaceholder
+            KeyAction::HistorySearch
         );
 
         assert_eq!(state.mode, Mode::Draft);
@@ -816,6 +841,50 @@ mod tests {
         assert_eq!(
             String::from_utf8(output).unwrap(),
             "file picker cancelled\n"
+        );
+    }
+
+    #[test]
+    fn apply_history_picker_result_replaces_draft_without_shell_quoting() {
+        let mut state = AppState::default();
+        state.draft.insert_str("partial");
+        let mut output = Vec::new();
+
+        apply_history_picker_result(
+            &mut state,
+            PickerRunResult {
+                selected: Some("git commit -m 'hello world'".to_string()),
+                exit_code: Some(0),
+            },
+            &mut output,
+        )
+        .unwrap();
+
+        assert_eq!(state.mode, Mode::Draft);
+        assert_eq!(state.draft.as_str(), "git commit -m 'hello world'");
+        assert!(String::from_utf8(output).unwrap().is_empty());
+    }
+
+    #[test]
+    fn apply_history_picker_result_reports_cancel_without_editing() {
+        let mut state = AppState::default();
+        state.draft.insert_str("partial");
+        let mut output = Vec::new();
+
+        apply_history_picker_result(
+            &mut state,
+            PickerRunResult {
+                selected: None,
+                exit_code: Some(130),
+            },
+            &mut output,
+        )
+        .unwrap();
+
+        assert_eq!(state.draft.as_str(), "partial");
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            "history search cancelled\n"
         );
     }
 

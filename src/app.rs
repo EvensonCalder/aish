@@ -24,7 +24,10 @@ use crate::history::{
 use crate::input::InputBuffer;
 use crate::keybindings::default_keybindings;
 use crate::modes::Mode;
-use crate::picker::{PickerAction, apply_picker_result};
+use crate::picker::{
+    PickerAction, ai_history_picker_candidates, apply_picker_result,
+    combined_history_picker_candidates, regular_history_picker_candidates,
+};
 use crate::pty::PtyBackend;
 use crate::templates::{
     TemplateEntry, append_template, apply_template_values_with_usage, find_template_by_name,
@@ -324,6 +327,21 @@ impl AppState {
         } else {
             false
         }
+    }
+
+    pub fn history_picker_candidates(&self) -> Vec<String> {
+        match self.mode {
+            Mode::History => regular_history_picker_candidates(&self.regular_history),
+            Mode::Ai => ai_history_picker_candidates(&self.ai_sessions),
+            _ => combined_history_picker_candidates(&self.regular_history, &self.ai_sessions),
+        }
+    }
+
+    pub fn replace_draft_from_history_picker(&mut self, command: impl Into<String>) {
+        self.draft = InputBuffer::from(command.into());
+        self.draft_from_editor = false;
+        self.draft_from_template = false;
+        self.mode = Mode::Draft;
     }
 
     fn selected_ai_item(&self) -> Option<(&AiSession, &AiItem)> {
@@ -1397,6 +1415,67 @@ mod tests {
         state.draft_from_editor = false;
         state.mode = Mode::History;
         assert!(!state.apply_picker_selection("file", crate::picker::PickerAction::InsertAtCursor));
+    }
+
+    #[test]
+    fn history_picker_candidates_follow_current_mode_scope() {
+        let regular_history = vec![
+            HistoryEntry {
+                t: 1,
+                command: "one".to_string(),
+                exit_code: Some(0),
+                source: HistorySource::User,
+            },
+            HistoryEntry {
+                t: 2,
+                command: "two".to_string(),
+                exit_code: Some(0),
+                source: HistorySource::User,
+            },
+        ];
+        let ai_sessions = vec![AiSession {
+            id: "s1".to_string(),
+            t: 3,
+            prompt: "prompt".to_string(),
+            ctx: false,
+            model: "test".to_string(),
+            items: vec![AiItem {
+                kind: AiItemKind::Command,
+                text: "ai command".to_string(),
+                name: None,
+            }],
+        }];
+        let mut state = AppState {
+            regular_history,
+            ai_sessions,
+            ..AppState::default()
+        };
+
+        assert_eq!(
+            state.history_picker_candidates(),
+            vec!["two", "one", "ai command"]
+        );
+        state.mode = Mode::History;
+        assert_eq!(state.history_picker_candidates(), vec!["two", "one"]);
+        state.mode = Mode::Ai;
+        assert_eq!(state.history_picker_candidates(), vec!["ai command"]);
+    }
+
+    #[test]
+    fn replace_draft_from_history_picker_copies_raw_command_to_draft() {
+        let mut state = AppState {
+            mode: Mode::History,
+            draft_from_editor: true,
+            draft_from_template: true,
+            ..AppState::default()
+        };
+
+        state.replace_draft_from_history_picker("git commit -m 'hello world'");
+
+        assert_eq!(state.mode, Mode::Draft);
+        assert_eq!(state.draft.as_str(), "git commit -m 'hello world'");
+        assert!(!state.draft_from_editor);
+        assert!(!state.draft_from_template);
     }
 
     #[test]
