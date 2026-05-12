@@ -120,7 +120,7 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
   - [ ] selected AI session/item
   - [x] last exit status
   - [x] current cwd if known
-  - [ ] output ring buffer
+  - [x] output ring buffer
 - [x] Implement empty-input `Tab` mode switching.
 - [x] Implement prompt symbols:
   - [x] `>` draft

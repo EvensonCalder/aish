@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -21,6 +21,15 @@ use crate::templates::{
     load_templates, remove_templates_by_name, replace_template, template_placeholders,
 };
 
+const OUTPUT_RING_CAPACITY: usize = 100;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutputEntry {
+    pub command: String,
+    pub output: String,
+    pub exit_code: i32,
+}
+
 #[derive(Debug)]
 pub struct AppState {
     pub mode: Mode,
@@ -39,6 +48,7 @@ pub struct AppState {
     pub ai_sessions: Vec<AiSession>,
     pub ai_command_indices: Vec<AiCommandIndex>,
     pub selected_ai_index: Option<usize>,
+    pub output_ring: VecDeque<OutputEntry>,
     pub clock: fn() -> i64,
 }
 
@@ -61,6 +71,7 @@ impl Default for AppState {
             ai_sessions: Vec::new(),
             ai_command_indices: Vec::new(),
             selected_ai_index: None,
+            output_ring: VecDeque::new(),
             clock: unix_timestamp,
         }
     }
@@ -229,6 +240,13 @@ impl AppState {
         };
         let column = self.prompt_prefix().len() + cursor;
         column.min(u16::MAX as usize) as u16
+    }
+
+    fn push_output_entry(&mut self, entry: OutputEntry) {
+        if self.output_ring.len() == OUTPUT_RING_CAPACITY {
+            self.output_ring.pop_front();
+        }
+        self.output_ring.push_back(entry);
     }
 }
 
@@ -687,6 +705,11 @@ pub fn execute_draft(
     if !result.output.is_empty() {
         writeln!(out, "{}", result.output)?;
     }
+    state.push_output_entry(OutputEntry {
+        command: result.command.clone(),
+        output: result.output.clone(),
+        exit_code: result.exit_code,
+    });
     if let Some(path) = &state.regular_history_path {
         let entry = HistoryEntry {
             command: result.command.clone(),
@@ -744,6 +767,7 @@ fn write_doctor_report(state: &AppState, out: &mut impl Write) -> Result<()> {
     )?;
     writeln!(out, "ai_sessions={}", state.ai_sessions.len())?;
     writeln!(out, "ai_commands={}", state.ai_command_indices.len())?;
+    writeln!(out, "output_ring_entries={}", state.output_ring.len())?;
     write_path_status(out, "regular_history_path", &state.regular_history_path)?;
     write_path_status(out, "notes_path", &state.notes_path)?;
     write_path_status(out, "draft_history_path", &state.draft_history_path)?;
@@ -1069,6 +1093,26 @@ mod tests {
         assert_eq!(state.mode, Mode::Draft);
         assert_eq!(state.draft.as_str(), "git status");
         assert_eq!(state.draft.cursor(), "git status".len());
+    }
+
+    #[test]
+    fn output_ring_keeps_latest_entries_up_to_capacity() {
+        let mut state = AppState::default();
+
+        for index in 0..(OUTPUT_RING_CAPACITY + 1) {
+            state.push_output_entry(OutputEntry {
+                command: format!("cmd {index}"),
+                output: format!("out {index}"),
+                exit_code: index as i32,
+            });
+        }
+
+        assert_eq!(state.output_ring.len(), OUTPUT_RING_CAPACITY);
+        assert_eq!(state.output_ring.front().unwrap().command, "cmd 1");
+        assert_eq!(
+            state.output_ring.back().unwrap().command,
+            format!("cmd {OUTPUT_RING_CAPACITY}")
+        );
     }
 
     #[test]
@@ -1761,6 +1805,7 @@ mod tests {
         assert!(output.contains("regular_history_entries=1"));
         assert!(output.contains("ai_sessions=1"));
         assert!(output.contains("ai_commands=1"));
+        assert!(output.contains("output_ring_entries=0"));
         assert!(output.contains("regular_history_path="));
         assert!(output.contains("exists=false"));
         assert!(!history_path.exists());

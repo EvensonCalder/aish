@@ -43,6 +43,10 @@ fn execute_draft_sends_command_to_backend_and_resets_state() {
     assert_eq!(state.last_status, Some(0));
     assert_eq!(state.mode, Mode::Draft);
     assert!(state.draft.is_empty());
+    assert_eq!(state.output_ring.len(), 1);
+    assert_eq!(state.output_ring[0].command, "printf 'hello draft\\n'");
+    assert!(state.output_ring[0].output.contains("hello draft"));
+    assert_eq!(state.output_ring[0].exit_code, 0);
 }
 
 #[test]

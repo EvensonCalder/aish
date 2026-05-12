@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 96 library unit tests.
+- 97 library unit tests.
 - 14 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
@@ -184,6 +184,7 @@ Implemented:
 - Empty-input `Tab` mode cycling.
 - Prompt line rendering.
 - Current cwd tracking from backend command completion markers.
+- In-memory output ring buffer records recent command output.
 - `#status` and `#doctor` report cwd when known.
 
 Tests:
@@ -195,6 +196,8 @@ Tests:
 - `app::tests::prompt_line_uses_current_mode_symbol`
 - `pty::tests::parses_marker_cwd_when_present`
 - `execute_draft_updates_current_cwd_from_backend_shell`
+- `app::tests::output_ring_keeps_latest_entries_up_to_capacity`
+- `execute_draft_sends_command_to_backend_and_resets_state`
 
 Status:
 
@@ -204,7 +207,6 @@ Known gaps:
 
 - Selected history index is implemented for regular history mode only.
 - Selected AI session/item state is not implemented.
-- Output ring buffer is not implemented.
 - Custom prompt variables are not implemented.
 
 ### Draft Input Editor
