@@ -521,6 +521,8 @@ Status: implemented for v0.1.0 via external `fzf`. Picker actions are intentiona
 - [x] Store AI session in `ai.jsonl`.
 - [x] Switch to `%` AI mode at first generated item.
 
+Status: direct AI prompts are wired to the chat-completions request path using configured env-key credentials. Live network behavior is not covered by automated tests; pure request/parse helpers and no-crash config-error behavior are covered.
+
 ### Acceptance criteria
 
 - `# how do I set git global name and email?` returns AI items.

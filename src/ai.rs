@@ -77,6 +77,44 @@ pub fn build_ai_request(config: &AiConfig, prompt: &str) -> Result<AiRequest> {
     Ok(AiRequest { url, api_key, body })
 }
 
+pub fn request_ai_items(config: &AiConfig, prompt: &str) -> Result<Vec<AiItem>> {
+    let request = build_ai_request(config, prompt)?;
+    let raw = send_chat_completions_request(&request)?;
+    let content = extract_chat_message_content(&raw)?;
+    parse_ai_items(&content)
+}
+
+pub fn send_chat_completions_request(request: &AiRequest) -> Result<String> {
+    let response = reqwest::blocking::Client::new()
+        .post(&request.url)
+        .bearer_auth(&request.api_key)
+        .json(&request.body)
+        .send()
+        .map_err(|error| anyhow!("AI request failed: {error}"))?;
+    let status = response.status();
+    let body = response
+        .text()
+        .map_err(|error| anyhow!("AI response body could not be read: {error}"))?;
+    if !status.is_success() {
+        bail!("AI request failed with status {status}: {body}");
+    }
+    Ok(body)
+}
+
+pub fn extract_chat_message_content(raw: &str) -> Result<String> {
+    let parsed: Value = serde_json::from_str(raw)
+        .map_err(|error| anyhow!("AI provider response was not valid JSON: {error}"))?;
+    parsed
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("content"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| anyhow!("AI provider response did not contain choices[0].message.content"))
+}
+
 pub fn build_chat_completions_body(model: &str, prompt: &str) -> Value {
     json!({
         "model": model,
@@ -177,6 +215,26 @@ mod tests {
                 .contains("final JSON only")
         );
         assert_eq!(body["messages"][1]["content"], "list files");
+    }
+
+    #[test]
+    fn extract_chat_message_content_reads_first_choice_message() {
+        let content = extract_chat_message_content(
+            r#"{"choices":[{"message":{"content":"{\"items\":[{\"kind\":\"command\",\"text\":\"pwd\"}]}"}}]}"#,
+        )
+        .unwrap();
+
+        assert_eq!(content, r#"{"items":[{"kind":"command","text":"pwd"}]}"#);
+    }
+
+    #[test]
+    fn extract_chat_message_content_rejects_missing_content() {
+        assert!(
+            extract_chat_message_content(r#"{"choices":[{"message":{}}]}"#)
+                .unwrap_err()
+                .to_string()
+                .contains("choices[0].message.content")
+        );
     }
 
     #[test]

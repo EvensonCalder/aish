@@ -5,6 +5,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 
+use crate::ai::request_ai_items;
 use crate::commands::{
     IMPLEMENTED_PRIVATE_COMMANDS, ParsedLine, parse_line, suggest_private_command,
 };
@@ -996,10 +997,9 @@ pub fn execute_draft(
                 state.mode = Mode::Draft;
                 return Ok(());
             }
-            ParsedLine::AiPrompt(_) => {
-                writeln!(out, "AI prompts are not implemented yet")?;
+            ParsedLine::AiPrompt(prompt) => {
+                submit_ai_prompt(state, prompt, out)?;
                 state.draft.clear();
-                state.mode = Mode::Draft;
                 return Ok(());
             }
             ParsedLine::AiPromptWithContext { prompt, command } => {
@@ -1052,6 +1052,28 @@ pub fn execute_draft(
         state.mode = Mode::Ai;
     } else {
         state.mode = Mode::Draft;
+    }
+    Ok(())
+}
+
+fn submit_ai_prompt(state: &mut AppState, prompt: &str, out: &mut impl Write) -> Result<()> {
+    match request_ai_items(&state.ai_config, prompt) {
+        Ok(items) => {
+            let model = state.ai_config.model.clone();
+            if state.store_ai_session_from_items(prompt, &model, items)? {
+                writeln!(
+                    out,
+                    "AI items generated: {}",
+                    state.ai_command_indices.len()
+                )?;
+            } else {
+                writeln!(out, "AI response contained no command items")?;
+            }
+        }
+        Err(error) => {
+            writeln!(out, "AI request failed: {error}")?;
+            state.mode = Mode::Draft;
+        }
     }
     Ok(())
 }
@@ -1751,6 +1773,28 @@ mod tests {
         assert_eq!(state.selected_ai_index, None);
         assert!(state.ai_command_indices.is_empty());
         assert_eq!(state.ai_sessions.len(), 1);
+    }
+
+    #[test]
+    fn ai_prompt_reports_config_error_without_crashing() {
+        let mut state = AppState::default();
+        state.draft.insert_str("# how do I list files?");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("AI request failed: AI model is not configured"));
+        assert_eq!(state.mode, Mode::Draft);
+        assert!(state.draft.is_empty());
+        assert!(state.ai_sessions.is_empty());
     }
 
     #[test]
