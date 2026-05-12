@@ -24,6 +24,7 @@ pub struct PtyBackend {
     writer: Box<dyn Write + Send>,
     output: Receiver<Vec<u8>>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
+    initial_cwd: Option<String>,
 }
 
 impl PtyBackend {
@@ -82,6 +83,7 @@ impl PtyBackend {
             writer,
             output: rx,
             child,
+            initial_cwd: None,
         };
         backend.initialize_shell(&launch)?;
         Ok(backend)
@@ -89,9 +91,14 @@ impl PtyBackend {
 
     fn initialize_shell(&mut self, launch: &ShellLaunch) -> Result<()> {
         self.write_raw(&launch.init_command)?;
-        let _ = self.read_until_ready(Duration::from_secs(5))?;
+        let raw = self.read_until_ready(Duration::from_secs(5))?;
+        self.initial_cwd = parse_ready_cwd(&raw);
         let _ = self.drain_for(Duration::from_millis(150));
         Ok(())
+    }
+
+    pub fn initial_cwd(&self) -> Option<&str> {
+        self.initial_cwd.as_deref()
     }
 
     pub fn write_raw(&mut self, text: &str) -> Result<()> {
@@ -151,7 +158,7 @@ impl PtyBackend {
         let deadline = Instant::now() + timeout;
         let mut data = Vec::new();
         loop {
-            if String::from_utf8_lossy(&data).contains(READY_MARKER) {
+            if parse_ready_cwd(&String::from_utf8_lossy(&data)).is_some() {
                 return Ok(String::from_utf8_lossy(&data).into_owned());
             }
             let now = Instant::now();
@@ -241,17 +248,17 @@ fn shell_launch(configured_shell: &str) -> ShellLaunch {
     let (args, init_command) = match shell_name {
         "bash" => (
             vec!["--noprofile".to_string(), "--norc".to_string()],
-            format!("stty -echo; printf '\\n{READY_MARKER}\\n'\n"),
+            format!("stty -echo; printf '\\n{READY_MARKER}\\t%s\\n' \"$PWD\"\n"),
         ),
         "zsh" => (
             vec!["-f".to_string()],
             format!(
-                "stty -echo; unsetopt zle prompt_cr prompt_sp; PROMPT=''; RPROMPT=''; printf '\\n{READY_MARKER}\\n'\n"
+                "stty -echo; unsetopt zle prompt_cr prompt_sp; PROMPT=''; RPROMPT=''; printf '\\n{READY_MARKER}\\t%s\\n' \"$PWD\"\n"
             ),
         ),
         _ => (
             Vec::new(),
-            format!("stty -echo; printf '\\n{READY_MARKER}\\n'\n"),
+            format!("stty -echo; printf '\\n{READY_MARKER}\\t%s\\n' \"$PWD\"\n"),
         ),
     };
 
@@ -290,6 +297,15 @@ fn parse_marker_output(raw: &str, marker: &str) -> Result<(String, i32, Option<S
         })
         .filter(|cwd| !cwd.is_empty());
     Ok((output, exit_code, cwd))
+}
+
+fn parse_ready_cwd(raw: &str) -> Option<String> {
+    let prefix = format!("{READY_MARKER}\t");
+    normalize_pty_newlines(raw)
+        .lines()
+        .find_map(|line| line.strip_prefix(&prefix))
+        .map(str::to_string)
+        .filter(|cwd| !cwd.is_empty())
 }
 
 fn normalize_pty_newlines(text: &str) -> String {
@@ -365,6 +381,21 @@ mod tests {
         let (output, status, _) = parse_marker_output(&raw, marker).unwrap();
         assert_eq!(output, "one\ntwo");
         assert_eq!(status, 0);
+    }
+
+    #[test]
+    fn parser_reads_ready_marker_cwd() {
+        let raw = format!("noise\r\n{READY_MARKER}\t/tmp/aish\r\n");
+        assert_eq!(parse_ready_cwd(&raw).as_deref(), Some("/tmp/aish"));
+        assert_eq!(parse_ready_cwd(READY_MARKER), None);
+    }
+
+    #[test]
+    fn parser_ignores_ready_marker_in_echoed_init_command() {
+        let raw = format!(
+            "stty -echo; printf '\\n{READY_MARKER}\\t%s\\n' \"$PWD\"\r\n{READY_MARKER}\t/tmp/aish\r\n"
+        );
+        assert_eq!(parse_ready_cwd(&raw).as_deref(), Some("/tmp/aish"));
     }
 
     #[test]

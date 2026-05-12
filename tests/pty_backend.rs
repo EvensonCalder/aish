@@ -20,6 +20,7 @@ fn pty_backend_runs_commands_and_preserves_shell_state() {
     let first_pwd = backend.run_command("pwd", Duration::from_secs(5)).unwrap();
     assert_eq!(first_pwd.exit_code, 0);
     assert!(!first_pwd.output.trim().is_empty());
+    assert_eq!(backend.initial_cwd(), Some(first_pwd.output.trim()));
     assert!(!first_pwd.output.contains("__AISH_STATUS__"));
 
     let cd = backend

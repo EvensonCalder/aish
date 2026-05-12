@@ -580,7 +580,7 @@ pub fn run() -> Result<()> {
     let store = HistoryStore::load(&layout)?;
     let mut backend = PtyBackend::spawn(&config.shell.backend)?;
     let mut state = AppState {
-        current_cwd: initial_current_cwd(),
+        current_cwd: backend.initial_cwd().map(PathBuf::from),
         regular_history_path: Some(layout.regular_history),
         ai_history_path: Some(layout.ai_history),
         notes_path: Some(layout.notes),
@@ -1343,10 +1343,6 @@ fn config_value(value: &str) -> &str {
     } else {
         value
     }
-}
-
-pub fn initial_current_cwd() -> Option<PathBuf> {
-    std::env::current_dir().ok()
 }
 
 fn write_editor_report(state: &AppState, out: &mut impl Write) -> Result<()> {
