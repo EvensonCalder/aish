@@ -11,6 +11,7 @@ use crossterm::terminal::{
 };
 
 use crate::app::{AppState, execute_draft, save_draft_if_configured};
+use crate::completion::render_completion_candidates;
 use crate::editor::resolve_editor_command;
 use crate::pty::PtyBackend;
 use crate::templates::template_placeholder_spans;
@@ -24,6 +25,7 @@ pub enum KeyAction {
     ExternalEditor,
     AdvancedKeyPlaceholder(&'static str),
     Submit,
+    ShowCompletions,
 }
 
 pub struct TerminalGuard;
@@ -106,6 +108,9 @@ fn handle_key(
         }
         KeyAction::AdvancedKeyPlaceholder(name) => {
             writeln!(out, "{name} is not implemented yet")?;
+        }
+        KeyAction::ShowCompletions => {
+            write_completion_candidates(state, out)?;
         }
         KeyAction::Submit => {
             writeln!(out)?;
@@ -350,6 +355,9 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
             KeyAction::Continue
         }
         (_, KeyCode::Tab) => {
+            if !state.draft.is_empty() && state.mode == crate::modes::Mode::Draft {
+                return KeyAction::ShowCompletions;
+            }
             state.handle_empty_tab();
             KeyAction::Continue
         }
@@ -412,6 +420,18 @@ pub fn redraw(state: &AppState, out: &mut impl Write) -> Result<()> {
     write!(out, "{}", state.render_prompt_line())?;
     execute!(out, MoveToColumn(state.terminal_cursor_column()))?;
     out.flush()?;
+    Ok(())
+}
+
+pub fn write_completion_candidates(state: &AppState, out: &mut impl Write) -> Result<()> {
+    let candidates = state.completion_candidates()?;
+    if candidates.is_empty() {
+        writeln!(out, "no completions")?;
+        return Ok(());
+    }
+    for line in render_completion_candidates(&candidates) {
+        writeln!(out, "{line}")?;
+    }
     Ok(())
 }
 
@@ -483,10 +503,45 @@ mod tests {
         let mut state = AppState::default();
         apply_key_to_state(key(KeyCode::Tab), &mut state);
         assert_eq!(state.mode, Mode::History);
+    }
 
+    #[test]
+    fn non_empty_tab_requests_completion_display_without_editing_draft() {
+        let mut state = AppState::default();
         state.draft.insert_str("git");
-        apply_key_to_state(key(KeyCode::Tab), &mut state);
-        assert_eq!(state.mode, Mode::History);
+
+        assert_eq!(
+            apply_key_to_state(key(KeyCode::Tab), &mut state),
+            KeyAction::ShowCompletions
+        );
+
+        assert_eq!(state.mode, Mode::Draft);
+        assert_eq!(state.draft.as_str(), "git");
+    }
+
+    #[test]
+    fn write_completion_candidates_prints_labeled_rows() {
+        let temp = tempfile::tempdir().unwrap();
+        let template_path = temp.path().join("templates/templates.jsonl");
+        crate::templates::append_template(
+            &template_path,
+            &crate::templates::TemplateEntry {
+                name: "git-save".to_string(),
+                body: "git add . && git commit".to_string(),
+            },
+        )
+        .unwrap();
+        let mut state = AppState {
+            template_store_path: Some(template_path),
+            ..AppState::default()
+        };
+        state.draft.insert_str("git");
+        let mut output = Vec::new();
+
+        write_completion_candidates(&state, &mut output).unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("template\tgit-save"));
     }
 
     #[test]

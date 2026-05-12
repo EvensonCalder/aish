@@ -448,7 +448,8 @@ This is a future configurable enhancement. It must not replace the default faith
 - [x] Implement ghost suggestion display-only helper.
 - [x] Implement accept suggestion helper.
 - [x] Add runtime AppState completion candidate helper.
-- [ ] Wire completion rendering and accept key into terminal UI.
+- [x] Wire non-empty Tab to render completion candidates without editing input.
+- [ ] Wire accept key into terminal UI.
 
 ### Acceptance criteria
 
