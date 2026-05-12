@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 126 library unit tests.
+- 127 library unit tests.
 - 18 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
@@ -280,6 +280,7 @@ Implemented:
 - Ordinary and editor draft history preserve backslash continuations as one submitted command string.
 - Editor roundtrip helper prepares a file, runs a fake editor, and reads successful edits back into draft while preserving the original draft on editor failure.
 - `Ctrl-X Ctrl-E` terminal handling resolves the editor, suspends raw mode when needed, runs the roundtrip, restores raw mode when needed, and reports success/failure.
+- `editor.execute_after_save = true` runs a successfully saved editor draft immediately with raw editor-draft semantics.
 - Template commands are recognized as placeholders but do not read or write template storage yet.
 - Encryption and sync commands are recognized as placeholders but do not change files, encryption state, remotes, or run git commands yet.
 - `#context` reports that context collection is currently disabled/not implemented.
@@ -314,6 +315,7 @@ Tests:
 - `terminal::tests::run_external_editor_replaces_draft_after_success`
 - `terminal::tests::run_external_editor_keeps_draft_after_editor_failure`
 - `terminal::tests::run_external_editor_reports_missing_editor`
+- `terminal::tests::run_external_editor_executes_after_save_when_configured`
 - `terminal::tests::editor_draft_ignores_inline_editing_keys`
 - `terminal::tests::ctrl_x_prefix_cancels_on_unknown_chord_without_editing_draft`
 - `app::tests::private_status_prints_mode_and_last_status`

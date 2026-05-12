@@ -101,7 +101,7 @@ fn handle_key(
             writeln!(out, "history search is not implemented yet")?;
         }
         KeyAction::ExternalEditor => {
-            run_external_editor(state, out)?;
+            run_external_editor(state, backend, out, command_timeout)?;
         }
         KeyAction::AdvancedKeyPlaceholder(name) => {
             writeln!(out, "{name} is not implemented yet")?;
@@ -119,7 +119,12 @@ fn handle_key(
     Ok(false)
 }
 
-pub fn run_external_editor(state: &mut AppState, out: &mut impl Write) -> Result<()> {
+pub fn run_external_editor(
+    state: &mut AppState,
+    backend: &mut PtyBackend,
+    out: &mut impl Write,
+    command_timeout: Duration,
+) -> Result<()> {
     let Some(command) = resolve_editor_command(&state.editor_config) else {
         writeln!(out, "editor.resolved=unavailable")?;
         return Ok(());
@@ -143,6 +148,9 @@ pub fn run_external_editor(state: &mut AppState, out: &mut impl Write) -> Result
     let result = result?;
     if result.exit_code == Some(0) {
         writeln!(out, "editor saved draft")?;
+        if state.editor_config.execute_after_save {
+            execute_draft(state, backend, out, command_timeout)?;
+        }
     } else {
         writeln!(
             out,
@@ -520,9 +528,16 @@ mod tests {
             ..AppState::default()
         };
         state.draft.insert_str("old draft");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
         let mut output = Vec::new();
 
-        run_external_editor(&mut state, &mut output).unwrap();
+        run_external_editor(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
 
         assert_eq!(state.draft.as_str(), "echo edited");
         assert_eq!(state.draft.cursor(), "echo edited".len());
@@ -544,9 +559,16 @@ mod tests {
             ..AppState::default()
         };
         state.draft.insert_str("old draft");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
         let mut output = Vec::new();
 
-        run_external_editor(&mut state, &mut output).unwrap();
+        run_external_editor(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
 
         assert_eq!(state.draft.as_str(), "old draft");
         assert_eq!(
@@ -566,12 +588,55 @@ mod tests {
             editor_temp_root: Some(temp.path().join("editor")),
             ..AppState::default()
         };
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
         let mut output = Vec::new();
 
-        let error = run_external_editor(&mut state, &mut output).unwrap_err();
+        let error = run_external_editor(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap_err();
 
         assert!(error.to_string().contains("failed to run editor command"));
         assert!(state.draft.is_empty());
+    }
+
+    #[test]
+    fn run_external_editor_executes_after_save_when_configured() {
+        let temp = tempfile::tempdir().unwrap();
+        let script = temp.path().join("fake-editor.sh");
+        let marker = temp.path().join("auto-ran");
+        std::fs::write(
+            &script,
+            format!("#!/bin/sh\nprintf 'touch {}' > \"$1\"\n", marker.display()),
+        )
+        .unwrap();
+        make_executable(&script);
+        let mut state = AppState {
+            editor_config: EditorConfig {
+                command: vec![script.display().to_string()],
+                execute_after_save: true,
+            },
+            editor_temp_root: Some(temp.path().join("editor")),
+            ..AppState::default()
+        };
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        run_external_editor(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        assert!(marker.exists());
+        assert_eq!(state.last_status, Some(0));
+        assert!(state.draft.is_empty());
+        assert_eq!(String::from_utf8(output).unwrap(), "editor saved draft\n");
     }
 
     #[test]

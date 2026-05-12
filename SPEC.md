@@ -385,7 +385,7 @@ Editor drafts are opaque in the main prompt. Aish should show a summary such as 
 
 Editor content is raw shell input. Aish does not parse line-leading `#` inside it, does not escape it as `##`, and does not rewrite multi-line content or backslash continuations. The backend shell interprets the content exactly as submitted.
 
-`execute_after_save = false` means editor exit only writes back an editor draft. It does not execute. If `execute_after_save = true` is implemented, it must only execute after a successful editor exit status and must preserve the same raw editor-draft semantics.
+`execute_after_save = false` means editor exit only writes back an editor draft. It does not execute. If `execute_after_save = true`, Aish executes only after a successful editor exit status and preserves the same raw editor-draft semantics.
 
 ### 6.3 Multi-line paste
 
