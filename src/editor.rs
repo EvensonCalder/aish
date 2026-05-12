@@ -1,11 +1,21 @@
 use std::env;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::process;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::config::EditorConfig;
+use anyhow::{Context, Result, bail};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditorCommand {
     pub argv: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreparedEditorSession {
+    pub path: PathBuf,
 }
 
 pub fn resolve_editor_command(config: &EditorConfig) -> Option<EditorCommand> {
@@ -29,6 +39,49 @@ pub fn resolve_editor_command(config: &EditorConfig) -> Option<EditorCommand> {
         .map(|name| EditorCommand {
             argv: vec![name.to_string()],
         })
+}
+
+pub fn prepare_editor_file(root: &Path, initial_text: &str) -> Result<PreparedEditorSession> {
+    fs::create_dir_all(root)
+        .with_context(|| format!("failed to create editor temp directory {}", root.display()))?;
+
+    for attempt in 0..100_u32 {
+        let path = root.join(format!("aish-edit-{}-{attempt}.sh", unique_editor_id()));
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        match options.open(&path) {
+            Ok(mut file) => {
+                file.write_all(initial_text.as_bytes()).with_context(|| {
+                    format!("failed to write editor temp file {}", path.display())
+                })?;
+                return Ok(PreparedEditorSession { path });
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!("failed to create editor temp file {}", path.display())
+                });
+            }
+        }
+    }
+
+    bail!(
+        "failed to allocate unique editor temp file in {}",
+        root.display()
+    )
+}
+
+fn unique_editor_id() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    format!("{}-{nanos}", process::id())
 }
 
 fn split_editor_command(value: &str) -> Option<Vec<String>> {
@@ -121,6 +174,25 @@ mod tests {
         restore_env("EDITOR", old_editor);
         restore_env("PATH", old_path);
         assert_eq!(command.argv, ["vi"]);
+    }
+
+    #[test]
+    fn prepare_editor_file_writes_initial_text_to_secure_temp_file() {
+        let temp = tempfile::tempdir().unwrap();
+
+        let session = prepare_editor_file(temp.path(), "git status\n# raw editor content").unwrap();
+
+        assert!(session.path.starts_with(temp.path()));
+        assert_eq!(
+            fs::read_to_string(&session.path).unwrap(),
+            "git status\n# raw editor content"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&session.path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
     }
 
     fn restore_env(name: &str, value: Option<std::ffi::OsString>) {

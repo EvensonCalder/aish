@@ -9,7 +9,7 @@ use crate::commands::{
     IMPLEMENTED_PRIVATE_COMMANDS, ParsedLine, parse_line, suggest_private_command,
 };
 use crate::config::{self, EditorConfig, PromptConfig};
-use crate::editor::resolve_editor_command;
+use crate::editor::{PreparedEditorSession, prepare_editor_file, resolve_editor_command};
 use crate::history::{
     AiCommandIndex, AiItem, AiItemKind, AiSession, DraftEntry, HistoryEntry, HistorySource,
     HistoryStore, NoteEntry, ai_command_indices, append_jsonl, load_jsonl, trim_combined_history,
@@ -214,6 +214,15 @@ impl AppState {
             Mode::Ai => self.copy_selected_ai_to_draft(),
             _ => false,
         }
+    }
+
+    pub fn prepare_editor_session(
+        &mut self,
+        temp_root: &std::path::Path,
+    ) -> Result<PreparedEditorSession> {
+        self.copy_read_only_selection_to_draft();
+        self.mode = Mode::Draft;
+        prepare_editor_file(temp_root, self.draft.as_str())
     }
 
     fn selected_ai_item(&self) -> Option<(&AiSession, &AiItem)> {
@@ -1258,6 +1267,73 @@ mod tests {
         assert_eq!(state.mode, Mode::Draft);
         assert_eq!(state.draft.as_str(), "git status");
         assert_eq!(state.draft.cursor(), "git status".len());
+    }
+
+    #[test]
+    fn prepare_editor_session_writes_draft_text() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut state = AppState::default();
+        state.draft.insert_str("git status");
+
+        let session = state.prepare_editor_session(temp.path()).unwrap();
+
+        assert_eq!(state.mode, Mode::Draft);
+        assert_eq!(state.draft.as_str(), "git status");
+        assert_eq!(std::fs::read_to_string(session.path).unwrap(), "git status");
+    }
+
+    #[test]
+    fn prepare_editor_session_copies_history_selection_to_draft_and_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut state = AppState {
+            mode: Mode::History,
+            regular_history: vec![HistoryEntry {
+                t: 1,
+                command: "git status".to_string(),
+                exit_code: Some(0),
+                source: HistorySource::User,
+            }],
+            selected_history_index: Some(0),
+            ..AppState::default()
+        };
+
+        let session = state.prepare_editor_session(temp.path()).unwrap();
+
+        assert_eq!(state.mode, Mode::Draft);
+        assert_eq!(state.draft.as_str(), "git status");
+        assert_eq!(std::fs::read_to_string(session.path).unwrap(), "git status");
+    }
+
+    #[test]
+    fn prepare_editor_session_copies_ai_selection_to_draft_and_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut state = AppState {
+            mode: Mode::Ai,
+            ai_sessions: vec![AiSession {
+                id: "a_1".to_string(),
+                t: 1,
+                prompt: "status".to_string(),
+                ctx: false,
+                model: "test".to_string(),
+                items: vec![AiItem {
+                    kind: AiItemKind::Command,
+                    text: "git status".to_string(),
+                    name: None,
+                }],
+            }],
+            ai_command_indices: vec![AiCommandIndex {
+                session_index: 0,
+                item_index: 0,
+            }],
+            selected_ai_index: Some(0),
+            ..AppState::default()
+        };
+
+        let session = state.prepare_editor_session(temp.path()).unwrap();
+
+        assert_eq!(state.mode, Mode::Draft);
+        assert_eq!(state.draft.as_str(), "git status");
+        assert_eq!(std::fs::read_to_string(session.path).unwrap(), "git status");
     }
 
     #[test]
