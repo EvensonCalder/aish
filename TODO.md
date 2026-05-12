@@ -440,9 +440,9 @@ This is a future configurable enhancement. It must not replace the default faith
   - [x] paths
   - [x] history arguments
   - [x] template placeholders
-- [ ] Implement ignore-space matching.
+- [x] Implement ignore-space matching helper.
 - [x] Preserve newest-to-oldest history order in first-token helper.
-- [ ] Implement `completion.max_results`.
+- [x] Implement `completion.max_results` helper/config default.
 - [ ] Render completion candidates below input.
 - [ ] Implement ghost suggestion display-only behavior.
 - [ ] Implement accept suggestion key.

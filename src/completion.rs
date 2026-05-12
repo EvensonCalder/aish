@@ -5,6 +5,21 @@ use std::path::{Path, PathBuf};
 use crate::history::HistoryEntry;
 use crate::templates::TemplateEntry;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CompletionOptions {
+    pub max_results: usize,
+    pub ignore_spaces: bool,
+}
+
+impl Default for CompletionOptions {
+    fn default() -> Self {
+        Self {
+            max_results: 5,
+            ignore_spaces: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TokenContext {
     pub start: usize,
@@ -140,10 +155,31 @@ pub fn complete_first_token(
     history_newest_first: &[HistoryEntry],
     path_dirs: &[PathBuf],
 ) -> Vec<CompletionCandidate> {
+    complete_first_token_with_options(
+        prefix,
+        templates,
+        history_newest_first,
+        path_dirs,
+        CompletionOptions {
+            max_results: usize::MAX,
+            ignore_spaces: false,
+        },
+    )
+}
+
+pub fn complete_first_token_with_options(
+    prefix: &str,
+    templates: &[TemplateEntry],
+    history_newest_first: &[HistoryEntry],
+    path_dirs: &[PathBuf],
+    options: CompletionOptions,
+) -> Vec<CompletionCandidate> {
     let mut candidates = Vec::new();
     let mut seen_templates = HashSet::new();
     for template in templates {
-        if template.name.starts_with(prefix) && seen_templates.insert(template.name.as_str()) {
+        if matches_completion_prefix(&template.name, prefix, options.ignore_spaces)
+            && seen_templates.insert(template.name.as_str())
+        {
             candidates.push(CompletionCandidate {
                 display: template.name.clone(),
                 replacement: template.body.clone(),
@@ -155,7 +191,9 @@ pub fn complete_first_token(
 
     let mut seen_history = HashSet::new();
     for entry in history_newest_first {
-        if entry.command.starts_with(prefix) && seen_history.insert(entry.command.as_str()) {
+        if matches_completion_prefix(&entry.command, prefix, options.ignore_spaces)
+            && seen_history.insert(entry.command.as_str())
+        {
             candidates.push(CompletionCandidate {
                 display: entry.command.clone(),
                 replacement: entry.command.clone(),
@@ -167,7 +205,7 @@ pub fn complete_first_token(
 
     let mut executable_candidates = complete_path_executables(prefix, path_dirs);
     candidates.append(&mut executable_candidates);
-    candidates
+    limit_candidates(candidates, options.max_results)
 }
 
 pub fn complete_non_first_token(
@@ -176,24 +214,54 @@ pub fn complete_non_first_token(
     history_newest_first: &[HistoryEntry],
     templates: &[TemplateEntry],
 ) -> Vec<CompletionCandidate> {
+    complete_non_first_token_with_options(
+        token,
+        cwd,
+        history_newest_first,
+        templates,
+        CompletionOptions {
+            max_results: usize::MAX,
+            ignore_spaces: false,
+        },
+    )
+}
+
+pub fn complete_non_first_token_with_options(
+    token: &str,
+    cwd: &Path,
+    history_newest_first: &[HistoryEntry],
+    templates: &[TemplateEntry],
+    options: CompletionOptions,
+) -> Vec<CompletionCandidate> {
     let mut candidates = Vec::new();
     if is_path_like_token(token) {
         candidates.extend(complete_path(token, cwd));
     }
-    candidates.extend(complete_history_arguments(token, history_newest_first));
-    candidates.extend(complete_template_placeholders(token, templates));
-    candidates
+    candidates.extend(complete_history_arguments(
+        token,
+        history_newest_first,
+        options.ignore_spaces,
+    ));
+    candidates.extend(complete_template_placeholders(
+        token,
+        templates,
+        options.ignore_spaces,
+    ));
+    limit_candidates(candidates, options.max_results)
 }
 
 fn complete_history_arguments(
     prefix: &str,
     history_newest_first: &[HistoryEntry],
+    ignore_spaces: bool,
 ) -> Vec<CompletionCandidate> {
     let mut seen = HashSet::new();
     let mut candidates = Vec::new();
     for entry in history_newest_first {
         for argument in command_arguments(&entry.command) {
-            if argument.starts_with(prefix) && seen.insert(argument.to_string()) {
+            if matches_completion_prefix(argument, prefix, ignore_spaces)
+                && seen.insert(argument.to_string())
+            {
                 candidates.push(CompletionCandidate {
                     display: argument.to_string(),
                     replacement: argument.to_string(),
@@ -209,12 +277,15 @@ fn complete_history_arguments(
 fn complete_template_placeholders(
     prefix: &str,
     templates: &[TemplateEntry],
+    ignore_spaces: bool,
 ) -> Vec<CompletionCandidate> {
     let mut seen = HashSet::new();
     let mut candidates = Vec::new();
     for template in templates {
         for placeholder in crate::templates::template_placeholders(&template.body) {
-            if placeholder.starts_with(prefix) && seen.insert(placeholder.clone()) {
+            if matches_completion_prefix(&placeholder, prefix, ignore_spaces)
+                && seen.insert(placeholder.clone())
+            {
                 candidates.push(CompletionCandidate {
                     display: placeholder.clone(),
                     replacement: placeholder,
@@ -225,6 +296,40 @@ fn complete_template_placeholders(
         }
     }
     candidates
+}
+
+pub fn matches_completion_prefix(candidate: &str, prefix: &str, ignore_spaces: bool) -> bool {
+    if !ignore_spaces {
+        return candidate.starts_with(prefix);
+    }
+
+    let compact_prefix = remove_spaces(prefix);
+    if remove_spaces(candidate).starts_with(&compact_prefix) {
+        return true;
+    }
+
+    let mut candidate_words = candidate.split_whitespace();
+    for prefix_part in prefix.split_whitespace() {
+        let Some(candidate_word) = candidate_words.next() else {
+            return false;
+        };
+        if !candidate_word.starts_with(prefix_part) {
+            return false;
+        }
+    }
+    !compact_prefix.is_empty() || prefix.is_empty()
+}
+
+pub fn limit_candidates(
+    mut candidates: Vec<CompletionCandidate>,
+    max_results: usize,
+) -> Vec<CompletionCandidate> {
+    candidates.truncate(max_results);
+    candidates
+}
+
+fn remove_spaces(value: &str) -> String {
+    value.chars().filter(|ch| !ch.is_whitespace()).collect()
 }
 
 fn command_arguments(command: &str) -> Vec<&str> {
@@ -614,6 +719,55 @@ mod tests {
     }
 
     #[test]
+    fn complete_first_token_can_match_while_ignoring_spaces_and_limit_results() {
+        let templates = vec![TemplateEntry {
+            name: "git-save".to_string(),
+            body: "git add . && git commit".to_string(),
+        }];
+        let history = vec![
+            HistoryEntry {
+                t: 2,
+                command: "git status".to_string(),
+                exit_code: Some(0),
+                source: crate::history::HistorySource::User,
+            },
+            HistoryEntry {
+                t: 1,
+                command: "git stash".to_string(),
+                exit_code: Some(0),
+                source: crate::history::HistorySource::User,
+            },
+        ];
+
+        assert_eq!(
+            complete_first_token_with_options(
+                "g s",
+                &templates,
+                &history,
+                &[],
+                CompletionOptions {
+                    max_results: 2,
+                    ignore_spaces: true,
+                },
+            ),
+            [
+                CompletionCandidate {
+                    display: "git status".to_string(),
+                    replacement: "git status".to_string(),
+                    is_dir: false,
+                    source: CompletionSource::History,
+                },
+                CompletionCandidate {
+                    display: "git stash".to_string(),
+                    replacement: "git stash".to_string(),
+                    is_dir: false,
+                    source: CompletionSource::History,
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn complete_non_first_token_orders_path_candidates_before_history_arguments() {
         let temp = tempfile::tempdir().unwrap();
         std::fs::create_dir(temp.path().join("src")).unwrap();
@@ -683,6 +837,45 @@ mod tests {
                 }
             ]
         );
+    }
+
+    #[test]
+    fn complete_non_first_token_applies_options_to_history_and_placeholders() {
+        let history = vec![HistoryEntry {
+            t: 1,
+            command: "git commit featurebranch".to_string(),
+            exit_code: Some(0),
+            source: crate::history::HistorySource::User,
+        }];
+        let templates = vec![TemplateEntry {
+            name: "branch".to_string(),
+            body: "git checkout {feature_branch}".to_string(),
+        }];
+
+        assert_eq!(
+            complete_non_first_token_with_options(
+                "feature b",
+                Path::new("/"),
+                &history,
+                &templates,
+                CompletionOptions {
+                    max_results: 1,
+                    ignore_spaces: true,
+                },
+            ),
+            [CompletionCandidate {
+                display: "featurebranch".to_string(),
+                replacement: "featurebranch".to_string(),
+                is_dir: false,
+                source: CompletionSource::History,
+            }]
+        );
+    }
+
+    #[test]
+    fn matches_completion_prefix_can_ignore_spaces() {
+        assert!(matches_completion_prefix("git status", "g s", true));
+        assert!(!matches_completion_prefix("git status", "g s", false));
     }
 
     #[test]

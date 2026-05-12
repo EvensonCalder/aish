@@ -13,6 +13,7 @@ pub struct Config {
     pub draft: DraftConfig,
     pub editor: EditorConfig,
     pub paste: PasteConfig,
+    pub completion: CompletionConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -56,6 +57,14 @@ pub struct PasteConfig {
     pub confirm_execute: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct CompletionConfig {
+    pub max_results: usize,
+    pub ignore_spaces: bool,
+    pub template_first: bool,
+}
+
 impl Default for ShellConfig {
     fn default() -> Self {
         Self {
@@ -96,6 +105,16 @@ impl Default for PasteConfig {
         Self {
             multiline: "editor".to_string(),
             confirm_execute: true,
+        }
+    }
+}
+
+impl Default for CompletionConfig {
+    fn default() -> Self {
+        Self {
+            max_results: 5,
+            ignore_spaces: true,
+            template_first: true,
         }
     }
 }
@@ -239,6 +258,9 @@ pub fn normalize_config(config: &mut Config) {
     ) {
         config.paste.multiline = PasteConfig::default().multiline;
     }
+    if config.completion.max_results == 0 {
+        config.completion.max_results = CompletionConfig::default().max_results;
+    }
 }
 
 #[cfg(test)]
@@ -258,6 +280,9 @@ mod tests {
         assert!(!config.editor.execute_after_save);
         assert_eq!(config.paste.multiline, "editor");
         assert!(config.paste.confirm_execute);
+        assert_eq!(config.completion.max_results, 5);
+        assert!(config.completion.ignore_spaces);
+        assert!(config.completion.template_first);
         assert!(config.storage.home.ends_with(".aish"));
     }
 
@@ -283,6 +308,11 @@ mod tests {
             paste: PasteConfig {
                 multiline: "unknown".to_string(),
                 confirm_execute: true,
+            },
+            completion: CompletionConfig {
+                max_results: 0,
+                ignore_spaces: true,
+                template_first: true,
             },
         };
 
