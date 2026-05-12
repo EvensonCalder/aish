@@ -392,6 +392,7 @@ mod tests {
         assert!(layout.templates.is_dir());
         assert!(layout.secrets.is_dir());
         assert!(layout.logs.is_dir());
+        assert_eq!(layout.events, root.join("logs/events.jsonl"));
         assert!(layout.runtime_cache.is_dir());
         assert_eq!(config.storage.home, layout.root);
     }

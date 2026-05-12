@@ -562,18 +562,18 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 
 ### Tasks
 
-- [ ] Implement `logs/events.jsonl`.
-- [ ] Add log writer.
-- [ ] Add log trimming to 1000 events.
-- [ ] Add `#log <count>`.
+- [x] Implement `logs/events.jsonl`.
+- [x] Add log writer.
+- [x] Add log trimming to 1000 events.
+- [x] Add `#log <count>`.
 - [ ] Log:
-  - [ ] AI request success/failure
-  - [ ] context confirmation/skip
+  - [x] AI request success/failure
+  - [x] context confirmation/skip
   - [ ] encryption changes
   - [ ] sync changes
   - [ ] sync failures
   - [ ] config errors
-- [ ] Ensure secrets are redacted.
+- [x] Ensure secrets are redacted.
 
 ### Acceptance criteria
 

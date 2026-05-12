@@ -29,6 +29,7 @@ use crate::history::{
 };
 use crate::input::InputBuffer;
 use crate::keybindings::default_keybindings;
+use crate::log::{DEFAULT_MAX_EVENTS, EventLevel, append_event, format_recent_events, load_events};
 use crate::modes::Mode;
 use crate::picker::{
     PickerAction, ai_history_picker_candidates, apply_picker_result, apply_raw_picker_result,
@@ -95,6 +96,7 @@ pub struct AppState {
     pub ai_history_path: Option<PathBuf>,
     pub notes_path: Option<PathBuf>,
     pub draft_history_path: Option<PathBuf>,
+    pub events_path: Option<PathBuf>,
     pub template_store_path: Option<PathBuf>,
     pub config_path: Option<PathBuf>,
     pub draft_persist: bool,
@@ -130,6 +132,7 @@ impl Default for AppState {
             ai_history_path: None,
             notes_path: None,
             draft_history_path: None,
+            events_path: None,
             template_store_path: None,
             config_path: None,
             draft_persist: true,
@@ -563,6 +566,13 @@ impl AppState {
         }
         self.output_ring.push_back(entry);
     }
+
+    fn append_event(&self, level: EventLevel, msg: &str) -> Result<()> {
+        if let Some(path) = &self.events_path {
+            append_event(path, (self.clock)(), level, msg, DEFAULT_MAX_EVENTS)?;
+        }
+        Ok(())
+    }
 }
 
 pub fn run() -> Result<()> {
@@ -574,6 +584,7 @@ pub fn run() -> Result<()> {
         ai_history_path: Some(layout.ai_history),
         notes_path: Some(layout.notes),
         draft_history_path: Some(layout.draft_history),
+        events_path: Some(layout.events),
         template_store_path: Some(layout.template_store),
         config_path: Some(layout.config),
         draft_persist: config.draft.persist,
@@ -767,7 +778,7 @@ pub fn execute_draft(
                         return Ok(());
                     }
                     "log" => {
-                        writeln!(out, "event log is not implemented yet")?;
+                        show_event_log(state, out, args)?;
                         state.draft.clear();
                         state.mode = Mode::Draft;
                         return Ok(());
@@ -1098,26 +1109,35 @@ pub fn answer_context_confirmation(
     state.mode = Mode::Draft;
     if !accepted {
         writeln!(out, "context command skipped: {}", pending.command)?;
+        state.append_event(EventLevel::Info, "context command skipped")?;
         return Ok(());
     }
+    state.append_event(EventLevel::Info, "context command confirmed")?;
     submit_confirmed_ai_prompt_with_context(state, &pending.prompt, &pending.command, out, timeout)
 }
 
 fn submit_ai_prompt(state: &mut AppState, prompt: &str, out: &mut impl Write) -> Result<()> {
     match request_ai_items(&state.ai_config, prompt) {
         Ok(items) => {
+            let item_count = items.len();
             let model = state.ai_config.model.clone();
             if state.store_ai_session_from_items(prompt, &model, items)? {
+                state.append_event(
+                    EventLevel::Info,
+                    &format!("AI generated {item_count} item(s)"),
+                )?;
                 writeln!(
                     out,
                     "AI items generated: {}",
                     state.ai_command_indices.len()
                 )?;
             } else {
+                state.append_event(EventLevel::Warn, "AI response contained no command items")?;
                 writeln!(out, "AI response contained no command items")?;
             }
         }
         Err(error) => {
+            state.append_event(EventLevel::Error, "AI request failed")?;
             writeln!(out, "AI request failed: {error}")?;
             state.mode = Mode::Draft;
         }
@@ -1137,6 +1157,10 @@ fn submit_ai_prompt_with_context(
             out,
             "context collection is disabled; context command not executed: {command}"
         )?;
+        state.append_event(
+            EventLevel::Warn,
+            "context command skipped because context is disabled",
+        )?;
         state.mode = Mode::Draft;
         return Ok(());
     }
@@ -1150,6 +1174,10 @@ fn submit_ai_prompt_with_context(
             command: command.to_string(),
             dangerous: true,
         });
+        state.append_event(
+            EventLevel::Warn,
+            "dangerous context command requires confirmation",
+        )?;
         state.mode = Mode::Draft;
         return Ok(());
     }
@@ -1165,6 +1193,7 @@ fn submit_ai_prompt_with_context(
             command: command.to_string(),
             dangerous: false,
         });
+        state.append_event(EventLevel::Warn, "context command requires confirmation")?;
         state.mode = Mode::Draft;
         return Ok(());
     }
@@ -1185,7 +1214,9 @@ fn submit_confirmed_ai_prompt_with_context(
         state.context_config.max_bytes,
         timeout,
     )?;
+    state.append_event(EventLevel::Info, "context command captured output")?;
     if result.truncated {
+        state.append_event(EventLevel::Warn, "context output truncated")?;
         writeln!(
             out,
             "context output truncated to {} bytes",
@@ -1194,6 +1225,27 @@ fn submit_confirmed_ai_prompt_with_context(
     }
     let contextual_prompt = build_contextual_ai_prompt(prompt, command, &result);
     submit_ai_prompt(state, &contextual_prompt, out)
+}
+
+fn show_event_log(state: &AppState, out: &mut impl Write, args: &str) -> Result<()> {
+    let count = args.parse::<usize>();
+    match (count, &state.events_path) {
+        (Ok(count), Some(path)) => {
+            let loaded = load_events(path)?;
+            for line in format_recent_events(&loaded.items, count) {
+                writeln!(out, "{line}")?;
+            }
+            if loaded.items.is_empty() {
+                writeln!(out, "no events logged")?;
+            }
+            if !loaded.errors.is_empty() {
+                writeln!(out, "skipped {} bad event line(s)", loaded.errors.len())?;
+            }
+        }
+        (Ok(_), None) => writeln!(out, "event log storage is not configured")?,
+        (Err(_), _) => writeln!(out, "usage: #log <count>")?,
+    }
+    Ok(())
 }
 
 fn write_doctor_report(state: &AppState, out: &mut impl Write) -> Result<()> {
@@ -2501,7 +2553,12 @@ mod tests {
 
     #[test]
     fn ai_prompt_with_context_waits_for_confirmation_by_default() {
-        let mut state = AppState::default();
+        let temp = tempfile::tempdir().unwrap();
+        let events_path = temp.path().join("logs/events.jsonl");
+        let mut state = AppState {
+            events_path: Some(events_path.clone()),
+            ..AppState::default()
+        };
         state.draft.insert_str("# explain < printf context");
         let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
         let mut output = Vec::new();
@@ -2528,6 +2585,8 @@ mod tests {
         );
         assert!(state.draft.is_empty());
         assert!(state.ai_sessions.is_empty());
+        let events = load_events(&events_path).unwrap();
+        assert_eq!(events.items[0].msg, "context command requires confirmation");
     }
 
     #[test]
@@ -2595,7 +2654,10 @@ mod tests {
 
     #[test]
     fn answer_context_confirmation_can_skip_pending_command() {
+        let temp = tempfile::tempdir().unwrap();
+        let events_path = temp.path().join("logs/events.jsonl");
         let mut state = AppState {
+            events_path: Some(events_path.clone()),
             pending_context: Some(PendingContextPrompt {
                 prompt: "explain".to_string(),
                 command: "printf context".to_string(),
@@ -2612,6 +2674,63 @@ mod tests {
         assert!(output.contains("context command skipped: printf context"));
         assert_eq!(state.pending_context, None);
         assert!(state.ai_sessions.is_empty());
+        let events = load_events(&events_path).unwrap();
+        assert_eq!(events.items[0].msg, "context command skipped");
+    }
+
+    #[test]
+    fn private_log_prints_recent_events() {
+        let temp = tempfile::tempdir().unwrap();
+        let events_path = temp.path().join("logs/events.jsonl");
+        append_event(&events_path, 1, EventLevel::Info, "one", DEFAULT_MAX_EVENTS).unwrap();
+        append_event(&events_path, 2, EventLevel::Warn, "two", DEFAULT_MAX_EVENTS).unwrap();
+        let mut state = AppState {
+            events_path: Some(events_path),
+            ..AppState::default()
+        };
+        state.draft.insert_str("#log 1");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(!output.contains("one"));
+        assert!(output.contains("2\tWarn\ttwo"));
+    }
+
+    #[test]
+    fn private_log_reports_usage_or_missing_storage() {
+        for (line, expected) in [
+            ("#log", "usage: #log <count>"),
+            ("#log nope", "usage: #log <count>"),
+            ("#log 1", "event log storage is not configured"),
+        ] {
+            let mut state = AppState::default();
+            state.draft.insert_str(line);
+            let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+            let mut output = Vec::new();
+
+            execute_draft(
+                &mut state,
+                &mut backend,
+                &mut output,
+                Duration::from_secs(5),
+            )
+            .unwrap();
+
+            let output = String::from_utf8(output).unwrap();
+            assert!(
+                output.contains(expected),
+                "missing {expected:?} in {output:?}"
+            );
+        }
     }
 
     #[test]
@@ -2731,7 +2850,6 @@ mod tests {
     fn subsystem_commands_report_placeholders() {
         for (line, expected) in [
             ("#completion", "completion engine is not implemented yet"),
-            ("#log", "event log is not implemented yet"),
             ("#editor", "editor temp directory is not configured"),
         ] {
             let mut state = AppState::default();
