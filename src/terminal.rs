@@ -196,6 +196,11 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
             state.draft.delete();
             KeyAction::Continue
         }
+        (_, KeyCode::Esc) => {
+            state.draft.clear();
+            state.mode = crate::modes::Mode::Draft;
+            KeyAction::Continue
+        }
         (_, KeyCode::Tab) => {
             state.handle_empty_tab();
             KeyAction::Continue
@@ -304,6 +309,31 @@ mod tests {
             apply_key_to_state(ctrl('d'), &mut state),
             KeyAction::Continue
         );
+    }
+
+    #[test]
+    fn esc_clears_draft_and_returns_to_draft_mode() {
+        let mut state = AppState {
+            mode: Mode::History,
+            regular_history: vec![crate::history::HistoryEntry {
+                t: 1,
+                command: "git status".to_string(),
+                exit_code: Some(0),
+                source: crate::history::HistorySource::User,
+            }],
+            selected_history_index: Some(0),
+            ..AppState::default()
+        };
+        state.draft.insert_str("partial");
+
+        assert_eq!(
+            apply_key_to_state(key(KeyCode::Esc), &mut state),
+            KeyAction::Continue
+        );
+
+        assert_eq!(state.mode, Mode::Draft);
+        assert!(state.draft.is_empty());
+        assert_eq!(state.selected_history_index, Some(0));
     }
 
     #[test]

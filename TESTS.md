@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 100 library unit tests.
+- 101 library unit tests.
 - 14 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
@@ -261,6 +261,7 @@ Implemented:
 - Minimal private commands: `#help`, `#status`, `#config`, `#doctor`, `#model`, `#base-url`, `#env-key`, `#key set`, `#key clear`, `#context`, `#completion`, `#log`, `#editor`, `#mt`, `#template list`, `#template rm`, `#encrypt`, `#set-remote`, `#push`, `#sync`, `#exit`, `#quit`, `#history <count>`.
 - `#help` prints private commands and the default keybinding map.
 - Help output distinguishes implemented keybindings from reserved keybindings.
+- `Esc` clears the draft and returns to draft mode.
 - `#status` reports the default keybinding count.
 - AI configuration commands are recognized as placeholders but do not persist config or read secrets yet.
 - Key commands are recognized as placeholders but do not store, read, or remove secrets yet.
@@ -288,6 +289,7 @@ Tests:
 - `app::tests::private_help_prints_available_commands`
 - `keybindings::tests::default_keybindings_include_common_and_advanced_bindings`
 - `keybindings::tests::default_keybindings_distinguish_implemented_and_reserved_bindings`
+- `terminal::tests::esc_clears_draft_and_returns_to_draft_mode`
 - `app::tests::private_status_prints_mode_and_last_status`
 - `app::tests::private_config_prints_read_only_runtime_config`
 - `app::tests::private_doctor_prints_read_only_diagnostics`

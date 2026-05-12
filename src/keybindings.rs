@@ -78,8 +78,8 @@ pub const DEFAULT_KEYBINDINGS: &[KeyBinding] = &[
     },
     KeyBinding {
         key: "Esc",
-        action: "cancel temporary mode reserved",
-        implemented: false,
+        action: "clear draft and return to draft mode",
+        implemented: true,
     },
     KeyBinding {
         key: "Ctrl-X Ctrl-E",
@@ -156,6 +156,13 @@ mod tests {
             bindings
                 .iter()
                 .find(|binding| binding.key == "Ctrl-C")
+                .unwrap()
+                .implemented
+        );
+        assert!(
+            bindings
+                .iter()
+                .find(|binding| binding.key == "Esc")
                 .unwrap()
                 .implemented
         );
