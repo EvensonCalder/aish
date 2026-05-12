@@ -375,7 +375,7 @@ This is a future configurable enhancement. It must not replace the default faith
 
 - [x] Add pure best-effort shell logical command splitter helper.
 - [x] Preserve backslash continuations.
-- [ ] Preserve quoted multi-line strings.
+- [x] Preserve quoted multi-line strings.
 - [ ] Preserve heredoc blocks.
 - [ ] Ignore blank lines.
 - [x] Ignore standalone comment lines in splitter output.
@@ -383,7 +383,7 @@ This is a future configurable enhancement. It must not replace the default faith
 - [ ] Add tests for common cases:
   - [x] two simple lines
   - [x] backslash continuation
-  - [ ] quoted newline
+  - [x] quoted newline
   - [ ] heredoc
   - [x] comments
   - [ ] mixed commands

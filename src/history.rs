@@ -175,6 +175,7 @@ pub fn ai_command_indices(sessions: &[AiSession]) -> Vec<AiCommandIndex> {
 pub fn split_logical_commands(input: &str) -> Vec<String> {
     let mut commands = Vec::new();
     let mut current = String::new();
+    let mut quote_state = ShellQuoteState::default();
 
     for line in input.lines() {
         let trimmed = line.trim();
@@ -185,12 +186,14 @@ pub fn split_logical_commands(input: &str) -> Vec<String> {
             current.push('\n');
         }
         current.push_str(line);
-        if !line_ends_with_continuation(line) {
+        quote_state.update_line(line);
+        if !line_ends_with_continuation(line) && !quote_state.is_open() {
             let command = current.trim();
             if !command.is_empty() {
                 commands.push(command.to_string());
             }
             current.clear();
+            quote_state = ShellQuoteState::default();
         }
     }
 
@@ -204,6 +207,37 @@ pub fn split_logical_commands(input: &str) -> Vec<String> {
 
 fn line_ends_with_continuation(line: &str) -> bool {
     line.trim_end().ends_with('\\')
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct ShellQuoteState {
+    single: bool,
+    double: bool,
+}
+
+impl ShellQuoteState {
+    fn is_open(self) -> bool {
+        self.single || self.double
+    }
+
+    fn update_line(&mut self, line: &str) {
+        let mut escaped = false;
+        for ch in line.chars() {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            if ch == '\\' && !self.single {
+                escaped = true;
+                continue;
+            }
+            match ch {
+                '\'' if !self.double => self.single = !self.single,
+                '"' if !self.single => self.double = !self.double,
+                _ => {}
+            }
+        }
+    }
 }
 
 pub fn append_jsonl<T: Serialize>(path: &Path, item: &T) -> Result<()> {
@@ -830,6 +864,27 @@ mod tests {
         let commands = split_logical_commands("echo '# not a comment'\necho value # inline");
 
         assert_eq!(commands, ["echo '# not a comment'", "echo value # inline"]);
+    }
+
+    #[test]
+    fn split_logical_commands_preserves_single_quoted_newlines() {
+        let commands = split_logical_commands("printf 'one\ntwo'\npwd");
+
+        assert_eq!(commands, ["printf 'one\ntwo'", "pwd"]);
+    }
+
+    #[test]
+    fn split_logical_commands_preserves_double_quoted_newlines() {
+        let commands = split_logical_commands("printf \"one\ntwo\"\npwd");
+
+        assert_eq!(commands, ["printf \"one\ntwo\"", "pwd"]);
+    }
+
+    #[test]
+    fn split_logical_commands_ignores_escaped_quotes() {
+        let commands = split_logical_commands("echo \"one \\\"two\\\"\"\npwd");
+
+        assert_eq!(commands, ["echo \"one \\\"two\\\"\"", "pwd"]);
     }
 
     #[test]
