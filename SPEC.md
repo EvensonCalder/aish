@@ -372,7 +372,7 @@ Default behavior:
 1. Open editor with current draft buffer.
 2. User edits and saves.
 3. Aish reads saved content.
-4. Content replaces current draft buffer.
+4. Content becomes an editor draft.
 5. User presses `Enter` to execute.
 
 If invoked from history or AI mode:
@@ -381,7 +381,11 @@ If invoked from history or AI mode:
 2. Open editor with copied content.
 3. Save back to draft.
 
-Editor content is raw shell input. Aish does not parse line-leading `#` inside it.
+Editor drafts are opaque in the main prompt. Aish should show a summary such as line count and byte count instead of rendering the full content inline. `Ctrl-X Ctrl-E` edits the editor draft again. `Enter` executes it.
+
+Editor content is raw shell input. Aish does not parse line-leading `#` inside it, does not escape it as `##`, and does not rewrite multi-line content or backslash continuations. The backend shell interprets the content exactly as submitted.
+
+`execute_after_save = false` means editor exit only writes back an editor draft. It does not execute. If `execute_after_save = true` is implemented, it must only execute after a successful editor exit status and must preserve the same raw editor-draft semantics.
 
 ### 6.3 Multi-line paste
 
@@ -426,11 +430,11 @@ confirm_execute = true
 
 ### 6.4 History semantics for multi-line raw submissions
 
-History should represent executed command semantics, not editor-buffer semantics.
+History stores exactly what Aish submits to the backend shell.
 
-When raw multi-line content is executed, Aish should append history entries as separate logical commands when possible.
+For v0.1, a multi-line editor draft is stored as one complete history command string. Backslash continuations, comments, heredocs, and quoted newlines remain part of that single history item.
 
-Recommended splitter behavior:
+Future shell-aware splitting can be added as a configurable enhancement, but it must not be the default unless it can preserve shell semantics reliably. A splitter would need to handle:
 
 - Split on newlines that end a complete shell command.
 - Preserve line continuations ending with `\` as part of one logical command.
@@ -439,7 +443,7 @@ Recommended splitter behavior:
 - Ignore blank lines.
 - Store comment-only lines as notes if note storage is enabled, not as commands.
 
-Aish does not need to fully parse Bash in v1, but it should avoid storing an entire editor script as one opaque history item when it can safely split logical commands.
+Until that exists, history must prefer faithful replay over prettier browsing.
 
 ---
 
@@ -1250,4 +1254,3 @@ A usable MVP includes:
 13. Config for model, AI URL, env key, context bytes, completion result count.
 14. Event log with `#log`.
 15. `#doctor` with basic checks.
-

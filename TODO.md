@@ -354,22 +354,24 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
 - [ ] Add execution warning when configured.
 - [ ] Ensure multi-line paste does not enter draft by default.
 - [ ] Implement raw submission to backend shell.
-- [ ] Implement history splitter for raw multi-line submissions.
+- [ ] Keep raw multi-line submission history faithful by default.
 
 ### Acceptance criteria
 
 - Single-line paste works like normal insertion.
 - Multi-line paste never silently executes unless user configured it.
 - Multi-line paste does not pollute draft.
-- Executed multi-line content is split into logical history entries where possible.
+- Executed multi-line content is stored as the exact command submitted to the backend shell.
 
 ---
 
 ## Phase 11: Shell logical command splitter
 
+This is a future configurable enhancement. It must not replace the default faithful-history behavior until it can preserve shell semantics reliably.
+
 ### Tasks
 
-- [ ] Implement best-effort shell logical command splitter.
+- [ ] Add optional best-effort shell logical command splitter config.
 - [ ] Preserve backslash continuations.
 - [ ] Preserve quoted multi-line strings.
 - [ ] Preserve heredoc blocks.
@@ -385,8 +387,9 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
 
 ### Acceptance criteria
 
-- `cd /tmp\npwd` becomes two history commands.
-- `echo foo \\\nbar` becomes one history command.
+- Default history stores `cd /tmp\npwd` as one submitted command string.
+- Optional splitter can make `cd /tmp\npwd` become two history commands only when enabled.
+- Optional splitter keeps `echo foo \\\nbar` as one history command.
 - heredoc command is not split incorrectly.
 - History semantics are closer to classic shell history than editor-buffer history.
 

@@ -123,6 +123,38 @@ fn execute_draft_sends_multiline_buffer_exactly_to_backend() {
 }
 
 #[test]
+fn execute_draft_preserves_backslash_continuation_and_history() {
+    let _guard = pty_execution_guard();
+    let temp = tempfile::tempdir().unwrap();
+    let history_path = temp.path().join("history/regular.jsonl");
+    let command = "printf '%s\\n' \\\n+draft-continuation";
+    let mut state = AppState {
+        regular_history_path: Some(history_path.clone()),
+        clock: fixed_clock,
+        ..AppState::default()
+    };
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    state.draft.insert_str(command);
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.contains("draft-continuation"));
+    let loaded = load_jsonl::<HistoryEntry>(&history_path).unwrap();
+    assert_eq!(loaded.errors, []);
+    assert_eq!(loaded.items.len(), 1);
+    assert_eq!(loaded.items[0].command, command);
+}
+
+#[test]
 fn execute_draft_does_not_send_line_leading_hash_to_backend_shell() {
     let _guard = pty_execution_guard();
     let mut state = AppState::default();
@@ -177,9 +209,12 @@ fn editor_draft_can_send_line_leading_hash_when_configured() {
 }
 
 #[test]
+#[allow(unused_variables)]
 fn editor_draft_sends_multiline_backslash_continuation_to_shell() {
     let _guard = pty_execution_guard();
     let temp = tempfile::tempdir().unwrap();
+    let _history_path = temp.path().join("history/regular.jsonl");
+    let command = "printf '%s\\n' \\\n+editor-continuation";
     let session = prepare_editor_file(temp.path(), "").unwrap();
     std::fs::write(&session.path, "printf '%s\\n' \\\n+editor-continuation").unwrap();
     let mut state = AppState::default();
@@ -199,6 +234,39 @@ fn editor_draft_sends_multiline_backslash_continuation_to_shell() {
     assert!(output.contains("editor-continuation"));
     assert_eq!(state.last_status, Some(0));
     assert!(state.draft.is_empty());
+}
+
+#[test]
+fn editor_draft_preserves_backslash_continuation_in_history() {
+    let _guard = pty_execution_guard();
+    let temp = tempfile::tempdir().unwrap();
+    let history_path = temp.path().join("history/regular.jsonl");
+    let command = "printf '%s\\n' \\\n+editor-history-continuation";
+    let session = prepare_editor_file(temp.path(), "").unwrap();
+    std::fs::write(&session.path, command).unwrap();
+    let mut state = AppState {
+        regular_history_path: Some(history_path.clone()),
+        clock: fixed_clock,
+        ..AppState::default()
+    };
+    state.replace_draft_from_editor_session(&session).unwrap();
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.contains("editor-history-continuation"));
+    let loaded = load_jsonl::<HistoryEntry>(&history_path).unwrap();
+    assert_eq!(loaded.errors, []);
+    assert_eq!(loaded.items.len(), 1);
+    assert_eq!(loaded.items[0].command, command);
 }
 
 #[test]
