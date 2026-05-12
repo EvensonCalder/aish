@@ -449,7 +449,7 @@ This is a future configurable enhancement. It must not replace the default faith
 - [x] Implement accept suggestion helper.
 - [x] Add runtime AppState completion candidate helper.
 - [x] Wire non-empty Tab to render completion candidates without editing input.
-- [ ] Wire accept key into terminal UI.
+- [x] Wire accept key into terminal UI.
 
 ### Acceptance criteria
 

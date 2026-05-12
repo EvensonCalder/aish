@@ -11,7 +11,7 @@ use crossterm::terminal::{
 };
 
 use crate::app::{AppState, execute_draft, save_draft_if_configured};
-use crate::completion::render_completion_candidates;
+use crate::completion::{accept_completion, current_token_context, render_completion_candidates};
 use crate::editor::resolve_editor_command;
 use crate::pty::PtyBackend;
 use crate::templates::template_placeholder_spans;
@@ -26,6 +26,7 @@ pub enum KeyAction {
     AdvancedKeyPlaceholder(&'static str),
     Submit,
     ShowCompletions,
+    AcceptCompletion,
 }
 
 pub struct TerminalGuard;
@@ -111,6 +112,9 @@ fn handle_key(
         }
         KeyAction::ShowCompletions => {
             write_completion_candidates(state, out)?;
+        }
+        KeyAction::AcceptCompletion => {
+            accept_first_completion(state)?;
         }
         KeyAction::Submit => {
             writeln!(out)?;
@@ -316,6 +320,12 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
         }
         (_, KeyCode::Right) => {
             if !is_read_only_mode && !is_editor_draft {
+                if state.mode == crate::modes::Mode::Draft
+                    && state.draft.cursor() == state.draft.as_str().len()
+                    && !state.draft.is_empty()
+                {
+                    return KeyAction::AcceptCompletion;
+                }
                 state.draft.move_right();
             }
             KeyAction::Continue
@@ -435,6 +445,20 @@ pub fn write_completion_candidates(state: &AppState, out: &mut impl Write) -> Re
     Ok(())
 }
 
+pub fn accept_first_completion(state: &mut AppState) -> Result<bool> {
+    let Some(candidate) = state.completion_candidates()?.into_iter().next() else {
+        return Ok(false);
+    };
+    let token = current_token_context(state.draft.as_str(), state.draft.cursor());
+    let accepted = accept_completion(state.draft.as_str(), &token, &candidate);
+    if state.draft.replace(accepted.line, accepted.cursor) {
+        state.draft_from_template = false;
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -542,6 +566,52 @@ mod tests {
 
         let output = String::from_utf8(output).unwrap();
         assert!(output.contains("template\tgit-save"));
+    }
+
+    #[test]
+    fn right_at_end_requests_completion_accept_without_editing_immediately() {
+        let mut state = AppState::default();
+        state.draft.insert_str("git");
+
+        assert_eq!(
+            apply_key_to_state(key(KeyCode::Right), &mut state),
+            KeyAction::AcceptCompletion
+        );
+
+        assert_eq!(state.draft.as_str(), "git");
+    }
+
+    #[test]
+    fn right_inside_line_keeps_cursor_movement_behavior() {
+        let mut state = AppState::default();
+        state.draft.insert_str("git status");
+        state.draft.move_start();
+
+        assert_eq!(
+            apply_key_to_state(key(KeyCode::Right), &mut state),
+            KeyAction::Continue
+        );
+
+        assert_eq!(state.draft.cursor(), 1);
+    }
+
+    #[test]
+    fn accept_first_completion_replaces_current_token() {
+        let mut state = AppState {
+            regular_history: vec![crate::history::HistoryEntry {
+                t: 1,
+                command: "git status".to_string(),
+                exit_code: Some(0),
+                source: crate::history::HistorySource::User,
+            }],
+            ..AppState::default()
+        };
+        state.draft.insert_str("git sta");
+
+        assert!(accept_first_completion(&mut state).unwrap());
+
+        assert_eq!(state.draft.as_str(), "git status");
+        assert_eq!(state.draft.cursor(), "git status".len());
     }
 
     #[test]

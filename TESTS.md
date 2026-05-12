@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 179 library unit tests.
+- 184 library unit tests.
 - 18 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
@@ -278,6 +278,7 @@ Implemented:
 - Runtime state carries completion config and `#config` reports completion settings read-only.
 - Runtime state can build completion candidates from current draft, templates, in-memory history, cwd, PATH, and completion config without mutating input or terminal UI.
 - Non-empty Tab requests completion display without editing input; terminal completion display prints labeled candidate rows.
+- Right at end-of-line accepts the first completion candidate; Right inside the line keeps ordinary cursor movement.
 - Completion helpers can render labeled candidate rows, compute display-only ghost suffixes, and return accepted completion text/cursor without mutating input state.
 - Editor command resolution supports config, `$VISUAL`, `$EDITOR`, and PATH fallback candidates.
 - Editor session preparation writes draft/history/AI selected content to a secure temporary file.
@@ -404,6 +405,11 @@ Tests:
 - `app::tests::completion_candidates_skip_editor_drafts_and_read_only_modes`
 - `terminal::tests::non_empty_tab_requests_completion_display_without_editing_draft`
 - `terminal::tests::write_completion_candidates_prints_labeled_rows`
+- `input::tests::replace_updates_text_and_cursor_when_cursor_is_valid_boundary`
+- `input::tests::replace_rejects_invalid_cursor_boundary`
+- `terminal::tests::right_at_end_requests_completion_accept_without_editing_immediately`
+- `terminal::tests::right_inside_line_keeps_cursor_movement_behavior`
+- `terminal::tests::accept_first_completion_replaces_current_token`
 
 Status:
 

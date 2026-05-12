@@ -32,6 +32,16 @@ impl InputBuffer {
         self.cursor = 0;
     }
 
+    pub fn replace(&mut self, text: impl Into<String>, cursor: usize) -> bool {
+        let text = text.into();
+        if cursor > text.len() || !text.is_char_boundary(cursor) {
+            return false;
+        }
+        self.text = text;
+        self.cursor = cursor;
+        true
+    }
+
     pub fn insert_char(&mut self, ch: char) {
         self.text.insert(self.cursor, ch);
         self.cursor += ch.len_utf8();
@@ -251,6 +261,25 @@ mod tests {
 
         assert_eq!(buffer.as_str(), "echo now");
         assert_eq!(buffer.cursor(), 5);
+    }
+
+    #[test]
+    fn replace_updates_text_and_cursor_when_cursor_is_valid_boundary() {
+        let mut buffer = InputBuffer::from("old");
+
+        assert!(buffer.replace("aλb", 3));
+
+        assert_eq!(buffer.as_str(), "aλb");
+        assert_eq!(buffer.cursor(), 3);
+    }
+
+    #[test]
+    fn replace_rejects_invalid_cursor_boundary() {
+        let mut buffer = InputBuffer::from("old");
+
+        assert!(!buffer.replace("aλb", 2));
+
+        assert_eq!(buffer.as_str(), "old");
     }
 
     #[test]
