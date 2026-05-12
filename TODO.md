@@ -482,12 +482,14 @@ Status: implemented for v0.1.0 terminal draft completion. Candidate ranking, can
 - [x] Implement template picker.
 - [x] Implement git branch picker.
 - [x] Implement env var picker.
-- [ ] Support keybindings:
+- [x] Support keybindings:
   - [x] `Ctrl-X Ctrl-F`
   - [x] `Ctrl-R`
   - [x] `Ctrl-X Ctrl-T`
   - [x] `Ctrl-X Ctrl-B`
   - [x] `Ctrl-X Ctrl-V`
+
+Status: implemented for v0.1.0 via external `fzf`. Picker actions are intentionally simple: file, git branch, and env var pickers replace the current token; history search replaces the full draft line; template picker copies the selected template body to a protected template draft.
 
 ### Acceptance criteria
 

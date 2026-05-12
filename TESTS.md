@@ -263,9 +263,9 @@ Implemented:
 - `#help` prints private commands and the default keybinding map.
 - Help output distinguishes implemented keybindings from reserved keybindings.
 - `Esc` clears the draft and returns to draft mode.
-- `Ctrl-R` returns a safe history-search placeholder action without editing draft state.
+- `Ctrl-R` resolves to history search without editing draft state before the picker returns a selection.
 - `Ctrl-X Ctrl-E` resolves to an external-editor launch action without editing draft state.
-- Other `Ctrl-X` advanced chords resolve to safe placeholder actions without editing draft state.
+- `Ctrl-X` advanced picker chords resolve to launch actions without editing draft state before the picker returns a selection.
 - `#status` reports the default keybinding count.
 - AI configuration commands are recognized as placeholders but do not persist config or read secrets yet.
 - Key commands are recognized as placeholders but do not store, read, or remove secrets yet.
