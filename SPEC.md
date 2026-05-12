@@ -1216,7 +1216,7 @@ Git: spawn git CLI initially
 Cron parsing: cron parser crate or internal minimal schedule parser
 ```
 
-Aish should keep shell parsing minimal. It only needs enough lexing for current-token detection, quoting insertion, placeholder spans, and best-effort history splitting. The backend shell remains authoritative for execution semantics.
+Aish should keep shell parsing minimal. It only needs enough lexing for current-token detection, quoting insertion, placeholder spans, and optional best-effort history splitting. The backend shell remains authoritative for execution semantics.
 
 ---
 

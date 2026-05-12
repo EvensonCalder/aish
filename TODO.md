@@ -309,7 +309,7 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
 
 ### Tasks
 
-- [ ] Resolve editor command:
+- [x] Resolve editor command:
   - [x] config
   - [x] `$VISUAL`
   - [x] `$EDITOR`
@@ -327,13 +327,14 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
 - [x] Replace draft buffer.
 - [x] Do not execute by default.
 - [x] Add optional `editor.execute_after_save` support.
-- [x] Ensure configured raw editor content bypasses Aish `#` parsing when submitted.
+- [x] Ensure editor draft content bypasses Aish `#` parsing when submitted.
 
 ### Acceptance criteria
 
 - `Ctrl-X Ctrl-E` opens editor.
 - Saving and quitting returns content to draft.
 - `#` lines inside editor content can be sent to shell as raw content.
+- Editor drafts render as summaries in the main prompt and can be reopened with `Ctrl-X Ctrl-E`.
 - Default does not auto-execute.
 - Optional execute-after-save works only if configured.
 

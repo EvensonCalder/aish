@@ -179,7 +179,7 @@ fn execute_draft_does_not_send_line_leading_hash_to_backend_shell() {
 }
 
 #[test]
-fn editor_draft_can_send_line_leading_hash_when_configured() {
+fn editor_draft_can_send_line_leading_hash_to_shell() {
     let _guard = pty_execution_guard();
     let temp = tempfile::tempdir().unwrap();
     let session = prepare_editor_file(temp.path(), "").unwrap();

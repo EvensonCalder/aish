@@ -269,7 +269,7 @@ Implemented:
 - AI configuration commands are recognized as placeholders but do not persist config or read secrets yet.
 - Key commands are recognized as placeholders but do not store, read, or remove secrets yet.
 - Completion and log commands are recognized as placeholders but do not activate those subsystems yet.
-- Editor command resolution supports config, `$VISUAL`, `$EDITOR`, and PATH fallback candidates without launching an editor yet.
+- Editor command resolution supports config, `$VISUAL`, `$EDITOR`, and PATH fallback candidates.
 - Editor session preparation writes draft/history/AI selected content to a secure temporary file.
 - Editor process runner appends the prepared file path to the resolved command and waits for exit status without reading or executing content.
 - Editor read-back replaces the draft buffer with saved file content without executing it.
@@ -300,7 +300,7 @@ Tests:
 - `commands::tests::unknown_private_command_suggestion_uses_nearest_implemented_command`
 - `commands::tests::notes_are_detected_with_or_without_space_after_hash`
 - `execute_draft_does_not_send_line_leading_hash_to_backend_shell`
-- `editor_draft_can_send_line_leading_hash_when_configured`
+- `editor_draft_can_send_line_leading_hash_to_shell`
 - `editor_draft_sends_multiline_backslash_continuation_to_shell`
 - `execute_draft_preserves_backslash_continuation_and_history`
 - `editor_draft_preserves_backslash_continuation_in_history`
