@@ -467,12 +467,12 @@ Status: implemented for v0.1.0 terminal draft completion. Candidate ranking, can
 
 ### Tasks
 
-- [ ] Implement picker result actions:
-  - [ ] insert at cursor
-  - [ ] replace current token
-  - [ ] append as argument
-  - [ ] replace line
-- [ ] Implement shell quoting for inserted values.
+- [x] Implement picker result action helpers:
+  - [x] insert at cursor
+  - [x] replace current token
+  - [x] append as argument
+  - [x] replace line
+- [x] Implement shell quoting for inserted values.
 - [ ] Implement file/path picker, initially via `fzf`.
 - [ ] Implement history search picker for `Ctrl-R`.
 - [ ] Implement template picker.

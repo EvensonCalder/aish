@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 184 library unit tests.
+- 190 library unit tests.
 - 18 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
@@ -280,6 +280,7 @@ Implemented:
 - Non-empty Tab requests completion display without editing input; terminal completion display prints labeled candidate rows.
 - Right at end-of-line accepts the first completion candidate; Right inside the line keeps ordinary cursor movement.
 - Completion helpers can render labeled candidate rows, compute display-only ghost suffixes, and return accepted completion text/cursor without mutating input state.
+- Picker helpers support shell quoting and pure result edits for insert-at-cursor, replace-current-token, append-as-argument, and replace-line actions.
 - Editor command resolution supports config, `$VISUAL`, `$EDITOR`, and PATH fallback candidates.
 - Editor session preparation writes draft/history/AI selected content to a secure temporary file.
 - Editor process runner appends the prepared file path to the resolved command and waits for exit status without reading or executing content.
@@ -410,6 +411,12 @@ Tests:
 - `terminal::tests::right_at_end_requests_completion_accept_without_editing_immediately`
 - `terminal::tests::right_inside_line_keeps_cursor_movement_behavior`
 - `terminal::tests::accept_first_completion_replaces_current_token`
+- `picker::tests::shell_quote_leaves_safe_values_unquoted`
+- `picker::tests::shell_quote_quotes_spaces_and_embedded_single_quotes`
+- `picker::tests::picker_insert_at_cursor_inserts_quoted_value`
+- `picker::tests::picker_replace_current_token_replaces_token_under_cursor`
+- `picker::tests::picker_append_as_argument_adds_separator_when_needed`
+- `picker::tests::picker_replace_line_replaces_everything`
 
 Status:
 
