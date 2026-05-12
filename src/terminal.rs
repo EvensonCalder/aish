@@ -1,4 +1,4 @@
-use std::io::{Write, stdout};
+use std::io::{Result as IoResult, Write, stdout};
 use std::panic;
 use std::time::Duration;
 
@@ -39,6 +39,37 @@ pub enum KeyAction {
 }
 
 pub struct TerminalGuard;
+
+pub struct CrLfWriter<'a, W: Write> {
+    inner: &'a mut W,
+    previous_was_cr: bool,
+}
+
+impl<'a, W: Write> CrLfWriter<'a, W> {
+    fn new(inner: &'a mut W) -> Self {
+        Self {
+            inner,
+            previous_was_cr: false,
+        }
+    }
+}
+
+impl<W: Write> Write for CrLfWriter<'_, W> {
+    fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
+        for &byte in buf {
+            if byte == b'\n' && !self.previous_was_cr {
+                self.inner.write_all(b"\r")?;
+            }
+            self.inner.write_all(&[byte])?;
+            self.previous_was_cr = byte == b'\r';
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> IoResult<()> {
+        self.inner.flush()
+    }
+}
 
 impl TerminalGuard {
     pub fn enter() -> Result<Self> {
@@ -84,7 +115,8 @@ pub fn run(
             }
             Event::Paste(text) => {
                 if apply_paste_to_state(&text, state) == PasteAction::Submit {
-                    execute_draft(state, backend, out, command_timeout)?;
+                    let mut display_out = CrLfWriter::new(out);
+                    execute_draft(state, backend, &mut display_out, command_timeout)?;
                     if state.exit_requested {
                         return Ok(());
                     }
@@ -111,28 +143,36 @@ fn handle_key(
             execute!(out, Clear(ClearType::All), MoveToColumn(0))?;
         }
         KeyAction::HistorySearch => {
-            run_history_picker(state, out)?;
+            let mut display_out = CrLfWriter::new(out);
+            run_history_picker(state, &mut display_out)?;
         }
         KeyAction::ExternalEditor => {
-            run_external_editor(state, backend, out, command_timeout)?;
+            let mut display_out = CrLfWriter::new(out);
+            run_external_editor(state, backend, &mut display_out, command_timeout)?;
         }
         KeyAction::FilePicker => {
-            run_file_picker(state, out)?;
+            let mut display_out = CrLfWriter::new(out);
+            run_file_picker(state, &mut display_out)?;
         }
         KeyAction::TemplatePicker => {
-            run_template_picker(state, out)?;
+            let mut display_out = CrLfWriter::new(out);
+            run_template_picker(state, &mut display_out)?;
         }
         KeyAction::GitBranchPicker => {
-            run_git_branch_picker(state, out)?;
+            let mut display_out = CrLfWriter::new(out);
+            run_git_branch_picker(state, &mut display_out)?;
         }
         KeyAction::EnvVarPicker => {
-            run_env_var_picker(state, out)?;
+            let mut display_out = CrLfWriter::new(out);
+            run_env_var_picker(state, &mut display_out)?;
         }
         KeyAction::AdvancedKeyPlaceholder(name) => {
-            writeln!(out, "{name} is not implemented yet")?;
+            let mut display_out = CrLfWriter::new(out);
+            writeln!(display_out, "{name} is not implemented yet")?;
         }
         KeyAction::ShowCompletions => {
-            write_completion_candidates(state, out)?;
+            let mut display_out = CrLfWriter::new(out);
+            write_completion_candidates(state, &mut display_out)?;
         }
         KeyAction::AcceptCompletion => {
             accept_first_completion(state)?;
@@ -140,7 +180,8 @@ fn handle_key(
         KeyAction::Submit => {
             execute!(out, MoveToColumn(state.render_prompt_line().len() as u16))?;
             write!(out, "\r\n")?;
-            execute_draft(state, backend, out, command_timeout)?;
+            let mut display_out = CrLfWriter::new(out);
+            execute_draft(state, backend, &mut display_out, command_timeout)?;
             if state.exit_requested {
                 return Ok(true);
             }
@@ -148,7 +189,8 @@ fn handle_key(
         KeyAction::ConfirmContext(accepted) => {
             execute!(out, MoveToColumn(state.render_prompt_line().len() as u16))?;
             write!(out, "\r\n")?;
-            answer_context_confirmation(state, accepted, out, command_timeout)?;
+            let mut display_out = CrLfWriter::new(out);
+            answer_context_confirmation(state, accepted, &mut display_out, command_timeout)?;
         }
         KeyAction::Continue => {}
     }
@@ -810,6 +852,21 @@ mod tests {
     }
 
     #[test]
+    fn crlf_writer_normalizes_lf_without_double_converting_crlf() {
+        let mut output = Vec::new();
+        {
+            let mut writer = CrLfWriter::new(&mut output);
+            write!(writer, "one\ntwo\r\nthree\r").unwrap();
+            write!(writer, "\nfour").unwrap();
+        }
+
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            "one\r\ntwo\r\nthree\r\nfour"
+        );
+    }
+
+    #[test]
     fn enter_and_empty_ctrl_d_return_actions() {
         let mut state = AppState::default();
         assert_eq!(
@@ -847,6 +904,27 @@ mod tests {
             output.contains("\u{1b}[13G\r\nhello"),
             "output was {output:?}"
         );
+    }
+
+    #[test]
+    fn submit_normalizes_multiline_shell_output_for_raw_terminal() {
+        let mut state = AppState::default();
+        state.draft.insert_str("printf 'one\\ntwo\\n'");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        handle_key(
+            key(KeyCode::Enter),
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("one\r\ntwo\r\n"), "output was {output:?}");
+        assert!(!output.contains("one\ntwo\n"), "output was {output:?}");
     }
 
     #[test]
