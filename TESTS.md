@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 117 library unit tests.
+- 119 library unit tests.
 - 14 draft execution integration tests.
 - 1 first-run integration test.
 - 3 active bash PTY integration tests.
@@ -272,6 +272,7 @@ Implemented:
 - Editor session preparation writes draft/history/AI selected content to a secure temporary file.
 - Editor process runner appends the prepared file path to the resolved command and waits for exit status without reading or executing content.
 - Editor read-back replaces the draft buffer with saved file content without executing it.
+- Editor roundtrip helper prepares a file, runs a fake editor, and reads successful edits back into draft while preserving the original draft on editor failure.
 - Template commands are recognized as placeholders but do not read or write template storage yet.
 - Encryption and sync commands are recognized as placeholders but do not change files, encryption state, remotes, or run git commands yet.
 - `#context` reports that context collection is currently disabled/not implemented.
@@ -319,6 +320,8 @@ Tests:
 - `app::tests::prepare_editor_session_copies_history_selection_to_draft_and_file`
 - `app::tests::prepare_editor_session_copies_ai_selection_to_draft_and_file`
 - `app::tests::replace_draft_from_editor_session_reads_file_without_executing`
+- `app::tests::run_editor_roundtrip_replaces_draft_after_success`
+- `app::tests::run_editor_roundtrip_keeps_original_draft_after_editor_failure`
 - `app::tests::template_commands_report_placeholders_without_storage_side_effects`
 - `app::tests::encryption_and_sync_commands_report_placeholders_without_side_effects`
 - `app::tests::private_history_without_count_prints_usage`

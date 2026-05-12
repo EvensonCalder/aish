@@ -10,7 +10,8 @@ use crate::commands::{
 };
 use crate::config::{self, EditorConfig, PromptConfig};
 use crate::editor::{
-    PreparedEditorSession, prepare_editor_file, read_editor_file, resolve_editor_command,
+    EditorCommand, EditorRunResult, PreparedEditorSession, prepare_editor_file, read_editor_file,
+    resolve_editor_command, run_editor_command,
 };
 use crate::history::{
     AiCommandIndex, AiItem, AiItemKind, AiSession, DraftEntry, HistoryEntry, HistorySource,
@@ -235,6 +236,19 @@ impl AppState {
         self.draft = InputBuffer::from(content);
         self.mode = Mode::Draft;
         Ok(())
+    }
+
+    pub fn run_editor_roundtrip(
+        &mut self,
+        temp_root: &std::path::Path,
+        command: &EditorCommand,
+    ) -> Result<EditorRunResult> {
+        let session = self.prepare_editor_session(temp_root)?;
+        let result = run_editor_command(command, &session)?;
+        if result.exit_code == Some(0) {
+            self.replace_draft_from_editor_session(&session)?;
+        }
+        Ok(result)
     }
 
     fn selected_ai_item(&self) -> Option<(&AiSession, &AiItem)> {
@@ -1070,6 +1084,7 @@ pub fn save_draft_if_configured(state: &AppState) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     #[test]
     fn empty_tab_cycles_modes() {
@@ -1362,6 +1377,51 @@ mod tests {
         assert_eq!(state.draft.as_str(), "echo edited\n# raw shell content");
         assert_eq!(state.draft.cursor(), state.draft.as_str().len());
         assert_eq!(state.last_status, None);
+        assert!(state.regular_history.is_empty());
+    }
+
+    #[test]
+    fn run_editor_roundtrip_replaces_draft_after_success() {
+        let temp = tempfile::tempdir().unwrap();
+        let script = temp.path().join("fake-editor.sh");
+        std::fs::write(&script, "#!/bin/sh\nprintf 'echo edited' > \"$1\"\n").unwrap();
+        make_executable(&script);
+        let command = EditorCommand {
+            argv: vec![script.display().to_string()],
+        };
+        let mut state = AppState::default();
+        state.draft.insert_str("old draft");
+
+        let result = state.run_editor_roundtrip(temp.path(), &command).unwrap();
+
+        assert_eq!(result.exit_code, Some(0));
+        assert_eq!(state.mode, Mode::Draft);
+        assert_eq!(state.draft.as_str(), "echo edited");
+        assert_eq!(state.draft.cursor(), "echo edited".len());
+        assert!(state.regular_history.is_empty());
+    }
+
+    #[test]
+    fn run_editor_roundtrip_keeps_original_draft_after_editor_failure() {
+        let temp = tempfile::tempdir().unwrap();
+        let script = temp.path().join("fake-editor.sh");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\nprintf 'should not replace' > \"$1\"\nexit 9\n",
+        )
+        .unwrap();
+        make_executable(&script);
+        let command = EditorCommand {
+            argv: vec![script.display().to_string()],
+        };
+        let mut state = AppState::default();
+        state.draft.insert_str("old draft");
+
+        let result = state.run_editor_roundtrip(temp.path(), &command).unwrap();
+
+        assert_eq!(result.exit_code, Some(9));
+        assert_eq!(state.mode, Mode::Draft);
+        assert_eq!(state.draft.as_str(), "old draft");
         assert!(state.regular_history.is_empty());
     }
 
@@ -2247,5 +2307,15 @@ mod tests {
         };
         assert!(!save_draft_if_configured(&state).unwrap());
         assert!(!path.exists());
+    }
+
+    fn make_executable(path: &Path) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = std::fs::metadata(path).unwrap().permissions();
+            permissions.set_mode(0o700);
+            std::fs::set_permissions(path, permissions).unwrap();
+        }
     }
 }

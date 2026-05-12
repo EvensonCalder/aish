@@ -319,6 +319,7 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
 - [ ] Implement `Ctrl-X Ctrl-E`.
 - [x] Create secure temporary edit file.
 - [x] Write current draft/current selected item.
+- [x] Compose prepare/run/read-back helper.
 - [ ] Suspend Aish raw mode.
 - [x] Run editor and wait.
 - [ ] Restore raw mode.
