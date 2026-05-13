@@ -214,9 +214,11 @@ impl PtyBackend {
     ) -> Result<CommandResult> {
         let _ = self.drain_for(Duration::from_millis(25));
         let marker = next_marker();
+        let start_command = start_marker_command(command);
         let marker_command = format!(
             " __aish_status=$?; printf '\\n%s%s\\t%s\\n' '{marker}' \"$__aish_status\" \"$PWD\"; sh -c \"exit $__aish_status\"\n"
         );
+        self.write_raw(&start_command)?;
         self.write_raw(command)?;
         if !command.ends_with('\n') {
             self.write_raw("\n")?;
@@ -224,10 +226,11 @@ impl PtyBackend {
         self.write_raw(&marker_command)?;
 
         let raw = self.read_until_marker(&marker, timeout)?;
-        let (output, exit_code, cwd) = parse_marker_output(&raw, &marker)?;
+        let (output, exit_code, cwd, started_command) = parse_marker_output(&raw, &marker)?;
+        let command_text = command.trim_end_matches('\n').to_string();
         Ok(CommandResult {
-            command: command.trim_end_matches('\n').to_string(),
-            started_command: None,
+            command: command_text.clone(),
+            started_command: started_command.or(Some(command_text)),
             output,
             exit_code,
             cwd,
@@ -370,6 +373,18 @@ fn marker_has_complete_status(raw: &str, marker: &str, marker_pos: usize) -> Opt
         .then_some(marker_pos)
 }
 
+fn start_marker_command(command: &str) -> String {
+    let display_command = command.trim_end_matches('\n').replace(['\r', '\n'], "\\n");
+    format!(
+        " printf '\n{START_MARKER}\t%s\n' {}\n",
+        shell_single_quote(&display_command)
+    )
+}
+
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
 pub fn resolve_shell(configured_shell: &str) -> String {
     if configured_shell != "auto" && !configured_shell.trim().is_empty() {
         return configured_shell.to_string();
@@ -444,13 +459,15 @@ fn shell_command_builder(launch: &ShellLaunch) -> CommandBuilder {
     command
 }
 
-fn parse_marker_output(raw: &str, marker: &str) -> Result<(String, i32, Option<String>)> {
+fn parse_marker_output(
+    raw: &str,
+    marker: &str,
+) -> Result<(String, i32, Option<String>, Option<String>)> {
     let marker_pos = find_complete_marker(raw, marker)
         .context("backend shell output did not contain prompt marker")?;
-    let output = clean_marker_echo(
-        &normalize_pty_newlines(raw[..marker_pos].trim_matches(['\r', '\n'])),
-        marker,
-    );
+    let before_marker = normalize_pty_newlines(raw[..marker_pos].trim_matches(['\r', '\n']));
+    let started_command = parse_started_command(&before_marker);
+    let output = clean_marker_echo(&before_marker, marker);
     let status_start = marker_pos + marker.len();
     let status: String = raw[status_start..]
         .chars()
@@ -471,7 +488,17 @@ fn parse_marker_output(raw: &str, marker: &str) -> Result<(String, i32, Option<S
                 .to_string()
         })
         .filter(|cwd| !cwd.is_empty());
-    Ok((output, exit_code, cwd))
+    Ok((output, exit_code, cwd, started_command))
+}
+
+fn parse_started_command(output: &str) -> Option<String> {
+    let prefix = format!("{START_MARKER}\t");
+    output
+        .lines()
+        .filter_map(|line| line.strip_prefix(&prefix))
+        .next_back()
+        .map(str::to_string)
+        .filter(|command| !command.is_empty())
 }
 
 fn parse_ready_cwd(raw: &str) -> Option<String> {
@@ -623,17 +650,18 @@ mod tests {
     fn parses_marker_and_hides_it_from_output() {
         let marker = "__AISH_STATUS__123__";
         let raw = format!("hello\r\n{marker}7\r\n");
-        let (output, status, cwd) = parse_marker_output(&raw, marker).unwrap();
+        let (output, status, cwd, started) = parse_marker_output(&raw, marker).unwrap();
         assert_eq!(output, "hello");
         assert_eq!(status, 7);
         assert_eq!(cwd, None);
+        assert_eq!(started, None);
     }
 
     #[test]
     fn parses_marker_cwd_when_present() {
         let marker = "__AISH_STATUS__123__";
         let raw = format!("hello\r\n{marker}7\t/tmp/aish\r\n");
-        let (output, status, cwd) = parse_marker_output(&raw, marker).unwrap();
+        let (output, status, cwd, _) = parse_marker_output(&raw, marker).unwrap();
         assert_eq!(output, "hello");
         assert_eq!(status, 7);
         assert_eq!(cwd.as_deref(), Some("/tmp/aish"));
@@ -643,7 +671,7 @@ mod tests {
     fn parser_ignores_old_fixed_marker_in_user_output() {
         let marker = "__AISH_STATUS__123__";
         let raw = format!("before __AISH_STATUS__ after\r\n{marker}0\r\n");
-        let (output, status, _) = parse_marker_output(&raw, marker).unwrap();
+        let (output, status, _, _) = parse_marker_output(&raw, marker).unwrap();
         assert_eq!(output, "before __AISH_STATUS__ after");
         assert_eq!(status, 0);
     }
@@ -652,7 +680,7 @@ mod tests {
     fn parser_normalizes_pty_newlines() {
         let marker = "__AISH_STATUS__123__";
         let raw = format!("one\r\ntwo\r\n{marker}0\r\n");
-        let (output, status, _) = parse_marker_output(&raw, marker).unwrap();
+        let (output, status, _, _) = parse_marker_output(&raw, marker).unwrap();
         assert_eq!(output, "one\ntwo");
         assert_eq!(status, 0);
     }
@@ -683,10 +711,31 @@ mod tests {
         let marker = "__AISH_STATUS__123__";
         let raw =
             format!("__aish_status=$?; printf marker {marker}\r\nactual\r\n{marker}0\t/tmp\r\n");
-        let (output, status, cwd) = parse_marker_output(&raw, marker).unwrap();
+        let (output, status, cwd, _) = parse_marker_output(&raw, marker).unwrap();
         assert_eq!(output, "actual");
         assert_eq!(status, 0);
         assert_eq!(cwd.as_deref(), Some("/tmp"));
+    }
+
+    #[test]
+    fn parser_reads_start_marker_for_marker_shells() {
+        let marker = "__AISH_STATUS__123__";
+        let raw = format!("{START_MARKER}\tprintf hello\nhello\n{marker}0\t/tmp\n");
+        let (output, status, cwd, started) = parse_marker_output(&raw, marker).unwrap();
+
+        assert_eq!(output, "hello");
+        assert_eq!(status, 0);
+        assert_eq!(cwd.as_deref(), Some("/tmp"));
+        assert_eq!(started.as_deref(), Some("printf hello"));
+    }
+
+    #[test]
+    fn start_marker_command_quotes_shell_text_and_normalizes_multiline_display() {
+        let command = start_marker_command("printf 'a\\n'\necho done");
+
+        assert!(command.starts_with(' '));
+        assert!(command.contains(START_MARKER));
+        assert!(command.contains("'printf '\\''a\\n'\\''\\necho done'"));
     }
 
     #[test]
