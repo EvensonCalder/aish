@@ -1068,6 +1068,11 @@ mod tests {
     }
 
     #[test]
+    fn panic_cleanup_hook_can_be_installed_without_panicking() {
+        install_panic_cleanup();
+    }
+
+    #[test]
     fn enter_and_empty_ctrl_d_return_actions() {
         let mut state = AppState::default();
         assert_eq!(

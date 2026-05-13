@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 278 library unit tests.
+- 279 library unit tests.
 - 23 draft execution integration tests.
 - 1 first-run integration test.
 - 6 active bash PTY integration tests.
@@ -176,6 +176,7 @@ Tests:
 - `terminal::tests::alt_word_navigation_moves_by_tokens`
 - `terminal::tests::tab_switches_mode_only_for_empty_draft`
 - `terminal::tests::enter_and_empty_ctrl_d_return_actions`
+- `terminal::tests::panic_cleanup_hook_can_be_installed_without_panicking`
 - `app::tests::terminal_cursor_column_tracks_draft_cursor`
 - `app::tests::private_exit_requests_app_exit`
 

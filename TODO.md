@@ -709,7 +709,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 - [x] Ensure line-leading `#` direct input never reaches shell.
 - [x] Ensure editor content bypasses Aish `#` parser intentionally.
 - [ ] Ensure passthrough mode does not intercept app keys.
-- [ ] Add terminal cleanup on panic.
+- [x] Add terminal cleanup on panic.
 
 ### Acceptance criteria
 
@@ -816,6 +816,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 - [x] Cover trailing backslash continuation UX.
 - [x] Cover `Ctrl-C` cancellation from continuation drafts.
 - [x] Cover backend `PS2`/`PROMPT2` leak prevention.
+- [x] Cover terminal panic cleanup hook installation.
 
 ### Manual tests
 
