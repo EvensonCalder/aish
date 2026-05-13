@@ -19,6 +19,7 @@ aish_spawn
 
 aish_send "\x18\x05"
 aish_expect "\[editor draft: 2 line(s)"
+aish_expect "review before Enter"
 aish_expect "Enter to run"
 
 aish_enter

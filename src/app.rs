@@ -634,7 +634,7 @@ impl AppState {
         let bytes = self.draft.as_str().len();
         let lines = self.draft.as_str().lines().count().max(1);
         format!(
-            "[editor draft: {lines} line(s), {bytes} byte(s); Ctrl-X Ctrl-E to edit, Enter to run]"
+            "[editor draft: {lines} line(s), {bytes} byte(s); review before Enter; Ctrl-X Ctrl-E to edit, Enter to run]"
         )
     }
 
@@ -2522,7 +2522,7 @@ mod tests {
 
         assert_eq!(
             state.render_prompt_line(),
-            "> [editor draft: 2 line(s), 17 byte(s); Ctrl-X Ctrl-E to edit, Enter to run]"
+            "> [editor draft: 2 line(s), 17 byte(s); review before Enter; Ctrl-X Ctrl-E to edit, Enter to run]"
         );
         assert_eq!(
             state.terminal_cursor_column(),

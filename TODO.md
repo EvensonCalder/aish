@@ -693,7 +693,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 
 - [x] Block unresolved placeholders from execution.
 - [x] Add context dangerous-command detection.
-- [ ] Add multi-line paste warnings.
+- [x] Add multi-line paste warnings.
 - [ ] Redact secrets from logs.
 - [ ] Redact secrets from AI context where feasible.
 - [x] Ensure line-leading `#` direct input never reaches shell.
@@ -800,6 +800,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 - [x] Cover external editor roundtrip.
 - [x] Cover editor-returned line-leading `#` content bypassing Aish private command parsing.
 - [x] Cover multiline paste editor-review execution.
+- [x] Cover multiline paste/editor draft review warning before execution.
 - [x] Cover key/encryption/sync placeholder commands as safe no-ops.
 - [x] Cover `echo "` and `echo '` continuation UX.
 - [x] Cover trailing backslash continuation UX.
