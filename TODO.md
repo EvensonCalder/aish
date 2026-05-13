@@ -711,27 +711,27 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 
 ### Tasks
 
-- [ ] Implement `#help`.
-- [ ] Implement `#status`:
-  - [ ] mode
-  - [ ] shell
-  - [ ] model
-  - [ ] final AI URL
-  - [ ] API key source
-  - [ ] encryption state
-  - [ ] sync state
-  - [ ] context config
-  - [ ] completion config
-- [ ] Implement `#doctor`:
-  - [ ] backend shell check
-  - [ ] PTY check
-  - [ ] gpg check
-  - [ ] git check
-  - [ ] fzf check
-  - [ ] editor check
-  - [ ] AI URL/key check
-  - [ ] storage permissions check
-- [ ] Implement `#config` to open or print config path.
+- [x] Implement `#help`.
+- [x] Implement `#status`:
+  - [x] mode
+  - [x] shell
+  - [x] model
+  - [x] final AI URL
+  - [x] API key source
+  - [x] encryption state
+  - [x] sync state
+  - [x] context config
+  - [x] completion config
+- [x] Implement `#doctor`:
+  - [x] backend shell check
+  - [x] PTY check
+  - [x] gpg check
+  - [x] git check
+  - [x] fzf check
+  - [x] editor check
+  - [x] AI URL/key check
+  - [x] storage permissions check
+- [x] Implement `#config` to open or print config path.
 
 ### Acceptance criteria
 

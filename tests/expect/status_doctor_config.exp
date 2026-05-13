@@ -13,8 +13,16 @@ aish_wait_prompt
 
 aish_send "#status"
 aish_enter
+aish_expect "Aish status"
 aish_expect "mode=>"
 aish_expect "last_status=1"
+aish_expect "shell=backend"
+aish_expect "ai.final_url="
+aish_expect "ai.key_source="
+aish_expect "encryption=off"
+aish_expect "sync=off"
+aish_expect "context.enabled="
+aish_expect "completion.max_results="
 aish_expect "keybindings="
 aish_wait_prompt
 
@@ -25,6 +33,11 @@ aish_expect "mode=>"
 aish_expect "last_status=1"
 aish_expect "regular_history_entries="
 aish_expect "ai_sessions="
+aish_expect "pty=ok"
+aish_expect "gpg=not_configured"
+aish_expect "git=not_configured"
+aish_expect "fzf=external"
+aish_expect "editor.resolved="
 aish_wait_prompt
 
 aish_send "#config"
@@ -33,6 +46,8 @@ aish_expect "Aish config"
 aish_expect "draft.persist="
 aish_expect "completion.max_results="
 aish_expect "context.enabled="
+aish_expect "encryption=off"
+aish_expect "sync=off"
 aish_wait_prompt
 
 aish_quit

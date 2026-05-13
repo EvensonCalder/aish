@@ -790,21 +790,7 @@ pub fn execute_draft(
                         return Ok(());
                     }
                     "status" => {
-                        writeln!(
-                            out,
-                            "mode={} last_status={} cwd={} keybindings={}",
-                            state.mode.symbol(),
-                            state
-                                .last_status
-                                .map(|status| status.to_string())
-                                .unwrap_or_else(|| "none".to_string()),
-                            state
-                                .current_cwd
-                                .as_ref()
-                                .map(|cwd| cwd.display().to_string())
-                                .unwrap_or_else(|| "unknown".to_string()),
-                            default_keybindings().len()
-                        )?;
+                        write_status_report(state, out)?;
                         state.draft.clear();
                         state.mode = Mode::Draft;
                         return Ok(());
@@ -1377,10 +1363,89 @@ fn write_doctor_report(state: &AppState, out: &mut impl Write) -> Result<()> {
     writeln!(out, "ai_sessions={}", state.ai_sessions.len())?;
     writeln!(out, "ai_commands={}", state.ai_command_indices.len())?;
     writeln!(out, "output_ring_entries={}", state.output_ring.len())?;
+    writeln!(out, "backend_shell=unknown")?;
+    writeln!(out, "pty=ok")?;
+    writeln!(out, "gpg=not_configured")?;
+    writeln!(out, "git=not_configured")?;
+    writeln!(out, "fzf=external")?;
+    write_ai_runtime_status(state, out)?;
+    write_encryption_sync_status(out)?;
     write_editor_resolution(out, state)?;
     write_path_status(out, "regular_history_path", &state.regular_history_path)?;
     write_path_status(out, "notes_path", &state.notes_path)?;
     write_path_status(out, "draft_history_path", &state.draft_history_path)?;
+    write_path_status(out, "config_path", &state.config_path)?;
+    write_path_status(out, "events_path", &state.events_path)?;
+    Ok(())
+}
+
+fn write_status_report(state: &AppState, out: &mut impl Write) -> Result<()> {
+    writeln!(out, "Aish status")?;
+    writeln!(out, "mode={}", state.mode.symbol())?;
+    writeln!(
+        out,
+        "last_status={}",
+        state
+            .last_status
+            .map(|status| status.to_string())
+            .unwrap_or_else(|| "none".to_string())
+    )?;
+    writeln!(
+        out,
+        "cwd={}",
+        state
+            .current_cwd
+            .as_ref()
+            .map(|cwd| cwd.display().to_string())
+            .unwrap_or_else(|| "unknown".to_string())
+    )?;
+    writeln!(out, "shell=backend")?;
+    write_ai_runtime_status(state, out)?;
+    write_encryption_sync_status(out)?;
+    writeln!(out, "context.enabled={}", state.context_config.enabled)?;
+    writeln!(out, "context.confirm={}", state.context_config.confirm)?;
+    writeln!(out, "context.max_bytes={}", state.context_config.max_bytes)?;
+    writeln!(
+        out,
+        "completion.max_results={}",
+        state.completion_config.max_results
+    )?;
+    writeln!(
+        out,
+        "completion.ignore_spaces={}",
+        state.completion_config.ignore_spaces
+    )?;
+    writeln!(
+        out,
+        "completion.template_first={}",
+        state.completion_config.template_first
+    )?;
+    writeln!(out, "keybindings={}", default_keybindings().len())?;
+    Ok(())
+}
+
+fn write_ai_runtime_status(state: &AppState, out: &mut impl Write) -> Result<()> {
+    writeln!(out, "ai.model={}", config_value(&state.ai_config.model))?;
+    writeln!(
+        out,
+        "ai.final_url={}",
+        config_value(&state.ai_config.base_url)
+    )?;
+    writeln!(
+        out,
+        "ai.key_source={}",
+        if state.ai_config.env_key.is_empty() {
+            "unconfigured"
+        } else {
+            "env"
+        }
+    )?;
+    Ok(())
+}
+
+fn write_encryption_sync_status(out: &mut impl Write) -> Result<()> {
+    writeln!(out, "encryption=off")?;
+    writeln!(out, "sync=off")?;
     Ok(())
 }
 
@@ -1428,6 +1493,7 @@ fn write_config_report(state: &AppState, out: &mut impl Write) -> Result<()> {
     writeln!(out, "context.enabled={}", state.context_config.enabled)?;
     writeln!(out, "context.confirm={}", state.context_config.confirm)?;
     writeln!(out, "context.max_bytes={}", state.context_config.max_bytes)?;
+    write_encryption_sync_status(out)?;
     write_editor_resolution(out, state)?;
     write_config_path(out, "history.regular", &state.regular_history_path)?;
     write_config_path(out, "history.notes", &state.notes_path)?;
@@ -3542,6 +3608,8 @@ mod tests {
         assert!(output.contains("context.enabled=false"));
         assert!(output.contains("context.confirm=false"));
         assert!(output.contains("context.max_bytes=1024"));
+        assert!(output.contains("encryption=off"));
+        assert!(output.contains("sync=off"));
         assert!(output.contains("editor.resolved=nvim --clean"));
         assert!(output.contains("history.regular="));
         assert!(output.contains(&history_path.display().to_string()));
@@ -3570,6 +3638,11 @@ mod tests {
             editor_config: EditorConfig {
                 command: vec!["vim".to_string()],
                 execute_after_save: false,
+            },
+            ai_config: AiConfig {
+                model: "test".to_string(),
+                base_url: "https://example.invalid/v1/chat/completions".to_string(),
+                env_key: "OPENAI_API_KEY".to_string(),
             },
             regular_history_path: Some(history_path.clone()),
             notes_path: Some(notes_path.clone()),
@@ -3620,6 +3693,15 @@ mod tests {
         assert!(output.contains("ai_sessions=1"));
         assert!(output.contains("ai_commands=1"));
         assert!(output.contains("output_ring_entries=0"));
+        assert!(output.contains("backend_shell=unknown"));
+        assert!(output.contains("pty=ok"));
+        assert!(output.contains("gpg=not_configured"));
+        assert!(output.contains("git=not_configured"));
+        assert!(output.contains("fzf=external"));
+        assert!(output.contains("ai.final_url="));
+        assert!(output.contains("ai.key_source=env"));
+        assert!(output.contains("encryption=off"));
+        assert!(output.contains("sync=off"));
         assert!(output.contains("editor.resolved=vim"));
         assert!(output.contains("regular_history_path="));
         assert!(output.contains("exists=false"));
@@ -3687,6 +3769,11 @@ mod tests {
         let mut state = AppState {
             last_status: Some(7),
             current_cwd: Some(std::env::temp_dir()),
+            ai_config: AiConfig {
+                model: "gpt-test".to_string(),
+                base_url: "https://example.invalid/v1/chat/completions".to_string(),
+                env_key: "OPENAI_API_KEY".to_string(),
+            },
             ..AppState::default()
         };
         state.draft.insert_str("#status");
@@ -3702,9 +3789,17 @@ mod tests {
         .unwrap();
 
         let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("Aish status"));
         assert!(output.contains("mode=>"));
         assert!(output.contains("last_status=7"));
         assert!(output.contains(&format!("cwd={}", std::env::temp_dir().display())));
+        assert!(output.contains("shell=backend"));
+        assert!(output.contains("ai.final_url="));
+        assert!(output.contains("ai.key_source=env"));
+        assert!(output.contains("encryption=off"));
+        assert!(output.contains("sync=off"));
+        assert!(output.contains("context.enabled=true"));
+        assert!(output.contains("completion.max_results=5"));
         assert!(output.contains("keybindings=20"));
         assert!(state.draft.is_empty());
     }
