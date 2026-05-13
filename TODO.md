@@ -787,6 +787,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 - [x] Cover history-mode command execution.
 - [x] Cover read-only history edit-copy behavior.
 - [x] Cover AI-mode command sequencing and read-only edit-copy behavior.
+- [x] Cover AI config persistence and diagnostic key-source redaction.
 - [x] Cover template creation/use/execution flow.
 - [x] Cover unresolved template placeholder execution blocking.
 - [x] Cover external editor roundtrip.

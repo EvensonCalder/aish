@@ -1,0 +1,41 @@
+#!/usr/bin/env expect
+# AI config commands should persist to the isolated config file and diagnostics
+# should report key source without leaking the configured environment variable
+# name through `#status`.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "#model expect-model"
+aish_enter
+aish_expect "#model=expect-model"
+aish_wait_prompt
+
+aish_send "#base-url https://api.example.invalid/v1"
+aish_enter
+aish_expect "#base-url=https://api.example.invalid/v1/chat/completions"
+aish_wait_prompt
+
+aish_send "#env-key AISH_EXPECT_API_KEY"
+aish_enter
+aish_expect "#env-key=AISH_EXPECT_API_KEY"
+aish_wait_prompt
+
+aish_send "#config"
+aish_enter
+aish_expect "ai.model=expect-model"
+aish_expect "ai.base_url=https://api.example.invalid/v1/chat/completions"
+aish_expect "ai.env_key=AISH_EXPECT_API_KEY"
+aish_wait_prompt
+
+aish_send "#status"
+aish_enter
+aish_expect "ai.model=expect-model"
+aish_expect "ai.final_url=https://api.example.invalid/v1/chat/completions"
+aish_expect "ai.key_source=env"
+assert_no "AISH_EXPECT_API_KEY" "keybindings="
+aish_wait_prompt
+
+aish_quit

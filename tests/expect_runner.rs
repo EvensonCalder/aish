@@ -237,5 +237,10 @@ fn ai_mode_edit_copies_to_draft() {
     run_script("ai_mode_edit_copies_to_draft.exp");
 }
 
+#[test]
+fn ai_config_persists() {
+    run_script("ai_config_persists.exp");
+}
+
 #[allow(dead_code)]
 fn _unused_path_check(_p: &Path) {}
