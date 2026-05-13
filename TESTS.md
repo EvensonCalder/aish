@@ -347,6 +347,7 @@ Implemented:
 - `#context` reports that context collection is currently disabled/not implemented.
 - `#config` prints read-only runtime configuration and does not create missing storage files.
 - `#doctor` prints read-only diagnostics and does not create missing storage files.
+- `#doctor` includes shell/integration checks for backend shell, PTY, GPG, git, fzf, editor, AI config, and storage paths.
 
 Tests:
 

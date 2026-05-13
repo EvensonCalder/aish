@@ -686,7 +686,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
   - [ ] command allowlist
   - [ ] alternate screen buffer detection
   - [ ] prompt return detection
-- [ ] Add `#doctor` integration checks.
+- [x] Add `#doctor` integration checks.
 
 ### Acceptance criteria
 
