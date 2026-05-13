@@ -649,7 +649,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 - [x] Implement startup cron check.
 - [ ] Implement conservative sync flow:
   - [ ] pull --rebase
-  - [ ] add managed files
+  - [x] add managed files
   - [ ] commit
   - [ ] push
 - [x] Abort on conflict.

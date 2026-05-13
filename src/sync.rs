@@ -39,6 +39,11 @@ pub enum SyncStepOutcome {
     AbortFailure { detail: String },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManagedAddPlan {
+    pub paths: Vec<String>,
+}
+
 #[derive(Debug)]
 pub struct SyncLock {
     path: PathBuf,
@@ -280,6 +285,26 @@ pub fn classify_git_sync_step(success: bool, stdout: &str, stderr: &str) -> Sync
     } else {
         SyncStepOutcome::AbortFailure { detail }
     }
+}
+
+pub fn managed_add_plan(config: &SyncConfig) -> ManagedAddPlan {
+    let mut paths = vec![".gitignore".to_string()];
+    if config.ai {
+        paths.push("history/ai.jsonl".to_string());
+    }
+    if config.history {
+        paths.push("history/notes.jsonl".to_string());
+        paths.push("history/regular.jsonl".to_string());
+    }
+    if config.templates {
+        paths.push("templates/templates.jsonl".to_string());
+    }
+    if config.drafts {
+        paths.push("history/draft.jsonl".to_string());
+    }
+    paths.sort();
+    paths.dedup();
+    ManagedAddPlan { paths }
 }
 
 fn combined_git_output(stdout: &str, stderr: &str) -> String {
@@ -544,6 +569,41 @@ mod tests {
             SyncStepOutcome::AbortFailure {
                 detail: "fatal: unable to access remote".to_string()
             }
+        );
+    }
+
+    #[test]
+    fn managed_add_plan_keeps_private_categories_off_by_default() {
+        let config = SyncConfig::default();
+
+        assert_eq!(
+            managed_add_plan(&config),
+            ManagedAddPlan {
+                paths: vec![".gitignore".to_string()]
+            }
+        );
+    }
+
+    #[test]
+    fn managed_add_plan_includes_enabled_category_paths_sorted() {
+        let config = SyncConfig {
+            ai: true,
+            history: true,
+            templates: true,
+            drafts: true,
+            ..SyncConfig::default()
+        };
+
+        assert_eq!(
+            managed_add_plan(&config).paths,
+            vec![
+                ".gitignore",
+                "history/ai.jsonl",
+                "history/draft.jsonl",
+                "history/notes.jsonl",
+                "history/regular.jsonl",
+                "templates/templates.jsonl",
+            ]
         );
     }
 }
