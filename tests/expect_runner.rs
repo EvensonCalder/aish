@@ -188,6 +188,11 @@ fn key_and_sync_placeholders() {
 }
 
 #[test]
+fn key_clear_removes_stored_key() {
+    run_script("key_clear_removes_stored_key.exp");
+}
+
+#[test]
 fn status_doctor_config() {
     run_script("status_doctor_config.exp");
 }

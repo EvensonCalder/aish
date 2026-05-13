@@ -99,6 +99,7 @@ pub struct AppState {
     pub draft_history_path: Option<PathBuf>,
     pub events_path: Option<PathBuf>,
     pub template_store_path: Option<PathBuf>,
+    pub secret_key_path: Option<PathBuf>,
     pub config_path: Option<PathBuf>,
     pub draft_persist: bool,
     pub regular_history: Vec<HistoryEntry>,
@@ -139,6 +140,7 @@ impl Default for AppState {
             draft_history_path: None,
             events_path: None,
             template_store_path: None,
+            secret_key_path: None,
             config_path: None,
             draft_persist: true,
             regular_history: Vec::new(),
@@ -678,6 +680,7 @@ pub fn run() -> Result<()> {
         draft_history_path: Some(layout.draft_history),
         events_path: Some(layout.events),
         template_store_path: Some(layout.template_store),
+        secret_key_path: Some(layout.secrets.join("key.json.gpg")),
         config_path: Some(layout.config),
         draft_persist: config.draft.persist,
         regular_history: store.regular,
@@ -833,9 +836,7 @@ pub fn execute_draft(
                             Some("set") => {
                                 writeln!(out, "#key set is not implemented yet; no key stored")?
                             }
-                            Some("clear") => {
-                                writeln!(out, "#key clear is not implemented yet; no key removed")?
-                            }
+                            Some("clear") => clear_stored_key(state, out)?,
                             _ => writeln!(out, "usage: #key set | #key clear")?,
                         }
                         state.draft.clear();
@@ -1559,6 +1560,25 @@ fn write_config_path(out: &mut impl Write, name: &str, path: &Option<PathBuf>) -
     match path {
         Some(path) => writeln!(out, "{name}={}", path.display())?,
         None => writeln!(out, "{name}=unconfigured")?,
+    }
+    Ok(())
+}
+
+fn clear_stored_key(state: &mut AppState, out: &mut impl Write) -> Result<()> {
+    let Some(path) = &state.secret_key_path else {
+        writeln!(out, "key storage is not configured; no key removed")?;
+        return Ok(());
+    };
+
+    match std::fs::remove_file(path) {
+        Ok(()) => {
+            state.append_event(EventLevel::Info, "stored key cleared")?;
+            writeln!(out, "stored key cleared")?;
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            writeln!(out, "no stored key to clear")?;
+        }
+        Err(err) => return Err(err.into()),
     }
     Ok(())
 }
@@ -3116,7 +3136,7 @@ mod tests {
             ("#key set", "#key set is not implemented yet; no key stored"),
             (
                 "#key clear",
-                "#key clear is not implemented yet; no key removed",
+                "key storage is not configured; no key removed",
             ),
             ("#key", "usage: #key set | #key clear"),
             ("#key rotate", "usage: #key set | #key clear"),
@@ -3142,6 +3162,42 @@ mod tests {
             assert_eq!(state.last_status, None);
             assert!(state.draft.is_empty());
         }
+    }
+
+    #[test]
+    fn key_clear_removes_stored_encrypted_key_and_logs_event() {
+        let temp = tempfile::tempdir().unwrap();
+        let key_path = temp.path().join("secrets/key.json.gpg");
+        let events_path = temp.path().join("logs/events.jsonl");
+        std::fs::create_dir_all(key_path.parent().unwrap()).unwrap();
+        std::fs::write(&key_path, b"encrypted-key-placeholder").unwrap();
+        let mut state = AppState {
+            secret_key_path: Some(key_path.clone()),
+            events_path: Some(events_path.clone()),
+            ..AppState::default()
+        };
+        state.draft.insert_str("#key clear");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        assert!(!key_path.exists());
+        assert!(
+            String::from_utf8(output)
+                .unwrap()
+                .contains("stored key cleared")
+        );
+        let events = load_events(&events_path).unwrap();
+        assert_eq!(events.items.len(), 1);
+        assert_eq!(events.items[0].level, EventLevel::Info);
+        assert_eq!(events.items[0].msg, "stored key cleared");
     }
 
     #[test]

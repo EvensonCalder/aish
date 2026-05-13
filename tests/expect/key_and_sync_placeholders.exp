@@ -14,7 +14,7 @@ aish_wait_prompt
 
 aish_send "#key clear"
 aish_enter
-aish_expect "#key clear is not implemented yet; no key removed"
+aish_expect "no stored key to clear"
 aish_wait_prompt
 
 aish_send "#encrypt on"

@@ -12,12 +12,12 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 283 library unit tests.
+- 284 library unit tests.
 - 23 draft execution integration tests.
 - 1 first-run integration test.
 - 6 active bash PTY integration tests.
 - 2 active zsh PTY integration tests.
-- 36 expect-driven end-to-end interactive scenarios.
+- 37 expect-driven end-to-end interactive scenarios.
 - Bash PTY startup records the backend shell's initial cwd so the first prompt matches the shell state before any command executes.
 - Backend PTY startup inherits Aish's current directory and can be resized so child commands such as `ls` see the real terminal width.
 - 0 doctests.
@@ -291,7 +291,7 @@ Implemented:
 - Context configuration persists `#context on|off`, `#context confirm on|off`, and `#context <bytes>` to `config.toml`; context confirmation stores a pending prompt and accepts `Y`/`Enter` or skips with `n`/`Esc`/`Ctrl-C`.
 - Context pseudo-pipe helpers run context commands through a controlled `/bin/sh -c` subprocess, capture stdout and stderr, cap output by configured byte limit, disclose truncation, detect dangerous command patterns, and build contextual AI prompts with common secret token shapes redacted from command/output context.
 - Event log helpers append to `logs/events.jsonl`, trim to 1000 events by default, redact common secret token shapes, record config update errors, and `#log <count>` prints recent events.
-- Key commands are recognized as placeholders but do not store, read, or remove secrets yet.
+- `#key set` remains a placeholder, while `#key clear` removes the encrypted key file if present and logs the action without printing stored secret content.
 - `#completion` remains a private-command placeholder, but the internal completion engine is active for draft completion display and acceptance.
 - Completion has pure current-token detection helpers that handle first-token classification, non-first-token classification, quoted whitespace, escaped whitespace, cursor-in-line contexts, path-like tokens, and UTF-8 cursor snapping.
 - Completion has a pure path completion helper that reads matching file and directory candidates, preserves directory prefixes, sorts candidates, marks directories with trailing `/`, preserves opening quotes in replacements, and handles missing directories as no matches.
@@ -419,6 +419,7 @@ Tests:
 - `app::tests::store_ai_session_from_items_without_commands_stays_in_draft`
 - `app::tests::ai_prompt_reports_config_error_without_crashing`
 - `app::tests::key_commands_report_placeholders_without_secret_side_effects`
+- `app::tests::key_clear_removes_stored_encrypted_key_and_logs_event`
 - `app::tests::subsystem_commands_report_placeholders`
 - `app::tests::private_editor_reports_resolution_without_launching_editor`
 - `editor::tests::resolve_editor_prefers_config_command`
@@ -793,6 +794,7 @@ Tests:
 - `expect_runner::history_mode_execute`
 - `expect_runner::template_use_executes`
 - `expect_runner::key_and_sync_placeholders`
+- `expect_runner::key_clear_removes_stored_key`
 - `expect_runner::status_doctor_config`
 - `expect_runner::notes_are_swallowed`
 - `expect_runner::template_placeholder_blocks_execution`

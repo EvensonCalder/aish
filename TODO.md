@@ -603,7 +603,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 ### Tasks
 
 - [ ] Implement `#key set` using GPG encryption.
-- [ ] Implement `#key clear`.
+- [x] Implement `#key clear`.
 - [ ] Implement `#encrypt on`.
 - [ ] Implement `#encrypt off`.
 - [ ] Encrypt:

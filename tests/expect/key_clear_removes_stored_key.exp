@@ -1,0 +1,26 @@
+#!/usr/bin/env expect
+# `#key clear` should remove an existing encrypted key file and log the action
+# without printing secret content.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set home [aish_new_home]
+file mkdir "$home/secrets"
+set fh [open "$home/secrets/key.json.gpg" w]
+puts $fh "encrypted-secret-placeholder"
+close $fh
+
+aish_spawn
+
+aish_send "#key clear"
+aish_enter
+aish_expect "stored key cleared"
+aish_wait_prompt
+
+aish_send "#log 5"
+aish_enter
+aish_expect "stored key cleared"
+assert_no "encrypted-secret-placeholder" "> "
+
+aish_quit
