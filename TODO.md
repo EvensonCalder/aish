@@ -175,7 +175,7 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
 
 - [x] Define keybinding map structure.
 - [x] Implement default non-conflicting keybindings.
-- [ ] Preserve common keys:
+- [x] Preserve common keys:
   - [x] `Ctrl-C`
   - [x] `Ctrl-D`
   - [x] `Ctrl-L`
@@ -778,6 +778,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 - [x] Cover persistent backend cwd with `cd /tmp` followed by `pwd`.
 - [x] Cover empty `Tab` mode cycling through draft/history/AI prompts.
 - [x] Cover `#help`, unknown private commands, `#exit`, and empty `Ctrl-D` exit.
+- [x] Cover common readline editing keys (`Ctrl-A`, `Ctrl-E`, `Ctrl-U`, `Ctrl-K`, `Ctrl-W`, and `Esc`).
 - [x] Cover `#status`, `#doctor`, and `#config` diagnostics.
 - [x] Cover note capture without backend shell execution.
 - [x] Cover context pseudo-pipe confirmation skip flow.

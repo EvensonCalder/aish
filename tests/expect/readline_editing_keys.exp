@@ -1,0 +1,42 @@
+#!/usr/bin/env expect
+# Common readline-style editing keys should work in real terminal use.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+# Ctrl-A inserts at the beginning, Ctrl-E returns to the end.
+aish_send "world"
+aish_send "\x01"
+aish_send "echo hello-"
+aish_send "\x05"
+aish_enter
+aish_expect "hello-world"
+aish_wait_prompt
+
+# Ctrl-U clears the line before submission.
+aish_send "echo should-not-run"
+aish_send "\x15"
+aish_send "echo ctrl-u-ok"
+aish_enter
+aish_expect "ctrl-u-ok"
+aish_wait_prompt
+
+# Ctrl-K deletes from cursor to end.
+aish_send "echo keep remove"
+aish_send "\x01"
+aish_send "\x1bb"
+aish_send "\x0b"
+aish_enter
+aish_expect "keep"
+assert_no "remove" "> "
+
+# Ctrl-W deletes the previous word.
+aish_send "echo keep drop"
+aish_send "\x17"
+aish_enter
+aish_expect "keep"
+assert_no "drop" "> "
+
+aish_quit

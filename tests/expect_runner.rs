@@ -242,5 +242,15 @@ fn ai_config_persists() {
     run_script("ai_config_persists.exp");
 }
 
+#[test]
+fn readline_editing_keys() {
+    run_script("readline_editing_keys.exp");
+}
+
+#[test]
+fn escape_clears_draft() {
+    run_script("escape_clears_draft.exp");
+}
+
 #[allow(dead_code)]
 fn _unused_path_check(_p: &Path) {}

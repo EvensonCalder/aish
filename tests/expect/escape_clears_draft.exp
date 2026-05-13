@@ -1,0 +1,18 @@
+#!/usr/bin/env expect
+# Escape should clear the current draft and return to the normal prompt.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "echo should-not-run"
+aish_send "\x1b"
+aish_wait_prompt
+
+aish_send "echo esc-ok"
+aish_enter
+aish_expect "esc-ok"
+aish_wait_prompt
+
+aish_quit
