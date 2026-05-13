@@ -1,0 +1,49 @@
+#!/usr/bin/env expect
+# Production-style template persistence: without AISH_HOME, templates stored
+# under $HOME/.aish should be available after restart.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set isolated_home "/tmp/aish-home-template-[pid]-[clock clicks]"
+file delete -force $isolated_home
+file mkdir $isolated_home
+set old_home $::env(HOME)
+unset -nocomplain ::env(AISH_HOME)
+set ::env(HOME) $isolated_home
+set aish_home "$isolated_home/.aish"
+
+aish_spawn_without_aish_home
+
+aish_send "#mt home-template echo home-template-ok"
+aish_enter
+aish_expect "template stored: home-template"
+aish_wait_prompt
+aish_quit
+
+if {![file exists "$aish_home/templates/templates.jsonl"]} {
+    puts stderr "missing persisted templates: $aish_home/templates/templates.jsonl"
+    exit 6
+}
+
+aish_spawn_without_aish_home
+
+aish_send "#template show home-template"
+aish_enter
+aish_expect "template: home-template"
+aish_expect "echo home-template-ok"
+aish_wait_prompt
+
+aish_send "#template use home-template"
+aish_enter
+aish_expect "template copied to draft: home-template"
+aish_expect "echo home-template-ok"
+
+aish_enter
+aish_expect "home-template-ok"
+aish_wait_prompt
+
+aish_quit
+
+set ::env(HOME) $old_home
+file delete -force $isolated_home

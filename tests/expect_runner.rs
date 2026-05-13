@@ -268,6 +268,11 @@ fn template_use_executes() {
 }
 
 #[test]
+fn home_default_template_persists() {
+    run_script("home_default_template_persists.exp");
+}
+
+#[test]
 fn key_and_sync_placeholders() {
     run_script("key_and_sync_placeholders.exp");
 }
