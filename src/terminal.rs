@@ -20,7 +20,7 @@ use crate::picker::{
 use crate::pty::{PtyBackend, pty_size};
 use crate::templates::template_placeholder_spans;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KeyAction {
     Continue,
     Exit,
@@ -36,6 +36,7 @@ pub enum KeyAction {
     ConfirmContext(bool),
     CompleteOrShow,
     AcceptCompletion,
+    ForwardToBackend(String),
 }
 
 pub struct TerminalGuard;
@@ -204,6 +205,10 @@ fn handle_key(
             write!(out, "\r\n")?;
             let mut display_out = CrLfWriter::new(out);
             answer_context_confirmation(state, accepted, &mut display_out, command_timeout)?;
+        }
+        KeyAction::ForwardToBackend(bytes) => {
+            backend.write_raw(&bytes)?;
+            return Ok(false);
         }
         KeyAction::Continue => {}
     }
@@ -456,6 +461,13 @@ fn normalize_paste_newlines(text: &str) -> String {
 }
 
 pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
+    if matches!(state.mode, crate::modes::Mode::Passthrough | crate::modes::Mode::UnlockPassthrough)
+    {
+        return passthrough_key_bytes(key)
+            .map(KeyAction::ForwardToBackend)
+            .unwrap_or(KeyAction::Continue);
+    }
+
     if key.code != KeyCode::Tab {
         state.completion_panel.clear();
     }
@@ -640,6 +652,27 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
             KeyAction::Continue
         }
         _ => KeyAction::Continue,
+    }
+}
+
+fn passthrough_key_bytes(key: KeyEvent) -> Option<String> {
+    match (key.modifiers, key.code) {
+        (KeyModifiers::CONTROL, KeyCode::Char(ch)) if ch.is_ascii_alphabetic() => {
+            let code = (ch.to_ascii_lowercase() as u8) - b'a' + 1;
+            Some(char::from(code).to_string())
+        }
+        (KeyModifiers::ALT, KeyCode::Char(ch)) => Some(format!("\x1b{ch}")),
+        (_, KeyCode::Char(ch)) => Some(ch.to_string()),
+        (_, KeyCode::Enter) => Some("\r".to_string()),
+        (_, KeyCode::Tab) => Some("\t".to_string()),
+        (_, KeyCode::Backspace) => Some("\x7f".to_string()),
+        (_, KeyCode::Esc) => Some("\x1b".to_string()),
+        (_, KeyCode::Up) => Some("\x1b[A".to_string()),
+        (_, KeyCode::Down) => Some("\x1b[B".to_string()),
+        (_, KeyCode::Right) => Some("\x1b[C".to_string()),
+        (_, KeyCode::Left) => Some("\x1b[D".to_string()),
+        (_, KeyCode::Delete) => Some("\x1b[3~".to_string()),
+        _ => None,
     }
 }
 
@@ -1560,6 +1593,45 @@ mod tests {
         assert!(!state.ctrl_x_prefix);
         assert_eq!(state.mode, Mode::Draft);
         assert_eq!(state.draft.as_str(), "git status");
+    }
+
+    #[test]
+    fn passthrough_mode_forwards_keys_without_interpreting_app_actions() {
+        let mut state = AppState {
+            mode: Mode::Passthrough,
+            ..AppState::default()
+        };
+        state.draft.insert_str("keep");
+
+        assert_eq!(
+            apply_key_to_state(ctrl('c'), &mut state),
+            KeyAction::ForwardToBackend("\x03".to_string())
+        );
+        assert_eq!(state.mode, Mode::Passthrough);
+        assert_eq!(state.draft.as_str(), "keep");
+
+        assert_eq!(
+            apply_key_to_state(key(KeyCode::Char('x')), &mut state),
+            KeyAction::ForwardToBackend("x".to_string())
+        );
+        assert_eq!(state.draft.as_str(), "keep");
+    }
+
+    #[test]
+    fn passthrough_mode_forwards_navigation_escape_sequences() {
+        let mut state = AppState {
+            mode: Mode::UnlockPassthrough,
+            ..AppState::default()
+        };
+
+        assert_eq!(
+            apply_key_to_state(key(KeyCode::Up), &mut state),
+            KeyAction::ForwardToBackend("\x1b[A".to_string())
+        );
+        assert_eq!(
+            apply_key_to_state(key(KeyCode::Delete), &mut state),
+            KeyAction::ForwardToBackend("\x1b[3~".to_string())
+        );
     }
 
     #[test]
