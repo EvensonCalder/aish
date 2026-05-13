@@ -585,7 +585,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
   - [x] AI request success/failure
   - [x] context confirmation/skip
   - [x] encryption changes
-  - [ ] sync changes
+  - [x] sync changes
   - [ ] sync failures
   - [x] config errors
 - [x] Ensure secrets are redacted.
@@ -634,10 +634,10 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 ### Tasks
 
 - [ ] Initialize git repository in `~/.aish` if requested.
-- [ ] Implement `#set-remote`.
+- [x] Implement `#set-remote`.
 - [ ] Implement `#push` manual sync.
 - [ ] Implement `#sync <cron-expression>`.
-- [ ] Implement `#sync off`.
+- [x] Implement `#sync off`.
 - [ ] Implement category sync toggles:
   - [ ] AI
   - [ ] regular history

@@ -24,7 +24,8 @@ aish_wait_prompt
 
 aish_send "#set-remote git@example.invalid:aish.git"
 aish_enter
-aish_expect "sync remote configuration is not implemented yet; no remote changed"
+aish_expect "sync.remote=git@example.invalid:aish.git"
+aish_expect "no git command run"
 aish_wait_prompt
 
 aish_send "#push"
@@ -34,7 +35,15 @@ aish_wait_prompt
 
 aish_send "#sync"
 aish_enter
-aish_expect "sync is not implemented yet; no git command run"
+aish_expect "sync.enabled=false"
+aish_expect "sync.remote=git@example.invalid:aish.git"
+aish_expect "no git command run"
+aish_wait_prompt
+
+aish_send "#sync off"
+aish_enter
+aish_expect "sync.enabled=false"
+aish_expect "no scheduler file created"
 aish_wait_prompt
 
 aish_quit

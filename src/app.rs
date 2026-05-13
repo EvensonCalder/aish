@@ -15,6 +15,7 @@ use crate::completion::{
 };
 use crate::config::{
     self, AiConfig, CompletionConfig, ContextConfig, EditorConfig, PasteConfig, PromptConfig,
+    SyncConfig,
 };
 use crate::context::{
     build_contextual_ai_prompt, is_dangerous_context_command, run_context_command,
@@ -115,6 +116,7 @@ pub struct AppState {
     pub completion_config: CompletionConfig,
     pub ai_config: AiConfig,
     pub context_config: ContextConfig,
+    pub sync_config: SyncConfig,
     pub pending_context: Option<PendingContextPrompt>,
     pub completion_panel: Vec<String>,
     pub last_rendered_lines: usize,
@@ -156,6 +158,7 @@ impl Default for AppState {
             completion_config: CompletionConfig::default(),
             ai_config: AiConfig::default(),
             context_config: ContextConfig::default(),
+            sync_config: SyncConfig::default(),
             pending_context: None,
             completion_panel: Vec::new(),
             last_rendered_lines: 1,
@@ -692,6 +695,7 @@ pub fn run() -> Result<()> {
         completion_config: config.completion,
         ai_config: config.ai,
         context_config: config.context,
+        sync_config: config.sync,
         editor_temp_root: Some(layout.runtime_cache.join("editor")),
         ..AppState::default()
     };
@@ -1089,10 +1093,7 @@ pub fn execute_draft(
                         return Ok(());
                     }
                     "set-remote" => {
-                        writeln!(
-                            out,
-                            "sync remote configuration is not implemented yet; no remote changed"
-                        )?;
+                        set_sync_remote(state, out, args)?;
                         state.draft.clear();
                         state.mode = Mode::Draft;
                         return Ok(());
@@ -1104,7 +1105,7 @@ pub fn execute_draft(
                         return Ok(());
                     }
                     "sync" => {
-                        writeln!(out, "sync is not implemented yet; no git command run")?;
+                        set_sync_schedule(state, out, args)?;
                         state.draft.clear();
                         state.mode = Mode::Draft;
                         return Ok(());
@@ -1373,7 +1374,7 @@ fn write_doctor_report(state: &AppState, out: &mut impl Write) -> Result<()> {
     writeln!(out, "git=not_configured")?;
     writeln!(out, "fzf=external")?;
     write_ai_runtime_status(state, out)?;
-    write_encryption_sync_status(out)?;
+    write_encryption_sync_status(state, out)?;
     write_editor_resolution(out, state)?;
     write_path_status(out, "regular_history_path", &state.regular_history_path)?;
     write_path_status(out, "notes_path", &state.notes_path)?;
@@ -1405,7 +1406,7 @@ fn write_status_report(state: &AppState, out: &mut impl Write) -> Result<()> {
     )?;
     writeln!(out, "shell={}", backend_shell_value(state))?;
     write_ai_runtime_status(state, out)?;
-    write_encryption_sync_status(out)?;
+    write_encryption_sync_status(state, out)?;
     writeln!(out, "context.enabled={}", state.context_config.enabled)?;
     writeln!(out, "context.confirm={}", state.context_config.confirm)?;
     writeln!(out, "context.max_bytes={}", state.context_config.max_bytes)?;
@@ -1451,9 +1452,19 @@ fn backend_shell_value(state: &AppState) -> &str {
     state.backend_shell.as_deref().unwrap_or("unknown")
 }
 
-fn write_encryption_sync_status(out: &mut impl Write) -> Result<()> {
+fn write_encryption_sync_status(state: &AppState, out: &mut impl Write) -> Result<()> {
     writeln!(out, "encryption=off")?;
-    writeln!(out, "sync=off")?;
+    writeln!(out, "sync.enabled={}", state.sync_config.enabled)?;
+    writeln!(
+        out,
+        "sync.remote={}",
+        config_value(&state.sync_config.remote)
+    )?;
+    writeln!(
+        out,
+        "sync.schedule={}",
+        config_value(&state.sync_config.schedule)
+    )?;
     Ok(())
 }
 
@@ -1502,7 +1513,7 @@ fn write_config_report(state: &AppState, out: &mut impl Write) -> Result<()> {
     writeln!(out, "context.enabled={}", state.context_config.enabled)?;
     writeln!(out, "context.confirm={}", state.context_config.confirm)?;
     writeln!(out, "context.max_bytes={}", state.context_config.max_bytes)?;
-    write_encryption_sync_status(out)?;
+    write_encryption_sync_status(state, out)?;
     write_editor_resolution(out, state)?;
     write_config_path(out, "history.regular", &state.regular_history_path)?;
     write_config_path(out, "history.notes", &state.notes_path)?;
@@ -1580,6 +1591,81 @@ fn clear_stored_key(state: &mut AppState, out: &mut impl Write) -> Result<()> {
         }
         Err(err) => return Err(err.into()),
     }
+    Ok(())
+}
+
+fn set_sync_remote(state: &mut AppState, out: &mut impl Write, args: &str) -> Result<()> {
+    let remote = args.trim();
+    if remote.is_empty() {
+        writeln!(out, "usage: #set-remote <git-url>")?;
+        return Ok(());
+    }
+    if state.config_path.is_none() {
+        writeln!(out, "config path is not configured; sync config not saved")?;
+        return Ok(());
+    }
+
+    update_sync_config(state, |config| {
+        config.sync.remote = remote.to_string();
+    })?;
+    writeln!(out, "sync.remote={remote}")?;
+    writeln!(out, "no git command run")?;
+    Ok(())
+}
+
+fn set_sync_schedule(state: &mut AppState, out: &mut impl Write, args: &str) -> Result<()> {
+    let args = args.trim();
+    if args.is_empty() {
+        write_encryption_sync_status(state, out)?;
+        writeln!(out, "no git command run")?;
+        return Ok(());
+    }
+    if state.config_path.is_none() {
+        writeln!(out, "config path is not configured; sync config not saved")?;
+        return Ok(());
+    }
+    if args == "off" {
+        update_sync_config(state, |config| {
+            config.sync.enabled = false;
+            config.sync.schedule.clear();
+        })?;
+        writeln!(out, "sync.enabled=false")?;
+        writeln!(out, "no scheduler file created")?;
+        return Ok(());
+    }
+
+    update_sync_config(state, |config| {
+        config.sync.enabled = true;
+        config.sync.schedule = args.to_string();
+    })?;
+    writeln!(out, "sync.enabled=true")?;
+    writeln!(out, "sync.schedule={args}")?;
+    writeln!(out, "no scheduler file created")?;
+    Ok(())
+}
+
+fn update_sync_config(
+    state: &mut AppState,
+    update: impl FnOnce(&mut config::Config),
+) -> Result<()> {
+    let Some(path) = &state.config_path else {
+        anyhow::bail!("config path is not configured; sync config not saved");
+    };
+    let mut config = match config::load_config(path) {
+        Ok(config) => config,
+        Err(err) => {
+            state.append_event(EventLevel::Error, "config error")?;
+            return Err(err);
+        }
+    };
+    update(&mut config);
+    config::normalize_config(&mut config);
+    if let Err(err) = config::save_config(path, &config) {
+        state.append_event(EventLevel::Error, "config error")?;
+        return Err(err);
+    }
+    state.sync_config = config.sync;
+    state.append_event(EventLevel::Info, "sync config changed")?;
     Ok(())
 }
 
@@ -3657,13 +3743,13 @@ mod tests {
             ),
             (
                 "#set-remote git@example.invalid:aish.git",
-                "sync remote configuration is not implemented yet; no remote changed",
+                "config path is not configured; sync config not saved",
             ),
             (
                 "#push",
                 "sync push is not implemented yet; no git command run",
             ),
-            ("#sync", "sync is not implemented yet; no git command run"),
+            ("#sync", "no git command run"),
         ] {
             let mut state = AppState::default();
             state.draft.insert_str(line);
@@ -3686,6 +3772,63 @@ mod tests {
             assert_eq!(state.last_status, None);
             assert!(state.draft.is_empty());
         }
+    }
+
+    #[test]
+    fn sync_config_commands_persist_without_running_git() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("config.toml");
+        let events_path = temp.path().join("logs/events.jsonl");
+        let mut config = config::Config::default();
+        config.storage.home = temp.path().to_path_buf();
+        config::save_config(&config_path, &config).unwrap();
+        let mut state = AppState {
+            config_path: Some(config_path.clone()),
+            events_path: Some(events_path.clone()),
+            ..AppState::default()
+        };
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+
+        for (line, expected) in [
+            (
+                "#set-remote git@example.invalid:aish.git",
+                "sync.remote=git@example.invalid:aish.git",
+            ),
+            ("#sync 0 * * * *", "sync.schedule=0 * * * *"),
+            ("#sync off", "sync.enabled=false"),
+        ] {
+            state.draft.insert_str(line);
+            let mut output = Vec::new();
+            execute_draft(
+                &mut state,
+                &mut backend,
+                &mut output,
+                Duration::from_secs(5),
+            )
+            .unwrap();
+            let output = String::from_utf8(output).unwrap();
+            assert!(
+                output.contains(expected),
+                "missing {expected:?} in {output:?}"
+            );
+            assert!(
+                output.contains("no git command run")
+                    || output.contains("no scheduler file created")
+            );
+        }
+
+        let loaded = config::load_config(&config_path).unwrap();
+        assert_eq!(loaded.sync.remote, "git@example.invalid:aish.git");
+        assert!(!loaded.sync.enabled);
+        assert!(loaded.sync.schedule.is_empty());
+        let events = load_events(&events_path).unwrap();
+        assert_eq!(events.items.len(), 3);
+        assert!(
+            events
+                .items
+                .iter()
+                .all(|event| event.msg == "sync config changed")
+        );
     }
 
     #[test]
@@ -3753,7 +3896,7 @@ mod tests {
         assert!(output.contains("context.confirm=false"));
         assert!(output.contains("context.max_bytes=1024"));
         assert!(output.contains("encryption=off"));
-        assert!(output.contains("sync=off"));
+        assert!(output.contains("sync.enabled=false"));
         assert!(output.contains("editor.resolved=nvim --clean"));
         assert!(output.contains("history.regular="));
         assert!(output.contains(&history_path.display().to_string()));
@@ -3846,7 +3989,7 @@ mod tests {
         assert!(output.contains("ai.final_url="));
         assert!(output.contains("ai.key_source=env"));
         assert!(output.contains("encryption=off"));
-        assert!(output.contains("sync=off"));
+        assert!(output.contains("sync.enabled=false"));
         assert!(output.contains("editor.resolved=vim"));
         assert!(output.contains("regular_history_path="));
         assert!(output.contains("exists=false"));
@@ -3943,7 +4086,7 @@ mod tests {
         assert!(output.contains("ai.final_url="));
         assert!(output.contains("ai.key_source=env"));
         assert!(output.contains("encryption=off"));
-        assert!(output.contains("sync=off"));
+        assert!(output.contains("sync.enabled=false"));
         assert!(output.contains("context.enabled=true"));
         assert!(output.contains("completion.max_results=5"));
         assert!(output.contains("keybindings=20"));

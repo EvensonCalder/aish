@@ -20,7 +20,7 @@ aish_expect "shell="
 aish_expect "ai.final_url="
 aish_expect "ai.key_source="
 aish_expect "encryption=off"
-aish_expect "sync=off"
+aish_expect "sync.enabled=false"
 aish_expect "context.enabled="
 aish_expect "completion.max_results="
 aish_expect "keybindings="
@@ -48,7 +48,7 @@ aish_expect "draft.persist="
 aish_expect "completion.max_results="
 aish_expect "context.enabled="
 aish_expect "encryption=off"
-aish_expect "sync=off"
+aish_expect "sync.enabled=false"
 aish_wait_prompt
 
 aish_quit

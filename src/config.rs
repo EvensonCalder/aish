@@ -16,6 +16,7 @@ pub struct Config {
     pub completion: CompletionConfig,
     pub ai: AiConfig,
     pub context: ContextConfig,
+    pub sync: SyncConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -81,6 +82,14 @@ pub struct ContextConfig {
     pub enabled: bool,
     pub confirm: bool,
     pub max_bytes: usize,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SyncConfig {
+    pub remote: String,
+    pub enabled: bool,
+    pub schedule: String,
 }
 
 impl Default for ContextConfig {
@@ -295,6 +304,8 @@ pub fn normalize_config(config: &mut Config) {
     if config.context.max_bytes == 0 {
         config.context.max_bytes = ContextConfig::default().max_bytes;
     }
+    config.sync.remote = config.sync.remote.trim().to_string();
+    config.sync.schedule = config.sync.schedule.trim().to_string();
 }
 
 #[cfg(test)]
@@ -319,6 +330,7 @@ mod tests {
         assert!(config.completion.template_first);
         assert_eq!(config.ai, AiConfig::default());
         assert_eq!(config.context, ContextConfig::default());
+        assert_eq!(config.sync, SyncConfig::default());
         assert!(config.storage.home.ends_with(".aish"));
     }
 
@@ -360,6 +372,11 @@ mod tests {
                 confirm: false,
                 max_bytes: 0,
             },
+            sync: SyncConfig {
+                remote: "  git@example.invalid:aish.git  ".to_string(),
+                enabled: true,
+                schedule: "  0 * * * *  ".to_string(),
+            },
         };
 
         normalize_config(&mut config);
@@ -375,6 +392,11 @@ mod tests {
             enabled: false,
             confirm: false,
             max_bytes: 65_536,
+        };
+        expected.sync = SyncConfig {
+            remote: "git@example.invalid:aish.git".to_string(),
+            enabled: true,
+            schedule: "0 * * * *".to_string(),
         };
         assert_eq!(config, expected);
     }

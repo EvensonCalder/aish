@@ -106,7 +106,7 @@ Picker features use external `fzf`; Aish does not implement an internal picker U
 
 ## Encryption And Sync Status
 
-GPG-backed key storage, encrypted history/templates, and git sync are not implemented yet. Current `#key set`, `#encrypt`, `#set-remote`, `#push`, and `#sync` commands are safe placeholders and do not mutate secrets, encryption state, remotes, or git repositories. `#key clear` removes an existing encrypted key file if present.
+GPG-backed key storage, encrypted history/templates, and git sync execution are not implemented yet. Current `#key set`, `#encrypt`, and `#push` commands are safe placeholders and do not mutate secrets, encryption state, remotes, or git repositories. `#key clear` removes an existing encrypted key file if present. `#set-remote` and `#sync off` persist sync configuration, while `#sync <expr>` stores the requested schedule but does not create scheduler files or run git yet.
 
 ## Shell Integration Notes
 

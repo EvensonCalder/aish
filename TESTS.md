@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 284 library unit tests.
+- 285 library unit tests.
 - 23 draft execution integration tests.
 - 1 first-run integration test.
 - 6 active bash PTY integration tests.
@@ -290,7 +290,7 @@ Implemented:
 - Direct `# prompt` AI requests are wired to the configured chat-completions request path; missing config reports a readable error without crashing or mutating AI history.
 - Context configuration persists `#context on|off`, `#context confirm on|off`, and `#context <bytes>` to `config.toml`; context confirmation stores a pending prompt and accepts `Y`/`Enter` or skips with `n`/`Esc`/`Ctrl-C`.
 - Context pseudo-pipe helpers run context commands through a controlled `/bin/sh -c` subprocess, capture stdout and stderr, cap output by configured byte limit, disclose truncation, detect dangerous command patterns, and build contextual AI prompts with common secret token shapes redacted from command/output context.
-- Event log helpers append to `logs/events.jsonl`, trim to 1000 events by default, redact common secret token shapes, record config update errors, record secret/encryption-adjacent changes such as `#key clear`, and `#log <count>` prints recent events.
+- Event log helpers append to `logs/events.jsonl`, trim to 1000 events by default, redact common secret token shapes, record config update errors, record secret/encryption-adjacent changes such as `#key clear`, record sync config changes, and `#log <count>` prints recent events.
 - `#key set` remains a placeholder, while `#key clear` removes the encrypted key file if present and logs the action without printing stored secret content.
 - `#completion` remains a private-command placeholder, but the internal completion engine is active for draft completion display and acceptance.
 - Completion has pure current-token detection helpers that handle first-token classification, non-first-token classification, quoted whitespace, escaped whitespace, cursor-in-line contexts, path-like tokens, and UTF-8 cursor snapping.
@@ -420,6 +420,7 @@ Tests:
 - `app::tests::ai_prompt_reports_config_error_without_crashing`
 - `app::tests::key_commands_report_placeholders_without_secret_side_effects`
 - `app::tests::key_clear_removes_stored_encrypted_key_and_logs_event`
+- `app::tests::sync_config_commands_persist_without_running_git`
 - `app::tests::subsystem_commands_report_placeholders`
 - `app::tests::private_editor_reports_resolution_without_launching_editor`
 - `editor::tests::resolve_editor_prefers_config_command`
