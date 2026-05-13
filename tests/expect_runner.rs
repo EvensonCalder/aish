@@ -418,6 +418,11 @@ fn external_editor_roundtrip() {
 }
 
 #[test]
+fn home_default_external_editor_roundtrip() {
+    run_script("home_default_external_editor_roundtrip.exp");
+}
+
+#[test]
 fn external_editor_failure_preserves_draft() {
     run_script("external_editor_failure_preserves_draft.exp");
 }
