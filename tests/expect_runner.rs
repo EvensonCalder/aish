@@ -153,6 +153,11 @@ fn aish_home_empty_uses_home() {
 }
 
 #[test]
+fn aish_home_relative_fails_cleanly() {
+    run_script("aish_home_relative_fails_cleanly.exp");
+}
+
+#[test]
 fn cd_persists() {
     run_script("cd_persists.exp");
 }
