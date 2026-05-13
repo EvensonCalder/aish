@@ -96,6 +96,17 @@ if {[string first "startup-sync-history" $pushed_history] < 0} {
     exit 6
 }
 
+set first_sync_head [run_git --git-dir $remote rev-parse HEAD]
+
+aish_spawn_without_aish_home
+aish_quit
+
+set second_sync_head [run_git --git-dir $remote rev-parse HEAD]
+if {$second_sync_head ne $first_sync_head} {
+    puts stderr "startup sync ran again before schedule was due"
+    exit 6
+}
+
 set ::env(HOME) $old_home
 if {$old_aish_home_exists} {
     set ::env(AISH_HOME) $old_aish_home
