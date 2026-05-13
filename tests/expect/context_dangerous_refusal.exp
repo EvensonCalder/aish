@@ -1,0 +1,34 @@
+#!/usr/bin/env expect
+# Dangerous context pseudo-pipe commands must require confirmation and remain
+# skipped when the user refuses.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set home [aish_new_home]
+set marker "$home/dangerous-context-marker"
+set fh [open $marker w]
+puts $fh "must remain"
+close $fh
+
+aish_spawn
+
+aish_send "# explain danger < rm -rf $marker"
+aish_enter
+aish_expect "dangerous context command requires confirmation: rm -rf $marker"
+
+aish_send "n"
+aish_expect "context command skipped: rm -rf $marker"
+aish_wait_prompt
+
+aish_send "echo dangerous-refusal-ok"
+aish_enter
+aish_expect "dangerous-refusal-ok"
+aish_wait_prompt
+
+aish_quit
+
+if {![file exists $marker]} {
+    puts stderr "dangerous context command ran despite refusal"
+    exit 6
+}

@@ -238,6 +238,11 @@ fn context_confirmation_skip() {
 }
 
 #[test]
+fn context_dangerous_refusal() {
+    run_script("context_dangerous_refusal.exp");
+}
+
+#[test]
 fn external_editor_roundtrip() {
     run_script("external_editor_roundtrip.exp");
 }

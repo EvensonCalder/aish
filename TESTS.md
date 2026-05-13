@@ -18,7 +18,7 @@ Current test inventory:
 - 7 active bash PTY integration tests.
 - 2 active zsh PTY integration tests.
 - 1 conditional fish PTY integration test.
-- 45 expect-driven end-to-end interactive scenarios.
+- 46 expect-driven end-to-end interactive scenarios.
 - Bash PTY startup records the backend shell's initial cwd so the first prompt matches the shell state before any command executes.
 - Backend PTY startup inherits Aish's current directory and can be resized so child commands such as `ls` see the real terminal width.
 - 0 doctests.
@@ -61,7 +61,7 @@ Expect scenarios are the acceptance layer for user-visible terminal behavior. Th
 | Mode switching and read-only behavior | `empty_tab_cycles_modes`, `history_mode_execute`, `read_only_edit_copies_to_draft`, `ai_mode_executes_sequence`, `ai_mode_edit_copies_to_draft`, `output_then_redraw_interactions` | Covered | Add more mode redraw regressions only for observed failures. |
 | Completion UI | `completion_accept_single`, `completion_panel_multiple`, `output_then_redraw_interactions` | Covered | Add completion-panel-after-output regression if observed. |
 | Private command UX and diagnostics | `help_lists_commands`, `unknown_private_command`, `private_command_safe_failures`, `status_doctor_config`, `key_and_sync_placeholders`, `key_clear_removes_stored_key`, `ai_config_persists` | Covered | Add new safe-failure scenarios when new private commands are added. |
-| Notes, context, and logs | `notes_are_swallowed`, `context_confirmation_skip`, `log_shows_context_skip` | Covered | Add dangerous-context end-to-end refusal case. |
+| Notes, context, and logs | `notes_are_swallowed`, `context_confirmation_skip`, `context_dangerous_refusal`, `log_shows_context_skip` | Covered | Add new context scenarios only for observed regressions. |
 | Templates | `template_use_executes`, `template_crud`, `template_placeholder_blocks_execution` | Covered | Add completion/template interaction if UI changes. |
 | Editor and paste flows | `external_editor_roundtrip`, `editor_hash_content_bypasses_parser`, `multiline_paste_editor_review` | Covered | Add editor failure path and large paste boundary if practical. |
 | Sync | `key_and_sync_placeholders`, `sync_push_local_remote`, `sync_push_failure_logs` | Covered | Add conflict-specific expect scenario if sync conflict UI changes. |
@@ -337,6 +337,7 @@ Implemented:
 - Alternate-screen buffer detection tracks common enter/exit CSI sequences (`?47`, `?1047`, `?1049`) and ignores unrelated terminal styling escapes.
 - Passthrough prompt-return detection requires process exit and normal-screen state before Aish redraws its prompt after an interactive command.
 - `#encrypt on` warns that existing plaintext may remain in git history and that Aish will not rewrite history automatically, while encryption remains otherwise unimplemented.
+- Dangerous context pseudo-pipe commands have expect coverage proving refusal skips execution and leaves the target file intact.
 - Prompt redraw after ordinary command output has both a Rust virtual-screen regression and an expect scenario requiring command output line termination before the next prompt.
 - Command output followed by mode-switch redraw and unique completion acceptance has expect coverage through the real binary.
 - Manual `#push` sync has expect coverage against a local temporary bare git remote, including managed `.gitignore` push and no scheduler file creation.
