@@ -1,0 +1,39 @@
+#!/usr/bin/env expect
+# Mixed stdout/stderr output must remain visible before later prompt redraws.
+# This covers real command output ordering followed by mode and completion redraws.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "cd $::env(AISH_HOME)"
+aish_enter
+aish_wait_prompt
+
+aish_send "touch mixed-redraw-target.txt"
+aish_enter
+aish_wait_prompt
+
+aish_send "printf 'stdout-redraw-ok\\n'; printf 'stderr-redraw-ok\\n' >&2"
+aish_enter
+aish_expect "stdout-redraw-ok"
+aish_expect "stderr-redraw-ok"
+aish_wait_prompt
+
+# Empty Tab cycles modes after mixed output without erasing it.
+aish_send "\t"
+aish_expect "\$ "
+aish_send "\t"
+aish_expect "% "
+aish_send "\t"
+aish_wait_prompt
+
+# Completion redraw after mixed output should still work normally.
+aish_send "cat mixed-redraw-target"
+aish_send "\t"
+aish_expect "mixed-redraw-target.txt"
+aish_enter
+aish_wait_prompt
+
+aish_quit

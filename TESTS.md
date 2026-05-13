@@ -18,7 +18,7 @@ Current test inventory:
 - 7 active bash PTY integration tests.
 - 2 active zsh PTY integration tests.
 - 1 conditional fish PTY integration test.
-- 56 expect-driven end-to-end interactive scenarios.
+- 57 expect-driven end-to-end interactive scenarios.
 - Bash PTY startup records the backend shell's initial cwd so the first prompt matches the shell state before any command executes.
 - Backend PTY startup inherits Aish's current directory and can be resized so child commands such as `ls` see the real terminal width.
 - 0 doctests.
@@ -54,7 +54,7 @@ Expect scenarios are the acceptance layer for user-visible terminal behavior. Th
 
 | Area | Current scenarios | Status | Known gaps |
 | --- | --- | --- | --- |
-| Basic command execution and prompt redraw | `basic_echo`, `output_visible_before_prompt`, `output_then_redraw_interactions` | Covered | Add mixed stderr/stdout redraw stress cases if regressions appear. |
+| Basic command execution and prompt redraw | `basic_echo`, `output_visible_before_prompt`, `output_then_redraw_interactions`, `mixed_stdout_stderr_redraw` | Covered | Add new redraw stress cases only for observed regressions. |
 | Backend cwd and shell state | `cd_persists` | Covered | Add zsh/fish-specific end-to-end variants when portable. |
 | Shell continuation UX | `dquote_continuation`, `squote_continuation`, `backslash_continuation`, `ctrl_c_cancels_continuation`, `no_backend_ps2_leak` | Covered | Add heredoc-style continuation if it becomes user-facing. |
 | Prompt/control keys | `ctrl_l_clear_screen`, `readline_editing_keys`, `long_unicode_input`, `terminal_resize`, `escape_clears_draft`, `ctrl_x_unknown_chord_cancels`, `ctrl_d_exits`, `exit_command` | Covered | Add new prompt-control scenarios only for observed regressions. |

@@ -113,6 +113,11 @@ fn output_then_redraw_interactions() {
 }
 
 #[test]
+fn mixed_stdout_stderr_redraw() {
+    run_script("mixed_stdout_stderr_redraw.exp");
+}
+
+#[test]
 fn first_run_doctor() {
     run_script("first_run_doctor.exp");
 }
