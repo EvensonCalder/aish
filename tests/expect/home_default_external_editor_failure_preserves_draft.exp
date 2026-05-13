@@ -1,0 +1,56 @@
+#!/usr/bin/env expect
+# Production-style editor failure: without AISH_HOME, a failing EDITOR should
+# show a useful message and preserve the current draft.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set isolated_home "/tmp/aish-home-editor-fail-[pid]-[clock clicks]"
+file delete -force $isolated_home
+file mkdir $isolated_home
+set old_home $::env(HOME)
+set old_editor_exists [info exists ::env(EDITOR)]
+if {$old_editor_exists} {
+    set old_editor $::env(EDITOR)
+}
+set old_aish_home_exists [info exists ::env(AISH_HOME)]
+if {$old_aish_home_exists} {
+    set old_aish_home $::env(AISH_HOME)
+}
+unset -nocomplain ::env(AISH_HOME)
+set ::env(HOME) $isolated_home
+
+set editor "/tmp/aish-home-failing-editor-[pid]-[clock clicks].sh"
+set fh [open $editor w]
+puts $fh {#!/bin/sh}
+puts $fh {printf 'echo should-not-replace-home\n' > "$1"}
+puts $fh {exit 7}
+close $fh
+file attributes $editor -permissions 0755
+set ::env(EDITOR) $editor
+
+aish_spawn_without_aish_home
+
+aish_send "echo keep-home-after-editor-fail"
+aish_send "\x18\x05"
+aish_expect "editor exited without saving draft: status=7"
+aish_expect "> echo keep-home-after-editor-fail"
+
+aish_enter
+aish_expect "keep-home-after-editor-fail"
+aish_wait_prompt
+aish_quit
+
+set ::env(HOME) $old_home
+if {$old_editor_exists} {
+    set ::env(EDITOR) $old_editor
+} else {
+    unset -nocomplain ::env(EDITOR)
+}
+if {$old_aish_home_exists} {
+    set ::env(AISH_HOME) $old_aish_home
+} else {
+    unset -nocomplain ::env(AISH_HOME)
+}
+file delete -force $editor
+file delete -force $isolated_home

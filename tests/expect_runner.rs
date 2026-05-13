@@ -428,6 +428,11 @@ fn external_editor_failure_preserves_draft() {
 }
 
 #[test]
+fn home_default_external_editor_failure_preserves_draft() {
+    run_script("home_default_external_editor_failure_preserves_draft.exp");
+}
+
+#[test]
 fn multiline_paste_editor_review() {
     run_script("multiline_paste_editor_review.exp");
 }
