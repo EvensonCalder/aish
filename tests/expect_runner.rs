@@ -208,6 +208,11 @@ fn sync_push_local_remote() {
 }
 
 #[test]
+fn sync_push_failure_logs() {
+    run_script("sync_push_failure_logs.exp");
+}
+
+#[test]
 fn key_clear_removes_stored_key() {
     run_script("key_clear_removes_stored_key.exp");
 }

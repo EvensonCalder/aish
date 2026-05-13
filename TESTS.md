@@ -18,7 +18,7 @@ Current test inventory:
 - 7 active bash PTY integration tests.
 - 2 active zsh PTY integration tests.
 - 1 conditional fish PTY integration test.
-- 44 expect-driven end-to-end interactive scenarios.
+- 45 expect-driven end-to-end interactive scenarios.
 - Bash PTY startup records the backend shell's initial cwd so the first prompt matches the shell state before any command executes.
 - Backend PTY startup inherits Aish's current directory and can be resized so child commands such as `ls` see the real terminal width.
 - 0 doctests.
@@ -64,7 +64,7 @@ Expect scenarios are the acceptance layer for user-visible terminal behavior. Th
 | Notes, context, and logs | `notes_are_swallowed`, `context_confirmation_skip`, `log_shows_context_skip` | Covered | Add dangerous-context end-to-end refusal case. |
 | Templates | `template_use_executes`, `template_crud`, `template_placeholder_blocks_execution` | Covered | Add completion/template interaction if UI changes. |
 | Editor and paste flows | `external_editor_roundtrip`, `editor_hash_content_bypasses_parser`, `multiline_paste_editor_review` | Covered | Add editor failure path and large paste boundary if practical. |
-| Sync | `key_and_sync_placeholders`, `sync_push_local_remote` | Covered | Add conflict-specific expect scenario if sync conflict UI changes. |
+| Sync | `key_and_sync_placeholders`, `sync_push_local_remote`, `sync_push_failure_logs` | Covered | Add conflict-specific expect scenario if sync conflict UI changes. |
 | Passthrough/interactive programs | `passthrough_less` when `less` is available; key forwarding is Rust-covered | Partial | Full automatic passthrough detection still needs an async PTY design for alternate-screen/prompt-return detection. |
 | Encryption/GPG | `key_clear_removes_stored_key` | Partial | Add fake GPG or test-key flow before claiming encryption completion. |
 
@@ -339,6 +339,7 @@ Implemented:
 - Prompt redraw after ordinary command output has both a Rust virtual-screen regression and an expect scenario requiring command output line termination before the next prompt.
 - Command output followed by mode-switch redraw and unique completion acceptance has expect coverage through the real binary.
 - Manual `#push` sync has expect coverage against a local temporary bare git remote, including managed `.gitignore` push and no scheduler file creation.
+- Manual `#push` sync failure has expect coverage with a missing local remote, including visible failure output, event-log recording, and no scheduler file creation.
 - Representative private-command safe failures have expect coverage for invalid history/log/template/context/sync usage, followed by a backend command proving the session remains usable.
 - Long and Unicode input has expect coverage for UTF-8 command execution and Ctrl-A/Ctrl-E editing around emoji text.
 - Terminal size has expect coverage proving startup outer terminal rows/columns propagate to backend child commands via `stty size`; runtime backend resize is covered by PTY integration.

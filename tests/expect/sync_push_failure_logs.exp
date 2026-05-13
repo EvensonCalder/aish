@@ -1,0 +1,35 @@
+#!/usr/bin/env expect
+# Manual sync failures should be visible to the user and recorded in the event
+# log without network access.
+
+set timeout 15
+source [file dirname [info script]]/_lib.exp
+
+set home [aish_new_home]
+set missing_remote "$home/missing-remote.git"
+
+aish_spawn
+
+aish_send "#set-remote $missing_remote"
+aish_enter
+aish_expect "sync.remote=$missing_remote"
+aish_wait_prompt
+
+aish_send "#push"
+aish_enter
+aish_expect "sync step ok: git init"
+aish_expect "sync step ok: git remote add origin $missing_remote"
+aish_expect "sync failed: git pull --rebase"
+aish_wait_prompt
+
+aish_send "#log 5"
+aish_enter
+aish_expect "sync failed"
+aish_wait_prompt
+
+if {[file exists "$home/cache/runtime/scheduler"]} {
+    puts stderr "unexpected scheduler file created"
+    exit 6
+}
+
+aish_quit
