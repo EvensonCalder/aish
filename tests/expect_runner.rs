@@ -278,6 +278,11 @@ fn history_picker_cancel_preserves_draft() {
 }
 
 #[test]
+fn home_default_history_picker_cancel_preserves_draft() {
+    run_script("home_default_history_picker_cancel_preserves_draft.exp");
+}
+
+#[test]
 fn file_picker_cancel_preserves_draft() {
     run_script("file_picker_cancel_preserves_draft.exp");
 }
