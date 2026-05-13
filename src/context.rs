@@ -4,6 +4,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 
+use crate::log::redact_secrets;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextCommandResult {
     pub output: String,
@@ -78,7 +80,8 @@ pub fn build_contextual_ai_prompt(
         .unwrap_or_else(|| "unknown".to_string());
     format!(
         "User prompt:\n{prompt}\n\nContext command:\n{command}\n\nContext exit status: {exit_code}\n\nContext output{truncation}:\n```text\n{}\n```",
-        result.output
+        redact_secrets(&result.output),
+        command = redact_secrets(command)
     )
 }
 
@@ -166,5 +169,24 @@ mod tests {
         assert!(prompt.contains("User prompt:\nexplain this"));
         assert!(prompt.contains("Context command:\nprintf hello"));
         assert!(prompt.contains("Context output truncated to configured byte limit"));
+    }
+
+    #[test]
+    fn contextual_ai_prompt_redacts_common_secret_shapes() {
+        let prompt = build_contextual_ai_prompt(
+            "explain this",
+            "printf sk-command-secret",
+            &ContextCommandResult {
+                output: "token sk-output-secret ghp_output".to_string(),
+                exit_code: Some(0),
+                truncated: false,
+            },
+        );
+
+        assert!(prompt.contains("Context command:\nprintf [redacted]"));
+        assert!(prompt.contains("token [redacted] [redacted]"));
+        assert!(!prompt.contains("sk-command-secret"));
+        assert!(!prompt.contains("sk-output-secret"));
+        assert!(!prompt.contains("ghp_output"));
     }
 }

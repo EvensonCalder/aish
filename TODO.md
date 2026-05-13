@@ -694,8 +694,8 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 - [x] Block unresolved placeholders from execution.
 - [x] Add context dangerous-command detection.
 - [x] Add multi-line paste warnings.
-- [ ] Redact secrets from logs.
-- [ ] Redact secrets from AI context where feasible.
+- [x] Redact secrets from logs.
+- [x] Redact secrets from AI context where feasible.
 - [x] Ensure line-leading `#` direct input never reaches shell.
 - [x] Ensure editor content bypasses Aish `#` parser intentionally.
 - [ ] Ensure passthrough mode does not intercept app keys.
