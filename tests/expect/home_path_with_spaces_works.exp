@@ -1,0 +1,46 @@
+#!/usr/bin/env expect
+# Production-style HOME paths may contain spaces. Aish should create and use
+# $HOME/.aish correctly without relying on shell-unsafe path handling.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set isolated_home "/tmp/aish home with spaces [pid] [clock clicks]"
+file delete -force $isolated_home
+file mkdir $isolated_home
+set old_home $::env(HOME)
+set old_aish_home_exists [info exists ::env(AISH_HOME)]
+if {$old_aish_home_exists} {
+    set old_aish_home $::env(AISH_HOME)
+}
+unset -nocomplain ::env(AISH_HOME)
+set ::env(HOME) $isolated_home
+set aish_home "$isolated_home/.aish"
+
+aish_spawn_without_aish_home
+
+if {![file exists "$aish_home/config.toml"]} {
+    puts stderr "missing config under HOME with spaces: $aish_home/config.toml"
+    exit 6
+}
+
+aish_send "#doctor"
+aish_enter
+aish_expect "config_path=$aish_home/config.toml"
+aish_expect "events_path=$aish_home/logs/events.jsonl"
+aish_wait_prompt
+
+aish_send "echo home-spaces-ok"
+aish_enter
+aish_expect "home-spaces-ok"
+aish_wait_prompt
+
+aish_quit
+
+set ::env(HOME) $old_home
+if {$old_aish_home_exists} {
+    set ::env(AISH_HOME) $old_aish_home
+} else {
+    unset -nocomplain ::env(AISH_HOME)
+}
+file delete -force $isolated_home

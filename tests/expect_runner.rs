@@ -163,6 +163,11 @@ fn home_unwritable_fails_cleanly() {
 }
 
 #[test]
+fn home_path_with_spaces_works() {
+    run_script("home_path_with_spaces_works.exp");
+}
+
+#[test]
 fn cd_persists() {
     run_script("cd_persists.exp");
 }
