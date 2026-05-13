@@ -113,6 +113,11 @@ fn output_then_redraw_interactions() {
 }
 
 #[test]
+fn first_run_doctor() {
+    run_script("first_run_doctor.exp");
+}
+
+#[test]
 fn cd_persists() {
     run_script("cd_persists.exp");
 }

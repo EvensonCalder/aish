@@ -1,0 +1,45 @@
+#!/usr/bin/env expect
+# A brand-new isolated AISH_HOME should start, create the first-run layout,
+# run immediate diagnostics, and exit cleanly.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set home [aish_new_home]
+file delete -force $home
+set ::env(AISH_HOME) $home
+
+aish_spawn
+
+if {![file isdirectory $home]} {
+    puts stderr "AISH_HOME was not created: $home"
+    exit 6
+}
+
+foreach path [list \
+    $home/config.toml \
+    $home/history \
+    $home/templates \
+    $home/secrets \
+    $home/logs \
+    $home/cache/runtime \
+] {
+    if {![file exists $path]} {
+        puts stderr "missing first-run path: $path"
+        exit 6
+    }
+}
+
+aish_send "#doctor"
+aish_enter
+aish_expect "Aish doctor"
+aish_expect "mode=>"
+aish_expect "pty=ok"
+aish_expect "gpg=not_configured"
+aish_expect "git=not_configured"
+aish_expect "fzf=external"
+aish_expect "config_path=$home/config.toml"
+aish_expect "events_path=$home/logs/events.jsonl"
+aish_wait_prompt
+
+aish_quit
