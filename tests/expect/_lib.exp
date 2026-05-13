@@ -33,11 +33,11 @@ proc aish_spawn {} {
     aish_wait_prompt
 }
 
-# Wait for the trailing `> ` of the draft prompt, allowing ANSI cursor codes
-# (e.g. ESC[19G) immediately after it.
+# Wait for the draft prompt line, allowing optional restored draft text before
+# the ANSI cursor-positioning codes.
 proc aish_wait_prompt {} {
     expect {
-        -re {> \x1b\[}     {}
+        -re {> [^\r\n]*\x1b\[}     {}
         timeout            { puts stderr "no prompt"; exit 2 }
         eof                { puts stderr "eof before prompt"; exit 2 }
     }

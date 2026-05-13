@@ -684,6 +684,7 @@ pub fn run() -> Result<()> {
     let (layout, config) = config::init_default_layout(config::default_aish_dir())?;
     let store = HistoryStore::load(&layout)?;
     let mut backend = PtyBackend::spawn(&config.shell.backend)?;
+    let restored_draft = latest_persisted_draft(&store, config.draft.persist);
     let mut state = AppState {
         current_cwd: backend.initial_cwd().map(PathBuf::from),
         backend_shell: Some(backend.shell_program().to_string()),
@@ -709,6 +710,9 @@ pub fn run() -> Result<()> {
         editor_temp_root: Some(layout.runtime_cache.join("editor")),
         ..AppState::default()
     };
+    if let Some(draft) = restored_draft {
+        state.draft = InputBuffer::from(draft);
+    }
     run_startup_sync_check(&mut state, &layout.root, &mut io::stdout())?;
     crate::terminal::run(
         &mut state,
@@ -716,6 +720,14 @@ pub fn run() -> Result<()> {
         &mut io::stdout(),
         Duration::from_secs(60),
     )
+}
+
+fn latest_persisted_draft(store: &HistoryStore, persist_enabled: bool) -> Option<String> {
+    persist_enabled
+        .then(|| store.drafts.last())
+        .flatten()
+        .map(|entry| entry.text.clone())
+        .filter(|text| !text.is_empty())
 }
 
 pub fn execute_draft(
@@ -2333,6 +2345,35 @@ mod tests {
 
         state.mode = Mode::Ai;
         assert_eq!(state.render_prompt_line(), "% ");
+    }
+
+    #[test]
+    fn latest_persisted_draft_restores_only_when_enabled() {
+        let store = HistoryStore {
+            drafts: vec![
+                DraftEntry {
+                    t: 1,
+                    text: "old".to_string(),
+                },
+                DraftEntry {
+                    t: 2,
+                    text: "new".to_string(),
+                },
+            ],
+            ..empty_history_store()
+        };
+
+        assert_eq!(latest_persisted_draft(&store, true).as_deref(), Some("new"));
+        assert_eq!(latest_persisted_draft(&store, false), None);
+
+        let empty_store = HistoryStore {
+            drafts: vec![DraftEntry {
+                t: 3,
+                text: String::new(),
+            }],
+            ..empty_history_store()
+        };
+        assert_eq!(latest_persisted_draft(&empty_store, true), None);
     }
 
     #[test]
@@ -4780,6 +4821,18 @@ mod tests {
             let mut permissions = std::fs::metadata(path).unwrap().permissions();
             permissions.set_mode(0o700);
             std::fs::set_permissions(path, permissions).unwrap();
+        }
+    }
+
+    fn empty_history_store() -> HistoryStore {
+        HistoryStore {
+            regular: Vec::new(),
+            regular_newest_indices: Vec::new(),
+            drafts: Vec::new(),
+            ai_sessions: Vec::new(),
+            ai_command_indices: Vec::new(),
+            notes: Vec::new(),
+            errors: Vec::new(),
         }
     }
 }
