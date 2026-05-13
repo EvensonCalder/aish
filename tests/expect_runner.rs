@@ -223,6 +223,11 @@ fn template_picker_cancel_preserves_draft() {
 }
 
 #[test]
+fn git_branch_picker_cancel_preserves_draft() {
+    run_script("git_branch_picker_cancel_preserves_draft.exp");
+}
+
+#[test]
 fn draft_persists_across_restarts() {
     run_script("draft_persists_across_restarts.exp");
 }
