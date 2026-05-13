@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
+use crate::config::SyncConfig;
 use crate::log::{DEFAULT_MAX_EVENTS, EventLevel, append_event};
 
 const GITIGNORE_BEGIN: &str = "# BEGIN AISH MANAGED";
@@ -19,6 +20,16 @@ pub struct TrackedManagedFilesWarning {
 pub enum SyncFailureKind {
     Conflict,
     Failure,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StartupSyncDecision {
+    Due,
+    Disabled,
+    MissingRemote,
+    MissingSchedule,
+    NotDue { next_due_at: i64 },
+    UnsupportedSchedule(String),
 }
 
 #[derive(Debug)]
@@ -189,6 +200,68 @@ pub fn log_sync_failure(
     )
 }
 
+pub fn startup_sync_decision(
+    config: &SyncConfig,
+    now_unix: i64,
+    last_attempt_unix: Option<i64>,
+) -> StartupSyncDecision {
+    if !config.enabled {
+        return StartupSyncDecision::Disabled;
+    }
+    if config.remote.trim().is_empty() {
+        return StartupSyncDecision::MissingRemote;
+    }
+    let schedule = config.schedule.trim();
+    if schedule.is_empty() {
+        return StartupSyncDecision::MissingSchedule;
+    }
+    let Some(interval_seconds) = conservative_schedule_interval_seconds(schedule) else {
+        return StartupSyncDecision::UnsupportedSchedule(schedule.to_string());
+    };
+    let Some(last_attempt_unix) = last_attempt_unix else {
+        return StartupSyncDecision::Due;
+    };
+    let next_due_at = last_attempt_unix.saturating_add(interval_seconds);
+    if now_unix >= next_due_at {
+        StartupSyncDecision::Due
+    } else {
+        StartupSyncDecision::NotDue { next_due_at }
+    }
+}
+
+fn conservative_schedule_interval_seconds(schedule: &str) -> Option<i64> {
+    match schedule {
+        "@hourly" => Some(60 * 60),
+        "@daily" => Some(24 * 60 * 60),
+        _ => five_field_cron_interval_seconds(schedule),
+    }
+}
+
+fn five_field_cron_interval_seconds(schedule: &str) -> Option<i64> {
+    let fields: Vec<&str> = schedule.split_whitespace().collect();
+    match fields.as_slice() {
+        [minute, "*", "*", "*", "*"] if minute.starts_with("*/") => {
+            cron_step_interval_seconds(minute, 60)
+        }
+        ["0", hour, "*", "*", "*"] if hour.starts_with("*/") => {
+            cron_step_interval_seconds(hour, 60 * 60)
+        }
+        ["0", "0", "*", "*", "*"] => Some(24 * 60 * 60),
+        ["0", "0", day, "*", "*"] if day.starts_with("*/") => {
+            cron_step_interval_seconds(day, 24 * 60 * 60)
+        }
+        _ => None,
+    }
+}
+
+fn cron_step_interval_seconds(field: &str, unit_seconds: i64) -> Option<i64> {
+    let step = field.strip_prefix("*/")?.parse::<i64>().ok()?;
+    if step <= 0 {
+        return None;
+    }
+    Some(step * unit_seconds)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -323,6 +396,71 @@ mod tests {
         assert_eq!(
             loaded.items[0].msg,
             "sync conflict: merge conflict near [redacted]"
+        );
+    }
+
+    #[test]
+    fn startup_sync_decision_skips_when_not_configured() {
+        let mut config = SyncConfig::default();
+        assert_eq!(
+            startup_sync_decision(&config, 100, None),
+            StartupSyncDecision::Disabled
+        );
+
+        config.enabled = true;
+        assert_eq!(
+            startup_sync_decision(&config, 100, None),
+            StartupSyncDecision::MissingRemote
+        );
+
+        config.remote = "git@example.test:aish.git".to_string();
+        assert_eq!(
+            startup_sync_decision(&config, 100, None),
+            StartupSyncDecision::MissingSchedule
+        );
+    }
+
+    #[test]
+    fn startup_sync_decision_handles_supported_schedules_conservatively() {
+        let config = SyncConfig {
+            enabled: true,
+            remote: "git@example.test:aish.git".to_string(),
+            schedule: "*/15 * * * *".to_string(),
+            ai: false,
+            history: false,
+            templates: false,
+            drafts: false,
+        };
+
+        assert_eq!(
+            startup_sync_decision(&config, 100, None),
+            StartupSyncDecision::Due
+        );
+        assert_eq!(
+            startup_sync_decision(&config, 1000, Some(200)),
+            StartupSyncDecision::NotDue { next_due_at: 1100 }
+        );
+        assert_eq!(
+            startup_sync_decision(&config, 1100, Some(200)),
+            StartupSyncDecision::Due
+        );
+    }
+
+    #[test]
+    fn startup_sync_decision_rejects_unsupported_cron_without_side_effects() {
+        let config = SyncConfig {
+            enabled: true,
+            remote: "git@example.test:aish.git".to_string(),
+            schedule: "5 4 * * mon".to_string(),
+            ai: false,
+            history: false,
+            templates: false,
+            drafts: false,
+        };
+
+        assert_eq!(
+            startup_sync_decision(&config, 100, Some(0)),
+            StartupSyncDecision::UnsupportedSchedule("5 4 * * mon".to_string())
         );
     }
 }

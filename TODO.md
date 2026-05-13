@@ -646,7 +646,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 - [x] Maintain managed `.gitignore` section.
 - [x] Warn if files may already be tracked; do not run `git rm --cached` automatically.
 - [x] Implement lock file.
-- [ ] Implement startup cron check.
+- [x] Implement startup cron check.
 - [ ] Implement conservative sync flow:
   - [ ] pull --rebase
   - [ ] add managed files
