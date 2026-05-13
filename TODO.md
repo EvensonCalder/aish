@@ -584,7 +584,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 - [ ] Log:
   - [x] AI request success/failure
   - [x] context confirmation/skip
-  - [ ] encryption changes
+  - [x] encryption changes
   - [ ] sync changes
   - [ ] sync failures
   - [x] config errors
