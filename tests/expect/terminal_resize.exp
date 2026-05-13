@@ -1,0 +1,18 @@
+#!/usr/bin/env expect
+# Aish should read the terminal size at startup and forward it to the backend
+# PTY so child commands observe the real visible rows/columns. Dynamic runtime
+# resize is covered by Rust PTY tests because portable Expect slave-PTY resize is
+# not available consistently across platforms.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set stty_init "rows 17 columns 77"
+aish_spawn
+
+aish_send "stty size"
+aish_enter
+aish_expect "17 77"
+aish_wait_prompt
+
+aish_quit

@@ -278,6 +278,11 @@ fn long_unicode_input() {
 }
 
 #[test]
+fn terminal_resize() {
+    run_script("terminal_resize.exp");
+}
+
+#[test]
 fn escape_clears_draft() {
     run_script("escape_clears_draft.exp");
 }
