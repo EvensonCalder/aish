@@ -223,6 +223,11 @@ fn history_persists_across_restarts() {
 }
 
 #[test]
+fn home_default_history_persists() {
+    run_script("home_default_history_persists.exp");
+}
+
+#[test]
 fn history_picker_cancel_preserves_draft() {
     run_script("history_picker_cancel_preserves_draft.exp");
 }
