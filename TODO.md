@@ -670,10 +670,10 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 
 - [ ] Replace simple prompt marker with shell-specific integration where possible.
 - [ ] Bash integration:
-  - [ ] prompt-ready marker
+  - [x] prompt-ready marker
   - [x] command-start marker
-  - [ ] command-finish marker with exit code
-  - [ ] cwd reporting
+  - [x] command-finish marker with exit code
+  - [x] cwd reporting
 - [ ] Zsh integration:
   - [x] `precmd`
   - [x] `preexec`

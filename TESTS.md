@@ -15,7 +15,7 @@ Current test inventory:
 - 322 library unit tests.
 - 23 draft execution integration tests.
 - 1 first-run integration test.
-- 6 active bash PTY integration tests.
+- 7 active bash PTY integration tests.
 - 2 active zsh PTY integration tests.
 - 37 expect-driven end-to-end interactive scenarios.
 - Bash PTY startup records the backend shell's initial cwd so the first prompt matches the shell state before any command executes.
@@ -308,6 +308,7 @@ Implemented:
 - Manual `#push` sync is covered against a local bare git remote, including pull-rebase, managed `.gitignore` add, commit, push, and completion event logging without network access.
 - Startup `#sync <cron-expression>` behavior is covered for due and not-due schedules using a runtime timestamp file, sync lock, and local bare git remote without creating scheduler files.
 - Marker-based shell integration now emits and parses command-start markers, with shell-quoting tests and PTY coverage that bash reports `started_command` without leaking internal markers into history.
+- Bash marker integration has PTY coverage for prompt-ready initial cwd, command-start reporting, command-finish exit status, and cwd reporting after command execution.
 - `#key set` remains a placeholder, while `#key clear` removes the encrypted key file if present and logs the action without printing stored secret content.
 - `#completion` remains a private-command placeholder, but the internal completion engine is active for draft completion display and acceptance.
 - Completion has pure current-token detection helpers that handle first-token classification, non-first-token classification, quoted whitespace, escaped whitespace, cursor-in-line contexts, path-like tokens, and UTF-8 cursor snapping.

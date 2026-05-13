@@ -105,6 +105,21 @@ fn pty_backend_captures_failed_command_exit_status() {
 }
 
 #[test]
+fn pty_backend_reports_finish_status_and_cwd() {
+    let _guard = pty_test_guard();
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+
+    let result = backend
+        .run_command("cd /tmp && false", Duration::from_secs(5))
+        .unwrap();
+
+    assert_eq!(result.started_command.as_deref(), Some("cd /tmp && false"));
+    assert_eq!(result.exit_code, 1);
+    assert_eq!(result.cwd.as_deref(), Some("/tmp"));
+    assert!(result.output.trim().is_empty());
+}
+
+#[test]
 fn pty_backend_does_not_confuse_user_output_with_prompt_marker() {
     let _guard = pty_test_guard();
     let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
