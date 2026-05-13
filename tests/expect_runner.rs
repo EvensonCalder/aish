@@ -438,6 +438,11 @@ fn multiline_paste_editor_review() {
 }
 
 #[test]
+fn home_default_multiline_paste_editor_review() {
+    run_script("home_default_multiline_paste_editor_review.exp");
+}
+
+#[test]
 fn read_only_edit_copies_to_draft() {
     run_script("read_only_edit_copies_to_draft.exp");
 }

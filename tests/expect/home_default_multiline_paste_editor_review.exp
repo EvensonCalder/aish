@@ -1,0 +1,38 @@
+#!/usr/bin/env expect
+# Production-style multiline paste: without AISH_HOME, bracketed multiline paste
+# should create a review draft and execute only after explicit Enter.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set isolated_home "/tmp/aish-home-paste-[pid]-[clock clicks]"
+file delete -force $isolated_home
+file mkdir $isolated_home
+set old_home $::env(HOME)
+set old_aish_home_exists [info exists ::env(AISH_HOME)]
+if {$old_aish_home_exists} {
+    set old_aish_home $::env(AISH_HOME)
+}
+unset -nocomplain ::env(AISH_HOME)
+set ::env(HOME) $isolated_home
+
+aish_spawn_without_aish_home
+
+aish_send "\x1b\[200~echo home-paste-one\necho home-paste-two\x1b\[201~"
+aish_expect "\[editor draft: 2 line(s)"
+aish_expect "review before Enter"
+aish_expect "Enter to run"
+
+aish_enter
+aish_expect "home-paste-one"
+aish_expect "home-paste-two"
+aish_wait_prompt
+aish_quit
+
+set ::env(HOME) $old_home
+if {$old_aish_home_exists} {
+    set ::env(AISH_HOME) $old_aish_home
+} else {
+    unset -nocomplain ::env(AISH_HOME)
+}
+file delete -force $isolated_home
