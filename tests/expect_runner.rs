@@ -503,6 +503,11 @@ fn ai_mode_edit_copies_to_draft() {
 }
 
 #[test]
+fn home_default_ai_mode_edit_copies_to_draft() {
+    run_script("home_default_ai_mode_edit_copies_to_draft.exp");
+}
+
+#[test]
 fn ai_config_persists() {
     run_script("ai_config_persists.exp");
 }

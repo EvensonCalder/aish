@@ -1,0 +1,48 @@
+#!/usr/bin/env expect
+# Production-style AI read-only edit: without AISH_HOME, typing while viewing an
+# AI item loaded from $HOME/.aish should copy it to draft before editing.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set isolated_home "/tmp/aish-home-ai-edit-[pid]-[clock clicks]"
+file delete -force $isolated_home
+file mkdir $isolated_home
+set old_home $::env(HOME)
+set old_aish_home_exists [info exists ::env(AISH_HOME)]
+if {$old_aish_home_exists} {
+    set old_aish_home $::env(AISH_HOME)
+}
+unset -nocomplain ::env(AISH_HOME)
+set ::env(HOME) $isolated_home
+set aish_home "$isolated_home/.aish"
+
+aish_spawn_without_aish_home
+aish_quit
+
+set fh [open "$aish_home/history/ai.jsonl" w]
+puts $fh {{"id":"home-s1","t":1,"prompt":"expect","ctx":false,"model":"test","items":[{"kind":"command","text":"echo home-ai-copy"}]}}
+close $fh
+
+aish_spawn_without_aish_home
+
+aish_send "\t"
+aish_expect "\$ "
+aish_send "\t"
+aish_expect "% "
+aish_expect "echo home-ai-copy"
+
+aish_send "X"
+aish_expect "> echo home-ai-copyX"
+
+aish_send "\x03"
+aish_wait_prompt
+aish_quit
+
+set ::env(HOME) $old_home
+if {$old_aish_home_exists} {
+    set ::env(AISH_HOME) $old_aish_home
+} else {
+    unset -nocomplain ::env(AISH_HOME)
+}
+file delete -force $isolated_home
