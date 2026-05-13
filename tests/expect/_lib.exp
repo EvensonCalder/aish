@@ -33,6 +33,14 @@ proc aish_spawn {} {
     aish_wait_prompt
 }
 
+proc aish_spawn_without_aish_home {} {
+    global spawn_id
+    unset -nocomplain ::env(AISH_HOME)
+    set bin $::env(AISH_BIN)
+    spawn -noecho $bin
+    aish_wait_prompt
+}
+
 # Wait for the draft prompt line, allowing optional restored draft text before
 # the ANSI cursor-positioning codes.
 proc aish_wait_prompt {} {

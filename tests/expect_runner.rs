@@ -123,6 +123,11 @@ fn first_run_doctor() {
 }
 
 #[test]
+fn home_default_first_run_doctor() {
+    run_script("home_default_first_run_doctor.exp");
+}
+
+#[test]
 fn invalid_config_startup() {
     run_script("invalid_config_startup.exp");
 }

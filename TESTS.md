@@ -18,7 +18,7 @@ Current test inventory:
 - 7 active bash PTY integration tests.
 - 2 active zsh PTY integration tests.
 - 1 conditional fish PTY integration test.
-- 58 expect-driven end-to-end interactive scenarios.
+- 59 expect-driven end-to-end interactive scenarios.
 - Bash PTY startup records the backend shell's initial cwd so the first prompt matches the shell state before any command executes.
 - Backend PTY startup inherits Aish's current directory and can be resized so child commands such as `ls` see the real terminal width.
 - 0 doctests.
@@ -61,7 +61,7 @@ Expect scenarios are the acceptance layer for user-visible terminal behavior. Th
 | Mode switching and read-only behavior | `empty_tab_cycles_modes`, `history_mode_execute`, `history_persists_across_restarts`, `draft_persists_across_restarts`, `read_only_edit_copies_to_draft`, `ai_mode_executes_sequence`, `ai_mode_edit_copies_to_draft`, `output_then_redraw_interactions` | Covered | Add more mode redraw regressions only for observed failures. |
 | Completion UI | `completion_accept_single`, `completion_panel_multiple`, `output_then_redraw_interactions` | Covered | Add completion-panel-after-output regression if observed. |
 | Picker cancellation UX | `history_picker_cancel_preserves_draft`, `file_picker_cancel_preserves_draft`, `template_picker_cancel_preserves_draft`, `git_branch_picker_cancel_preserves_draft`, `env_var_picker_cancel_preserves_draft` | Covered | Add picker success-path expect scenarios only when picker replacement UI changes; Rust tests cover replacement logic. |
-| Private command UX and diagnostics | `first_run_doctor`, `invalid_config_startup`, `help_lists_commands`, `unknown_private_command`, `private_command_safe_failures`, `status_doctor_config`, `key_and_sync_placeholders`, `key_clear_removes_stored_key`, `ai_config_persists` | Covered | Add new safe-failure scenarios when new private commands are added. |
+| Private command UX and diagnostics | `first_run_doctor`, `home_default_first_run_doctor`, `invalid_config_startup`, `help_lists_commands`, `unknown_private_command`, `private_command_safe_failures`, `status_doctor_config`, `key_and_sync_placeholders`, `key_clear_removes_stored_key`, `ai_config_persists` | Covered | Add new safe-failure scenarios when new private commands are added. |
 | Notes, context, and logs | `notes_are_swallowed`, `context_confirmation_skip`, `context_dangerous_refusal`, `log_shows_context_skip` | Covered | Add new context scenarios only for observed regressions. |
 | Templates | `template_use_executes`, `template_crud`, `template_placeholder_blocks_execution` | Covered | Add completion/template interaction if UI changes. |
 | Editor and paste flows | `external_editor_roundtrip`, `external_editor_failure_preserves_draft`, `editor_hash_content_bypasses_parser`, `multiline_paste_editor_review` | Covered | Add large paste boundary if practical. |
@@ -96,6 +96,7 @@ Implemented:
 - `AISH_HOME` override for tests and isolated runs.
 - Paste config defaults: `multiline = "editor"`, `confirm_execute = true`.
 - First-run directory creation.
+- Default production home creation at `$HOME/.aish` when `AISH_HOME` is unset.
 - Missing config creates default `config.toml`.
 - Invalid config returns a readable error.
 - Draft config defaults: `persist = true`, `sync = false`.
@@ -109,6 +110,7 @@ Tests:
 - `config::tests::aish_home_environment_overrides_default_root`
 - `first_run_creates_aish_home_without_user_home_side_effects`
 - `first_run_doctor` expect scenario
+- `home_default_first_run_doctor` expect scenario
 - `invalid_config_startup` expect scenario
 
 Status:
