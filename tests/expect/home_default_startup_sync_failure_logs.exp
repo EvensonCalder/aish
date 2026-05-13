@@ -1,0 +1,91 @@
+#!/usr/bin/env expect
+# Production-style startup sync failure: without AISH_HOME, a due startup sync
+# against a missing local remote should log the failure, record an attempt, and
+# avoid scheduler files.
+
+set timeout 15
+source [file dirname [info script]]/_lib.exp
+
+set root "/tmp/aish-home-startup-sync-failure-[pid]-[clock clicks]"
+set isolated_home "$root/user-home"
+set aish_home "$isolated_home/.aish"
+set missing_remote "$root/missing-remote.git"
+file delete -force $root
+file mkdir $root
+file mkdir $isolated_home
+set old_home $::env(HOME)
+set old_git_author_name_exists [info exists ::env(GIT_AUTHOR_NAME)]
+set old_git_author_email_exists [info exists ::env(GIT_AUTHOR_EMAIL)]
+set old_git_committer_name_exists [info exists ::env(GIT_COMMITTER_NAME)]
+set old_git_committer_email_exists [info exists ::env(GIT_COMMITTER_EMAIL)]
+if {$old_git_author_name_exists} { set old_git_author_name $::env(GIT_AUTHOR_NAME) }
+if {$old_git_author_email_exists} { set old_git_author_email $::env(GIT_AUTHOR_EMAIL) }
+if {$old_git_committer_name_exists} { set old_git_committer_name $::env(GIT_COMMITTER_NAME) }
+if {$old_git_committer_email_exists} { set old_git_committer_email $::env(GIT_COMMITTER_EMAIL) }
+set old_aish_home_exists [info exists ::env(AISH_HOME)]
+if {$old_aish_home_exists} {
+    set old_aish_home $::env(AISH_HOME)
+}
+unset -nocomplain ::env(AISH_HOME)
+set ::env(HOME) $isolated_home
+set ::env(GIT_AUTHOR_NAME) "Aish Expect"
+set ::env(GIT_AUTHOR_EMAIL) "aish@example.invalid"
+set ::env(GIT_COMMITTER_NAME) "Aish Expect"
+set ::env(GIT_COMMITTER_EMAIL) "aish@example.invalid"
+
+aish_spawn_without_aish_home
+
+aish_send "#set-remote $missing_remote"
+aish_enter
+aish_expect "sync.remote=$missing_remote"
+aish_wait_prompt
+
+aish_send "#sync @hourly"
+aish_enter
+aish_expect "sync.enabled=true"
+aish_expect "sync.schedule=@hourly"
+aish_expect "no scheduler file created"
+aish_wait_prompt
+
+aish_send "#sync history on"
+aish_enter
+aish_expect "sync.history=true"
+aish_wait_prompt
+
+aish_send "echo startup-sync-failure-history"
+aish_enter
+aish_expect "startup-sync-failure-history"
+aish_wait_prompt
+
+aish_quit
+
+file delete -force "$aish_home/cache/runtime/sync.last_attempt"
+
+aish_spawn_without_aish_home
+aish_send "#log 20"
+aish_enter
+aish_expect "sync failed"
+aish_wait_prompt
+aish_quit
+
+if {[file exists "$aish_home/cache/runtime/scheduler"]} {
+    puts stderr "unexpected scheduler file created by failed startup sync"
+    exit 6
+}
+
+if {![file exists "$aish_home/cache/runtime/sync.last_attempt"]} {
+    puts stderr "failed startup sync did not record last attempt"
+    exit 6
+}
+
+set ::env(HOME) $old_home
+if {$old_aish_home_exists} {
+    set ::env(AISH_HOME) $old_aish_home
+} else {
+    unset -nocomplain ::env(AISH_HOME)
+}
+if {$old_git_author_name_exists} { set ::env(GIT_AUTHOR_NAME) $old_git_author_name } else { unset -nocomplain ::env(GIT_AUTHOR_NAME) }
+if {$old_git_author_email_exists} { set ::env(GIT_AUTHOR_EMAIL) $old_git_author_email } else { unset -nocomplain ::env(GIT_AUTHOR_EMAIL) }
+if {$old_git_committer_name_exists} { set ::env(GIT_COMMITTER_NAME) $old_git_committer_name } else { unset -nocomplain ::env(GIT_COMMITTER_NAME) }
+if {$old_git_committer_email_exists} { set ::env(GIT_COMMITTER_EMAIL) $old_git_committer_email } else { unset -nocomplain ::env(GIT_COMMITTER_EMAIL) }
+file delete -force $root

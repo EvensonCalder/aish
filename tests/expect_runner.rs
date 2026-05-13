@@ -328,6 +328,11 @@ fn home_default_startup_sync_unsupported_schedule() {
 }
 
 #[test]
+fn home_default_startup_sync_failure_logs() {
+    run_script("home_default_startup_sync_failure_logs.exp");
+}
+
+#[test]
 fn sync_push_local_remote() {
     run_script("sync_push_local_remote.exp");
 }
