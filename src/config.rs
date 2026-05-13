@@ -238,10 +238,13 @@ pub fn default_aish_dir() -> PathBuf {
 pub fn runtime_aish_dir() -> Result<PathBuf> {
     if let Ok(home) = std::env::var("AISH_HOME") {
         let home = home.trim();
-        if home.is_empty() {
-            bail!("AISH_HOME or HOME must be set to an absolute path");
+        if !home.is_empty() {
+            let home = PathBuf::from(home);
+            if !home.is_absolute() {
+                bail!("AISH_HOME must be set to an absolute path");
+            }
+            return Ok(home);
         }
-        return Ok(PathBuf::from(home));
     }
 
     let Some(home) = std::env::var_os("HOME") else {
@@ -334,6 +337,9 @@ pub fn normalize_config(config: &mut Config) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn default_config_matches_spec_basics() {
@@ -474,6 +480,7 @@ mod tests {
 
     #[test]
     fn aish_home_environment_overrides_default_root() {
+        let _guard = ENV_LOCK.lock().unwrap();
         let temp = tempfile::tempdir().unwrap();
         unsafe {
             std::env::set_var("AISH_HOME", temp.path());
@@ -489,6 +496,7 @@ mod tests {
 
     #[test]
     fn runtime_aish_dir_rejects_missing_home() {
+        let _guard = ENV_LOCK.lock().unwrap();
         unsafe {
             std::env::remove_var("AISH_HOME");
             std::env::set_var("HOME", "");
@@ -500,5 +508,38 @@ mod tests {
             std::env::remove_var("HOME");
         }
         assert!(err.contains("AISH_HOME or HOME must be set to an absolute path"));
+    }
+
+    #[test]
+    fn runtime_aish_dir_empty_aish_home_falls_back_to_home() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        unsafe {
+            std::env::set_var("AISH_HOME", "");
+            std::env::set_var("HOME", temp.path());
+        }
+
+        let root = runtime_aish_dir().unwrap();
+
+        unsafe {
+            std::env::remove_var("AISH_HOME");
+            std::env::remove_var("HOME");
+        }
+        assert_eq!(root, temp.path().join(".aish"));
+    }
+
+    #[test]
+    fn runtime_aish_dir_rejects_relative_aish_home() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        unsafe {
+            std::env::set_var("AISH_HOME", "relative-aish");
+        }
+
+        let err = runtime_aish_dir().unwrap_err().to_string();
+
+        unsafe {
+            std::env::remove_var("AISH_HOME");
+        }
+        assert!(err.contains("AISH_HOME must be set to an absolute path"));
     }
 }
