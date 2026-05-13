@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 334 library unit tests.
+- 335 library unit tests.
 - 23 draft execution integration tests.
 - 1 first-run integration test.
 - 7 active bash PTY integration tests.
@@ -66,7 +66,7 @@ Expect scenarios are the acceptance layer for user-visible terminal behavior. Th
 | Editor and paste flows | `external_editor_roundtrip`, `editor_hash_content_bypasses_parser`, `multiline_paste_editor_review` | Covered | Add editor failure path and large paste boundary if practical. |
 | Sync | `key_and_sync_placeholders`, `sync_push_local_remote`, `sync_push_failure_logs` | Covered | Add conflict-specific expect scenario if sync conflict UI changes. |
 | Passthrough/interactive programs | `passthrough_less` when `less` is available; key forwarding is Rust-covered | Partial | Full automatic passthrough detection still needs an async PTY design for alternate-screen/prompt-return detection. |
-| Encryption/GPG | `key_clear_removes_stored_key` | Partial | Add fake GPG or test-key flow before claiming encryption completion. |
+| Encryption/GPG | `key_clear_removes_stored_key`, `key_and_sync_placeholders` | Partial | Add fake GPG or test-key flow before claiming encryption completion. |
 
 ## Feature Coverage
 
@@ -336,6 +336,7 @@ Implemented:
 - Interactive passthrough command allowlist detects common fullscreen/interactive commands, basenames, shell quoting, assignments, and wrappers such as `sudo`, `env`, `command`, and `exec` without changing runtime behavior yet.
 - Alternate-screen buffer detection tracks common enter/exit CSI sequences (`?47`, `?1047`, `?1049`) and ignores unrelated terminal styling escapes.
 - Passthrough prompt-return detection requires process exit and normal-screen state before Aish redraws its prompt after an interactive command.
+- `#encrypt on` warns that existing plaintext may remain in git history and that Aish will not rewrite history automatically, while encryption remains otherwise unimplemented.
 - Prompt redraw after ordinary command output has both a Rust virtual-screen regression and an expect scenario requiring command output line termination before the next prompt.
 - Command output followed by mode-switch redraw and unique completion acceptance has expect coverage through the real binary.
 - Manual `#push` sync has expect coverage against a local temporary bare git remote, including managed `.gitignore` push and no scheduler file creation.

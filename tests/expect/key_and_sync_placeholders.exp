@@ -19,6 +19,7 @@ aish_wait_prompt
 
 aish_send "#encrypt on"
 aish_enter
+aish_expect "warning: existing plaintext data may remain in git history; Aish will not rewrite history automatically"
 aish_expect "encryption is not implemented yet; no data changed"
 aish_wait_prompt
 

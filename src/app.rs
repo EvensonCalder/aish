@@ -27,6 +27,7 @@ use crate::editor::{
     EditorCommand, EditorRunResult, PreparedEditorSession, prepare_editor_file, read_editor_file,
     resolve_editor_command, run_editor_command,
 };
+use crate::encryption::plaintext_git_history_warning;
 use crate::history::{
     AiCommandIndex, AiItem, AiItemKind, AiSession, DraftEntry, HistoryEntry, HistorySource,
     HistoryStore, NoteEntry, ai_command_indices, append_jsonl, load_jsonl, trim_combined_history,
@@ -1097,6 +1098,9 @@ pub fn execute_draft(
                         return Ok(());
                     }
                     "encrypt" => {
+                        if args.split_whitespace().next() == Some("on") {
+                            writeln!(out, "{}", plaintext_git_history_warning())?;
+                        }
                         writeln!(out, "encryption is not implemented yet; no data changed")?;
                         state.draft.clear();
                         state.mode = Mode::Draft;
