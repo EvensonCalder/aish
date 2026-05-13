@@ -1,0 +1,80 @@
+#!/usr/bin/env expect
+# Production-style completion: without AISH_HOME, path completion should work in
+# the current directory while history/templates are stored under $HOME/.aish.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set isolated_home "/tmp/aish-home-completion-[pid]-[clock clicks]"
+set workdir "/tmp/aish-home-completion-work-[pid]-[clock clicks]"
+file delete -force $isolated_home
+file delete -force $workdir
+file mkdir $isolated_home
+file mkdir $workdir
+set old_home $::env(HOME)
+set old_aish_home_exists [info exists ::env(AISH_HOME)]
+if {$old_aish_home_exists} {
+    set old_aish_home $::env(AISH_HOME)
+}
+unset -nocomplain ::env(AISH_HOME)
+set ::env(HOME) $isolated_home
+set aish_home "$isolated_home/.aish"
+
+set fh [open "$workdir/home-completion-one.txt" w]
+puts $fh "one"
+close $fh
+set fh [open "$workdir/home-completion-two.txt" w]
+puts $fh "two"
+close $fh
+set fh [open "$workdir/home-unique-target.txt" w]
+puts $fh "unique"
+close $fh
+
+aish_spawn_without_aish_home
+
+aish_send "cd $workdir"
+aish_enter
+aish_wait_prompt
+
+aish_send "#mt home-complete-template echo should-not-run"
+aish_enter
+aish_expect "template stored: home-complete-template"
+aish_wait_prompt
+
+aish_send "echo home-completion-history"
+aish_enter
+aish_expect "home-completion-history"
+aish_wait_prompt
+
+aish_send "cat home-unique-tar"
+aish_send "\t"
+aish_expect "home-unique-target.txt"
+aish_send "\x03"
+aish_wait_prompt
+
+aish_send "cat home-completion-"
+aish_send "\t"
+aish_expect "file\thome-completion-one.txt"
+aish_expect "file\thome-completion-two.txt"
+aish_send "\x03"
+aish_wait_prompt
+
+aish_quit
+
+if {![file exists "$aish_home/templates/templates.jsonl"]} {
+    puts stderr "template completion setup did not persist under default home"
+    exit 6
+}
+if {![file exists "$aish_home/history/regular.jsonl"]} {
+    puts stderr "history completion setup did not persist under default home"
+    exit 6
+}
+
+set ::env(HOME) $old_home
+if {$old_aish_home_exists} {
+    set ::env(AISH_HOME) $old_aish_home
+} else {
+    unset -nocomplain ::env(AISH_HOME)
+}
+file delete -force $workdir
+file delete -force $isolated_home

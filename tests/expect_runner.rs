@@ -253,6 +253,11 @@ fn completion_panel_multiple() {
 }
 
 #[test]
+fn home_default_completion_ui() {
+    run_script("home_default_completion_ui.exp");
+}
+
+#[test]
 fn history_mode_execute() {
     run_script("history_mode_execute.exp");
 }
