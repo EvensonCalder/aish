@@ -7,6 +7,12 @@ const GITIGNORE_BEGIN: &str = "# BEGIN AISH MANAGED";
 const GITIGNORE_END: &str = "# END AISH MANAGED";
 const MANAGED_GITIGNORE_LINES: &[&str] = &["cache/", "logs/", "secrets/", "*.tmp"];
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrackedManagedFilesWarning {
+    pub paths: Vec<String>,
+    pub message: String,
+}
+
 #[derive(Debug)]
 pub struct SyncLock {
     path: PathBuf,
@@ -118,6 +124,44 @@ fn managed_gitignore_section() -> String {
     output
 }
 
+pub fn tracked_managed_files_warning<I, S>(tracked_paths: I) -> Option<TrackedManagedFilesWarning>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut paths: Vec<String> = tracked_paths
+        .into_iter()
+        .filter_map(|path| managed_tracked_path(path.as_ref()))
+        .collect();
+    paths.sort();
+    paths.dedup();
+
+    if paths.is_empty() {
+        return None;
+    }
+
+    Some(TrackedManagedFilesWarning {
+        message: format!(
+            "warning: {} Aish-managed path(s) may already be tracked; not running git rm --cached automatically",
+            paths.len()
+        ),
+        paths,
+    })
+}
+
+fn managed_tracked_path(path: &str) -> Option<String> {
+    let normalized = path.trim_start_matches("./");
+    if normalized.starts_with("cache/")
+        || normalized.starts_with("logs/")
+        || normalized.starts_with("secrets/")
+        || normalized.ends_with(".tmp")
+    {
+        Some(normalized.to_string())
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,5 +232,35 @@ mod tests {
         assert!(!updated.contains("old\n"));
         assert_eq!(updated.matches(GITIGNORE_BEGIN).count(), 1);
         assert_eq!(updated.matches(GITIGNORE_END).count(), 1);
+    }
+
+    #[test]
+    fn tracked_managed_files_warning_lists_managed_tracked_paths() {
+        let warning = tracked_managed_files_warning([
+            "README.md",
+            "cache/model.json",
+            "./logs/events.jsonl",
+            "secrets/key.json.gpg",
+            "notes.tmp",
+            "cache/model.json",
+        ])
+        .expect("tracked managed paths are warned");
+
+        assert_eq!(
+            warning.paths,
+            vec![
+                "cache/model.json",
+                "logs/events.jsonl",
+                "notes.tmp",
+                "secrets/key.json.gpg"
+            ]
+        );
+        assert!(warning.message.contains("4 Aish-managed path(s)"));
+        assert!(warning.message.contains("not running git rm --cached"));
+    }
+
+    #[test]
+    fn tracked_managed_files_warning_ignores_unmanaged_paths() {
+        assert!(tracked_managed_files_warning(["README.md", "src/main.rs", "tmp/notes"]).is_none());
     }
 }
