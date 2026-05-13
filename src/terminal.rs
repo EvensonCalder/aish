@@ -3,7 +3,7 @@ use std::panic;
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::cursor::{MoveToColumn, MoveToPreviousLine, MoveUp};
+use crossterm::cursor::{MoveTo, MoveToColumn, MoveToPreviousLine, MoveUp};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
@@ -152,7 +152,7 @@ fn handle_key(
     match apply_key_to_state(key, state) {
         KeyAction::Exit => return Ok(true),
         KeyAction::ClearScreen => {
-            execute!(out, Clear(ClearType::All), MoveToColumn(0))?;
+            clear_screen_for_redraw(state, out)?;
         }
         KeyAction::HistorySearch => {
             let mut display_out = CrLfWriter::new(out);
@@ -214,6 +214,12 @@ fn handle_key(
     }
     redraw(state, out)?;
     Ok(false)
+}
+
+fn clear_screen_for_redraw(state: &mut AppState, out: &mut impl Write) -> Result<()> {
+    state.last_rendered_lines = 0;
+    execute!(out, Clear(ClearType::All), MoveTo(0, 0))?;
+    Ok(())
 }
 
 pub fn run_external_editor(
@@ -1595,6 +1601,22 @@ mod tests {
         assert!(!state.ctrl_x_prefix);
         assert_eq!(state.mode, Mode::Draft);
         assert_eq!(state.draft.as_str(), "git status");
+    }
+
+    #[test]
+    fn clear_screen_moves_to_top_left_before_redraw() {
+        let mut state = AppState {
+            last_rendered_lines: 3,
+            ..AppState::default()
+        };
+        let mut output = Vec::new();
+
+        clear_screen_for_redraw(&mut state, &mut output).unwrap();
+
+        let rendered = String::from_utf8(output).unwrap();
+        assert!(rendered.contains("\x1b[2J"));
+        assert!(rendered.contains("\x1b[1;1H"));
+        assert_eq!(state.last_rendered_lines, 0);
     }
 
     #[test]
