@@ -18,7 +18,7 @@ Current test inventory:
 - 7 active bash PTY integration tests.
 - 2 active zsh PTY integration tests.
 - 1 conditional fish PTY integration test.
-- 50 expect-driven end-to-end interactive scenarios.
+- 51 expect-driven end-to-end interactive scenarios.
 - Bash PTY startup records the backend shell's initial cwd so the first prompt matches the shell state before any command executes.
 - Backend PTY startup inherits Aish's current directory and can be resized so child commands such as `ls` see the real terminal width.
 - 0 doctests.
@@ -63,7 +63,7 @@ Expect scenarios are the acceptance layer for user-visible terminal behavior. Th
 | Private command UX and diagnostics | `first_run_doctor`, `invalid_config_startup`, `help_lists_commands`, `unknown_private_command`, `private_command_safe_failures`, `status_doctor_config`, `key_and_sync_placeholders`, `key_clear_removes_stored_key`, `ai_config_persists` | Covered | Add new safe-failure scenarios when new private commands are added. |
 | Notes, context, and logs | `notes_are_swallowed`, `context_confirmation_skip`, `context_dangerous_refusal`, `log_shows_context_skip` | Covered | Add new context scenarios only for observed regressions. |
 | Templates | `template_use_executes`, `template_crud`, `template_placeholder_blocks_execution` | Covered | Add completion/template interaction if UI changes. |
-| Editor and paste flows | `external_editor_roundtrip`, `editor_hash_content_bypasses_parser`, `multiline_paste_editor_review` | Covered | Add editor failure path and large paste boundary if practical. |
+| Editor and paste flows | `external_editor_roundtrip`, `external_editor_failure_preserves_draft`, `editor_hash_content_bypasses_parser`, `multiline_paste_editor_review` | Covered | Add large paste boundary if practical. |
 | Sync | `key_and_sync_placeholders`, `sync_push_local_remote`, `sync_push_failure_logs` | Covered | Add conflict-specific expect scenario if sync conflict UI changes. |
 | Passthrough/interactive programs | `passthrough_less` when `less` is available; key forwarding is Rust-covered | Partial | Full automatic passthrough detection still needs an async PTY design for alternate-screen/prompt-return detection. |
 | Encryption/GPG | `key_clear_removes_stored_key`, `key_and_sync_placeholders` | Partial | Add fake GPG or test-key flow before claiming encryption completion. |

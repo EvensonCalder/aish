@@ -268,6 +268,11 @@ fn external_editor_roundtrip() {
 }
 
 #[test]
+fn external_editor_failure_preserves_draft() {
+    run_script("external_editor_failure_preserves_draft.exp");
+}
+
+#[test]
 fn multiline_paste_editor_review() {
     run_script("multiline_paste_editor_review.exp");
 }

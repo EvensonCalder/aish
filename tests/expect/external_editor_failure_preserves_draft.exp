@@ -1,0 +1,29 @@
+#!/usr/bin/env expect
+# A failing external editor should show a useful message and keep the original
+# draft visible/editable in the terminal.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set editor "/tmp/aish-failing-editor-[pid]-[clock clicks].sh"
+set fh [open $editor w]
+puts $fh {#!/bin/sh}
+puts $fh {printf 'echo should-not-replace\n' > "$1"}
+puts $fh {exit 7}
+close $fh
+file attributes $editor -permissions 0755
+set ::env(EDITOR) $editor
+
+aish_spawn
+
+aish_send "echo keep-after-editor-fail"
+aish_send "\x18\x05"
+aish_expect "editor exited without saving draft: status=7"
+aish_expect "> echo keep-after-editor-fail"
+
+aish_enter
+aish_expect "keep-after-editor-fail"
+aish_wait_prompt
+
+aish_quit
+file delete -force $editor
