@@ -1,0 +1,62 @@
+#!/usr/bin/env expect
+# Production-style file picker cancellation: without AISH_HOME, Ctrl-X Ctrl-F
+# should use external fzf, cancel cleanly, and preserve the current draft.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set isolated_home "/tmp/aish-home-file-picker-[pid]-[clock clicks]"
+file delete -force $isolated_home
+file mkdir $isolated_home
+set old_home $::env(HOME)
+set old_aish_home_exists [info exists ::env(AISH_HOME)]
+if {$old_aish_home_exists} {
+    set old_aish_home $::env(AISH_HOME)
+}
+unset -nocomplain ::env(AISH_HOME)
+set ::env(HOME) $isolated_home
+
+set bindir "/tmp/aish-home-file-fake-fzf-[pid]-[clock clicks]"
+file mkdir $bindir
+set fzf "$bindir/fzf"
+set fh [open $fzf w]
+puts $fh {#!/bin/sh}
+puts $fh {cat >/dev/null}
+puts $fh {exit 130}
+close $fh
+file attributes $fzf -permissions 0755
+set old_path $::env(PATH)
+set ::env(PATH) "$bindir:$old_path"
+
+set workdir "/tmp/aish-home-file-picker-work-[pid]-[clock clicks]"
+file mkdir $workdir
+set fh [open "$workdir/candidate.txt" w]
+puts $fh "candidate"
+close $fh
+
+aish_spawn_without_aish_home
+
+aish_send "cd $workdir"
+aish_enter
+aish_wait_prompt
+
+aish_send "echo keep-home-after-file-picker-cancel"
+aish_send "\x18\x06"
+aish_expect "file picker cancelled"
+aish_expect "> echo keep-home-after-file-picker-cancel"
+
+aish_enter
+aish_expect "keep-home-after-file-picker-cancel"
+aish_wait_prompt
+aish_quit
+
+set ::env(PATH) $old_path
+set ::env(HOME) $old_home
+if {$old_aish_home_exists} {
+    set ::env(AISH_HOME) $old_aish_home
+} else {
+    unset -nocomplain ::env(AISH_HOME)
+}
+file delete -force $bindir
+file delete -force $workdir
+file delete -force $isolated_home

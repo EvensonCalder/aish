@@ -288,6 +288,11 @@ fn file_picker_cancel_preserves_draft() {
 }
 
 #[test]
+fn home_default_file_picker_cancel_preserves_draft() {
+    run_script("home_default_file_picker_cancel_preserves_draft.exp");
+}
+
+#[test]
 fn template_picker_cancel_preserves_draft() {
     run_script("template_picker_cancel_preserves_draft.exp");
 }
