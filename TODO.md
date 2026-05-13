@@ -192,7 +192,7 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
   - [x] `Tab`
   - [x] `Esc`
   - [x] `Up/Down`
-- [ ] Implement advanced bindings:
+- [x] Implement advanced bindings:
   - [x] `Ctrl-X Ctrl-E` external editor
   - [x] `Ctrl-X Ctrl-F` file picker
   - [x] `Ctrl-X Ctrl-T` template picker
@@ -779,6 +779,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 - [x] Cover empty `Tab` mode cycling through draft/history/AI prompts.
 - [x] Cover `#help`, unknown private commands, `#exit`, and empty `Ctrl-D` exit.
 - [x] Cover common readline editing keys (`Ctrl-A`, `Ctrl-E`, `Ctrl-U`, `Ctrl-K`, `Ctrl-W`, and `Esc`).
+- [x] Cover unknown `Ctrl-X` chord cancellation.
 - [x] Cover `#status`, `#doctor`, and `#config` diagnostics.
 - [x] Cover note capture without backend shell execution.
 - [x] Cover context pseudo-pipe confirmation skip flow.

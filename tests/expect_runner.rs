@@ -252,5 +252,10 @@ fn escape_clears_draft() {
     run_script("escape_clears_draft.exp");
 }
 
+#[test]
+fn ctrl_x_unknown_chord_cancels() {
+    run_script("ctrl_x_unknown_chord_cancels.exp");
+}
+
 #[allow(dead_code)]
 fn _unused_path_check(_p: &Path) {}

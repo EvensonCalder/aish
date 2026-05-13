@@ -1,0 +1,16 @@
+#!/usr/bin/env expect
+# An unknown Ctrl-X chord should cancel the prefix state without editing the
+# draft or trapping subsequent input.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "echo ctrl-x-ok"
+aish_send "\x18\x19"
+aish_enter
+aish_expect "ctrl-x-ok"
+aish_wait_prompt
+
+aish_quit
