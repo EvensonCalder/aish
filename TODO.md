@@ -668,21 +668,21 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 
 ### Tasks
 
-- [ ] Replace simple prompt marker with shell-specific integration where possible.
-- [ ] Bash integration:
+- [x] Replace simple prompt marker with shell-specific integration where possible.
+- [x] Bash integration:
   - [x] prompt-ready marker
   - [x] command-start marker
   - [x] command-finish marker with exit code
   - [x] cwd reporting
-- [ ] Zsh integration:
+- [x] Zsh integration:
   - [x] `precmd`
   - [x] `preexec`
   - [x] cwd reporting
   - [x] surface command-start events beyond output filtering
-- [ ] Fish integration:
+- [x] Fish integration:
   - [x] prompt/event functions
   - [x] cwd reporting
-- [ ] Detect interactive commands for passthrough:
+- [x] Detect interactive commands for passthrough:
   - [x] command allowlist
   - [x] alternate screen buffer detection
   - [x] prompt return detection
@@ -782,7 +782,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 - [x] External editor roundtrip using a fake editor script.
 - [x] Multi-line paste editor-review flow.
 - [ ] GPG fake command or test key flow.
-- [ ] Git sync in temporary repo.
+- [x] Git sync in temporary repo.
 
 ### Expect end-to-end tests
 

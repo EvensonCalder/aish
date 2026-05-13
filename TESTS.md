@@ -336,6 +336,7 @@ Implemented:
 - Interactive passthrough command allowlist detects common fullscreen/interactive commands, basenames, shell quoting, assignments, and wrappers such as `sudo`, `env`, `command`, and `exec` without changing runtime behavior yet.
 - Alternate-screen buffer detection tracks common enter/exit CSI sequences (`?47`, `?1047`, `?1049`) and ignores unrelated terminal styling escapes.
 - Passthrough prompt-return detection requires process exit and normal-screen state before Aish redraws its prompt after an interactive command.
+- Shell integration rollup is covered across bash marker integration, zsh hooks, fish events, foreground passthrough for allowlisted interactive commands, and local temporary git sync integration tests.
 - `#encrypt on` warns that existing plaintext may remain in git history and that Aish will not rewrite history automatically, while encryption remains otherwise unimplemented.
 - Dangerous context pseudo-pipe commands have expect coverage proving refusal skips execution and leaves the target file intact.
 - Prompt redraw after ordinary command output has both a Rust virtual-screen regression and an expect scenario requiring command output line termination before the next prompt.
