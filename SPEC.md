@@ -682,10 +682,18 @@ Current token is the first token:
   executables from PATH
 
 Current token is not the first token:
-  path candidates
   history argument candidates
+  file/path candidates
   template placeholder candidates
 ```
+
+For non-first-token completion:
+
+- History argument candidates are shown before file/path candidates.
+- History argument candidates are ordered newest to oldest.
+- File/path candidates must accurately represent the underlying filesystem entry.
+- Regular files must not be presented as directories.
+- Directory candidates should use a trailing `/` so users can distinguish them from files.
 
 ### 10.2 Template/history matching
 
@@ -704,6 +712,7 @@ For command completion:
 - If there is exactly one candidate, Aish accepts it immediately.
 - If there are multiple candidates, Aish displays at most `completion.max_results` candidates below the prompt and redraws the current draft.
 - Candidate display must not append text to the active prompt line.
+
 
 Config:
 
@@ -1165,6 +1174,13 @@ command finished
 exit status
 current working directory
 ```
+
+Shell history responsibility:
+
+- Aish-owned functional shell injections such as readiness markers, status markers, or similar internal integration commands must not pollute backend shell history when Aish can prevent that safely.
+- For Bash and Zsh, Aish should prefer prevention over deletion by using shell-supported history-ignore behavior for Aish-injected internal commands.
+- If Aish ever needs to remove an entry after the fact, removal must be exact and conservative: only entries Aish can confidently attribute to its own injected functional commands may be touched.
+- If exact attribution is not possible, Aish must leave shell history unchanged.
 
 ---
 

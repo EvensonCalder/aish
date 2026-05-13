@@ -240,12 +240,12 @@ pub fn complete_non_first_token_with_options(
     options: CompletionOptions,
 ) -> Vec<CompletionCandidate> {
     let mut candidates = Vec::new();
-    candidates.extend(complete_path(token, cwd));
     candidates.extend(complete_history_arguments(
         token,
         history_newest_first,
         options.ignore_spaces,
     ));
+    candidates.extend(complete_path(token, cwd));
     candidates.extend(complete_template_placeholders(
         token,
         templates,
@@ -338,7 +338,7 @@ pub fn render_completion_candidates(candidates: &[CompletionCandidate]) -> Vec<S
         .map(|candidate| {
             format!(
                 "{}\t{}",
-                completion_source_label(candidate.source),
+                completion_candidate_label(candidate),
                 candidate.display
             )
         })
@@ -375,11 +375,18 @@ pub fn accept_completion(
 
 fn completion_source_label(source: CompletionSource) -> &'static str {
     match source {
-        CompletionSource::Path => "path",
+        CompletionSource::Path => "file",
         CompletionSource::Template => "template",
         CompletionSource::History => "history",
         CompletionSource::Executable => "exec",
         CompletionSource::TemplatePlaceholder => "placeholder",
+    }
+}
+
+fn completion_candidate_label(candidate: &CompletionCandidate) -> &'static str {
+    match candidate.source {
+        CompletionSource::Path if candidate.is_dir => "dir",
+        _ => completion_source_label(candidate.source),
     }
 }
 
@@ -823,7 +830,7 @@ mod tests {
     }
 
     #[test]
-    fn complete_non_first_token_orders_path_candidates_before_history_arguments() {
+    fn complete_non_first_token_orders_history_arguments_before_path_candidates() {
         let temp = tempfile::tempdir().unwrap();
         std::fs::create_dir(temp.path().join("src")).unwrap();
         std::fs::write(temp.path().join("src/main.rs"), "").unwrap();
@@ -838,16 +845,16 @@ mod tests {
             complete_non_first_token("src/", temp.path(), &history, &[]),
             [
                 CompletionCandidate {
-                    display: "src/main.rs".to_string(),
-                    replacement: "src/main.rs".to_string(),
-                    is_dir: false,
-                    source: CompletionSource::Path,
-                },
-                CompletionCandidate {
                     display: "src/lib.rs".to_string(),
                     replacement: "src/lib.rs".to_string(),
                     is_dir: false,
                     source: CompletionSource::History,
+                },
+                CompletionCandidate {
+                    display: "src/main.rs".to_string(),
+                    replacement: "src/main.rs".to_string(),
+                    is_dir: false,
+                    source: CompletionSource::Path,
                 },
             ]
         );
@@ -970,7 +977,30 @@ mod tests {
 
         assert_eq!(
             render_completion_candidates(&candidates),
-            ["template\tdeploy", "path\tsrc/main.rs"]
+            ["template\tdeploy", "file\tsrc/main.rs"]
+        );
+    }
+
+    #[test]
+    fn render_completion_candidates_labels_directories_separately_from_files() {
+        let candidates = vec![
+            CompletionCandidate {
+                display: "src/".to_string(),
+                replacement: "src/".to_string(),
+                is_dir: true,
+                source: CompletionSource::Path,
+            },
+            CompletionCandidate {
+                display: "src/main.rs".to_string(),
+                replacement: "src/main.rs".to_string(),
+                is_dir: false,
+                source: CompletionSource::Path,
+            },
+        ];
+
+        assert_eq!(
+            render_completion_candidates(&candidates),
+            ["dir\tsrc/", "file\tsrc/main.rs"]
         );
     }
 

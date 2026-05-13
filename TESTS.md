@@ -12,19 +12,18 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 262 library unit tests.
-- 18 draft execution integration tests.
+- 269 library unit tests.
+- 20 draft execution integration tests.
 - 1 first-run integration test.
-- 4 active bash PTY integration tests.
+- 5 active bash PTY integration tests.
+- 2 active zsh PTY integration tests.
 - Bash PTY startup records the backend shell's initial cwd so the first prompt matches the shell state before any command executes.
 - Backend PTY startup inherits Aish's current directory and can be resized so child commands such as `ls` see the real terminal width.
-- 1 ignored zsh PTY integration test.
 - 0 doctests.
 
 Current expected result:
 
 - All active tests pass.
-- `zsh_pty_backend_runs_commands_and_preserves_shell_state_when_available` is intentionally ignored until shell-specific zsh prompt/echo integration is implemented.
 
 ## Test Commands
 
@@ -105,6 +104,9 @@ Implemented:
 - Marker parsing waits for marker plus exit status and line ending.
 - Marker parsing handles echoed marker injection commands.
 - PTY CRLF output normalization.
+- Bash and zsh startup enable shell-native ignore-space history behavior for Aish internal integration commands.
+- Ready-marker cleanup hides internal ready lines from displayed output.
+- A dedicated bash PTY integration test isolates `HOME` and verifies user commands remain in shell history while Aish internal marker commands do not.
 - Backend shell is killed on `PtyBackend` drop.
 - Real bash shell state persistence is tested with `pwd`, `cd /tmp`, `pwd`.
 
@@ -118,30 +120,38 @@ Tests:
 - `pty::tests::parser_normalizes_pty_newlines`
 - `pty::tests::parser_uses_real_marker_when_command_echo_contains_marker`
 - `pty::tests::marker_status_requires_digits_and_line_end`
+- `pty::tests::clean_marker_echo_hides_ready_marker_lines`
+- `pty::tests::parser_reads_ready_marker_cwd_when_status_is_present`
+- `pty::tests::parse_ready_status_output_reads_status_cwd_and_filters_hook_lines`
 - `pty_backend_runs_commands_and_preserves_shell_state`
 - `pty_backend_captures_failed_command_exit_status`
 - `pty_backend_does_not_confuse_user_output_with_prompt_marker`
+- `pty_backend_keeps_user_commands_but_not_aish_internal_markers_in_history`
 
 Status:
 
 - Passing for bash.
 
-### PTY Backend: Zsh Preparation
+### PTY Backend: Zsh Integration
 
 Implemented:
 
-- zsh launch preparation uses `zsh -f`.
-- zsh init attempts to disable prompt/ZLE behavior for future support.
-- A real zsh PTY integration test exists but is ignored.
+- zsh launch preparation uses `zsh -f -o histignorespace`.
+- zsh startup disables prompt/ZLE behavior needed for the PTY hook flow.
+- zsh startup enables ignore-space history behavior for Aish internal integration commands.
+- zsh PTY command execution preserves shell state and reports exit status/cwd through core `preexec` / `precmd` hooks.
+- zsh `preexec` start markers are consumed, filtered from command output, and exposed as `CommandResult::started_command`.
+- A dedicated zsh PTY integration test isolates `HOME` and verifies user commands remain in shell history while Aish internal marker commands do not.
 
 Tests:
 
 - `zsh_pty_backend_runs_commands_and_preserves_shell_state_when_available`
+- `zsh_pty_backend_keeps_user_commands_but_not_aish_internal_markers_in_history`
 
 Status:
 
-- Ignored by design.
-- Reason: zsh still needs shell-specific prompt/echo integration beyond bash v0.1.
+- Passing.
+- Remaining gap: zsh hook start events are parsed into command results, but not yet surfaced as a separate terminal event-loop notification.
 
 ### Terminal Raw Mode And Event Loop
 
@@ -287,7 +297,7 @@ Implemented:
 - Prompt cwd rendering abbreviates the user home directory as `~` and paths inside it as `~/...`.
 - Raw-terminal display writes normalize line feeds to CRLF through a terminal display writer, so multi-line shell output and UI messages return to column zero without corrupting stored command output.
 - Runtime state can build completion candidates from current draft, templates, in-memory history, cwd, PATH, and completion config without mutating input or terminal UI.
-- Non-empty Tab accepts the single completion candidate immediately, shows zero/multiple candidates below the prompt without appending to the active prompt line, and terminal completion display prints labeled candidate rows.
+- Non-empty Tab accepts the single completion candidate immediately, stores zero/multiple candidates in a refreshable panel below the prompt, redraws the prompt with the cursor restored to the input line, and terminal completion display prints labeled candidate rows.
 - Right at end-of-line accepts the first completion candidate; Right inside the line keeps ordinary cursor movement.
 - Completion helpers can render labeled candidate rows, compute display-only ghost suffixes, and return accepted completion text/cursor without mutating input state.
 - Picker helpers support shell quoting and pure result edits for insert-at-cursor, replace-current-token, append-as-argument, and replace-line actions.
@@ -311,6 +321,7 @@ Implemented:
 - Phase 10 paste review is represented as opaque editor drafts rather than a separate inline paste editor.
 - Single-line paste copies read-only history/AI selections to draft before inserting pasted text.
 - Editor draft submission preserves multi-line backslash continuation and lets the backend shell interpret it.
+- Ordinary drafts use the configured backend shell's own `-n` syntax check to detect incomplete multi-line input before PTY submission, preserving `echo "` / continuation behavior without hand-parsing shell quotes in Aish.
 - Ordinary and editor draft history preserve backslash continuations as one submitted command string.
 - Optional shell logical splitter helper splits simple lines while preserving backslash continuations; it is not wired into default history behavior.
 - Optional shell logical splitter ignores standalone comments and preserves inline `#` content.
@@ -344,6 +355,8 @@ Tests:
 - `execute_draft_does_not_send_line_leading_hash_to_backend_shell`
 - `editor_draft_can_send_line_leading_hash_to_shell`
 - `editor_draft_sends_multiline_backslash_continuation_to_shell`
+- `execute_draft_keeps_unfinished_quote_as_continuation_draft`
+- `execute_draft_runs_completed_multiline_quote_after_continuation`
 - `execute_draft_preserves_backslash_continuation_and_history`
 - `editor_draft_preserves_backslash_continuation_in_history`
 - `execute_draft_does_not_run_context_pseudo_pipe_command`
@@ -428,13 +441,14 @@ Tests:
 - `completion::tests::complete_path_returns_empty_for_missing_directory`
 - `completion::tests::complete_first_token_orders_templates_history_then_executables`
 - `completion::tests::complete_first_token_deduplicates_each_source`
-- `completion::tests::complete_non_first_token_orders_path_candidates_before_history_arguments`
+- `completion::tests::complete_non_first_token_orders_history_arguments_before_path_candidates`
 - `completion::tests::complete_non_first_token_includes_history_arguments_without_path_prefix`
 - `completion::tests::command_arguments_preserve_quoted_argument_spaces`
 - `completion::tests::complete_first_token_can_match_while_ignoring_spaces_and_limit_results`
 - `completion::tests::complete_non_first_token_applies_options_to_history_and_placeholders`
 - `completion::tests::matches_completion_prefix_can_ignore_spaces`
 - `completion::tests::render_completion_candidates_labels_sources_without_mutating_input`
+- `completion::tests::render_completion_candidates_labels_directories_separately_from_files`
 - `completion::tests::ghost_completion_suffix_is_display_only_tail`
 - `completion::tests::accept_completion_replaces_token_and_returns_new_cursor`
 - `app::tests::completion_candidates_use_templates_before_history_for_first_token`
@@ -442,6 +456,10 @@ Tests:
 - `app::tests::completion_candidates_skip_editor_drafts_and_read_only_modes`
 - `terminal::tests::non_empty_tab_requests_completion_display_without_editing_draft`
 - `terminal::tests::write_completion_candidates_prints_labeled_rows`
+- `terminal::tests::tab_shows_multiple_completion_candidates_below_prompt`
+- `terminal::tests::tab_display_respects_completion_max_results`
+- `terminal::tests::redraw_renders_completion_panel_below_prompt_and_restores_cursor`
+- `terminal::tests::editing_after_completion_panel_clears_panel`
 - `input::tests::replace_updates_text_and_cursor_when_cursor_is_valid_boundary`
 - `input::tests::replace_rejects_invalid_cursor_boundary`
 - `terminal::tests::right_at_end_requests_completion_accept_without_editing_immediately`

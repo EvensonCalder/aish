@@ -114,6 +114,7 @@ pub struct AppState {
     pub ai_config: AiConfig,
     pub context_config: ContextConfig,
     pub pending_context: Option<PendingContextPrompt>,
+    pub completion_panel: Vec<String>,
     pub draft_from_editor: bool,
     pub draft_from_template: bool,
     pub ctrl_x_prefix: bool,
@@ -150,6 +151,7 @@ impl Default for AppState {
             ai_config: AiConfig::default(),
             context_config: ContextConfig::default(),
             pending_context: None,
+            completion_panel: Vec::new(),
             draft_from_editor: false,
             draft_from_template: false,
             ctrl_x_prefix: false,
@@ -1062,6 +1064,12 @@ pub fn execute_draft(
                 return Ok(());
             }
         }
+    }
+
+    if !state.draft_from_editor && backend.input_needs_more_lines(&command)? {
+        state.draft.insert_str("\n");
+        state.mode = Mode::Draft;
+        return Ok(());
     }
 
     state.mode = Mode::CommandRunning;

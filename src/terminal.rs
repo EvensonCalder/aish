@@ -3,7 +3,7 @@ use std::panic;
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::cursor::MoveToColumn;
+use crossterm::cursor::{MoveToColumn, MoveUp};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
@@ -147,6 +147,7 @@ fn handle_key(
     out: &mut impl Write,
     command_timeout: Duration,
 ) -> Result<bool> {
+    let had_completion_panel = !state.completion_panel.is_empty();
     match apply_key_to_state(key, state) {
         KeyAction::Exit => return Ok(true),
         KeyAction::ClearScreen => {
@@ -181,12 +182,15 @@ fn handle_key(
             writeln!(display_out, "{name} is not implemented yet")?;
         }
         KeyAction::CompleteOrShow => {
-            complete_or_show_candidates(state, out)?;
+            complete_or_show_candidates(state)?;
         }
         KeyAction::AcceptCompletion => {
             accept_first_completion(state)?;
         }
         KeyAction::Submit => {
+            if had_completion_panel {
+                redraw(state, out)?;
+            }
             execute!(out, MoveToColumn(state.render_prompt_line().len() as u16))?;
             write!(out, "\r\n")?;
             let mut display_out = CrLfWriter::new(out);
@@ -452,6 +456,10 @@ fn normalize_paste_newlines(text: &str) -> String {
 }
 
 pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
+    if key.code != KeyCode::Tab {
+        state.completion_panel.clear();
+    }
+
     if state.pending_context.is_some() {
         return match (key.modifiers, key.code) {
             (_, KeyCode::Enter) => KeyAction::ConfirmContext(true),
@@ -672,8 +680,14 @@ fn expand_template_draft_if_inside_placeholder(state: &mut AppState) {
 }
 
 pub fn redraw(state: &AppState, out: &mut impl Write) -> Result<()> {
-    execute!(out, MoveToColumn(0), Clear(ClearType::CurrentLine))?;
+    execute!(out, MoveToColumn(0), Clear(ClearType::FromCursorDown))?;
     write!(out, "{}", state.render_prompt_line())?;
+    if !state.completion_panel.is_empty() {
+        for line in &state.completion_panel {
+            write!(out, "\r\n{line}")?;
+        }
+        execute!(out, MoveUp(state.completion_panel.len() as u16))?;
+    }
     execute!(out, MoveToColumn(state.terminal_cursor_column()))?;
     out.flush()?;
     Ok(())
@@ -691,25 +705,25 @@ pub fn write_completion_candidates(state: &AppState, out: &mut impl Write) -> Re
     Ok(())
 }
 
-pub fn complete_or_show_candidates(state: &mut AppState, out: &mut impl Write) -> Result<()> {
+pub fn complete_or_show_candidates(state: &mut AppState) -> Result<()> {
     let decision_candidates = state.completion_candidates_with_max_results(
         state.completion_config.max_results.saturating_add(1),
     )?;
     match decision_candidates.len() {
-        0 => write_completion_panel(state, out),
+        0 => {
+            state.completion_panel = vec!["no completions".to_string()];
+            Ok(())
+        }
         1 => {
+            state.completion_panel.clear();
             accept_completion_candidate(state, decision_candidates.into_iter().next().unwrap())?;
             Ok(())
         }
-        _ => write_completion_panel(state, out),
+        _ => {
+            state.completion_panel = render_completion_candidates(&state.completion_candidates()?);
+            Ok(())
+        }
     }
-}
-
-fn write_completion_panel(state: &AppState, out: &mut impl Write) -> Result<()> {
-    execute!(out, MoveToColumn(state.render_prompt_line().len() as u16))?;
-    write!(out, "\r\n")?;
-    let mut display_out = CrLfWriter::new(out);
-    write_completion_candidates(state, &mut display_out)
 }
 
 pub fn accept_first_completion(state: &mut AppState) -> Result<bool> {
@@ -826,11 +840,10 @@ mod tests {
         };
         std::fs::write(temp.path().join("single.txt"), "").unwrap();
         state.draft.insert_str("cat si");
-        let mut output = Vec::new();
 
-        complete_or_show_candidates(&mut state, &mut output).unwrap();
+        complete_or_show_candidates(&mut state).unwrap();
 
-        assert!(output.is_empty());
+        assert!(state.completion_panel.is_empty());
         assert_eq!(state.draft.as_str(), "cat single.txt");
     }
 
@@ -844,19 +857,12 @@ mod tests {
         std::fs::write(temp.path().join("one.txt"), "").unwrap();
         std::fs::write(temp.path().join("only.log"), "").unwrap();
         state.draft.insert_str("cat o");
-        let mut output = Vec::new();
 
-        complete_or_show_candidates(&mut state, &mut output).unwrap();
+        complete_or_show_candidates(&mut state).unwrap();
 
-        let output = String::from_utf8(output).unwrap();
-        assert!(output.starts_with("\u{1b}[8G\r\n"), "output was {output:?}");
-        assert!(
-            output.contains("path\tone.txt\r\n"),
-            "output was {output:?}"
-        );
-        assert!(
-            output.contains("path\tonly.log\r\n"),
-            "output was {output:?}"
+        assert_eq!(
+            state.completion_panel,
+            vec!["file\tone.txt".to_string(), "file\tonly.log".to_string()]
         );
         assert_eq!(state.draft.as_str(), "cat o");
     }
@@ -875,12 +881,39 @@ mod tests {
         std::fs::write(temp.path().join("one.txt"), "").unwrap();
         std::fs::write(temp.path().join("only.log"), "").unwrap();
         state.draft.insert_str("cat o");
+
+        complete_or_show_candidates(&mut state).unwrap();
+
+        assert_eq!(state.completion_panel.len(), 1);
+        assert!(state.completion_panel[0].starts_with("file\t"));
+    }
+
+    #[test]
+    fn redraw_renders_completion_panel_below_prompt_and_restores_cursor() {
+        let mut state = AppState::default();
+        state.draft.insert_str("git");
+        state.completion_panel = vec!["exec\tgit".to_string(), "exec\tgit-shell".to_string()];
         let mut output = Vec::new();
 
-        complete_or_show_candidates(&mut state, &mut output).unwrap();
+        redraw(&state, &mut output).unwrap();
 
         let output = String::from_utf8(output).unwrap();
-        assert_eq!(output.matches("path\t").count(), 1, "output was {output:?}");
+        assert!(output.contains("> git\r\nexec\tgit\r\nexec\tgit-shell"));
+        assert!(output.contains("\u{1b}[2A"), "output was {output:?}");
+        assert!(output.ends_with("\u{1b}[6G"), "output was {output:?}");
+    }
+
+    #[test]
+    fn editing_after_completion_panel_clears_panel() {
+        let mut state = AppState {
+            completion_panel: vec!["exec\tgit".to_string()],
+            ..AppState::default()
+        };
+        state.draft.insert_str("git");
+
+        apply_key_to_state(key(KeyCode::Char('x')), &mut state);
+
+        assert!(state.completion_panel.is_empty());
     }
 
     #[test]

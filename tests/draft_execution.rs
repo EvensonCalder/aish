@@ -100,6 +100,56 @@ fn execute_draft_updates_current_cwd_from_backend_shell() {
 }
 
 #[test]
+fn execute_draft_keeps_unfinished_quote_as_continuation_draft() {
+    let _guard = pty_execution_guard();
+    let mut state = AppState::default();
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    state.draft.insert_str("echo \"");
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    assert!(String::from_utf8(output).unwrap().is_empty());
+    assert_eq!(state.mode, Mode::Draft);
+    assert_eq!(state.draft.as_str(), "echo \"\n");
+
+    let after = backend
+        .run_command("printf 'backend-ok\\n'", Duration::from_secs(5))
+        .unwrap();
+    assert_eq!(after.output.trim(), "backend-ok");
+}
+
+#[test]
+fn execute_draft_runs_completed_multiline_quote_after_continuation() {
+    let _guard = pty_execution_guard();
+    let mut state = AppState::default();
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    state.draft.insert_str("echo \"\n123\n\"");
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    assert!(String::from_utf8(output).unwrap().contains("123"));
+    assert_eq!(state.last_status, Some(0));
+    assert_eq!(state.mode, Mode::Draft);
+    assert!(state.draft.is_empty());
+}
+
+#[test]
 fn execute_draft_sends_multiline_buffer_exactly_to_backend() {
     let _guard = pty_execution_guard();
     let mut state = AppState::default();
@@ -291,12 +341,12 @@ fn execute_draft_does_not_run_context_pseudo_pipe_command() {
     .unwrap();
 
     let output = String::from_utf8(output).unwrap();
-    assert!(output.contains("AI prompts with context are not implemented yet"));
-    assert!(output.contains("context command not executed"));
-    assert!(output.contains("prompt: explain this"));
+    assert!(output.contains("aish will run this command to collect context"));
+    assert!(output.contains("Run context command? [Y/n]"));
     assert!(!marker.exists());
     assert_eq!(state.last_status, None);
     assert_eq!(state.mode, Mode::Draft);
+    assert!(state.pending_context.is_some());
     assert!(state.draft.is_empty());
 }
 

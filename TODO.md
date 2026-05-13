@@ -660,9 +660,10 @@ Status: direct AI prompts are wired to the chat-completions request path using c
   - [ ] command-finish marker with exit code
   - [ ] cwd reporting
 - [ ] Zsh integration:
-  - [ ] `precmd`
-  - [ ] `preexec`
-  - [ ] cwd reporting
+  - [x] `precmd`
+  - [x] `preexec`
+  - [x] cwd reporting
+  - [ ] surface command-start events beyond output filtering
 - [ ] Fish integration:
   - [ ] prompt/event functions
   - [ ] cwd reporting

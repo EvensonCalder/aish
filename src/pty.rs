@@ -1,6 +1,7 @@
 use std::env;
 use std::io::{Read, Write};
 use std::path::Path;
+use std::process::{Command as ProcessCommand, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
@@ -10,14 +11,24 @@ use portable_pty::{CommandBuilder, MasterPty, NativePtySystem, PtySize, PtySyste
 
 const MARKER_PREFIX: &str = "__AISH_STATUS__";
 const READY_MARKER: &str = "__AISH_READY__";
+const START_MARKER: &str = "__AISH_START__";
 static NEXT_MARKER_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandResult {
     pub command: String,
+    pub started_command: Option<String>,
     pub output: String,
     pub exit_code: i32,
     pub cwd: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct HookCommandResult {
+    output: String,
+    exit_code: i32,
+    cwd: String,
+    started_command: Option<String>,
 }
 
 pub struct PtyBackend {
@@ -26,6 +37,14 @@ pub struct PtyBackend {
     output: Receiver<Vec<u8>>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
     initial_cwd: Option<String>,
+    shell_program: String,
+    integration: ShellIntegration,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ShellIntegration {
+    MarkerCommand,
+    ZshHooks,
 }
 
 impl PtyBackend {
@@ -74,6 +93,8 @@ impl PtyBackend {
             output: rx,
             child,
             initial_cwd: None,
+            shell_program: launch.program.clone(),
+            integration: launch.integration,
         };
         backend.initialize_shell(&launch)?;
         Ok(backend)
@@ -107,11 +128,56 @@ impl PtyBackend {
         Ok(())
     }
 
+    pub fn input_needs_more_lines(&self, input: &str) -> Result<bool> {
+        let shell_name = Path::new(&self.shell_program)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        let mut command = ProcessCommand::new(&self.shell_program);
+        match shell_name {
+            "bash" => {
+                command.args(["--noprofile", "--norc", "-n"]);
+            }
+            "zsh" => {
+                command.args(["-f", "-n"]);
+            }
+            _ => return Ok(false),
+        }
+
+        let mut child = command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .with_context(|| format!("failed to syntax-check input with {}", self.shell_program))?;
+        if let Some(stdin) = child.stdin.as_mut() {
+            stdin
+                .write_all(input.as_bytes())
+                .context("failed to write input to shell syntax check")?;
+            stdin
+                .write_all(b"\n")
+                .context("failed to finish shell syntax check input")?;
+        }
+        let output = child
+            .wait_with_output()
+            .context("failed to read shell syntax check result")?;
+        if output.status.success() {
+            return Ok(false);
+        }
+        Ok(is_incomplete_shell_syntax(&String::from_utf8_lossy(
+            &output.stderr,
+        )))
+    }
+
     pub fn run_command(&mut self, command: &str, timeout: Duration) -> Result<CommandResult> {
+        if self.integration == ShellIntegration::ZshHooks {
+            return self.run_command_with_zsh_hooks(command, timeout);
+        }
+
         let _ = self.drain_for(Duration::from_millis(25));
         let marker = next_marker();
         let marker_command = format!(
-            "__aish_status=$?; printf '\\n%s%s\\t%s\\n' '{marker}' \"$__aish_status\" \"$PWD\"; sh -c \"exit $__aish_status\"\n"
+            " __aish_status=$?; printf '\\n%s%s\\t%s\\n' '{marker}' \"$__aish_status\" \"$PWD\"; sh -c \"exit $__aish_status\"\n"
         );
         self.write_raw(command)?;
         if !command.ends_with('\n') {
@@ -123,6 +189,7 @@ impl PtyBackend {
         let (output, exit_code, cwd) = parse_marker_output(&raw, &marker)?;
         Ok(CommandResult {
             command: command.trim_end_matches('\n').to_string(),
+            started_command: None,
             output,
             exit_code,
             cwd,
@@ -150,6 +217,28 @@ impl PtyBackend {
                 Err(mpsc::RecvTimeoutError::Disconnected) => bail!("backend shell PTY closed"),
             }
         }
+    }
+
+    fn run_command_with_zsh_hooks(
+        &mut self,
+        command: &str,
+        timeout: Duration,
+    ) -> Result<CommandResult> {
+        let _ = self.drain_for(Duration::from_millis(25));
+        self.write_raw(command)?;
+        if !command.ends_with('\n') {
+            self.write_raw("\n")?;
+        }
+
+        let raw = self.read_until_ready(timeout)?;
+        let parsed = parse_ready_status_output(&raw)?;
+        Ok(CommandResult {
+            command: command.trim_end_matches('\n').to_string(),
+            started_command: parsed.started_command,
+            output: parsed.output,
+            exit_code: parsed.exit_code,
+            cwd: Some(parsed.cwd),
+        })
     }
 
     fn read_until_ready(&mut self, timeout: Duration) -> Result<String> {
@@ -258,6 +347,7 @@ struct ShellLaunch {
     program: String,
     args: Vec<String>,
     init_command: String,
+    integration: ShellIntegration,
 }
 
 fn shell_launch(configured_shell: &str) -> ShellLaunch {
@@ -267,20 +357,29 @@ fn shell_launch(configured_shell: &str) -> ShellLaunch {
         .and_then(|name| name.to_str())
         .unwrap_or_default();
 
-    let (args, init_command) = match shell_name {
+    let (args, init_command, integration) = match shell_name {
         "bash" => (
             vec!["--noprofile".to_string(), "--norc".to_string()],
-            format!("stty -echo; printf '\\n{READY_MARKER}\\t%s\\n' \"$PWD\"\n"),
+            format!(
+                "export HISTCONTROL=ignorespace${{HISTCONTROL:+:$HISTCONTROL}}; stty -echo; printf '\\n{READY_MARKER}\\t%s\\n' \"$PWD\"\n"
+            ),
+            ShellIntegration::MarkerCommand,
         ),
         "zsh" => (
-            vec!["-f".to_string()],
+            vec![
+                "-f".to_string(),
+                "-o".to_string(),
+                "histignorespace".to_string(),
+            ],
             format!(
-                "stty -echo; unsetopt zle prompt_cr prompt_sp; PROMPT=''; RPROMPT=''; printf '\\n{READY_MARKER}\\t%s\\n' \"$PWD\"\n"
+                " stty -echo; unsetopt zle prompt_cr prompt_sp; PROMPT=''; RPROMPT=''; preexec() {{ printf '\\n{START_MARKER}\\t%s\\n' \"$1\"; }}; precmd() {{ printf '\\n{READY_MARKER}\\t%s\\t%s\\n' \"$?\" \"$PWD\"; }}; precmd\n"
             ),
+            ShellIntegration::ZshHooks,
         ),
         _ => (
             Vec::new(),
             format!("stty -echo; printf '\\n{READY_MARKER}\\t%s\\n' \"$PWD\"\n"),
+            ShellIntegration::MarkerCommand,
         ),
     };
 
@@ -288,6 +387,7 @@ fn shell_launch(configured_shell: &str) -> ShellLaunch {
         program,
         args,
         init_command,
+        integration,
     }
 }
 
@@ -341,8 +441,57 @@ fn parse_ready_cwd(raw: &str) -> Option<String> {
     normalize_pty_newlines(raw)
         .lines()
         .find_map(|line| line.strip_prefix(&prefix))
-        .map(str::to_string)
+        .and_then(|rest| {
+            let mut parts = rest.split('\t');
+            let first = parts.next()?;
+            Some(parts.next().unwrap_or(first).to_string())
+        })
         .filter(|cwd| !cwd.is_empty())
+}
+
+fn parse_ready_status_output(raw: &str) -> Result<HookCommandResult> {
+    let raw = normalize_pty_newlines(raw);
+    let mut ready_line = None;
+    let mut started_command = None;
+    let mut output_lines = Vec::new();
+
+    for line in raw.lines() {
+        if let Some(command) = line.strip_prefix(&format!("{START_MARKER}\t")) {
+            started_command = Some(command.to_string());
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix(&format!("{READY_MARKER}\t")) {
+            ready_line = Some(rest.to_string());
+            continue;
+        }
+        output_lines.push(line);
+    }
+
+    let ready = ready_line.context("backend shell output did not contain ready marker")?;
+    let (status, cwd) = ready
+        .split_once('\t')
+        .context("backend shell ready marker did not include cwd")?;
+    let exit_code = status
+        .parse::<i32>()
+        .context("invalid shell exit status in ready marker")?;
+    Ok(HookCommandResult {
+        output: output_lines
+            .join("\n")
+            .trim_matches(['\r', '\n'])
+            .to_string(),
+        exit_code,
+        cwd: cwd.to_string(),
+        started_command,
+    })
+}
+
+fn is_incomplete_shell_syntax(stderr: &str) -> bool {
+    let stderr = stderr.to_ascii_lowercase();
+    stderr.contains("unexpected eof")
+        || stderr.contains("unexpected end of file")
+        || stderr.contains("parse error near `\\n'")
+        || stderr.contains("parse error near `\n'")
+        || stderr.contains("parse error: unmatched")
 }
 
 fn normalize_pty_newlines(text: &str) -> String {
@@ -353,6 +502,8 @@ fn clean_marker_echo(output: &str, marker: &str) -> String {
     output
         .lines()
         .filter(|line| !(line.contains("__aish_status=$?") && line.contains(marker)))
+        .filter(|line| !line.contains(READY_MARKER))
+        .filter(|line| !line.contains(START_MARKER))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -384,14 +535,17 @@ mod tests {
         assert_eq!(launch.program, "/bin/bash");
         assert_eq!(launch.args, ["--noprofile", "--norc"]);
         assert!(launch.init_command.contains(READY_MARKER));
+        assert!(launch.init_command.contains("HISTCONTROL=ignorespace"));
     }
 
     #[test]
     fn non_bash_launch_does_not_receive_bash_only_flags() {
         let launch = shell_launch("/bin/zsh");
         assert_eq!(launch.program, "/bin/zsh");
-        assert_eq!(launch.args, ["-f"]);
+        assert_eq!(launch.args, ["-f", "-o", "histignorespace"]);
         assert!(launch.init_command.contains("unsetopt zle"));
+        assert!(launch.init_command.contains("preexec()"));
+        assert!(launch.init_command.contains("precmd()"));
     }
 
     #[test]
@@ -440,6 +594,12 @@ mod tests {
     }
 
     #[test]
+    fn parser_reads_ready_marker_cwd_when_status_is_present() {
+        let raw = format!("noise\r\n{READY_MARKER}\t0\t/tmp/aish\r\n");
+        assert_eq!(parse_ready_cwd(&raw).as_deref(), Some("/tmp/aish"));
+    }
+
+    #[test]
     fn parser_ignores_ready_marker_in_echoed_init_command() {
         let raw = format!(
             "stty -echo; printf '\\n{READY_MARKER}\\t%s\\n' \"$PWD\"\r\n{READY_MARKER}\t/tmp/aish\r\n"
@@ -456,6 +616,42 @@ mod tests {
         assert_eq!(output, "actual");
         assert_eq!(status, 0);
         assert_eq!(cwd.as_deref(), Some("/tmp"));
+    }
+
+    #[test]
+    fn clean_marker_echo_hides_ready_marker_lines() {
+        let output = clean_marker_echo(
+            &format!("echoed\n{READY_MARKER}\t/tmp/aish\nvisible"),
+            "__AISH_STATUS__1__",
+        );
+
+        assert_eq!(output, "echoed\nvisible");
+    }
+
+    #[test]
+    fn parse_ready_status_output_reads_status_cwd_and_filters_hook_lines() {
+        let raw = format!("hello\n{START_MARKER}\techo hello\n{READY_MARKER}\t7\t/tmp/aish\n");
+
+        assert_eq!(
+            parse_ready_status_output(&raw).unwrap(),
+            HookCommandResult {
+                output: "hello".to_string(),
+                exit_code: 7,
+                cwd: "/tmp/aish".to_string(),
+                started_command: Some("echo hello".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn incomplete_shell_syntax_detection_uses_shell_error_text() {
+        assert!(is_incomplete_shell_syntax(
+            "bash: unexpected EOF while looking for matching `\"'"
+        ));
+        assert!(is_incomplete_shell_syntax("zsh: parse error: unmatched \""));
+        assert!(!is_incomplete_shell_syntax(
+            "syntax error near unexpected token `fi'"
+        ));
     }
 
     #[test]
