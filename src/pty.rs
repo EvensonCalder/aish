@@ -118,6 +118,10 @@ impl PtyBackend {
         self.initial_cwd.as_deref()
     }
 
+    pub fn shell_program(&self) -> &str {
+        &self.shell_program
+    }
+
     pub fn resize(&mut self, size: PtySize) -> Result<()> {
         self.master.resize(size).context("failed to resize PTY")
     }
@@ -587,6 +591,13 @@ mod tests {
             command.get_cwd().map(|cwd| cwd.as_os_str()),
             Some(cwd.as_os_str())
         );
+    }
+
+    #[test]
+    fn spawned_backend_reports_resolved_shell_program() {
+        let backend = PtyBackend::spawn("/bin/bash").unwrap();
+
+        assert_eq!(backend.shell_program(), "/bin/bash");
     }
 
     #[test]

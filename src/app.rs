@@ -91,6 +91,7 @@ pub struct AppState {
     pub draft: InputBuffer,
     pub last_status: Option<i32>,
     pub current_cwd: Option<PathBuf>,
+    pub backend_shell: Option<String>,
     pub exit_requested: bool,
     pub regular_history_path: Option<PathBuf>,
     pub ai_history_path: Option<PathBuf>,
@@ -130,6 +131,7 @@ impl Default for AppState {
             draft: InputBuffer::new(),
             last_status: None,
             current_cwd: None,
+            backend_shell: None,
             exit_requested: false,
             regular_history_path: None,
             ai_history_path: None,
@@ -669,6 +671,7 @@ pub fn run() -> Result<()> {
     let mut backend = PtyBackend::spawn(&config.shell.backend)?;
     let mut state = AppState {
         current_cwd: backend.initial_cwd().map(PathBuf::from),
+        backend_shell: Some(backend.shell_program().to_string()),
         regular_history_path: Some(layout.regular_history),
         ai_history_path: Some(layout.ai_history),
         notes_path: Some(layout.notes),
@@ -1363,7 +1366,7 @@ fn write_doctor_report(state: &AppState, out: &mut impl Write) -> Result<()> {
     writeln!(out, "ai_sessions={}", state.ai_sessions.len())?;
     writeln!(out, "ai_commands={}", state.ai_command_indices.len())?;
     writeln!(out, "output_ring_entries={}", state.output_ring.len())?;
-    writeln!(out, "backend_shell=unknown")?;
+    writeln!(out, "backend_shell={}", backend_shell_value(state))?;
     writeln!(out, "pty=ok")?;
     writeln!(out, "gpg=not_configured")?;
     writeln!(out, "git=not_configured")?;
@@ -1399,7 +1402,7 @@ fn write_status_report(state: &AppState, out: &mut impl Write) -> Result<()> {
             .map(|cwd| cwd.display().to_string())
             .unwrap_or_else(|| "unknown".to_string())
     )?;
-    writeln!(out, "shell=backend")?;
+    writeln!(out, "shell={}", backend_shell_value(state))?;
     write_ai_runtime_status(state, out)?;
     write_encryption_sync_status(out)?;
     writeln!(out, "context.enabled={}", state.context_config.enabled)?;
@@ -1443,6 +1446,10 @@ fn write_ai_runtime_status(state: &AppState, out: &mut impl Write) -> Result<()>
     Ok(())
 }
 
+fn backend_shell_value(state: &AppState) -> &str {
+    state.backend_shell.as_deref().unwrap_or("unknown")
+}
+
 fn write_encryption_sync_status(out: &mut impl Write) -> Result<()> {
     writeln!(out, "encryption=off")?;
     writeln!(out, "sync=off")?;
@@ -1451,6 +1458,7 @@ fn write_encryption_sync_status(out: &mut impl Write) -> Result<()> {
 
 fn write_config_report(state: &AppState, out: &mut impl Write) -> Result<()> {
     writeln!(out, "Aish config")?;
+    writeln!(out, "shell.backend={}", backend_shell_value(state))?;
     writeln!(out, "draft.persist={}", state.draft_persist)?;
     writeln!(
         out,
@@ -3558,6 +3566,7 @@ mod tests {
             notes_path: Some(notes_path.clone()),
             draft_history_path: Some(draft_path.clone()),
             template_store_path: Some(template_path.clone()),
+            backend_shell: Some("/bin/bash".to_string()),
             draft_persist: false,
             editor_config: EditorConfig {
                 command: vec!["nvim".to_string(), "--clean".to_string()],
@@ -3594,6 +3603,7 @@ mod tests {
 
         let output = String::from_utf8(output).unwrap();
         assert!(output.contains("Aish config"));
+        assert!(output.contains("shell.backend=/bin/bash"));
         assert!(output.contains("draft.persist=false"));
         assert!(output.contains("editor.execute_after_save=false"));
         assert!(output.contains("editor.command=nvim --clean"));
@@ -3635,6 +3645,7 @@ mod tests {
         let mut state = AppState {
             last_status: Some(7),
             current_cwd: Some(temp.path().to_path_buf()),
+            backend_shell: Some("/bin/bash".to_string()),
             editor_config: EditorConfig {
                 command: vec!["vim".to_string()],
                 execute_after_save: false,
@@ -3693,7 +3704,7 @@ mod tests {
         assert!(output.contains("ai_sessions=1"));
         assert!(output.contains("ai_commands=1"));
         assert!(output.contains("output_ring_entries=0"));
-        assert!(output.contains("backend_shell=unknown"));
+        assert!(output.contains("backend_shell=/bin/bash"));
         assert!(output.contains("pty=ok"));
         assert!(output.contains("gpg=not_configured"));
         assert!(output.contains("git=not_configured"));
@@ -3769,6 +3780,7 @@ mod tests {
         let mut state = AppState {
             last_status: Some(7),
             current_cwd: Some(std::env::temp_dir()),
+            backend_shell: Some("/bin/bash".to_string()),
             ai_config: AiConfig {
                 model: "gpt-test".to_string(),
                 base_url: "https://example.invalid/v1/chat/completions".to_string(),
@@ -3793,7 +3805,7 @@ mod tests {
         assert!(output.contains("mode=>"));
         assert!(output.contains("last_status=7"));
         assert!(output.contains(&format!("cwd={}", std::env::temp_dir().display())));
-        assert!(output.contains("shell=backend"));
+        assert!(output.contains("shell=/bin/bash"));
         assert!(output.contains("ai.final_url="));
         assert!(output.contains("ai.key_source=env"));
         assert!(output.contains("encryption=off"));
