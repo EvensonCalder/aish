@@ -118,6 +118,11 @@ fn first_run_doctor() {
 }
 
 #[test]
+fn invalid_config_startup() {
+    run_script("invalid_config_startup.exp");
+}
+
+#[test]
 fn cd_persists() {
     run_script("cd_persists.exp");
 }

@@ -1,0 +1,28 @@
+#!/usr/bin/env expect
+# Invalid config should fail before raw-mode UI startup with a readable error and
+# without leaving an interactive Aish session behind.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set home [aish_new_home]
+file mkdir $home
+set f [open "$home/config.toml" w]
+puts $f "this is not valid toml ="
+close $f
+set ::env(AISH_HOME) $home
+
+spawn -noecho $::env(AISH_BIN)
+expect {
+    -ex "invalid TOML" {}
+    -ex "TOML parse error" {}
+    -ex "failed to parse config" {}
+    timeout { puts stderr "no readable config error"; exit 7 }
+    eof { puts stderr "eof before readable config error"; exit 7 }
+}
+
+expect {
+    eof {}
+    -re {> \x1b\[} { puts stderr "unexpected Aish prompt after invalid config"; exit 7 }
+    timeout { puts stderr "invalid-config process did not exit"; exit 7 }
+}
