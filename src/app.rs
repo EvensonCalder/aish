@@ -1,4 +1,5 @@
 use std::collections::{HashMap, VecDeque};
+use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -40,9 +41,9 @@ use crate::picker::{
 };
 use crate::pty::PtyBackend;
 use crate::sync::{
-    GitCommandPlan, SyncFailureKind, SyncLock, SyncStepOutcome, classify_git_sync_step,
-    conservative_sync_plan, init_repo_plan, log_sync_failure, maintain_managed_gitignore,
-    tracked_managed_files_warning,
+    GitCommandPlan, StartupSyncDecision, SyncFailureKind, SyncLock, SyncStepOutcome,
+    classify_git_sync_step, conservative_sync_plan, init_repo_plan, log_sync_failure,
+    maintain_managed_gitignore, startup_sync_decision, tracked_managed_files_warning,
 };
 use crate::templates::{
     TemplateEntry, append_template, apply_template_values_with_usage, find_template_by_name,
@@ -705,6 +706,7 @@ pub fn run() -> Result<()> {
         editor_temp_root: Some(layout.runtime_cache.join("editor")),
         ..AppState::default()
     };
+    run_startup_sync_check(&mut state, &layout.root, &mut io::stdout())?;
     crate::terminal::run(
         &mut state,
         &mut backend,
@@ -1729,6 +1731,55 @@ fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -> Result<()
     Ok(())
 }
 
+fn run_startup_sync_check(state: &mut AppState, root: &Path, out: &mut impl Write) -> Result<()> {
+    let last_attempt_path = root.join("cache/runtime/sync.last_attempt");
+    let now = (state.clock)();
+    match startup_sync_decision(
+        &state.sync_config,
+        now,
+        read_last_sync_attempt(&last_attempt_path)?,
+    ) {
+        StartupSyncDecision::Due => {
+            write_last_sync_attempt(&last_attempt_path, now)?;
+            writeln!(out, "startup sync due; running #push")?;
+            run_manual_sync_push(state, out)?;
+        }
+        StartupSyncDecision::UnsupportedSchedule(schedule) => {
+            state.append_event(
+                EventLevel::Warn,
+                &format!("startup sync unsupported schedule: {schedule}"),
+            )?;
+        }
+        StartupSyncDecision::Disabled
+        | StartupSyncDecision::MissingRemote
+        | StartupSyncDecision::MissingSchedule
+        | StartupSyncDecision::NotDue { .. } => {}
+    }
+    Ok(())
+}
+
+fn read_last_sync_attempt(path: &Path) -> Result<Option<i64>> {
+    match fs::read_to_string(path) {
+        Ok(raw) => Ok(raw.trim().parse::<i64>().ok()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(err)
+            .with_context(|| format!("failed to read startup sync timestamp {}", path.display())),
+    }
+}
+
+fn write_last_sync_attempt(path: &Path, value: i64) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "failed to create startup sync timestamp directory {}",
+                parent.display()
+            )
+        })?;
+    }
+    fs::write(path, format!("{value}\n"))
+        .with_context(|| format!("failed to write startup sync timestamp {}", path.display()))
+}
+
 fn sync_root(state: &AppState) -> Option<PathBuf> {
     state.config_path.as_ref()?.parent().map(Path::to_path_buf)
 }
@@ -2184,7 +2235,6 @@ pub fn save_draft_if_configured(state: &AppState) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
     use std::path::Path;
 
     #[test]
@@ -4169,6 +4219,76 @@ mod tests {
         );
     }
 
+    #[test]
+    fn startup_sync_runs_due_schedule_against_local_git_remote() {
+        let temp = tempfile::tempdir().unwrap();
+        let remote = temp.path().join("remote.git");
+        let seed = temp.path().join("seed");
+        let root = temp.path().join("aish-home");
+        seed_local_remote(&remote, &seed, &root);
+
+        let config_path = root.join("config.toml");
+        let events_path = root.join("logs/events.jsonl");
+        let mut config = config::Config::default();
+        config.storage.home = root.clone();
+        config.sync.remote = remote.to_string_lossy().into_owned();
+        config.sync.enabled = true;
+        config.sync.schedule = "@hourly".to_string();
+        config::save_config(&config_path, &config).unwrap();
+        let mut state = AppState {
+            config_path: Some(config_path),
+            events_path: Some(events_path.clone()),
+            sync_config: config.sync,
+            clock: || 3_600,
+            ..AppState::default()
+        };
+        let mut output = Vec::new();
+
+        run_startup_sync_check(&mut state, &root, &mut output).unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(
+            output.contains("startup sync due; running #push"),
+            "{output}"
+        );
+        assert!(output.contains("sync push completed"), "{output}");
+        assert_eq!(
+            fs::read_to_string(root.join("cache/runtime/sync.last_attempt")).unwrap(),
+            "3600\n"
+        );
+        let events = load_events(&events_path).unwrap();
+        assert!(
+            events
+                .items
+                .iter()
+                .any(|event| event.msg == "sync push completed")
+        );
+    }
+
+    #[test]
+    fn startup_sync_skips_not_due_schedule_without_running_git() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let last_attempt = root.join("cache/runtime/sync.last_attempt");
+        write_last_sync_attempt(&last_attempt, 3_500).unwrap();
+        let mut state = AppState {
+            sync_config: SyncConfig {
+                remote: "git@example.invalid:aish.git".to_string(),
+                enabled: true,
+                schedule: "@hourly".to_string(),
+                ..SyncConfig::default()
+            },
+            clock: || 3_600,
+            ..AppState::default()
+        };
+        let mut output = Vec::new();
+
+        run_startup_sync_check(&mut state, root, &mut output).unwrap();
+
+        assert!(String::from_utf8(output).unwrap().is_empty());
+        assert_eq!(fs::read_to_string(last_attempt).unwrap(), "3500\n");
+    }
+
     fn run_test_git<const N: usize>(cwd: &Path, args: [&str; N]) {
         let output = Command::new("git")
             .args(args)
@@ -4181,6 +4301,28 @@ mod tests {
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+
+    fn seed_local_remote(remote: &Path, seed: &Path, root: &Path) {
+        run_test_git(
+            remote.parent().unwrap(),
+            ["init", "--bare", remote.to_str().unwrap()],
+        );
+        fs::create_dir_all(seed).unwrap();
+        run_test_git(seed, ["init"]);
+        run_test_git(seed, ["config", "user.name", "Aish Test"]);
+        run_test_git(seed, ["config", "user.email", "aish@example.invalid"]);
+        fs::write(seed.join("README.md"), "seed\n").unwrap();
+        run_test_git(seed, ["add", "README.md"]);
+        run_test_git(seed, ["commit", "-m", "seed"]);
+        run_test_git(seed, ["remote", "add", "origin", remote.to_str().unwrap()]);
+        run_test_git(seed, ["push", "-u", "origin", "HEAD"]);
+        run_test_git(
+            remote.parent().unwrap(),
+            ["clone", remote.to_str().unwrap(), root.to_str().unwrap()],
+        );
+        run_test_git(root, ["config", "user.name", "Aish Test"]);
+        run_test_git(root, ["config", "user.email", "aish@example.invalid"]);
     }
 
     #[test]
