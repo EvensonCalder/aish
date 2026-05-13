@@ -493,6 +493,11 @@ fn ai_mode_executes_sequence() {
 }
 
 #[test]
+fn home_default_ai_mode_executes_sequence() {
+    run_script("home_default_ai_mode_executes_sequence.exp");
+}
+
+#[test]
 fn ai_mode_edit_copies_to_draft() {
     run_script("ai_mode_edit_copies_to_draft.exp");
 }
