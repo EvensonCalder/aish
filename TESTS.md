@@ -17,7 +17,7 @@ Current test inventory:
 - 1 first-run integration test.
 - 7 active bash PTY integration tests.
 - 2 active zsh PTY integration tests.
-- 39 expect-driven end-to-end interactive scenarios.
+- 40 expect-driven end-to-end interactive scenarios.
 - Bash PTY startup records the backend shell's initial cwd so the first prompt matches the shell state before any command executes.
 - Backend PTY startup inherits Aish's current directory and can be resized so child commands such as `ls` see the real terminal width.
 - 0 doctests.
@@ -63,7 +63,7 @@ Expect scenarios are the acceptance layer for user-visible terminal behavior. Th
 | Notes, context, and logs | `notes_are_swallowed`, `context_confirmation_skip`, `log_shows_context_skip` | Covered | Add dangerous-context end-to-end refusal case. |
 | Templates | `template_use_executes`, `template_crud`, `template_placeholder_blocks_execution` | Covered | Add completion/template interaction if UI changes. |
 | Editor and paste flows | `external_editor_roundtrip`, `editor_hash_content_bypasses_parser`, `multiline_paste_editor_review` | Covered | Add editor failure path and large paste boundary if practical. |
-| Sync | `key_and_sync_placeholders` | Partial | Add local temporary git remote success/failure scenarios. |
+| Sync | `key_and_sync_placeholders`, `sync_push_local_remote` | Covered | Add conflict-specific expect scenario if sync conflict UI changes. |
 | Passthrough/interactive programs | key forwarding is Rust-covered | Partial | Add portable expect scenarios for `less`, `fzf` fallback, or a simple TUI fixture. |
 | Encryption/GPG | `key_clear_removes_stored_key` | Partial | Add fake GPG or test-key flow before claiming encryption completion. |
 
@@ -332,6 +332,7 @@ Implemented:
 - Interactive passthrough command allowlist detects common fullscreen/interactive commands, basenames, shell quoting, assignments, and wrappers such as `sudo`, `env`, `command`, and `exec` without changing runtime behavior yet.
 - Prompt redraw after ordinary command output has both a Rust virtual-screen regression and an expect scenario requiring command output line termination before the next prompt.
 - Command output followed by mode-switch redraw and unique completion acceptance has expect coverage through the real binary.
+- Manual `#push` sync has expect coverage against a local temporary bare git remote, including managed `.gitignore` push and no scheduler file creation.
 - `#key set` remains a placeholder, while `#key clear` removes the encrypted key file if present and logs the action without printing stored secret content.
 - `#completion` remains a private-command placeholder, but the internal completion engine is active for draft completion display and acceptance.
 - Completion has pure current-token detection helpers that handle first-token classification, non-first-token classification, quoted whitespace, escaped whitespace, cursor-in-line contexts, path-like tokens, and UTF-8 cursor snapping.

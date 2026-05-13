@@ -1,0 +1,65 @@
+#!/usr/bin/env expect
+# End-to-end manual sync: #push should work against a local bare git remote
+# without network access or scheduler files.
+
+set timeout 20
+source [file dirname [info script]]/_lib.exp
+
+set root "/tmp/aish-sync-expect-[pid]-[clock clicks]"
+set remote "$root/remote.git"
+set seed "$root/seed"
+set home "$root/aish-home"
+file mkdir $root
+file mkdir $seed
+
+proc run_git {args} {
+    if {[catch {exec git {*}$args 2>@1} output]} {
+        puts stderr $output
+        exit 6
+    }
+    return $output
+}
+
+run_git init --bare $remote
+run_git -C $seed init
+run_git -C $seed config user.name "Aish Expect"
+run_git -C $seed config user.email "aish@example.invalid"
+set fh [open "$seed/README.md" w]
+puts $fh "seed"
+close $fh
+run_git -C $seed add README.md
+run_git -C $seed commit -m seed
+run_git -C $seed remote add origin $remote
+run_git -C $seed push -u origin HEAD
+run_git clone $remote $home
+run_git -C $home config user.name "Aish Expect"
+run_git -C $home config user.email "aish@example.invalid"
+
+set ::env(AISH_HOME) $home
+aish_spawn
+
+aish_send "#set-remote $remote"
+aish_enter
+aish_expect "sync.remote=$remote"
+aish_wait_prompt
+
+aish_send "#push"
+aish_enter
+aish_expect "sync step ok: git pull --rebase"
+aish_expect "sync step ok: git add -- .gitignore"
+aish_expect "sync step ok: git commit"
+aish_expect "sync step ok: git push"
+aish_expect "sync push completed"
+aish_wait_prompt
+
+aish_quit
+
+set pushed_gitignore [run_git --git-dir $remote show HEAD:.gitignore]
+if {[string first "# BEGIN AISH MANAGED" $pushed_gitignore] < 0} {
+    puts stderr "remote .gitignore missing managed Aish section"
+    exit 6
+}
+if {[file exists "$home/cache/runtime/scheduler"]} {
+    puts stderr "unexpected scheduler file created"
+    exit 6
+}

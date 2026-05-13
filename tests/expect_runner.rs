@@ -198,6 +198,11 @@ fn key_and_sync_placeholders() {
 }
 
 #[test]
+fn sync_push_local_remote() {
+    run_script("sync_push_local_remote.exp");
+}
+
+#[test]
 fn key_clear_removes_stored_key() {
     run_script("key_clear_removes_stored_key.exp");
 }
