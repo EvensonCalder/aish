@@ -258,6 +258,11 @@ fn draft_persists_across_restarts() {
 }
 
 #[test]
+fn home_default_draft_persists() {
+    run_script("home_default_draft_persists.exp");
+}
+
+#[test]
 fn template_use_executes() {
     run_script("template_use_executes.exp");
 }

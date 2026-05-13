@@ -1,0 +1,35 @@
+#!/usr/bin/env expect
+# Production-style draft restore: without AISH_HOME, persisted drafts under
+# $HOME/.aish should restore into the prompt on restart.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set isolated_home "/tmp/aish-home-draft-[pid]-[clock clicks]"
+file delete -force $isolated_home
+file mkdir $isolated_home
+set old_home $::env(HOME)
+unset -nocomplain ::env(AISH_HOME)
+set ::env(HOME) $isolated_home
+set aish_home "$isolated_home/.aish"
+
+aish_spawn_without_aish_home
+aish_quit
+
+set f [open "$aish_home/history/draft.jsonl" a]
+puts $f {{"t":1234567890,"text":"echo home-draft-ok"}}
+close $f
+
+spawn -noecho $::env(AISH_BIN)
+expect {
+    -ex "> echo home-draft-ok" {}
+    timeout { puts stderr "home default persisted draft was not restored"; exit 3 }
+    eof { puts stderr "eof before home default restored draft prompt"; exit 3 }
+}
+aish_send "\x03"
+aish_wait_prompt
+
+aish_quit
+
+set ::env(HOME) $old_home
+file delete -force $isolated_home
