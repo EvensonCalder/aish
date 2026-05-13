@@ -267,5 +267,10 @@ fn template_crud() {
     run_script("template_crud.exp");
 }
 
+#[test]
+fn editor_hash_content_bypasses_parser() {
+    run_script("editor_hash_content_bypasses_parser.exp");
+}
+
 #[allow(dead_code)]
 fn _unused_path_check(_p: &Path) {}

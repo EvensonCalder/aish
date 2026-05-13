@@ -1,0 +1,29 @@
+#!/usr/bin/env expect
+# Editor-returned content is an explicit raw shell submission. A leading `#`
+# from the editor must bypass Aish's private-command parser and reach the
+# backend shell as shell text.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set editor "/tmp/aish-fake-editor-hash-[pid]-[clock clicks].sh"
+set fh [open $editor w]
+puts $fh {#!/bin/sh}
+puts $fh {printf '# this is a shell comment\necho editor-hash-ok\n' > "$1"}
+puts $fh {exit 0}
+close $fh
+file attributes $editor -permissions 0755
+set ::env(EDITOR) $editor
+
+aish_spawn
+
+aish_send "\x18\x05"
+aish_expect "\[editor draft: 2 line(s)"
+aish_expect "Enter to run"
+
+aish_enter
+aish_expect "editor-hash-ok"
+aish_wait_prompt
+
+aish_quit
+file delete -force $editor
