@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 303 library unit tests.
+- 306 library unit tests.
 - 23 draft execution integration tests.
 - 1 first-run integration test.
 - 6 active bash PTY integration tests.
@@ -300,6 +300,7 @@ Implemented:
 - Git sync step classification helper identifies conflict-like git output and distinguishes conflict aborts from ordinary failures without running git.
 - Managed add plan helper selects only enabled sync category paths plus `.gitignore` for future git add operations without running git.
 - Pull-rebase command plan helper emits fixed `git pull --rebase` arguments without shell interpolation or running git.
+- Sync commit command plan helper emits fixed `git commit -m` arguments, sanitizes message text, and rejects empty messages without running git.
 - `#key set` remains a placeholder, while `#key clear` removes the encrypted key file if present and logs the action without printing stored secret content.
 - `#completion` remains a private-command placeholder, but the internal completion engine is active for draft completion display and acceptance.
 - Completion has pure current-token detection helpers that handle first-token classification, non-first-token classification, quoted whitespace, escaped whitespace, cursor-in-line contexts, path-like tokens, and UTF-8 cursor snapping.

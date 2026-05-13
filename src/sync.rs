@@ -320,6 +320,33 @@ pub fn pull_rebase_plan() -> GitCommandPlan {
     }
 }
 
+pub fn commit_plan(message: &str) -> Option<GitCommandPlan> {
+    let message = sanitize_commit_message(message);
+    if message.is_empty() {
+        return None;
+    }
+    Some(GitCommandPlan {
+        program: "git".to_string(),
+        args: vec!["commit".to_string(), "-m".to_string(), message],
+    })
+}
+
+pub fn default_sync_commit_plan() -> GitCommandPlan {
+    commit_plan("sync aish data").expect("default sync commit message is non-empty")
+}
+
+fn sanitize_commit_message(message: &str) -> String {
+    message
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or_default()
+        .chars()
+        .filter(|ch| !ch.is_control())
+        .take(72)
+        .collect()
+}
+
 fn combined_git_output(stdout: &str, stderr: &str) -> String {
     let mut parts = Vec::new();
     let stdout = stdout.trim();
@@ -629,5 +656,40 @@ mod tests {
                 args: vec!["pull".to_string(), "--rebase".to_string()]
             }
         );
+    }
+
+    #[test]
+    fn default_sync_commit_plan_uses_fixed_git_arguments() {
+        assert_eq!(
+            default_sync_commit_plan(),
+            GitCommandPlan {
+                program: "git".to_string(),
+                args: vec![
+                    "commit".to_string(),
+                    "-m".to_string(),
+                    "sync aish data".to_string()
+                ]
+            }
+        );
+    }
+
+    #[test]
+    fn commit_plan_sanitizes_message_without_shell_interpolation() {
+        assert_eq!(
+            commit_plan("\n  sync now && rm -rf /\nsecond line").unwrap(),
+            GitCommandPlan {
+                program: "git".to_string(),
+                args: vec![
+                    "commit".to_string(),
+                    "-m".to_string(),
+                    "sync now && rm -rf /".to_string()
+                ]
+            }
+        );
+    }
+
+    #[test]
+    fn commit_plan_rejects_empty_message() {
+        assert_eq!(commit_plan("\n\t\n"), None);
     }
 }
