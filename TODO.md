@@ -982,15 +982,15 @@ enum AiItemKind {
 
 ## Phase 26: Documentation checklist
 
-- [ ] `README.md` with philosophy: Aish Is not a SHell.
-- [ ] Quickstart.
-- [ ] Keybindings.
-- [ ] `#` commands.
-- [ ] AI safety rules.
-- [ ] Editor mode.
-- [ ] Multi-line paste behavior.
-- [ ] Templates.
-- [ ] Encryption.
-- [ ] Git sync.
-- [ ] Shell integration notes.
-- [ ] Troubleshooting with `#doctor`.
+- [x] `README.md` with philosophy: Aish Is not a SHell.
+- [x] Quickstart.
+- [x] Keybindings.
+- [x] `#` commands.
+- [x] AI safety rules.
+- [x] Editor mode.
+- [x] Multi-line paste behavior.
+- [x] Templates.
+- [x] Encryption.
+- [x] Git sync.
+- [x] Shell integration notes.
+- [x] Troubleshooting with `#doctor`.
