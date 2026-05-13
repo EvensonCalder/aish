@@ -217,3 +217,47 @@ fn zsh_pty_backend_keeps_user_commands_but_not_aish_internal_markers_in_history(
     assert!(!history.output.contains("__AISH_STATUS__"));
     assert!(!history.output.contains("__AISH_READY__"));
 }
+
+#[test]
+fn fish_pty_backend_runs_commands_and_reports_cwd_when_available() {
+    let _guard = pty_test_guard();
+    let Some(fish) = find_shell(&[
+        "/opt/homebrew/bin/fish",
+        "/usr/local/bin/fish",
+        "/usr/bin/fish",
+        "/bin/fish",
+    ]) else {
+        return;
+    };
+
+    let mut backend = PtyBackend::spawn(fish).unwrap();
+    let first = backend
+        .run_command("printf 'fish-ok\\n'", Duration::from_secs(5))
+        .unwrap();
+
+    assert_eq!(first.exit_code, 0);
+    assert_eq!(
+        first.started_command.as_deref(),
+        Some("printf 'fish-ok\\n'")
+    );
+    assert_eq!(first.output.trim(), "fish-ok");
+    assert_eq!(first.cwd.as_deref(), Some(backend.initial_cwd().unwrap()));
+
+    let cd = backend
+        .run_command("cd /tmp", Duration::from_secs(5))
+        .unwrap();
+    assert_eq!(cd.exit_code, 0);
+
+    let pwd = backend.run_command("pwd", Duration::from_secs(5)).unwrap();
+    assert_eq!(pwd.exit_code, 0);
+    assert_eq!(pwd.started_command.as_deref(), Some("pwd"));
+    assert_eq!(pwd.cwd.as_deref(), Some("/tmp"));
+    assert_eq!(pwd.output.trim(), "/tmp");
+}
+
+fn find_shell(candidates: &[&'static str]) -> Option<&'static str> {
+    candidates
+        .iter()
+        .copied()
+        .find(|candidate| Path::new(candidate).exists())
+}

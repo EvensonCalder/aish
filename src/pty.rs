@@ -51,6 +51,7 @@ pub struct ContinuationCheck {
 enum ShellIntegration {
     MarkerCommand,
     ZshHooks,
+    FishEvents,
 }
 
 impl PtyBackend {
@@ -197,11 +198,14 @@ impl PtyBackend {
     }
 
     pub fn run_command(&mut self, command: &str, timeout: Duration) -> Result<CommandResult> {
-        if self.integration == ShellIntegration::ZshHooks {
-            if command.contains('\n') {
+        if matches!(
+            self.integration,
+            ShellIntegration::ZshHooks | ShellIntegration::FishEvents
+        ) {
+            if self.integration == ShellIntegration::ZshHooks && command.contains('\n') {
                 return self.run_command_with_marker(command, timeout);
             }
-            return self.run_command_with_zsh_hooks(command, timeout);
+            return self.run_command_with_shell_events(command, timeout);
         }
 
         self.run_command_with_marker(command, timeout)
@@ -260,7 +264,7 @@ impl PtyBackend {
         }
     }
 
-    fn run_command_with_zsh_hooks(
+    fn run_command_with_shell_events(
         &mut self,
         command: &str,
         timeout: Duration,
@@ -428,6 +432,13 @@ fn shell_launch(configured_shell: &str) -> ShellLaunch {
                 " stty -echo; unsetopt zle prompt_cr prompt_sp; PROMPT=''; RPROMPT=''; PROMPT2=''; preexec() {{ printf '\\n{START_MARKER}\\t%s\\n' \"$1\"; }}; precmd() {{ printf '\\n{READY_MARKER}\\t%s\\t%s\\n' \"$?\" \"$PWD\"; }}; precmd\n"
             ),
             ShellIntegration::ZshHooks,
+        ),
+        "fish" => (
+            vec!["--no-config".to_string()],
+            format!(
+                "stty -echo; function __aish_preexec --on-event fish_preexec; printf '\n{START_MARKER}\\t%s\n' $argv[1]; end; function fish_prompt; printf '\n{READY_MARKER}\\t%s\\t%s\n' $status $PWD; end; function fish_right_prompt; end; fish_prompt\n"
+            ),
+            ShellIntegration::FishEvents,
         ),
         _ => (
             Vec::new(),
@@ -656,6 +667,18 @@ mod tests {
         assert!(launch.init_command.contains("unsetopt zle"));
         assert!(launch.init_command.contains("preexec()"));
         assert!(launch.init_command.contains("precmd()"));
+    }
+
+    #[test]
+    fn fish_launch_uses_event_functions_without_user_config() {
+        let launch = shell_launch("/usr/bin/fish");
+
+        assert_eq!(launch.program, "/usr/bin/fish");
+        assert_eq!(launch.args, ["--no-config"]);
+        assert_eq!(launch.integration, ShellIntegration::FishEvents);
+        assert!(launch.init_command.contains("--on-event fish_preexec"));
+        assert!(launch.init_command.contains("function fish_prompt"));
+        assert!(!launch.args.contains(&"--noprofile".to_string()));
     }
 
     #[test]

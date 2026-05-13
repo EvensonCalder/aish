@@ -12,11 +12,12 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 327 library unit tests.
+- 328 library unit tests.
 - 23 draft execution integration tests.
 - 1 first-run integration test.
 - 7 active bash PTY integration tests.
 - 2 active zsh PTY integration tests.
+- 1 conditional fish PTY integration test.
 - 43 expect-driven end-to-end interactive scenarios.
 - Bash PTY startup records the backend shell's initial cwd so the first prompt matches the shell state before any command executes.
 - Backend PTY startup inherits Aish's current directory and can be resized so child commands such as `ls` see the real terminal width.
@@ -330,6 +331,7 @@ Implemented:
 - Marker-based shell integration now emits and parses command-start markers, with shell-quoting tests and PTY coverage that bash reports `started_command` without leaking internal markers into history.
 - Bash marker integration has PTY coverage for prompt-ready initial cwd, command-start reporting, command-finish exit status, and cwd reporting after command execution.
 - Zsh hook integration has PTY coverage for `preexec` command-start reporting, `precmd` finish status, and cwd reporting after command execution when `/bin/zsh` is available.
+- Fish event integration has launch/unit coverage for `fish_preexec` and `fish_prompt` setup plus conditional PTY coverage for command-start, finish status, and cwd reporting when fish is installed.
 - Interactive passthrough command allowlist detects common fullscreen/interactive commands, basenames, shell quoting, assignments, and wrappers such as `sudo`, `env`, `command`, and `exec` without changing runtime behavior yet.
 - Prompt redraw after ordinary command output has both a Rust virtual-screen regression and an expect scenario requiring command output line termination before the next prompt.
 - Command output followed by mode-switch redraw and unique completion acceptance has expect coverage through the real binary.

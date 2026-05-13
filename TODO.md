@@ -680,8 +680,8 @@ Status: direct AI prompts are wired to the chat-completions request path using c
   - [x] cwd reporting
   - [x] surface command-start events beyond output filtering
 - [ ] Fish integration:
-  - [ ] prompt/event functions
-  - [ ] cwd reporting
+  - [x] prompt/event functions
+  - [x] cwd reporting
 - [ ] Detect interactive commands for passthrough:
   - [x] command allowlist
   - [ ] alternate screen buffer detection
