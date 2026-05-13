@@ -55,6 +55,11 @@ pub struct InitRepoPlan {
     pub commands: Vec<GitCommandPlan>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConservativeSyncPlan {
+    pub commands: Vec<GitCommandPlan>,
+}
+
 #[derive(Debug)]
 pub struct SyncLock {
     path: PathBuf,
@@ -345,6 +350,26 @@ pub fn push_plan() -> GitCommandPlan {
         program: "git".to_string(),
         args: vec!["push".to_string()],
     }
+}
+
+pub fn conservative_sync_plan(config: &SyncConfig) -> ConservativeSyncPlan {
+    let add_plan = managed_add_plan(config);
+    let commands = vec![
+        pull_rebase_plan(),
+        GitCommandPlan {
+            program: "git".to_string(),
+            args: git_add_args(&add_plan.paths),
+        },
+        default_sync_commit_plan(),
+        push_plan(),
+    ];
+    ConservativeSyncPlan { commands }
+}
+
+fn git_add_args(paths: &[String]) -> Vec<String> {
+    let mut args = vec!["add".to_string(), "--".to_string()];
+    args.extend(paths.iter().cloned());
+    args
 }
 
 pub fn init_repo_plan(remote: &str) -> Option<InitRepoPlan> {
@@ -775,6 +800,65 @@ mod tests {
         assert_eq!(
             init_repo_plan("git@example.test:aish.git\n--upload-pack=x"),
             None
+        );
+    }
+
+    #[test]
+    fn conservative_sync_plan_orders_fixed_steps() {
+        let config = SyncConfig {
+            history: true,
+            templates: true,
+            ..SyncConfig::default()
+        };
+
+        assert_eq!(
+            conservative_sync_plan(&config),
+            ConservativeSyncPlan {
+                commands: vec![
+                    GitCommandPlan {
+                        program: "git".to_string(),
+                        args: vec!["pull".to_string(), "--rebase".to_string()]
+                    },
+                    GitCommandPlan {
+                        program: "git".to_string(),
+                        args: vec![
+                            "add".to_string(),
+                            "--".to_string(),
+                            ".gitignore".to_string(),
+                            "history/notes.jsonl".to_string(),
+                            "history/regular.jsonl".to_string(),
+                            "templates/templates.jsonl".to_string()
+                        ]
+                    },
+                    GitCommandPlan {
+                        program: "git".to_string(),
+                        args: vec![
+                            "commit".to_string(),
+                            "-m".to_string(),
+                            "sync aish data".to_string()
+                        ]
+                    },
+                    GitCommandPlan {
+                        program: "git".to_string(),
+                        args: vec!["push".to_string()]
+                    }
+                ]
+            }
+        );
+    }
+
+    #[test]
+    fn conservative_sync_plan_adds_only_gitignore_when_categories_are_private_by_default() {
+        assert_eq!(
+            conservative_sync_plan(&SyncConfig::default()).commands[1],
+            GitCommandPlan {
+                program: "git".to_string(),
+                args: vec![
+                    "add".to_string(),
+                    "--".to_string(),
+                    ".gitignore".to_string()
+                ]
+            }
         );
     }
 }

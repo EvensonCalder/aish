@@ -3,7 +3,7 @@ use std::panic;
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::cursor::{MoveTo, MoveToColumn, MoveToPreviousLine, MoveUp};
+use crossterm::cursor::{MoveToColumn, MoveToPreviousLine, MoveUp};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
@@ -218,7 +218,7 @@ fn handle_key(
 
 fn clear_screen_for_redraw(state: &mut AppState, out: &mut impl Write) -> Result<()> {
     state.last_rendered_lines = 0;
-    execute!(out, Clear(ClearType::All), MoveTo(0, 0))?;
+    write!(out, "\x1b[H\x1b[2J\x1b[3J\x1b[H")?;
     Ok(())
 }
 
@@ -1614,9 +1614,149 @@ mod tests {
         clear_screen_for_redraw(&mut state, &mut output).unwrap();
 
         let rendered = String::from_utf8(output).unwrap();
+        assert!(rendered.starts_with("\x1b[H"));
+        assert!(!rendered.starts_with("\r\n"));
+        assert!(!rendered.starts_with('\n'));
         assert!(rendered.contains("\x1b[2J"));
-        assert!(rendered.contains("\x1b[1;1H"));
+        assert!(rendered.contains("\x1b[3J"));
         assert_eq!(state.last_rendered_lines, 0);
+    }
+
+    #[test]
+    fn ctrl_l_redraw_does_not_emit_leading_blank_line() {
+        let mut state = AppState::default();
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        handle_key(
+            ctrl('l'),
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let rendered = String::from_utf8(output).unwrap();
+        let screen = TestScreen::from_output(&rendered);
+        assert_eq!(screen.line(0), "> ");
+        assert_eq!(screen.first_non_empty_line(), Some(0));
+    }
+
+    #[test]
+    fn clear_like_command_output_redraws_prompt_on_first_screen_line() {
+        let mut state = AppState::default();
+        state
+            .draft
+            .insert_str("printf '\\033[H\\033[2J\\033[3J\\033[H'");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        handle_key(
+            key(KeyCode::Enter),
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let rendered = String::from_utf8(output).unwrap();
+        let screen = TestScreen::from_output(&rendered);
+        assert_eq!(screen.line(0), "> ");
+        assert_eq!(screen.first_non_empty_line(), Some(0));
+    }
+
+    struct TestScreen {
+        rows: Vec<Vec<char>>,
+        row: usize,
+        col: usize,
+    }
+
+    impl TestScreen {
+        fn from_output(output: &str) -> Self {
+            let mut screen = Self {
+                rows: vec![Vec::new(); 8],
+                row: 0,
+                col: 0,
+            };
+            let chars: Vec<char> = output.chars().collect();
+            let mut i = 0;
+            while i < chars.len() {
+                match chars[i] {
+                    '\x1b' if chars.get(i + 1) == Some(&'[') => {
+                        i = screen.apply_csi(&chars, i + 2);
+                    }
+                    '\r' => {
+                        screen.col = 0;
+                        i += 1;
+                    }
+                    '\n' => {
+                        screen.row += 1;
+                        screen.ensure_row();
+                        i += 1;
+                    }
+                    ch => {
+                        screen.put(ch);
+                        i += 1;
+                    }
+                }
+            }
+            screen
+        }
+
+        fn apply_csi(&mut self, chars: &[char], mut i: usize) -> usize {
+            let start = i;
+            while i < chars.len() && !chars[i].is_ascii_alphabetic() {
+                i += 1;
+            }
+            if i >= chars.len() {
+                return i;
+            }
+            let params: String = chars[start..i].iter().collect();
+            match chars[i] {
+                'H' => {
+                    self.row = 0;
+                    self.col = 0;
+                }
+                'J' if params == "2" || params == "3" => {
+                    self.rows = vec![Vec::new(); 8];
+                    self.row = 0;
+                    self.col = 0;
+                }
+                'G' => {
+                    self.col = params.parse::<usize>().unwrap_or(1).saturating_sub(1);
+                }
+                _ => {}
+            }
+            i + 1
+        }
+
+        fn put(&mut self, ch: char) {
+            self.ensure_row();
+            if self.rows[self.row].len() <= self.col {
+                self.rows[self.row].resize(self.col + 1, ' ');
+            }
+            self.rows[self.row][self.col] = ch;
+            self.col += 1;
+        }
+
+        fn ensure_row(&mut self) {
+            if self.rows.len() <= self.row {
+                self.rows.resize_with(self.row + 1, Vec::new);
+            }
+        }
+
+        fn line(&self, row: usize) -> String {
+            self.rows
+                .get(row)
+                .map(|line| line.iter().collect::<String>())
+                .unwrap_or_default()
+        }
+
+        fn first_non_empty_line(&self) -> Option<usize> {
+            self.rows.iter().position(|line| !line.is_empty())
+        }
     }
 
     #[test]

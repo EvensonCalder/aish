@@ -10,8 +10,9 @@ aish_spawn
 aish_send "\x0c"
 # Clear should move to the top-left before redrawing the prompt; otherwise a
 # blank first line can appear after clear in real terminals.
+aish_expect "\033\[H"
 aish_expect "\033\[2J"
-aish_expect "\033\[1;1H"
+aish_expect "\033\[3J"
 # After clear, Aish should still be at a prompt.
 aish_wait_prompt
 

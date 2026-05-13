@@ -1,3 +1,4 @@
 /target
 .opencode/
 cache/
+.DS_Store
