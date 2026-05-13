@@ -168,6 +168,11 @@ fn home_path_with_spaces_works() {
 }
 
 #[test]
+fn home_aish_path_file_fails_cleanly() {
+    run_script("home_aish_path_file_fails_cleanly.exp");
+}
+
+#[test]
 fn cd_persists() {
     run_script("cd_persists.exp");
 }

@@ -1,0 +1,50 @@
+#!/usr/bin/env expect
+# If $HOME/.aish already exists as a regular file, Aish should fail clearly
+# before entering the interactive UI and must not overwrite the file.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set isolated_home "/tmp/aish-home-file-conflict-[pid]-[clock clicks]"
+file delete -force $isolated_home
+file mkdir $isolated_home
+set old_home $::env(HOME)
+set old_aish_home_exists [info exists ::env(AISH_HOME)]
+if {$old_aish_home_exists} {
+    set old_aish_home $::env(AISH_HOME)
+}
+unset -nocomplain ::env(AISH_HOME)
+set ::env(HOME) $isolated_home
+
+set f [open "$isolated_home/.aish" w]
+puts $f "not a directory"
+close $f
+
+spawn -noecho $::env(AISH_BIN)
+expect {
+    -ex "failed to create directory" {}
+    -ex "Not a directory" {}
+    -ex "File exists" {}
+    -ex "file exists" {}
+    timeout { puts stderr "no readable .aish-file conflict error"; exit 7 }
+    eof { puts stderr "eof before .aish-file conflict error"; exit 7 }
+}
+
+expect {
+    eof {}
+    -re {> \x1b\[} { puts stderr "unexpected Aish prompt with .aish file conflict"; exit 7 }
+    timeout { puts stderr ".aish-file conflict process did not exit"; exit 7 }
+}
+
+if {![file isfile "$isolated_home/.aish"]} {
+    puts stderr ".aish conflict file was unexpectedly replaced"
+    exit 7
+}
+
+set ::env(HOME) $old_home
+if {$old_aish_home_exists} {
+    set ::env(AISH_HOME) $old_aish_home
+} else {
+    unset -nocomplain ::env(AISH_HOME)
+}
+file delete -force $isolated_home
