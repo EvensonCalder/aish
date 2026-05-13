@@ -1,0 +1,52 @@
+#!/usr/bin/env expect
+# Representative private command failures should be readable and safe: they must
+# not fall through to the backend shell or produce side effects beyond the error.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "#history nope"
+aish_enter
+aish_expect "usage: #history <count>"
+aish_wait_prompt
+
+aish_send "#log nope"
+aish_enter
+aish_expect "usage: #log <count>"
+aish_wait_prompt
+
+aish_send "#mt deploy"
+aish_enter
+aish_expect "usage: #mt <name> <body>"
+aish_wait_prompt
+
+aish_send "#template show missing"
+aish_enter
+aish_expect "template not found: missing"
+aish_wait_prompt
+
+aish_send "#template rm"
+aish_enter
+aish_expect "usage: #template list | #template show <name> | #template use <name> | #template rm <name> | #template replace <name> <body>"
+aish_wait_prompt
+
+aish_send "#context invalid option"
+aish_enter
+aish_expect "usage: #context \[on|off|confirm on|confirm off|<bytes>\]"
+aish_wait_prompt
+
+aish_send "#sync ai maybe"
+aish_enter
+aish_expect "usage: #sync ai|history|templates|drafts on|off"
+aish_wait_prompt
+
+# Prove the session is still usable and none of the invalid private commands was
+# sent to the backend shell.
+aish_send "echo safe-failures-ok"
+aish_enter
+aish_expect "safe-failures-ok"
+aish_wait_prompt
+
+aish_quit

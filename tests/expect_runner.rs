@@ -173,6 +173,11 @@ fn unknown_private_command() {
 }
 
 #[test]
+fn private_command_safe_failures() {
+    run_script("private_command_safe_failures.exp");
+}
+
+#[test]
 fn completion_accept_single() {
     run_script("completion_accept_single.exp");
 }
