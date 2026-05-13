@@ -1,0 +1,77 @@
+#!/usr/bin/env expect
+# Production-style history trimming: without AISH_HOME, #history should trim
+# $HOME/.aish history and the trimmed result should survive restart.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set isolated_home "/tmp/aish-home-history-trim-[pid]-[clock clicks]"
+file delete -force $isolated_home
+file mkdir $isolated_home
+set old_home $::env(HOME)
+set old_aish_home_exists [info exists ::env(AISH_HOME)]
+if {$old_aish_home_exists} {
+    set old_aish_home $::env(AISH_HOME)
+}
+unset -nocomplain ::env(AISH_HOME)
+set ::env(HOME) $isolated_home
+set aish_home "$isolated_home/.aish"
+
+aish_spawn_without_aish_home
+
+aish_send "echo home-trim-one"
+aish_enter
+aish_expect "home-trim-one"
+aish_wait_prompt
+
+aish_send "echo home-trim-two"
+aish_enter
+aish_expect "home-trim-two"
+aish_wait_prompt
+
+aish_send "echo home-trim-three"
+aish_enter
+aish_expect "home-trim-three"
+aish_wait_prompt
+
+aish_send "#history 2"
+aish_enter
+aish_expect "history trimmed to 2"
+aish_wait_prompt
+
+aish_quit
+
+set f [open "$aish_home/history/regular.jsonl" r]
+set history [read $f]
+close $f
+if {[string first "home-trim-one" $history] >= 0} {
+    puts stderr "trimmed command remained in persisted home history"
+    exit 6
+}
+if {[string first "home-trim-two" $history] < 0 || [string first "home-trim-three" $history] < 0} {
+    puts stderr "retained commands missing from persisted home history"
+    exit 6
+}
+
+aish_spawn_without_aish_home
+aish_send "#doctor"
+aish_enter
+aish_expect "regular_history_entries=2"
+aish_wait_prompt
+
+aish_send "\t"
+aish_expect "\$ "
+aish_send "\033\[A"
+aish_expect "echo home-trim-three"
+aish_send "\x03"
+aish_wait_prompt
+
+aish_quit
+
+set ::env(HOME) $old_home
+if {$old_aish_home_exists} {
+    set ::env(AISH_HOME) $old_aish_home
+} else {
+    unset -nocomplain ::env(AISH_HOME)
+}
+file delete -force $isolated_home
