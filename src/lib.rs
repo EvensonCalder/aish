@@ -15,6 +15,7 @@ pub mod paste;
 pub mod picker;
 pub mod pty;
 pub mod shell_integration;
+pub mod sync;
 pub mod templates;
 pub mod terminal;
 
