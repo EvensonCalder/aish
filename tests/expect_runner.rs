@@ -278,6 +278,11 @@ fn key_and_sync_placeholders() {
 }
 
 #[test]
+fn home_default_sync_config_persists() {
+    run_script("home_default_sync_config_persists.exp");
+}
+
+#[test]
 fn sync_push_local_remote() {
     run_script("sync_push_local_remote.exp");
 }

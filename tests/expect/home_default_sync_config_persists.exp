@@ -1,0 +1,77 @@
+#!/usr/bin/env expect
+# Production-style sync config persistence: without AISH_HOME, sync settings that
+# do not trigger startup git should persist under $HOME/.aish/config.toml without
+# creating scheduler files.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set isolated_home "/tmp/aish-home-sync-config-[pid]-[clock clicks]"
+file delete -force $isolated_home
+file mkdir $isolated_home
+set old_home $::env(HOME)
+unset -nocomplain ::env(AISH_HOME)
+set ::env(HOME) $isolated_home
+set aish_home "$isolated_home/.aish"
+set remote "$isolated_home/remote.git"
+
+aish_spawn_without_aish_home
+
+aish_send "#set-remote $remote"
+aish_enter
+aish_expect "sync.remote=$remote"
+aish_expect "no git command run"
+aish_wait_prompt
+
+aish_send "#sync history on"
+aish_enter
+aish_expect "sync.history=true"
+aish_expect "no git command run"
+aish_wait_prompt
+
+aish_send "#sync templates on"
+aish_enter
+aish_expect "sync.templates=true"
+aish_expect "no git command run"
+aish_wait_prompt
+
+aish_quit
+
+if {[file exists "$aish_home/cache/runtime/scheduler"]} {
+    puts stderr "unexpected scheduler file created"
+    exit 6
+}
+
+aish_spawn_without_aish_home
+
+aish_send "#sync"
+aish_enter
+aish_expect "sync.enabled=false"
+aish_expect "sync.remote=$remote"
+aish_expect "sync.schedule=unconfigured"
+aish_expect "sync.ai=false"
+aish_expect "sync.history=true"
+aish_expect "sync.templates=true"
+aish_expect "sync.drafts=false"
+aish_expect "no git command run"
+aish_wait_prompt
+
+aish_send "#config"
+aish_enter
+aish_expect "sync.enabled=false"
+aish_expect "sync.remote=$remote"
+aish_expect "sync.schedule=unconfigured"
+aish_expect "sync.ai=false"
+aish_expect "sync.history=true"
+aish_expect "sync.templates=true"
+aish_wait_prompt
+
+if {[file exists "$aish_home/cache/runtime/scheduler"]} {
+    puts stderr "unexpected scheduler file created after restart"
+    exit 6
+}
+
+aish_quit
+
+set ::env(HOME) $old_home
+file delete -force $isolated_home
