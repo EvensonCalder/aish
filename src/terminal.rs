@@ -3,7 +3,7 @@ use std::panic;
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::cursor::{MoveToColumn, MoveToPreviousLine, MoveUp};
+use crossterm::cursor::{MoveTo, MoveToColumn, MoveToPreviousLine, MoveUp};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
@@ -218,7 +218,13 @@ fn handle_key(
 
 fn clear_screen_for_redraw(state: &mut AppState, out: &mut impl Write) -> Result<()> {
     state.last_rendered_lines = 0;
-    write!(out, "\x1b[H\x1b[2J\x1b[3J\x1b[H")?;
+    execute!(
+        out,
+        MoveTo(0, 0),
+        Clear(ClearType::All),
+        Clear(ClearType::Purge),
+        MoveTo(0, 0)
+    )?;
     Ok(())
 }
 
@@ -1170,8 +1176,12 @@ mod tests {
         .unwrap();
 
         let output = String::from_utf8(output).unwrap();
-        assert!(output.contains("one\r\ntwo\r\n"), "output was {output:?}");
+        assert!(output.contains("one\r\ntwo"), "output was {output:?}");
         assert!(!output.contains("one\ntwo\n"), "output was {output:?}");
+        assert!(
+            !output.contains("one\r\ntwo\r\n\r\n"),
+            "output was {output:?}"
+        );
     }
 
     #[test]
@@ -1614,7 +1624,6 @@ mod tests {
         clear_screen_for_redraw(&mut state, &mut output).unwrap();
 
         let rendered = String::from_utf8(output).unwrap();
-        assert!(rendered.starts_with("\x1b[H"));
         assert!(!rendered.starts_with("\r\n"));
         assert!(!rendered.starts_with('\n'));
         assert!(rendered.contains("\x1b[2J"));
@@ -1646,9 +1655,7 @@ mod tests {
     #[test]
     fn clear_like_command_output_redraws_prompt_on_first_screen_line() {
         let mut state = AppState::default();
-        state
-            .draft
-            .insert_str("printf '\\033[H\\033[2J\\033[3J\\033[H'");
+        state.draft.insert_str("printf '\\033[H\\033[2J'");
         let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
         let mut output = Vec::new();
 

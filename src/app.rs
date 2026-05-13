@@ -1189,16 +1189,11 @@ pub fn execute_draft(
 }
 
 fn write_command_output(out: &mut impl Write, output: &str) -> Result<()> {
+    // PTY output is already terminal protocol. Adding display framing here can
+    // corrupt commands like `clear`: ESC[H ESC[2J followed by an Aish-added LF
+    // moves the prompt to row 1, leaving a blank first row.
     write!(out, "{output}")?;
-    if !output.ends_with('\n') && !terminal_control_output_ends_at_home(output) {
-        writeln!(out)?;
-    }
     Ok(())
-}
-
-fn terminal_control_output_ends_at_home(output: &str) -> bool {
-    let trimmed = output.trim_end_matches(['\r', '\n']);
-    trimmed.ends_with("\x1b[H") || trimmed.ends_with("\x1b[1;1H") || trimmed.ends_with("\x1b[;H")
 }
 
 pub fn answer_context_confirmation(
@@ -2472,12 +2467,21 @@ mod tests {
     }
 
     #[test]
-    fn command_output_adds_newline_after_plain_output_without_newline() {
+    fn command_output_does_not_add_newline_after_common_clear_sequence() {
+        let mut output = Vec::new();
+
+        write_command_output(&mut output, "\x1b[H\x1b[2J").unwrap();
+
+        assert_eq!(String::from_utf8(output).unwrap(), "\x1b[H\x1b[2J");
+    }
+
+    #[test]
+    fn command_output_preserves_plain_output_without_newline() {
         let mut output = Vec::new();
 
         write_command_output(&mut output, "plain output").unwrap();
 
-        assert_eq!(String::from_utf8(output).unwrap(), "plain output\n");
+        assert_eq!(String::from_utf8(output).unwrap(), "plain output");
     }
 
     #[test]
