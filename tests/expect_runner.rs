@@ -318,6 +318,11 @@ fn env_var_picker_cancel_preserves_draft() {
 }
 
 #[test]
+fn home_default_env_var_picker_cancel_preserves_draft() {
+    run_script("home_default_env_var_picker_cancel_preserves_draft.exp");
+}
+
+#[test]
 fn draft_persists_across_restarts() {
     run_script("draft_persists_across_restarts.exp");
 }
