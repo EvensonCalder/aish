@@ -318,6 +318,11 @@ fn home_default_sync_config_persists() {
 }
 
 #[test]
+fn home_default_startup_sync_runs() {
+    run_script("home_default_startup_sync_runs.exp");
+}
+
+#[test]
 fn sync_push_local_remote() {
     run_script("sync_push_local_remote.exp");
 }

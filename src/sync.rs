@@ -45,6 +45,12 @@ pub struct ManagedAddPlan {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExistingManagedAddPlan {
+    pub paths: Vec<String>,
+    pub missing_paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitCommandPlan {
     pub program: String,
     pub args: Vec<String>,
@@ -323,6 +329,26 @@ pub fn managed_add_plan(config: &SyncConfig) -> ManagedAddPlan {
     ManagedAddPlan { paths }
 }
 
+pub fn existing_managed_add_plan(
+    root: impl AsRef<Path>,
+    config: &SyncConfig,
+) -> ExistingManagedAddPlan {
+    let root = root.as_ref();
+    let mut paths = Vec::new();
+    let mut missing_paths = Vec::new();
+    for path in managed_add_plan(config).paths {
+        if path == ".gitignore" || root.join(&path).exists() {
+            paths.push(path);
+        } else {
+            missing_paths.push(path);
+        }
+    }
+    ExistingManagedAddPlan {
+        paths,
+        missing_paths,
+    }
+}
+
 pub fn pull_rebase_plan() -> GitCommandPlan {
     GitCommandPlan {
         program: "git".to_string(),
@@ -348,12 +374,34 @@ pub fn default_sync_commit_plan() -> GitCommandPlan {
 pub fn push_plan() -> GitCommandPlan {
     GitCommandPlan {
         program: "git".to_string(),
-        args: vec!["push".to_string()],
+        args: vec![
+            "push".to_string(),
+            "-u".to_string(),
+            "origin".to_string(),
+            "HEAD".to_string(),
+        ],
     }
 }
 
 pub fn conservative_sync_plan(config: &SyncConfig) -> ConservativeSyncPlan {
     let add_plan = managed_add_plan(config);
+    let commands = vec![
+        pull_rebase_plan(),
+        GitCommandPlan {
+            program: "git".to_string(),
+            args: git_add_args(&add_plan.paths),
+        },
+        default_sync_commit_plan(),
+        push_plan(),
+    ];
+    ConservativeSyncPlan { commands }
+}
+
+pub fn conservative_sync_plan_for_existing_paths(
+    root: impl AsRef<Path>,
+    config: &SyncConfig,
+) -> ConservativeSyncPlan {
+    let add_plan = existing_managed_add_plan(root, config);
     let commands = vec![
         pull_rebase_plan(),
         GitCommandPlan {
@@ -714,6 +762,27 @@ mod tests {
     }
 
     #[test]
+    fn existing_managed_add_plan_skips_missing_enabled_paths() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("history")).unwrap();
+        fs::write(temp.path().join(".gitignore"), "").unwrap();
+        fs::write(temp.path().join("history/regular.jsonl"), "{}").unwrap();
+        let config = SyncConfig {
+            history: true,
+            templates: true,
+            ..SyncConfig::default()
+        };
+
+        let plan = existing_managed_add_plan(temp.path(), &config);
+
+        assert_eq!(plan.paths, vec![".gitignore", "history/regular.jsonl"]);
+        assert_eq!(
+            plan.missing_paths,
+            vec!["history/notes.jsonl", "templates/templates.jsonl"]
+        );
+    }
+
+    #[test]
     fn pull_rebase_plan_uses_fixed_git_arguments() {
         assert_eq!(
             pull_rebase_plan(),
@@ -765,7 +834,12 @@ mod tests {
             push_plan(),
             GitCommandPlan {
                 program: "git".to_string(),
-                args: vec!["push".to_string()]
+                args: vec![
+                    "push".to_string(),
+                    "-u".to_string(),
+                    "origin".to_string(),
+                    "HEAD".to_string()
+                ]
             }
         );
     }
@@ -840,7 +914,12 @@ mod tests {
                     },
                     GitCommandPlan {
                         program: "git".to_string(),
-                        args: vec!["push".to_string()]
+                        args: vec![
+                            "push".to_string(),
+                            "-u".to_string(),
+                            "origin".to_string(),
+                            "HEAD".to_string()
+                        ]
                     }
                 ]
             }

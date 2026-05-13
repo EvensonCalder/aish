@@ -45,8 +45,9 @@ use crate::pty::PtyBackend;
 use crate::shell_integration::is_interactive_passthrough_command;
 use crate::sync::{
     GitCommandPlan, StartupSyncDecision, SyncFailureKind, SyncLock, SyncStepOutcome,
-    classify_git_sync_step, conservative_sync_plan, init_repo_plan, log_sync_failure,
-    maintain_managed_gitignore, startup_sync_decision, tracked_managed_files_warning,
+    classify_git_sync_step, conservative_sync_plan_for_existing_paths, init_repo_plan,
+    log_sync_failure, maintain_managed_gitignore, startup_sync_decision,
+    tracked_managed_files_warning,
 };
 use crate::templates::{
     TemplateEntry, append_template, apply_template_values_with_usage, find_template_by_name,
@@ -1779,15 +1780,24 @@ fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -> Result<()
     };
 
     maintain_managed_gitignore(root.join(".gitignore"))?;
+    let mut initialized_repo = false;
     if root.join(".git").is_dir() {
         warn_tracked_managed_paths(&root, out)?;
     } else if let Some(plan) = init_repo_plan(remote) {
         for command in &plan.commands {
             run_sync_git_step(state, out, &root, command)?;
         }
+        initialized_repo = true;
     }
 
-    for command in conservative_sync_plan(&state.sync_config).commands {
+    for command in conservative_sync_plan_for_existing_paths(&root, &state.sync_config).commands {
+        if initialized_repo && is_pull_rebase_command(&command) {
+            writeln!(
+                out,
+                "sync step skipped: git pull --rebase for new repository"
+            )?;
+            continue;
+        }
         if is_commit_command(&command) {
             let result = run_git_command(&root, &command)?;
             if result.success || git_output_is_nothing_to_commit(&result.combined_output()) {
@@ -1961,6 +1971,15 @@ fn run_git_command(root: &Path, command: &GitCommandPlan) -> Result<GitStepResul
 
 fn is_commit_command(command: &GitCommandPlan) -> bool {
     command.program == "git" && command.args.first().is_some_and(|arg| arg == "commit")
+}
+
+fn is_pull_rebase_command(command: &GitCommandPlan) -> bool {
+    command.program == "git"
+        && command
+            .args
+            .iter()
+            .map(String::as_str)
+            .eq(["pull", "--rebase"])
 }
 
 fn git_output_is_nothing_to_commit(output: &str) -> bool {
