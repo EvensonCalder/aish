@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
+use crate::log::{DEFAULT_MAX_EVENTS, EventLevel, append_event};
+
 const GITIGNORE_BEGIN: &str = "# BEGIN AISH MANAGED";
 const GITIGNORE_END: &str = "# END AISH MANAGED";
 const MANAGED_GITIGNORE_LINES: &[&str] = &["cache/", "logs/", "secrets/", "*.tmp"];
@@ -11,6 +13,12 @@ const MANAGED_GITIGNORE_LINES: &[&str] = &["cache/", "logs/", "secrets/", "*.tmp
 pub struct TrackedManagedFilesWarning {
     pub paths: Vec<String>,
     pub message: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncFailureKind {
+    Conflict,
+    Failure,
 }
 
 #[derive(Debug)]
@@ -162,6 +170,25 @@ fn managed_tracked_path(path: &str) -> Option<String> {
     }
 }
 
+pub fn log_sync_failure(
+    log_path: impl AsRef<Path>,
+    t: i64,
+    kind: SyncFailureKind,
+    detail: &str,
+) -> Result<()> {
+    let label = match kind {
+        SyncFailureKind::Conflict => "sync conflict",
+        SyncFailureKind::Failure => "sync failed",
+    };
+    append_event(
+        log_path.as_ref(),
+        t,
+        EventLevel::Error,
+        &format!("{label}: {detail}"),
+        DEFAULT_MAX_EVENTS,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -262,5 +289,40 @@ mod tests {
     #[test]
     fn tracked_managed_files_warning_ignores_unmanaged_paths() {
         assert!(tracked_managed_files_warning(["README.md", "src/main.rs", "tmp/notes"]).is_none());
+    }
+
+    #[test]
+    fn log_sync_failure_records_error_event() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("logs/events.jsonl");
+
+        log_sync_failure(&path, 7, SyncFailureKind::Failure, "git push exited 1").unwrap();
+
+        let loaded = crate::log::load_events(&path).unwrap();
+        assert_eq!(loaded.items.len(), 1);
+        assert_eq!(loaded.items[0].t, 7);
+        assert_eq!(loaded.items[0].level, EventLevel::Error);
+        assert_eq!(loaded.items[0].msg, "sync failed: git push exited 1");
+    }
+
+    #[test]
+    fn log_sync_conflict_redacts_secret_like_detail() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("logs/events.jsonl");
+
+        log_sync_failure(
+            &path,
+            8,
+            SyncFailureKind::Conflict,
+            "merge conflict near sk-secret-token",
+        )
+        .unwrap();
+
+        let loaded = crate::log::load_events(&path).unwrap();
+        assert_eq!(loaded.items[0].level, EventLevel::Error);
+        assert_eq!(
+            loaded.items[0].msg,
+            "sync conflict: merge conflict near [redacted]"
+        );
     }
 }
