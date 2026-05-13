@@ -368,6 +368,11 @@ fn home_default_key_clear_removes_stored_key() {
 }
 
 #[test]
+fn home_default_encrypt_placeholder_noops() {
+    run_script("home_default_encrypt_placeholder_noops.exp");
+}
+
+#[test]
 fn status_doctor_config() {
     run_script("status_doctor_config.exp");
 }
