@@ -138,6 +138,11 @@ fn invalid_config_startup() {
 }
 
 #[test]
+fn home_default_invalid_config_startup() {
+    run_script("home_default_invalid_config_startup.exp");
+}
+
+#[test]
 fn cd_persists() {
     run_script("cd_persists.exp");
 }

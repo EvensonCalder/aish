@@ -1,0 +1,36 @@
+#!/usr/bin/env expect
+# Production-style invalid config: without AISH_HOME, an invalid
+# $HOME/.aish/config.toml should fail with a readable error and no interactive
+# prompt.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set isolated_home "/tmp/aish-home-invalid-config-[pid]-[clock clicks]"
+file delete -force $isolated_home
+file mkdir "$isolated_home/.aish"
+set old_home $::env(HOME)
+unset -nocomplain ::env(AISH_HOME)
+set ::env(HOME) $isolated_home
+
+set f [open "$isolated_home/.aish/config.toml" w]
+puts $f "this is not valid toml ="
+close $f
+
+spawn -noecho $::env(AISH_BIN)
+expect {
+    -ex "invalid TOML" {}
+    -ex "TOML parse error" {}
+    -ex "failed to parse config" {}
+    timeout { puts stderr "no readable home default config error"; exit 7 }
+    eof { puts stderr "eof before readable home default config error"; exit 7 }
+}
+
+expect {
+    eof {}
+    -re {> \x1b\[} { puts stderr "unexpected Aish prompt after home default invalid config"; exit 7 }
+    timeout { puts stderr "home default invalid-config process did not exit"; exit 7 }
+}
+
+set ::env(HOME) $old_home
+file delete -force $isolated_home
