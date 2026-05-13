@@ -37,6 +37,25 @@ pub fn alternate_screen_active_after(output: &str, initially_active: bool) -> bo
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PassthroughReturnState {
+    pub alternate_screen_active: bool,
+    pub prompt_returned: bool,
+}
+
+pub fn passthrough_return_state_after(
+    output: &str,
+    initially_alternate_screen_active: bool,
+    process_exited: bool,
+) -> PassthroughReturnState {
+    let alternate_screen_active =
+        alternate_screen_active_after(output, initially_alternate_screen_active);
+    PassthroughReturnState {
+        alternate_screen_active,
+        prompt_returned: process_exited && !alternate_screen_active,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AlternateScreenEvent {
     Enter,
     Exit,
@@ -250,5 +269,41 @@ mod tests {
     fn alternate_screen_detection_ignores_unrelated_escape_sequences() {
         assert!(!alternate_screen_active_after("\x1b[31mred\x1b[0m", false));
         assert!(alternate_screen_active_after("\x1b[31mred\x1b[0m", true));
+    }
+
+    #[test]
+    fn passthrough_return_detection_requires_process_exit_and_normal_screen() {
+        assert_eq!(
+            passthrough_return_state_after("", false, true),
+            PassthroughReturnState {
+                alternate_screen_active: false,
+                prompt_returned: true
+            }
+        );
+        assert_eq!(
+            passthrough_return_state_after("", false, false),
+            PassthroughReturnState {
+                alternate_screen_active: false,
+                prompt_returned: false
+            }
+        );
+        assert_eq!(
+            passthrough_return_state_after("\x1b[?1049h", false, true),
+            PassthroughReturnState {
+                alternate_screen_active: true,
+                prompt_returned: false
+            }
+        );
+    }
+
+    #[test]
+    fn passthrough_return_detection_accepts_alternate_screen_exit_before_process_exit() {
+        assert_eq!(
+            passthrough_return_state_after("\x1b[?1049hbody\x1b[?1049l", false, true),
+            PassthroughReturnState {
+                alternate_screen_active: false,
+                prompt_returned: true
+            }
+        );
     }
 }

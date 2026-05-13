@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 332 library unit tests.
+- 334 library unit tests.
 - 23 draft execution integration tests.
 - 1 first-run integration test.
 - 7 active bash PTY integration tests.
@@ -335,6 +335,7 @@ Implemented:
 - Allowlisted interactive commands can run in a foreground passthrough path with raw mode disabled; `less` has skip-safe expect coverage when available.
 - Interactive passthrough command allowlist detects common fullscreen/interactive commands, basenames, shell quoting, assignments, and wrappers such as `sudo`, `env`, `command`, and `exec` without changing runtime behavior yet.
 - Alternate-screen buffer detection tracks common enter/exit CSI sequences (`?47`, `?1047`, `?1049`) and ignores unrelated terminal styling escapes.
+- Passthrough prompt-return detection requires process exit and normal-screen state before Aish redraws its prompt after an interactive command.
 - Prompt redraw after ordinary command output has both a Rust virtual-screen regression and an expect scenario requiring command output line termination before the next prompt.
 - Command output followed by mode-switch redraw and unique completion acceptance has expect coverage through the real binary.
 - Manual `#push` sync has expect coverage against a local temporary bare git remote, including managed `.gitignore` push and no scheduler file creation.
