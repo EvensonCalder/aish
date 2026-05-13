@@ -262,5 +262,10 @@ fn history_trim_persists() {
     run_script("history_trim_persists.exp");
 }
 
+#[test]
+fn template_crud() {
+    run_script("template_crud.exp");
+}
+
 #[allow(dead_code)]
 fn _unused_path_check(_p: &Path) {}

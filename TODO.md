@@ -269,7 +269,7 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
 ### Tasks
 
 - [x] Implement line-leading `#` parser.
-- [ ] Recognize private commands:
+- [x] Recognize private commands:
   - [x] `#help`
   - [x] `#status`
   - [x] `#config`
@@ -285,7 +285,10 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
   - [x] `#log`
   - [x] `#mt`
   - [x] `#template list`
+  - [x] `#template show`
+  - [x] `#template use`
   - [x] `#template rm`
+  - [x] `#template replace`
   - [x] `#editor`
   - [x] `#encrypt`
   - [x] `#set-remote`
@@ -792,6 +795,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 - [x] Cover AI-mode command sequencing and read-only edit-copy behavior.
 - [x] Cover AI config persistence and diagnostic key-source redaction.
 - [x] Cover template creation/use/execution flow.
+- [x] Cover template list/show/replace/rm CRUD flow.
 - [x] Cover unresolved template placeholder execution blocking.
 - [x] Cover external editor roundtrip.
 - [x] Cover multiline paste editor-review execution.

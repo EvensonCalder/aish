@@ -17,7 +17,7 @@ Current test inventory:
 - 1 first-run integration test.
 - 6 active bash PTY integration tests.
 - 2 active zsh PTY integration tests.
-- 34 expect-driven end-to-end interactive scenarios.
+- 35 expect-driven end-to-end interactive scenarios.
 - Bash PTY startup records the backend shell's initial cwd so the first prompt matches the shell state before any command executes.
 - Backend PTY startup inherits Aish's current directory and can be resized so child commands such as `ls` see the real terminal width.
 - 0 doctests.
@@ -761,7 +761,7 @@ Status:
 Implemented:
 
 - A Rust integration harness runs `expect` scenarios against the built `aish` binary with isolated `AISH_HOME` directories.
-- Interactive smoke coverage now checks real terminal input/output for basic command execution, cwd persistence, mode cycling, private command safety, help output, status/config/doctor diagnostics, notes, context confirmation skip, event log output, clear screen, exit paths, completion, readline-style editing keys, unknown `Ctrl-X` chord cancellation, history execution, persisted history trimming, AI command sequencing, AI config persistence and key-source redaction, read-only edit-copy behavior, template execution, unresolved template blocking, external editor roundtrip, multiline paste editor-review execution, key/encryption/sync no-op safety, quote continuation, backslash continuation, Ctrl-C continuation cancellation, and backend prompt leak prevention.
+- Interactive smoke coverage now checks real terminal input/output for basic command execution, cwd persistence, mode cycling, private command safety, help output, status/config/doctor diagnostics, notes, context confirmation skip, event log output, clear screen, exit paths, completion, readline-style editing keys, unknown `Ctrl-X` chord cancellation, history execution, persisted history trimming, AI command sequencing, AI config persistence and key-source redaction, read-only edit-copy behavior, template execution, template CRUD, unresolved template blocking, external editor roundtrip, multiline paste editor-review execution, key/encryption/sync no-op safety, quote continuation, backslash continuation, Ctrl-C continuation cancellation, and backend prompt leak prevention.
 - Each new user-facing interactive feature should now receive both Rust-level tests and at least one expect scenario when it affects real terminal behavior.
 
 Tests:
@@ -799,6 +799,7 @@ Tests:
 - `expect_runner::escape_clears_draft`
 - `expect_runner::ctrl_x_unknown_chord_cancels`
 - `expect_runner::history_trim_persists`
+- `expect_runner::template_crud`
 
 Status:
 
