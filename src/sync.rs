@@ -44,6 +44,12 @@ pub struct ManagedAddPlan {
     pub paths: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitCommandPlan {
+    pub program: String,
+    pub args: Vec<String>,
+}
+
 #[derive(Debug)]
 pub struct SyncLock {
     path: PathBuf,
@@ -305,6 +311,13 @@ pub fn managed_add_plan(config: &SyncConfig) -> ManagedAddPlan {
     paths.sort();
     paths.dedup();
     ManagedAddPlan { paths }
+}
+
+pub fn pull_rebase_plan() -> GitCommandPlan {
+    GitCommandPlan {
+        program: "git".to_string(),
+        args: vec!["pull".to_string(), "--rebase".to_string()],
+    }
 }
 
 fn combined_git_output(stdout: &str, stderr: &str) -> String {
@@ -604,6 +617,17 @@ mod tests {
                 "history/regular.jsonl",
                 "templates/templates.jsonl",
             ]
+        );
+    }
+
+    #[test]
+    fn pull_rebase_plan_uses_fixed_git_arguments() {
+        assert_eq!(
+            pull_rebase_plan(),
+            GitCommandPlan {
+                program: "git".to_string(),
+                args: vec!["pull".to_string(), "--rebase".to_string()]
+            }
         );
     }
 }
