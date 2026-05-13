@@ -1,0 +1,21 @@
+#!/usr/bin/env expect
+# Multiple Tab completion candidates should render as a refreshable panel below
+# the prompt rather than appending forever.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "cat Cargo."
+aish_send "\t"
+aish_expect "file\tCargo.lock"
+aish_expect "file\tCargo.toml"
+
+# Repeated Tab should redraw/refresh the same panel and keep the draft editable.
+aish_send "\t"
+aish_expect "file\tCargo.lock"
+aish_send "\x03"
+aish_wait_prompt
+
+aish_quit

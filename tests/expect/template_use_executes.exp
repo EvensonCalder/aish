@@ -1,0 +1,23 @@
+#!/usr/bin/env expect
+# Template creation and use should work end-to-end in the terminal.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "#mt smoke echo template-expect-ok"
+aish_enter
+aish_expect "template stored: smoke"
+aish_wait_prompt
+
+aish_send "#template use smoke"
+aish_enter
+aish_expect "template copied to draft: smoke"
+aish_expect "echo template-expect-ok"
+
+aish_enter
+aish_expect "template-expect-ok"
+aish_wait_prompt
+
+aish_quit

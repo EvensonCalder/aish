@@ -1,0 +1,23 @@
+#!/usr/bin/env expect
+# Regular history mode should browse executed commands and Enter should run the
+# selected command.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "echo history-expect-ok"
+aish_enter
+aish_expect "history-expect-ok"
+aish_wait_prompt
+
+aish_send "\t"
+aish_expect "\$ "
+aish_send "\033\[A"
+aish_expect "echo history-expect-ok"
+aish_enter
+aish_expect "history-expect-ok"
+aish_wait_prompt
+
+aish_quit

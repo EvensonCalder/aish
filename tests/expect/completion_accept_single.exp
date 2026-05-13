@@ -1,0 +1,17 @@
+#!/usr/bin/env expect
+# A single Tab completion candidate should be accepted into the draft immediately.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "cat Cargo.t"
+aish_send "\t"
+aish_expect "Cargo.toml"
+
+# Clear the draft instead of running `cat` so the test remains focused on UI behavior.
+aish_send "\x03"
+aish_wait_prompt
+
+aish_quit

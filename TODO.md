@@ -779,6 +779,10 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 - [x] Cover empty `Tab` mode cycling through draft/history/AI prompts.
 - [x] Cover `#help`, unknown private commands, `#exit`, and empty `Ctrl-D` exit.
 - [x] Cover `Ctrl-L` clear-screen behavior.
+- [x] Cover single-candidate completion acceptance and multi-candidate completion panel display.
+- [x] Cover history-mode command execution.
+- [x] Cover template creation/use/execution flow.
+- [x] Cover key/encryption/sync placeholder commands as safe no-ops.
 - [x] Cover `echo "` and `echo '` continuation UX.
 - [x] Cover trailing backslash continuation UX.
 - [x] Cover `Ctrl-C` cancellation from continuation drafts.

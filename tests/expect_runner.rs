@@ -162,5 +162,30 @@ fn unknown_private_command() {
     run_script("unknown_private_command.exp");
 }
 
+#[test]
+fn completion_accept_single() {
+    run_script("completion_accept_single.exp");
+}
+
+#[test]
+fn completion_panel_multiple() {
+    run_script("completion_panel_multiple.exp");
+}
+
+#[test]
+fn history_mode_execute() {
+    run_script("history_mode_execute.exp");
+}
+
+#[test]
+fn template_use_executes() {
+    run_script("template_use_executes.exp");
+}
+
+#[test]
+fn key_and_sync_placeholders() {
+    run_script("key_and_sync_placeholders.exp");
+}
+
 #[allow(dead_code)]
 fn _unused_path_check(_p: &Path) {}

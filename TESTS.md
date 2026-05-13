@@ -17,7 +17,7 @@ Current test inventory:
 - 1 first-run integration test.
 - 5 active bash PTY integration tests.
 - 2 active zsh PTY integration tests.
-- 14 expect-driven end-to-end interactive scenarios.
+- 19 expect-driven end-to-end interactive scenarios.
 - Bash PTY startup records the backend shell's initial cwd so the first prompt matches the shell state before any command executes.
 - Backend PTY startup inherits Aish's current directory and can be resized so child commands such as `ls` see the real terminal width.
 - 0 doctests.
@@ -761,7 +761,7 @@ Status:
 Implemented:
 
 - A Rust integration harness runs `expect` scenarios against the built `aish` binary with isolated `AISH_HOME` directories.
-- Interactive smoke coverage now checks real terminal input/output for basic command execution, cwd persistence, mode cycling, private command safety, help output, clear screen, exit paths, quote continuation, backslash continuation, Ctrl-C continuation cancellation, and backend prompt leak prevention.
+- Interactive smoke coverage now checks real terminal input/output for basic command execution, cwd persistence, mode cycling, private command safety, help output, clear screen, exit paths, completion, history execution, template execution, key/encryption/sync no-op safety, quote continuation, backslash continuation, Ctrl-C continuation cancellation, and backend prompt leak prevention.
 - Each new user-facing interactive feature should now receive both Rust-level tests and at least one expect scenario when it affects real terminal behavior.
 
 Tests:
@@ -779,6 +779,11 @@ Tests:
 - `expect_runner::backslash_continuation`
 - `expect_runner::ctrl_c_cancels_continuation`
 - `expect_runner::no_backend_ps2_leak`
+- `expect_runner::completion_accept_single`
+- `expect_runner::completion_panel_multiple`
+- `expect_runner::history_mode_execute`
+- `expect_runner::template_use_executes`
+- `expect_runner::key_and_sync_placeholders`
 
 Status:
 
