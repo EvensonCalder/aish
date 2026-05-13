@@ -1,0 +1,83 @@
+#!/usr/bin/env expect
+# Production-style startup sync with an unsupported schedule should not run git
+# or create scheduler files, and should record a readable event-log warning.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set root "/tmp/aish-home-startup-sync-unsupported-[pid]-[clock clicks]"
+set isolated_home "$root/user-home"
+set aish_home "$isolated_home/.aish"
+set remote "$root/remote.git"
+file delete -force $root
+file mkdir $root
+file mkdir $isolated_home
+set old_home $::env(HOME)
+set old_aish_home_exists [info exists ::env(AISH_HOME)]
+if {$old_aish_home_exists} {
+    set old_aish_home $::env(AISH_HOME)
+}
+unset -nocomplain ::env(AISH_HOME)
+set ::env(HOME) $isolated_home
+
+proc run_git {args} {
+    if {[catch {exec git {*}$args 2>@1} output]} {
+        puts stderr $output
+        exit 6
+    }
+    return $output
+}
+
+proc try_git {args} {
+    return [catch {exec git {*}$args 2>@1} output]
+}
+
+run_git init --bare $remote
+
+aish_spawn_without_aish_home
+
+aish_send "#set-remote $remote"
+aish_enter
+aish_expect "sync.remote=$remote"
+aish_wait_prompt
+
+aish_send "#sync 5 4 * * mon"
+aish_enter
+aish_expect "sync.enabled=true"
+aish_expect "sync.schedule=5 4 * * mon"
+aish_expect "no scheduler file created"
+aish_wait_prompt
+
+aish_quit
+
+aish_spawn_without_aish_home
+aish_send "#log 5"
+aish_enter
+aish_expect "startup sync unsupported schedule: 5 4 * * mon"
+aish_wait_prompt
+aish_quit
+
+if {[file exists "$aish_home/cache/runtime/scheduler"]} {
+    puts stderr "unexpected scheduler file created for unsupported schedule"
+    exit 6
+}
+
+if {[file exists "$aish_home/cache/runtime/sync.last_attempt"]} {
+    puts stderr "unsupported schedule recorded a sync attempt"
+    exit 6
+}
+
+if {[try_git --git-dir $remote rev-parse HEAD]} {
+    # Expected: no git sync ran, so the bare remote should remain empty.
+} else {
+    puts stderr "unsupported schedule unexpectedly pushed to remote"
+    exit 6
+}
+
+set ::env(HOME) $old_home
+if {$old_aish_home_exists} {
+    set ::env(AISH_HOME) $old_aish_home
+} else {
+    unset -nocomplain ::env(AISH_HOME)
+}
+file delete -force $root

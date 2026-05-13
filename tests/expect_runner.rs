@@ -323,6 +323,11 @@ fn home_default_startup_sync_runs() {
 }
 
 #[test]
+fn home_default_startup_sync_unsupported_schedule() {
+    run_script("home_default_startup_sync_unsupported_schedule.exp");
+}
+
+#[test]
 fn sync_push_local_remote() {
     run_script("sync_push_local_remote.exp");
 }
