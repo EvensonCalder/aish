@@ -15,11 +15,18 @@ set ::env(NO_COLOR) "1"
 set ::env(TERM) "xterm-256color"
 
 # Pick an isolated AISH_HOME per spawn so concurrent runs do not collide.
-proc aish_spawn {} {
-    global spawn_id
+proc aish_new_home {} {
     set tmp "/tmp/aish-expect-[pid]-[clock clicks]"
     file mkdir $tmp
     set ::env(AISH_HOME) $tmp
+    return $tmp
+}
+
+proc aish_spawn {} {
+    global spawn_id
+    if {![info exists ::env(AISH_HOME)] || $::env(AISH_HOME) eq ""} {
+        aish_new_home
+    }
     # Force the test binary path; cargo sets CARGO_BIN_EXE_aish when running tests.
     set bin $::env(AISH_BIN)
     spawn -noecho $bin

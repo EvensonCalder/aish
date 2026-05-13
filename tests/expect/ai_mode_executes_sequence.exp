@@ -1,0 +1,31 @@
+#!/usr/bin/env expect
+# Preloaded AI command history should be browsable in `%` mode and execute one
+# item at a time, returning to draft after the last successful command.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set home [aish_new_home]
+file mkdir "$home/history"
+set fh [open "$home/history/ai.jsonl" w]
+puts $fh {{"id":"s1","t":1,"prompt":"expect","ctx":false,"model":"test","items":[{"kind":"command","text":"echo ai-first"},{"kind":"command","text":"echo ai-second"}]}}
+close $fh
+
+aish_spawn
+
+aish_send "\t"
+aish_expect "\$ "
+aish_send "\t"
+aish_expect "% "
+aish_expect "echo ai-first"
+
+aish_enter
+aish_expect "ai-first"
+aish_expect "% "
+aish_expect "echo ai-second"
+
+aish_enter
+aish_expect "ai-second"
+aish_wait_prompt
+
+aish_quit

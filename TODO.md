@@ -112,12 +112,12 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
   - [x] `PasteReviewEditor`
   - [x] `Picker`
   - [x] `UnlockPassthrough`
-- [ ] Define `AppState`:
+- [x] Define `AppState`:
   - [x] mode
   - [x] draft buffer
   - [x] cursor position
-  - [ ] selected history index
-  - [ ] selected AI session/item
+  - [x] selected history index
+  - [x] selected AI session/item
   - [x] last exit status
   - [x] current cwd if known
   - [x] output ring buffer
@@ -786,6 +786,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 - [x] Cover single-candidate completion acceptance and multi-candidate completion panel display.
 - [x] Cover history-mode command execution.
 - [x] Cover read-only history edit-copy behavior.
+- [x] Cover AI-mode command sequencing and read-only edit-copy behavior.
 - [x] Cover template creation/use/execution flow.
 - [x] Cover unresolved template placeholder execution blocking.
 - [x] Cover external editor roundtrip.

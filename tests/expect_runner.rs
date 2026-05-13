@@ -227,5 +227,15 @@ fn log_shows_context_skip() {
     run_script("log_shows_context_skip.exp");
 }
 
+#[test]
+fn ai_mode_executes_sequence() {
+    run_script("ai_mode_executes_sequence.exp");
+}
+
+#[test]
+fn ai_mode_edit_copies_to_draft() {
+    run_script("ai_mode_edit_copies_to_draft.exp");
+}
+
 #[allow(dead_code)]
 fn _unused_path_check(_p: &Path) {}
