@@ -373,6 +373,11 @@ fn notes_are_swallowed() {
 }
 
 #[test]
+fn home_default_notes_are_swallowed() {
+    run_script("home_default_notes_are_swallowed.exp");
+}
+
+#[test]
 fn template_placeholder_blocks_execution() {
     run_script("template_placeholder_blocks_execution.exp");
 }

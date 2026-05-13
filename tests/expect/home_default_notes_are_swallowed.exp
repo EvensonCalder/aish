@@ -1,0 +1,53 @@
+#!/usr/bin/env expect
+# Production-style notes: without AISH_HOME, line-leading notes should be stored
+# under $HOME/.aish and must not be sent to the backend shell.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set isolated_home "/tmp/aish-home-notes-[pid]-[clock clicks]"
+file delete -force $isolated_home
+file mkdir $isolated_home
+set old_home $::env(HOME)
+set old_aish_home_exists [info exists ::env(AISH_HOME)]
+if {$old_aish_home_exists} {
+    set old_aish_home $::env(AISH_HOME)
+}
+unset -nocomplain ::env(AISH_HOME)
+set ::env(HOME) $isolated_home
+set aish_home "$isolated_home/.aish"
+
+aish_spawn_without_aish_home
+
+aish_send "# TODO: home note should not hit shell"
+aish_enter
+aish_expect "note stored"
+aish_wait_prompt
+
+aish_send "echo home-note-shell-ok"
+aish_enter
+aish_expect "home-note-shell-ok"
+aish_wait_prompt
+
+aish_quit
+
+if {![file exists "$aish_home/history/notes.jsonl"]} {
+    puts stderr "missing persisted notes: $aish_home/history/notes.jsonl"
+    exit 6
+}
+
+set f [open "$aish_home/history/notes.jsonl" r]
+set notes [read $f]
+close $f
+if {[string first "home note should not hit shell" $notes] < 0} {
+    puts stderr "persisted notes missing expected content"
+    exit 6
+}
+
+set ::env(HOME) $old_home
+if {$old_aish_home_exists} {
+    set ::env(AISH_HOME) $old_aish_home
+} else {
+    unset -nocomplain ::env(AISH_HOME)
+}
+file delete -force $isolated_home
