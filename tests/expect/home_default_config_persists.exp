@@ -1,0 +1,61 @@
+#!/usr/bin/env expect
+# Production-style config persistence: without AISH_HOME, private config changes
+# should persist under $HOME/.aish/config.toml and load after restart.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set isolated_home "/tmp/aish-home-config-[pid]-[clock clicks]"
+file delete -force $isolated_home
+file mkdir $isolated_home
+set old_home $::env(HOME)
+unset -nocomplain ::env(AISH_HOME)
+set ::env(HOME) $isolated_home
+set aish_home "$isolated_home/.aish"
+
+aish_spawn_without_aish_home
+
+aish_send "#model home-model"
+aish_enter
+aish_expect "#model=home-model"
+aish_wait_prompt
+
+aish_send "#base-url https://home.example.invalid/v1"
+aish_enter
+aish_expect "#base-url=https://home.example.invalid/v1/chat/completions"
+aish_wait_prompt
+
+aish_send "#env-key HOME_EXPECT_API_KEY"
+aish_enter
+aish_expect "#env-key=HOME_EXPECT_API_KEY"
+aish_wait_prompt
+
+aish_quit
+
+if {![file exists "$aish_home/config.toml"]} {
+    puts stderr "missing persisted config: $aish_home/config.toml"
+    exit 6
+}
+
+aish_spawn_without_aish_home
+
+aish_send "#config"
+aish_enter
+aish_expect "config_path=$aish_home/config.toml"
+aish_expect "ai.model=home-model"
+aish_expect "ai.base_url=https://home.example.invalid/v1/chat/completions"
+aish_expect "ai.env_key=HOME_EXPECT_API_KEY"
+aish_wait_prompt
+
+aish_send "#status"
+aish_enter
+aish_expect "ai.model=home-model"
+aish_expect "ai.final_url=https://home.example.invalid/v1/chat/completions"
+aish_expect "ai.key_source=env"
+assert_no "HOME_EXPECT_API_KEY" "keybindings="
+aish_wait_prompt
+
+aish_quit
+
+set ::env(HOME) $old_home
+file delete -force $isolated_home

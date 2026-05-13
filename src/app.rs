@@ -1568,6 +1568,7 @@ fn write_encryption_sync_status(state: &AppState, out: &mut impl Write) -> Resul
 
 fn write_config_report(state: &AppState, out: &mut impl Write) -> Result<()> {
     writeln!(out, "Aish config")?;
+    write_config_path(out, "config_path", &state.config_path)?;
     writeln!(out, "shell.backend={}", backend_shell_value(state))?;
     writeln!(out, "draft.persist={}", state.draft_persist)?;
     writeln!(
@@ -4485,7 +4486,9 @@ mod tests {
         let notes_path = temp.path().join("history/notes.jsonl");
         let draft_path = temp.path().join("history/draft.jsonl");
         let template_path = temp.path().join("templates/templates.jsonl");
+        let config_path = temp.path().join("config.toml");
         let mut state = AppState {
+            config_path: Some(config_path.clone()),
             regular_history_path: Some(history_path.clone()),
             notes_path: Some(notes_path.clone()),
             draft_history_path: Some(draft_path.clone()),
@@ -4527,6 +4530,8 @@ mod tests {
 
         let output = String::from_utf8(output).unwrap();
         assert!(output.contains("Aish config"));
+        assert!(output.contains("config_path="));
+        assert!(output.contains(&config_path.display().to_string()));
         assert!(output.contains("shell.backend=/bin/bash"));
         assert!(output.contains("draft.persist=false"));
         assert!(output.contains("editor.execute_after_save=false"));
