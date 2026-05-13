@@ -652,7 +652,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
   - [ ] add managed files
   - [ ] commit
   - [ ] push
-- [ ] Abort on conflict.
+- [x] Abort on conflict.
 - [x] Log conflict/failure.
 
 ### Acceptance criteria

@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 297 library unit tests.
+- 300 library unit tests.
 - 23 draft execution integration tests.
 - 1 first-run integration test.
 - 6 active bash PTY integration tests.
@@ -297,6 +297,7 @@ Implemented:
 - Tracked managed files warning helper identifies Aish-managed paths that may already be tracked and explicitly avoids automatic `git rm --cached` behavior.
 - Sync conflict/failure logging helper writes redacted error events through the event log without running git.
 - Startup sync schedule decision helper conservatively detects due/skipped sync states without creating scheduler files or running git.
+- Git sync step classification helper identifies conflict-like git output and distinguishes conflict aborts from ordinary failures without running git.
 - `#key set` remains a placeholder, while `#key clear` removes the encrypted key file if present and logs the action without printing stored secret content.
 - `#completion` remains a private-command placeholder, but the internal completion engine is active for draft completion display and acceptance.
 - Completion has pure current-token detection helpers that handle first-token classification, non-first-token classification, quoted whitespace, escaped whitespace, cursor-in-line contexts, path-like tokens, and UTF-8 cursor snapping.

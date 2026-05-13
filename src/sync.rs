@@ -32,6 +32,13 @@ pub enum StartupSyncDecision {
     UnsupportedSchedule(String),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SyncStepOutcome {
+    Continue,
+    AbortConflict { detail: String },
+    AbortFailure { detail: String },
+}
+
 #[derive(Debug)]
 pub struct SyncLock {
     path: PathBuf,
@@ -262,6 +269,48 @@ fn cron_step_interval_seconds(field: &str, unit_seconds: i64) -> Option<i64> {
     Some(step * unit_seconds)
 }
 
+pub fn classify_git_sync_step(success: bool, stdout: &str, stderr: &str) -> SyncStepOutcome {
+    if success {
+        return SyncStepOutcome::Continue;
+    }
+
+    let detail = combined_git_output(stdout, stderr);
+    if git_output_looks_conflicted(&detail) {
+        SyncStepOutcome::AbortConflict { detail }
+    } else {
+        SyncStepOutcome::AbortFailure { detail }
+    }
+}
+
+fn combined_git_output(stdout: &str, stderr: &str) -> String {
+    let mut parts = Vec::new();
+    let stdout = stdout.trim();
+    let stderr = stderr.trim();
+    if !stdout.is_empty() {
+        parts.push(stdout);
+    }
+    if !stderr.is_empty() {
+        parts.push(stderr);
+    }
+    if parts.is_empty() {
+        "git command failed without output".to_string()
+    } else {
+        parts.join("\n")
+    }
+}
+
+fn git_output_looks_conflicted(output: &str) -> bool {
+    let lower = output.to_ascii_lowercase();
+    lower.contains("merge conflict")
+        || lower.contains("conflict (content)")
+        || lower.contains("fix conflicts and then")
+        || lower.contains("cannot rebase")
+        || lower.contains("could not apply")
+        || lower.contains("non-fast-forward")
+        || lower.contains("fetch first")
+        || lower.contains("failed to push some refs")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -461,6 +510,40 @@ mod tests {
         assert_eq!(
             startup_sync_decision(&config, 100, Some(0)),
             StartupSyncDecision::UnsupportedSchedule("5 4 * * mon".to_string())
+        );
+    }
+
+    #[test]
+    fn classify_git_sync_step_continues_on_success() {
+        assert_eq!(
+            classify_git_sync_step(true, "already up to date", ""),
+            SyncStepOutcome::Continue
+        );
+    }
+
+    #[test]
+    fn classify_git_sync_step_aborts_on_conflict_like_output() {
+        let outcome = classify_git_sync_step(
+            false,
+            "CONFLICT (content): Merge conflict in history/regular.jsonl",
+            "error: could not apply abc123",
+        );
+
+        assert_eq!(
+            outcome,
+            SyncStepOutcome::AbortConflict {
+                detail: "CONFLICT (content): Merge conflict in history/regular.jsonl\nerror: could not apply abc123".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn classify_git_sync_step_aborts_on_non_conflict_failure() {
+        assert_eq!(
+            classify_git_sync_step(false, "", "fatal: unable to access remote"),
+            SyncStepOutcome::AbortFailure {
+                detail: "fatal: unable to access remote".to_string()
+            }
         );
     }
 }
