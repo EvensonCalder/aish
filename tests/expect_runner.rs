@@ -203,6 +203,11 @@ fn history_mode_execute() {
 }
 
 #[test]
+fn history_persists_across_restarts() {
+    run_script("history_persists_across_restarts.exp");
+}
+
+#[test]
 fn template_use_executes() {
     run_script("template_use_executes.exp");
 }
