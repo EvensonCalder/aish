@@ -335,6 +335,13 @@ pub fn default_sync_commit_plan() -> GitCommandPlan {
     commit_plan("sync aish data").expect("default sync commit message is non-empty")
 }
 
+pub fn push_plan() -> GitCommandPlan {
+    GitCommandPlan {
+        program: "git".to_string(),
+        args: vec!["push".to_string()],
+    }
+}
+
 fn sanitize_commit_message(message: &str) -> String {
     message
         .lines()
@@ -691,5 +698,16 @@ mod tests {
     #[test]
     fn commit_plan_rejects_empty_message() {
         assert_eq!(commit_plan("\n\t\n"), None);
+    }
+
+    #[test]
+    fn push_plan_uses_fixed_git_arguments() {
+        assert_eq!(
+            push_plan(),
+            GitCommandPlan {
+                program: "git".to_string(),
+                args: vec!["push".to_string()]
+            }
+        );
     }
 }

@@ -651,7 +651,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
   - [x] pull --rebase
   - [x] add managed files
   - [x] commit
-  - [ ] push
+  - [x] push
 - [x] Abort on conflict.
 - [x] Log conflict/failure.
 
