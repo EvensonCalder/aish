@@ -329,6 +329,7 @@ Implemented:
 - Startup `#sync <cron-expression>` behavior is covered for due and not-due schedules using a runtime timestamp file, sync lock, and local bare git remote without creating scheduler files.
 - Marker-based shell integration now emits and parses command-start markers, with shell-quoting tests and PTY coverage that bash reports `started_command` without leaking internal markers into history.
 - Bash marker integration has PTY coverage for prompt-ready initial cwd, command-start reporting, command-finish exit status, and cwd reporting after command execution.
+- Zsh hook integration has PTY coverage for `preexec` command-start reporting, `precmd` finish status, and cwd reporting after command execution when `/bin/zsh` is available.
 - Interactive passthrough command allowlist detects common fullscreen/interactive commands, basenames, shell quoting, assignments, and wrappers such as `sudo`, `env`, `command`, and `exec` without changing runtime behavior yet.
 - Prompt redraw after ordinary command output has both a Rust virtual-screen regression and an expect scenario requiring command output line termination before the next prompt.
 - Command output followed by mode-switch redraw and unique completion acceptance has expect coverage through the real binary.

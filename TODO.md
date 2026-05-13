@@ -678,7 +678,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
   - [x] `precmd`
   - [x] `preexec`
   - [x] cwd reporting
-  - [ ] surface command-start events beyond output filtering
+  - [x] surface command-start events beyond output filtering
 - [ ] Fish integration:
   - [ ] prompt/event functions
   - [ ] cwd reporting

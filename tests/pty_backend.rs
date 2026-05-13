@@ -175,6 +175,7 @@ fn zsh_pty_backend_runs_commands_and_preserves_shell_state_when_available() {
     assert_eq!(first.exit_code, 0);
     assert_eq!(first.started_command.as_deref(), Some("printf 'zsh-ok\\n'"));
     assert_eq!(first.output.trim(), "zsh-ok");
+    assert_eq!(first.cwd.as_deref(), Some(backend.initial_cwd().unwrap()));
 
     let cd = backend
         .run_command("cd /tmp", Duration::from_secs(5))
@@ -183,6 +184,8 @@ fn zsh_pty_backend_runs_commands_and_preserves_shell_state_when_available() {
 
     let pwd = backend.run_command("pwd", Duration::from_secs(5)).unwrap();
     assert_eq!(pwd.exit_code, 0);
+    assert_eq!(pwd.started_command.as_deref(), Some("pwd"));
+    assert_eq!(pwd.cwd.as_deref(), Some("/tmp"));
     assert_eq!(pwd.output.trim(), "/tmp");
 }
 
