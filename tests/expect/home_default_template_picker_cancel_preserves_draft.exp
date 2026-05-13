@@ -1,0 +1,56 @@
+#!/usr/bin/env expect
+# Production-style template picker cancellation: without AISH_HOME, Ctrl-X Ctrl-T
+# should use external fzf, cancel cleanly, and preserve the current draft.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set isolated_home "/tmp/aish-home-template-picker-[pid]-[clock clicks]"
+file delete -force $isolated_home
+file mkdir $isolated_home
+set old_home $::env(HOME)
+set old_aish_home_exists [info exists ::env(AISH_HOME)]
+if {$old_aish_home_exists} {
+    set old_aish_home $::env(AISH_HOME)
+}
+unset -nocomplain ::env(AISH_HOME)
+set ::env(HOME) $isolated_home
+
+set bindir "/tmp/aish-home-template-fake-fzf-[pid]-[clock clicks]"
+file mkdir $bindir
+set fzf "$bindir/fzf"
+set fh [open $fzf w]
+puts $fh {#!/bin/sh}
+puts $fh {cat >/dev/null}
+puts $fh {exit 130}
+close $fh
+file attributes $fzf -permissions 0755
+set old_path $::env(PATH)
+set ::env(PATH) "$bindir:$old_path"
+
+aish_spawn_without_aish_home
+
+aish_send "#mt home-picker-template echo should-not-copy-home"
+aish_enter
+aish_expect "template stored: home-picker-template"
+aish_wait_prompt
+
+aish_send "echo keep-home-after-template-picker-cancel"
+aish_send "\x18\x14"
+aish_expect "template picker cancelled"
+aish_expect "> echo keep-home-after-template-picker-cancel"
+
+aish_enter
+aish_expect "keep-home-after-template-picker-cancel"
+aish_wait_prompt
+aish_quit
+
+set ::env(PATH) $old_path
+set ::env(HOME) $old_home
+if {$old_aish_home_exists} {
+    set ::env(AISH_HOME) $old_aish_home
+} else {
+    unset -nocomplain ::env(AISH_HOME)
+}
+file delete -force $bindir
+file delete -force $isolated_home

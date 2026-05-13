@@ -298,6 +298,11 @@ fn template_picker_cancel_preserves_draft() {
 }
 
 #[test]
+fn home_default_template_picker_cancel_preserves_draft() {
+    run_script("home_default_template_picker_cancel_preserves_draft.exp");
+}
+
+#[test]
 fn git_branch_picker_cancel_preserves_draft() {
     run_script("git_branch_picker_cancel_preserves_draft.exp");
 }
