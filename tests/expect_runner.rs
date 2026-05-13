@@ -333,6 +333,11 @@ fn home_default_startup_sync_failure_logs() {
 }
 
 #[test]
+fn home_default_startup_sync_disabled_noops() {
+    run_script("home_default_startup_sync_disabled_noops.exp");
+}
+
+#[test]
 fn sync_push_local_remote() {
     run_script("sync_push_local_remote.exp");
 }

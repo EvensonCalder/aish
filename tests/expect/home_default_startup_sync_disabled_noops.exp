@@ -1,0 +1,70 @@
+#!/usr/bin/env expect
+# Production-style disabled startup sync: persisted remote/category settings with
+# sync disabled should not run git, record attempts, log failures, or create
+# scheduler files on restart.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set root "/tmp/aish-home-startup-sync-disabled-[pid]-[clock clicks]"
+set isolated_home "$root/user-home"
+set aish_home "$isolated_home/.aish"
+set missing_remote "$root/missing-remote.git"
+file delete -force $root
+file mkdir $root
+file mkdir $isolated_home
+set old_home $::env(HOME)
+set old_aish_home_exists [info exists ::env(AISH_HOME)]
+if {$old_aish_home_exists} {
+    set old_aish_home $::env(AISH_HOME)
+}
+unset -nocomplain ::env(AISH_HOME)
+set ::env(HOME) $isolated_home
+
+aish_spawn_without_aish_home
+
+aish_send "#set-remote $missing_remote"
+aish_enter
+aish_expect "sync.remote=$missing_remote"
+aish_wait_prompt
+
+aish_send "#sync history on"
+aish_enter
+aish_expect "sync.history=true"
+aish_wait_prompt
+
+aish_send "echo disabled-startup-sync-history"
+aish_enter
+aish_expect "disabled-startup-sync-history"
+aish_wait_prompt
+aish_quit
+
+aish_spawn_without_aish_home
+aish_send "#log 20"
+aish_enter
+assert_no "sync failed" "> "
+aish_wait_prompt
+aish_quit
+
+if {[file exists "$aish_home/cache/runtime/scheduler"]} {
+    puts stderr "unexpected scheduler file created while startup sync disabled"
+    exit 6
+}
+
+if {[file exists "$aish_home/cache/runtime/sync.last_attempt"]} {
+    puts stderr "disabled startup sync recorded an attempt"
+    exit 6
+}
+
+if {[file exists "$aish_home/.git"]} {
+    puts stderr "disabled startup sync initialized git unexpectedly"
+    exit 6
+}
+
+set ::env(HOME) $old_home
+if {$old_aish_home_exists} {
+    set ::env(AISH_HOME) $old_aish_home
+} else {
+    unset -nocomplain ::env(AISH_HOME)
+}
+file delete -force $root
