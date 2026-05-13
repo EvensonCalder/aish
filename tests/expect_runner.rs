@@ -308,6 +308,11 @@ fn git_branch_picker_cancel_preserves_draft() {
 }
 
 #[test]
+fn home_default_git_branch_picker_cancel_preserves_draft() {
+    run_script("home_default_git_branch_picker_cancel_preserves_draft.exp");
+}
+
+#[test]
 fn env_var_picker_cancel_preserves_draft() {
     run_script("env_var_picker_cancel_preserves_draft.exp");
 }
