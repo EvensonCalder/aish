@@ -781,11 +781,15 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 - [x] Cover `#status`, `#doctor`, and `#config` diagnostics.
 - [x] Cover note capture without backend shell execution.
 - [x] Cover context pseudo-pipe confirmation skip flow.
+- [x] Cover event log output after a context skip.
 - [x] Cover `Ctrl-L` clear-screen behavior.
 - [x] Cover single-candidate completion acceptance and multi-candidate completion panel display.
 - [x] Cover history-mode command execution.
+- [x] Cover read-only history edit-copy behavior.
 - [x] Cover template creation/use/execution flow.
 - [x] Cover unresolved template placeholder execution blocking.
+- [x] Cover external editor roundtrip.
+- [x] Cover multiline paste editor-review execution.
 - [x] Cover key/encryption/sync placeholder commands as safe no-ops.
 - [x] Cover `echo "` and `echo '` continuation UX.
 - [x] Cover trailing backslash continuation UX.

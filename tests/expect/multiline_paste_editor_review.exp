@@ -1,0 +1,19 @@
+#!/usr/bin/env expect
+# Default multiline paste behavior should create an opaque editor draft rather
+# than silently executing pasted commands.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "\x1b\[200~echo paste-one\necho paste-two\x1b\[201~"
+aish_expect "\[editor draft: 2 line(s)"
+aish_expect "Enter to run"
+
+aish_enter
+aish_expect "paste-one"
+aish_expect "paste-two"
+aish_wait_prompt
+
+aish_quit

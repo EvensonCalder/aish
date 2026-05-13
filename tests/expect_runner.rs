@@ -207,5 +207,25 @@ fn context_confirmation_skip() {
     run_script("context_confirmation_skip.exp");
 }
 
+#[test]
+fn external_editor_roundtrip() {
+    run_script("external_editor_roundtrip.exp");
+}
+
+#[test]
+fn multiline_paste_editor_review() {
+    run_script("multiline_paste_editor_review.exp");
+}
+
+#[test]
+fn read_only_edit_copies_to_draft() {
+    run_script("read_only_edit_copies_to_draft.exp");
+}
+
+#[test]
+fn log_shows_context_skip() {
+    run_script("log_shows_context_skip.exp");
+}
+
 #[allow(dead_code)]
 fn _unused_path_check(_p: &Path) {}

@@ -1,0 +1,22 @@
+#!/usr/bin/env expect
+# Context confirmation decisions should be written to the event log and visible
+# through `#log` in an interactive session.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "# explain < echo log-context"
+aish_enter
+aish_expect "Run context command? \[Y/n\]"
+aish_send "n"
+aish_expect "context command skipped: echo log-context"
+aish_wait_prompt
+
+aish_send "#log 5"
+aish_enter
+aish_expect "context command skipped"
+aish_wait_prompt
+
+aish_quit

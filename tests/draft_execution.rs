@@ -312,6 +312,53 @@ fn editor_draft_sends_multiline_backslash_continuation_to_shell() {
 }
 
 #[test]
+fn editor_draft_executes_each_pasted_line() {
+    let _guard = pty_execution_guard();
+    let mut state = AppState::default();
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    state.replace_draft_from_editor_text("echo paste-one\necho paste-two");
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.contains("paste-one"), "output was {output:?}");
+    assert!(output.contains("paste-two"), "output was {output:?}");
+}
+
+#[test]
+fn editor_draft_preserves_multiline_command_after_prompt_render() {
+    let _guard = pty_execution_guard();
+    let mut state = AppState::default();
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut redraw_output = Vec::new();
+    let mut command_output = Vec::new();
+
+    state.replace_draft_from_editor_text("echo paste-one\necho paste-two");
+    let rendered = state.rendered_text();
+    std::io::Write::write_all(&mut redraw_output, rendered.as_bytes()).unwrap();
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut command_output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    let output = String::from_utf8(command_output).unwrap();
+    assert!(output.contains("paste-one"), "output was {output:?}");
+    assert!(output.contains("paste-two"), "output was {output:?}");
+}
+
+#[test]
 fn editor_draft_preserves_backslash_continuation_in_history() {
     let _guard = pty_execution_guard();
     let temp = tempfile::tempdir().unwrap();

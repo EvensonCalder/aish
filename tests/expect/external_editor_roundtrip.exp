@@ -1,0 +1,28 @@
+#!/usr/bin/env expect
+# Ctrl-X Ctrl-E should launch the configured editor, read the edited file back as
+# an opaque editor draft, and execute it only after Enter.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set editor "/tmp/aish-fake-editor-[pid]-[clock clicks].sh"
+set fh [open $editor w]
+puts $fh {#!/bin/sh}
+puts $fh {printf 'echo editor-expect-ok\n' > "$1"}
+puts $fh {exit 0}
+close $fh
+file attributes $editor -permissions 0755
+set ::env(EDITOR) $editor
+
+aish_spawn
+
+aish_send "\x18\x05"
+aish_expect "\[editor draft: 1 line(s)"
+aish_expect "Enter to run"
+
+aish_enter
+aish_expect "editor-expect-ok"
+aish_wait_prompt
+
+aish_quit
+file delete -force $editor

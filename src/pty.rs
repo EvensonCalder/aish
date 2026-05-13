@@ -194,9 +194,20 @@ impl PtyBackend {
 
     pub fn run_command(&mut self, command: &str, timeout: Duration) -> Result<CommandResult> {
         if self.integration == ShellIntegration::ZshHooks {
+            if command.contains('\n') {
+                return self.run_command_with_marker(command, timeout);
+            }
             return self.run_command_with_zsh_hooks(command, timeout);
         }
 
+        self.run_command_with_marker(command, timeout)
+    }
+
+    fn run_command_with_marker(
+        &mut self,
+        command: &str,
+        timeout: Duration,
+    ) -> Result<CommandResult> {
         let _ = self.drain_for(Duration::from_millis(25));
         let marker = next_marker();
         let marker_command = format!(

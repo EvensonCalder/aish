@@ -1,0 +1,25 @@
+#!/usr/bin/env expect
+# Editing a selected history item should copy it into draft mode before applying
+# the typed change, preserving read-only history semantics.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "echo copy-source"
+aish_enter
+aish_expect "copy-source"
+aish_wait_prompt
+
+aish_send "\t"
+aish_expect "\$ "
+aish_send "\033\[A"
+aish_expect "echo copy-source"
+aish_send "X"
+aish_expect "> echo copy-sourceX"
+
+aish_send "\x03"
+aish_wait_prompt
+
+aish_quit

@@ -78,6 +78,20 @@ fn pty_backend_resizes_visible_columns_for_child_commands() {
 }
 
 #[test]
+fn pty_backend_runs_multiline_commands_before_marker() {
+    let _guard = pty_test_guard();
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+
+    let result = backend
+        .run_command("echo paste-one\necho paste-two", Duration::from_secs(5))
+        .unwrap();
+
+    assert_eq!(result.exit_code, 0);
+    assert!(result.output.contains("paste-one"), "{:?}", result.output);
+    assert!(result.output.contains("paste-two"), "{:?}", result.output);
+}
+
+#[test]
 fn pty_backend_captures_failed_command_exit_status() {
     let _guard = pty_test_guard();
     let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
