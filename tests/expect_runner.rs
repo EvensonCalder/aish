@@ -143,6 +143,11 @@ fn home_default_invalid_config_startup() {
 }
 
 #[test]
+fn home_missing_fails_cleanly() {
+    run_script("home_missing_fails_cleanly.exp");
+}
+
+#[test]
 fn cd_persists() {
     run_script("cd_persists.exp");
 }

@@ -681,7 +681,7 @@ fn render_multiline_draft(prompt_prefix: &str, continuation_prefix: &str, text: 
 }
 
 pub fn run() -> Result<()> {
-    let (layout, config) = config::init_default_layout(config::default_aish_dir())?;
+    let (layout, config) = config::init_default_layout(config::runtime_aish_dir()?)?;
     let store = HistoryStore::load(&layout)?;
     let mut backend = PtyBackend::spawn(&config.shell.backend)?;
     let restored_draft = latest_persisted_draft(&store, config.draft.persist);

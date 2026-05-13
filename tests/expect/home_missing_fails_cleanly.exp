@@ -1,0 +1,34 @@
+#!/usr/bin/env expect
+# Without AISH_HOME and with HOME empty, Aish should fail clearly instead of
+# creating a relative .aish directory in the current working directory.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set isolated_cwd "/tmp/aish-missing-home-[pid]-[clock clicks]"
+file delete -force $isolated_cwd
+file mkdir $isolated_cwd
+set old_home $::env(HOME)
+unset -nocomplain ::env(AISH_HOME)
+set ::env(HOME) ""
+
+spawn -noecho sh -c "cd '$isolated_cwd' && '$::env(AISH_BIN)'"
+expect {
+    -ex "AISH_HOME or HOME must be set" {}
+    timeout { puts stderr "no readable missing-home error"; exit 7 }
+    eof { puts stderr "eof before missing-home error"; exit 7 }
+}
+
+expect {
+    eof {}
+    -re {> \x1b\[} { puts stderr "unexpected Aish prompt with missing HOME"; exit 7 }
+    timeout { puts stderr "missing-home process did not exit"; exit 7 }
+}
+
+if {[file exists "$isolated_cwd/.aish"]} {
+    puts stderr "unexpected relative .aish directory created"
+    exit 7
+}
+
+set ::env(HOME) $old_home
+file delete -force $isolated_cwd

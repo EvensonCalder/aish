@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -235,6 +235,25 @@ pub fn default_aish_dir() -> PathBuf {
         .join(".aish")
 }
 
+pub fn runtime_aish_dir() -> Result<PathBuf> {
+    if let Ok(home) = std::env::var("AISH_HOME") {
+        let home = home.trim();
+        if home.is_empty() {
+            bail!("AISH_HOME or HOME must be set to an absolute path");
+        }
+        return Ok(PathBuf::from(home));
+    }
+
+    let Some(home) = std::env::var_os("HOME") else {
+        bail!("AISH_HOME or HOME must be set to an absolute path");
+    };
+    let home = PathBuf::from(home);
+    if home.as_os_str().is_empty() || !home.is_absolute() {
+        bail!("AISH_HOME or HOME must be set to an absolute path");
+    }
+    Ok(home.join(".aish"))
+}
+
 pub fn init_default_layout(root: impl Into<PathBuf>) -> Result<(DirectoryLayout, Config)> {
     let layout = DirectoryLayout::new(root);
     layout.create_dirs()?;
@@ -466,5 +485,20 @@ mod tests {
             std::env::remove_var("AISH_HOME");
         }
         assert_eq!(root, temp.path());
+    }
+
+    #[test]
+    fn runtime_aish_dir_rejects_missing_home() {
+        unsafe {
+            std::env::remove_var("AISH_HOME");
+            std::env::set_var("HOME", "");
+        }
+
+        let err = runtime_aish_dir().unwrap_err().to_string();
+
+        unsafe {
+            std::env::remove_var("HOME");
+        }
+        assert!(err.contains("AISH_HOME or HOME must be set to an absolute path"));
     }
 }
