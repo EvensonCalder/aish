@@ -81,20 +81,20 @@ fn replace_managed_gitignore_section(existing: &str) -> String {
     let start = lines.iter().position(|line| line.trim() == GITIGNORE_BEGIN);
     let end = lines.iter().position(|line| line.trim() == GITIGNORE_END);
 
-    if let (Some(start), Some(end)) = (start, end) {
-        if start <= end {
-            let mut output = String::new();
-            for line in &lines[..start] {
-                output.push_str(line);
-                output.push('\n');
-            }
-            output.push_str(&managed);
-            for line in &lines[end + 1..] {
-                output.push_str(line);
-                output.push('\n');
-            }
-            return output;
+    if let (Some(start), Some(end)) = (start, end)
+        && start <= end
+    {
+        let mut output = String::new();
+        for line in &lines[..start] {
+            output.push_str(line);
+            output.push('\n');
         }
+        output.push_str(&managed);
+        for line in &lines[end + 1..] {
+            output.push_str(line);
+            output.push('\n');
+        }
+        return output;
     }
 
     let mut output = existing.trim_end_matches('\n').to_string();
