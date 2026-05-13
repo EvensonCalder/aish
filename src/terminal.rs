@@ -3,7 +3,7 @@ use std::panic;
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::cursor::{MoveToColumn, MoveUp};
+use crossterm::cursor::{MoveToColumn, MoveToPreviousLine, MoveUp};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
@@ -191,7 +191,10 @@ fn handle_key(
             if had_completion_panel {
                 redraw(state, out)?;
             }
-            execute!(out, MoveToColumn(state.render_prompt_line().len() as u16))?;
+            execute!(
+                out,
+                MoveToColumn(state.rendered_last_line_column()),
+            )?;
             write!(out, "\r\n")?;
             let mut display_out = CrLfWriter::new(out);
             execute_draft(state, backend, &mut display_out, command_timeout)?;
@@ -200,7 +203,7 @@ fn handle_key(
             }
         }
         KeyAction::ConfirmContext(accepted) => {
-            execute!(out, MoveToColumn(state.render_prompt_line().len() as u16))?;
+            execute!(out, MoveToColumn(state.rendered_last_line_column()))?;
             write!(out, "\r\n")?;
             let mut display_out = CrLfWriter::new(out);
             answer_context_confirmation(state, accepted, &mut display_out, command_timeout)?;
@@ -681,14 +684,18 @@ fn expand_template_draft_if_inside_placeholder(state: &mut AppState) {
 
 pub fn redraw(state: &AppState, out: &mut impl Write) -> Result<()> {
     execute!(out, MoveToColumn(0), Clear(ClearType::FromCursorDown))?;
-    write!(out, "{}", state.render_prompt_line())?;
+    write!(out, "{}", state.rendered_text())?;
     if !state.completion_panel.is_empty() {
         for line in &state.completion_panel {
             write!(out, "\r\n{line}")?;
         }
         execute!(out, MoveUp(state.completion_panel.len() as u16))?;
     }
-    execute!(out, MoveToColumn(state.terminal_cursor_column()))?;
+    let (cursor_row, cursor_col) = state.terminal_cursor_position();
+    if cursor_row > 0 {
+        execute!(out, MoveToPreviousLine(cursor_row))?;
+    }
+    execute!(out, MoveToColumn(cursor_col))?;
     out.flush()?;
     Ok(())
 }
@@ -904,6 +911,20 @@ mod tests {
     }
 
     #[test]
+    fn redraw_positions_cursor_on_multiline_draft_last_line() {
+        let mut state = AppState::default();
+        state.draft.insert_str("echo \"\n123");
+        let mut output = Vec::new();
+
+        redraw(&state, &mut output).unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("> echo \"\n123"), "output was {output:?}");
+        assert!(output.contains("\u{1b}[1F"), "output was {output:?}");
+        assert!(output.ends_with("\u{1b}[4G"), "output was {output:?}");
+    }
+
+    #[test]
     fn editing_after_completion_panel_clears_panel() {
         let mut state = AppState {
             completion_panel: vec!["exec\tgit".to_string()],
@@ -914,6 +935,18 @@ mod tests {
         apply_key_to_state(key(KeyCode::Char('x')), &mut state);
 
         assert!(state.completion_panel.is_empty());
+    }
+
+    #[test]
+    fn ctrl_c_clears_multiline_draft_and_returns_to_empty_prompt() {
+        let mut state = AppState::default();
+        state.draft.insert_str("echo \"\n123");
+
+        apply_key_to_state(ctrl('c'), &mut state);
+
+        assert!(state.draft.is_empty());
+        assert_eq!(state.mode, crate::modes::Mode::Draft);
+        assert_eq!(state.render_prompt_line(), "> ");
     }
 
     #[test]

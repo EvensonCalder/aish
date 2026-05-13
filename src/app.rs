@@ -523,6 +523,10 @@ impl AppState {
     }
 
     pub fn render_prompt_line(&self) -> String {
+        self.rendered_text()
+    }
+
+    pub fn rendered_text(&self) -> String {
         if let Some(pending) = &self.pending_context {
             let marker = if pending.dangerous {
                 "[dangerous context confirmation: Y/n]"
@@ -543,22 +547,43 @@ impl AppState {
     }
 
     pub fn terminal_cursor_column(&self) -> u16 {
+        self.terminal_cursor_position().1
+    }
+
+    pub fn terminal_cursor_position(&self) -> (u16, u16) {
         if let Some(pending) = &self.pending_context {
             let marker = if pending.dangerous {
                 "[dangerous context confirmation: Y/n]"
             } else {
                 "[context confirmation: Y/n]"
             };
-            return (self.prompt_prefix().len() + marker.len()).min(u16::MAX as usize) as u16;
+            return (0, (self.prompt_prefix().len() + marker.len()).min(u16::MAX as usize) as u16);
         }
-        let cursor = match self.mode {
-            Mode::History => self.selected_history_command().unwrap_or("").len(),
-            Mode::Ai => self.selected_ai_command().unwrap_or("").len(),
-            Mode::Draft if self.draft_from_editor => self.editor_draft_summary().len(),
-            _ => self.draft.cursor(),
+        let rendered_before_cursor = match self.mode {
+            Mode::History => format!("{}{}", self.prompt_prefix(), self.selected_history_command().unwrap_or("")),
+            Mode::Ai => format!("{}{}", self.prompt_prefix(), self.selected_ai_command().unwrap_or("")),
+            Mode::Draft if self.draft_from_editor => {
+                format!("{}{}", self.prompt_prefix(), self.editor_draft_summary())
+            }
+            _ => format!("{}{}", self.prompt_prefix(), &self.draft.as_str()[..self.draft.cursor()]),
         };
-        let column = self.prompt_prefix().len() + cursor;
-        column.min(u16::MAX as usize) as u16
+        let mut lines = rendered_before_cursor.split('\n');
+        let last = lines.next_back().unwrap_or_default();
+        let row = rendered_before_cursor.split('\n').count().saturating_sub(1);
+        (row.min(u16::MAX as usize) as u16, last.len().min(u16::MAX as usize) as u16)
+    }
+
+    pub fn rendered_line_count(&self) -> usize {
+        self.rendered_text().split('\n').count().max(1)
+    }
+
+    pub fn rendered_last_line_column(&self) -> u16 {
+        self.rendered_text()
+            .rsplit('\n')
+            .next()
+            .unwrap_or_default()
+            .len()
+            .min(u16::MAX as usize) as u16
     }
 
     fn editor_draft_summary(&self) -> String {
