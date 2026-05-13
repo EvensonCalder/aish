@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 288 library unit tests.
+- 290 library unit tests.
 - 23 draft execution integration tests.
 - 1 first-run integration test.
 - 6 active bash PTY integration tests.
@@ -293,6 +293,7 @@ Implemented:
 - Event log helpers append to `logs/events.jsonl`, trim to 1000 events by default, redact common secret token shapes, record config update errors, record secret/encryption-adjacent changes such as `#key clear`, record sync config changes, and `#log <count>` prints recent events.
 - Sync config commands persist remote, schedule/off state, and category toggles for AI/history/templates/drafts without running git or creating scheduler files.
 - Sync lock helper atomically creates a lock file, rejects a second holder, writes metadata, and removes the lock on drop.
+- Managed sync `.gitignore` helper preserves user content, replaces only the Aish managed section, and is idempotent.
 - `#key set` remains a placeholder, while `#key clear` removes the encrypted key file if present and logs the action without printing stored secret content.
 - `#completion` remains a private-command placeholder, but the internal completion engine is active for draft completion display and acceptance.
 - Completion has pure current-token detection helpers that handle first-token classification, non-first-token classification, quoted whitespace, escaped whitespace, cursor-in-line contexts, path-like tokens, and UTF-8 cursor snapping.

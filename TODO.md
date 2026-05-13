@@ -643,7 +643,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
   - [x] regular history
   - [x] templates
   - [x] drafts
-- [ ] Maintain managed `.gitignore` section.
+- [x] Maintain managed `.gitignore` section.
 - [ ] Warn if files may already be tracked; do not run `git rm --cached` automatically.
 - [x] Implement lock file.
 - [ ] Implement startup cron check.
