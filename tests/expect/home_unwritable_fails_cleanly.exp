@@ -1,0 +1,42 @@
+#!/usr/bin/env expect
+# If HOME is not writable, first-run setup should fail clearly before entering
+# the interactive UI.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set isolated_home "/tmp/aish-unwritable-home-[pid]-[clock clicks]"
+file delete -force $isolated_home
+file mkdir $isolated_home
+set old_home $::env(HOME)
+set old_aish_home_exists [info exists ::env(AISH_HOME)]
+if {$old_aish_home_exists} {
+    set old_aish_home $::env(AISH_HOME)
+}
+unset -nocomplain ::env(AISH_HOME)
+set ::env(HOME) $isolated_home
+file attributes $isolated_home -permissions 0555
+
+spawn -noecho $::env(AISH_BIN)
+expect {
+    -ex "failed to create directory" {}
+    -ex "Permission denied" {}
+    -ex "permission denied" {}
+    timeout { puts stderr "no readable unwritable-home error"; exit 7 }
+    eof { puts stderr "eof before unwritable-home error"; exit 7 }
+}
+
+expect {
+    eof {}
+    -re {> \x1b\[} { puts stderr "unexpected Aish prompt with unwritable HOME"; exit 7 }
+    timeout { puts stderr "unwritable-home process did not exit"; exit 7 }
+}
+
+file attributes $isolated_home -permissions 0755
+set ::env(HOME) $old_home
+if {$old_aish_home_exists} {
+    set ::env(AISH_HOME) $old_aish_home
+} else {
+    unset -nocomplain ::env(AISH_HOME)
+}
+file delete -force $isolated_home

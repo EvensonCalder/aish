@@ -158,6 +158,11 @@ fn aish_home_relative_fails_cleanly() {
 }
 
 #[test]
+fn home_unwritable_fails_cleanly() {
+    run_script("home_unwritable_fails_cleanly.exp");
+}
+
+#[test]
 fn cd_persists() {
     run_script("cd_persists.exp");
 }
