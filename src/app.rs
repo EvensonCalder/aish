@@ -161,6 +161,8 @@ impl Default for AppState {
 }
 
 impl AppState {
+    const CONTINUATION_PREFIX: &str = ".. ";
+
     pub fn handle_empty_tab(&mut self) {
         if self.draft.is_empty() {
             self.mode = self.mode.next_primary();
@@ -543,6 +545,9 @@ impl AppState {
             }
             _ => self.draft.as_str(),
         };
+        if self.mode == Mode::Draft && text.contains('\n') {
+            return render_multiline_draft(&self.prompt_prefix(), text);
+        }
         format!("{}{}", self.prompt_prefix(), text)
     }
 
@@ -557,20 +562,41 @@ impl AppState {
             } else {
                 "[context confirmation: Y/n]"
             };
-            return (0, (self.prompt_prefix().len() + marker.len()).min(u16::MAX as usize) as u16);
+            return (
+                0,
+                (self.prompt_prefix().len() + marker.len()).min(u16::MAX as usize) as u16,
+            );
         }
         let rendered_before_cursor = match self.mode {
-            Mode::History => format!("{}{}", self.prompt_prefix(), self.selected_history_command().unwrap_or("")),
-            Mode::Ai => format!("{}{}", self.prompt_prefix(), self.selected_ai_command().unwrap_or("")),
+            Mode::History => format!(
+                "{}{}",
+                self.prompt_prefix(),
+                self.selected_history_command().unwrap_or("")
+            ),
+            Mode::Ai => format!(
+                "{}{}",
+                self.prompt_prefix(),
+                self.selected_ai_command().unwrap_or("")
+            ),
             Mode::Draft if self.draft_from_editor => {
                 format!("{}{}", self.prompt_prefix(), self.editor_draft_summary())
             }
-            _ => format!("{}{}", self.prompt_prefix(), &self.draft.as_str()[..self.draft.cursor()]),
+            _ => {
+                let before_cursor = &self.draft.as_str()[..self.draft.cursor()];
+                if before_cursor.contains('\n') {
+                    render_multiline_draft(&self.prompt_prefix(), before_cursor)
+                } else {
+                    format!("{}{}", self.prompt_prefix(), before_cursor)
+                }
+            }
         };
         let mut lines = rendered_before_cursor.split('\n');
         let last = lines.next_back().unwrap_or_default();
         let row = rendered_before_cursor.split('\n').count().saturating_sub(1);
-        (row.min(u16::MAX as usize) as u16, last.len().min(u16::MAX as usize) as u16)
+        (
+            row.min(u16::MAX as usize) as u16,
+            last.len().min(u16::MAX as usize) as u16,
+        )
     }
 
     pub fn rendered_line_count(&self) -> usize {
@@ -607,6 +633,18 @@ impl AppState {
         }
         Ok(())
     }
+}
+
+fn render_multiline_draft(prompt_prefix: &str, text: &str) -> String {
+    let mut lines = text.split('\n');
+    let mut rendered = String::from(prompt_prefix);
+    rendered.push_str(lines.next().unwrap_or_default());
+    for line in lines {
+        rendered.push('\n');
+        rendered.push_str(AppState::CONTINUATION_PREFIX);
+        rendered.push_str(line);
+    }
+    rendered
 }
 
 pub fn run() -> Result<()> {

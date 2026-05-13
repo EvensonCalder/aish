@@ -191,10 +191,7 @@ fn handle_key(
             if had_completion_panel {
                 redraw(state, out)?;
             }
-            execute!(
-                out,
-                MoveToColumn(state.rendered_last_line_column()),
-            )?;
+            execute!(out, MoveToColumn(state.rendered_last_line_column()),)?;
             write!(out, "\r\n")?;
             let mut display_out = CrLfWriter::new(out);
             execute_draft(state, backend, &mut display_out, command_timeout)?;
@@ -919,9 +916,12 @@ mod tests {
         redraw(&state, &mut output).unwrap();
 
         let output = String::from_utf8(output).unwrap();
-        assert!(output.contains("> echo \"\n123"), "output was {output:?}");
+        assert!(
+            output.contains("> echo \"\n.. 123"),
+            "output was {output:?}"
+        );
         assert!(output.contains("\u{1b}[1F"), "output was {output:?}");
-        assert!(output.ends_with("\u{1b}[4G"), "output was {output:?}");
+        assert!(output.ends_with("\u{1b}[7G"), "output was {output:?}");
     }
 
     #[test]
