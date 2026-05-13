@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 281 library unit tests.
+- 283 library unit tests.
 - 23 draft execution integration tests.
 - 1 first-run integration test.
 - 6 active bash PTY integration tests.
@@ -290,7 +290,7 @@ Implemented:
 - Direct `# prompt` AI requests are wired to the configured chat-completions request path; missing config reports a readable error without crashing or mutating AI history.
 - Context configuration persists `#context on|off`, `#context confirm on|off`, and `#context <bytes>` to `config.toml`; context confirmation stores a pending prompt and accepts `Y`/`Enter` or skips with `n`/`Esc`/`Ctrl-C`.
 - Context pseudo-pipe helpers run context commands through a controlled `/bin/sh -c` subprocess, capture stdout and stderr, cap output by configured byte limit, disclose truncation, detect dangerous command patterns, and build contextual AI prompts with common secret token shapes redacted from command/output context.
-- Event log helpers append to `logs/events.jsonl`, trim to 1000 events by default, redact common secret token shapes, and `#log <count>` prints recent events.
+- Event log helpers append to `logs/events.jsonl`, trim to 1000 events by default, redact common secret token shapes, record config update errors, and `#log <count>` prints recent events.
 - Key commands are recognized as placeholders but do not store, read, or remove secrets yet.
 - `#completion` remains a private-command placeholder, but the internal completion engine is active for draft completion display and acceptance.
 - Completion has pure current-token detection helpers that handle first-token classification, non-first-token classification, quoted whitespace, escaped whitespace, cursor-in-line contexts, path-like tokens, and UTF-8 cursor snapping.
@@ -403,6 +403,8 @@ Tests:
 - `context::tests::contextual_ai_prompt_redacts_common_secret_shapes`
 - `app::tests::private_log_prints_recent_events`
 - `app::tests::private_log_reports_usage_or_missing_storage`
+- `app::tests::ai_config_write_errors_are_logged`
+- `app::tests::context_config_write_errors_are_logged`
 - `app::tests::ai_config_commands_persist_and_report_values`
 - `app::tests::ai_config_commands_report_unconfigured_without_config_path`
 - `ai::tests::normalize_chat_completions_url_appends_endpoint`

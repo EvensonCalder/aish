@@ -1579,7 +1579,13 @@ fn update_ai_config_field(
         return Ok(());
     };
 
-    let mut config = config::load_config(path)?;
+    let mut config = match config::load_config(path) {
+        Ok(config) => config,
+        Err(err) => {
+            state.append_event(EventLevel::Error, "config error")?;
+            return Err(err);
+        }
+    };
     match name {
         "model" => config.ai.model = value.to_string(),
         "base-url" => config.ai.base_url = normalize_chat_completions_url(value)?,
@@ -1587,7 +1593,10 @@ fn update_ai_config_field(
         _ => unreachable!("unknown AI config field"),
     }
     config::normalize_config(&mut config);
-    config::save_config(path, &config)?;
+    if let Err(err) = config::save_config(path, &config) {
+        state.append_event(EventLevel::Error, "config error")?;
+        return Err(err);
+    }
     state.ai_config = config.ai;
     write_ai_config_value(out, name, state)
 }
@@ -1655,10 +1664,19 @@ fn set_context_config(
         writeln!(out, "config path is not configured; #context not saved")?;
         return Ok(());
     };
-    let mut config = config::load_config(path)?;
+    let mut config = match config::load_config(path) {
+        Ok(config) => config,
+        Err(err) => {
+            state.append_event(EventLevel::Error, "config error")?;
+            return Err(err);
+        }
+    };
     update(&mut config)?;
     config::normalize_config(&mut config);
-    config::save_config(path, &config)?;
+    if let Err(err) = config::save_config(path, &config) {
+        state.append_event(EventLevel::Error, "config error")?;
+        return Err(err);
+    }
     state.context_config = config.context;
     write_context_config(out, &state.context_config)
 }
@@ -3030,6 +3048,66 @@ mod tests {
             );
             assert!(state.draft.is_empty());
         }
+    }
+
+    #[test]
+    fn ai_config_write_errors_are_logged() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("bad-config.toml");
+        let events_path = temp.path().join("logs/events.jsonl");
+        std::fs::write(&config_path, "not = [valid").unwrap();
+        let mut state = AppState {
+            config_path: Some(config_path),
+            events_path: Some(events_path.clone()),
+            ..AppState::default()
+        };
+        state.draft.insert_str("#model test-model");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        let err = execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("invalid config"));
+        let events = load_events(&events_path).unwrap();
+        assert_eq!(events.items.len(), 1);
+        assert_eq!(events.items[0].level, EventLevel::Error);
+        assert_eq!(events.items[0].msg, "config error");
+    }
+
+    #[test]
+    fn context_config_write_errors_are_logged() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("bad-config.toml");
+        let events_path = temp.path().join("logs/events.jsonl");
+        std::fs::write(&config_path, "not = [valid").unwrap();
+        let mut state = AppState {
+            config_path: Some(config_path),
+            events_path: Some(events_path.clone()),
+            ..AppState::default()
+        };
+        state.draft.insert_str("#context off");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        let err = execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("invalid config"));
+        let events = load_events(&events_path).unwrap();
+        assert_eq!(events.items.len(), 1);
+        assert_eq!(events.items[0].level, EventLevel::Error);
+        assert_eq!(events.items[0].msg, "config error");
     }
 
     #[test]

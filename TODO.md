@@ -587,7 +587,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
   - [ ] encryption changes
   - [ ] sync changes
   - [ ] sync failures
-  - [ ] config errors
+  - [x] config errors
 - [x] Ensure secrets are redacted.
 
 ### Acceptance criteria

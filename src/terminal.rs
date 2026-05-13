@@ -461,8 +461,10 @@ fn normalize_paste_newlines(text: &str) -> String {
 }
 
 pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
-    if matches!(state.mode, crate::modes::Mode::Passthrough | crate::modes::Mode::UnlockPassthrough)
-    {
+    if matches!(
+        state.mode,
+        crate::modes::Mode::Passthrough | crate::modes::Mode::UnlockPassthrough
+    ) {
         return passthrough_key_bytes(key)
             .map(KeyAction::ForwardToBackend)
             .unwrap_or(KeyAction::Continue);
