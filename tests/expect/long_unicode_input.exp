@@ -1,0 +1,26 @@
+#!/usr/bin/env expect
+# Long and Unicode input should remain editable and executable in the real
+# terminal path, including Ctrl-A/Ctrl-E navigation around UTF-8 content.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+set long_text "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+aish_send "printf 'unicode-long:%s:%s\\n' 'café-你好' '$long_text'"
+aish_enter
+aish_expect "unicode-long:café-你好:$long_text"
+aish_wait_prompt
+
+# Exercise readline-style navigation around Unicode text in the input editor.
+aish_send "echo suffix-🙂"
+aish_send "\x01"
+aish_send "echo prefix-"
+aish_send "\x05"
+aish_enter
+aish_expect "prefix-echo suffix-🙂"
+aish_wait_prompt
+
+aish_quit

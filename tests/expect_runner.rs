@@ -273,6 +273,11 @@ fn readline_editing_keys() {
 }
 
 #[test]
+fn long_unicode_input() {
+    run_script("long_unicode_input.exp");
+}
+
+#[test]
 fn escape_clears_draft() {
     run_script("escape_clears_draft.exp");
 }

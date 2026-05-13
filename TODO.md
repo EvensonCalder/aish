@@ -823,7 +823,8 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 - [x] Add expect coverage for command output followed by completion/redraw/mode switches.
 - [x] Add expect coverage for sync success/failure using local temporary git remotes.
 - [x] Add expect coverage for representative safe failure paths for all private commands.
-- [ ] Add expect coverage for terminal resize and long/Unicode input workflows.
+- [x] Add expect coverage for long/Unicode input workflows.
+- [ ] Add expect coverage for terminal resize workflows.
 - [ ] Add expect coverage for passthrough candidates where portable in CI (`less`, `fzf` fallback, simple TUI fixture).
 
 ### Manual tests
