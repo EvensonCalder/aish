@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 317 library unit tests.
+- 318 library unit tests.
 - 23 draft execution integration tests.
 - 1 first-run integration test.
 - 6 active bash PTY integration tests.
@@ -305,6 +305,7 @@ Implemented:
 - Git repository initialization plan helper emits fixed `git init` and `git remote add origin <remote>` arguments while rejecting empty/control-character remotes without running git.
 - Ctrl-L and real `clear`-style command output handling is covered with a virtual terminal screen test that interprets CR/LF and ANSI home/clear sequences, proving the final prompt renders on row 0 instead of leaving a blank first line.
 - Conservative sync flow plan helper orders pull-rebase, managed add, commit, and push steps using fixed git argument arrays without running git.
+- Manual `#push` sync is covered against a local bare git remote, including pull-rebase, managed `.gitignore` add, commit, push, and completion event logging without network access.
 - `#key set` remains a placeholder, while `#key clear` removes the encrypted key file if present and logs the action without printing stored secret content.
 - `#completion` remains a private-command placeholder, but the internal completion engine is active for draft completion display and acceptance.
 - Completion has pure current-token detection helpers that handle first-token classification, non-first-token classification, quoted whitespace, escaped whitespace, cursor-in-line contexts, path-like tokens, and UTF-8 cursor snapping.

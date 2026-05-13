@@ -1,9 +1,10 @@
 use std::collections::{HashMap, VecDeque};
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use crate::ai::{normalize_chat_completions_url, request_ai_items};
 use crate::commands::{
@@ -38,6 +39,11 @@ use crate::picker::{
     template_picker_candidates,
 };
 use crate::pty::PtyBackend;
+use crate::sync::{
+    GitCommandPlan, SyncFailureKind, SyncLock, SyncStepOutcome, classify_git_sync_step,
+    conservative_sync_plan, init_repo_plan, log_sync_failure, maintain_managed_gitignore,
+    tracked_managed_files_warning,
+};
 use crate::templates::{
     TemplateEntry, append_template, apply_template_values_with_usage, find_template_by_name,
     load_templates, remove_templates_by_name, replace_template, template_placeholders,
@@ -1099,7 +1105,7 @@ pub fn execute_draft(
                         return Ok(());
                     }
                     "push" => {
-                        writeln!(out, "sync push is not implemented yet; no git command run")?;
+                        run_manual_sync_push(state, out)?;
                         state.draft.clear();
                         state.mode = Mode::Draft;
                         return Ok(());
@@ -1672,6 +1678,173 @@ fn set_sync_schedule(state: &mut AppState, out: &mut impl Write, args: &str) -> 
     Ok(())
 }
 
+fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -> Result<()> {
+    let remote = state.sync_config.remote.trim();
+    if remote.is_empty() {
+        writeln!(
+            out,
+            "sync remote is not configured; run #set-remote <git-url> first"
+        )?;
+        return Ok(());
+    }
+    let Some(root) = sync_root(state) else {
+        writeln!(out, "config path is not configured; sync push cannot run")?;
+        return Ok(());
+    };
+    let lock_path = root.join("cache/runtime/sync.lock");
+    let Some(_lock) = SyncLock::acquire(&lock_path)? else {
+        writeln!(out, "sync is already running")?;
+        return Ok(());
+    };
+
+    maintain_managed_gitignore(root.join(".gitignore"))?;
+    if root.join(".git").is_dir() {
+        warn_tracked_managed_paths(&root, out)?;
+    } else if let Some(plan) = init_repo_plan(remote) {
+        for command in &plan.commands {
+            run_sync_git_step(state, out, &root, command)?;
+        }
+    }
+
+    for command in conservative_sync_plan(&state.sync_config).commands {
+        if is_commit_command(&command) {
+            let result = run_git_command(&root, &command)?;
+            if result.success || git_output_is_nothing_to_commit(&result.combined_output()) {
+                if result.success {
+                    writeln!(out, "sync step ok: git commit")?;
+                } else {
+                    writeln!(out, "sync step skipped: nothing to commit")?;
+                }
+                continue;
+            }
+            handle_failed_sync_step(state, out, &command, result)?;
+            return Ok(());
+        }
+        if !run_sync_git_step(state, out, &root, &command)? {
+            return Ok(());
+        }
+    }
+    state.append_event(EventLevel::Info, "sync push completed")?;
+    writeln!(out, "sync push completed")?;
+    Ok(())
+}
+
+fn sync_root(state: &AppState) -> Option<PathBuf> {
+    state.config_path.as_ref()?.parent().map(Path::to_path_buf)
+}
+
+fn warn_tracked_managed_paths(root: &Path, out: &mut impl Write) -> Result<()> {
+    let plan = GitCommandPlan {
+        program: "git".to_string(),
+        args: vec!["ls-files".to_string()],
+    };
+    let result = run_git_command(root, &plan)?;
+    if let Some(warning) = tracked_managed_files_warning(result.stdout.lines()) {
+        writeln!(out, "{}", warning.message)?;
+        for path in warning.paths {
+            writeln!(out, "tracked: {path}")?;
+        }
+    }
+    Ok(())
+}
+
+fn run_sync_git_step(
+    state: &AppState,
+    out: &mut impl Write,
+    root: &Path,
+    command: &GitCommandPlan,
+) -> Result<bool> {
+    let result = run_git_command(root, command)?;
+    if result.success {
+        writeln!(out, "sync step ok: {}", describe_git_command(command))?;
+        return Ok(true);
+    }
+    handle_failed_sync_step(state, out, command, result)?;
+    Ok(false)
+}
+
+fn handle_failed_sync_step(
+    state: &AppState,
+    out: &mut impl Write,
+    command: &GitCommandPlan,
+    result: GitStepResult,
+) -> Result<()> {
+    let detail = result.combined_output();
+    match classify_git_sync_step(false, &result.stdout, &result.stderr) {
+        SyncStepOutcome::AbortConflict { .. } => {
+            writeln!(
+                out,
+                "sync aborted on conflict: {}",
+                describe_git_command(command)
+            )?;
+            if let Some(path) = &state.events_path {
+                log_sync_failure(path, (state.clock)(), SyncFailureKind::Conflict, &detail)?;
+            }
+        }
+        SyncStepOutcome::AbortFailure { .. } => {
+            writeln!(out, "sync failed: {}", describe_git_command(command))?;
+            if let Some(path) = &state.events_path {
+                log_sync_failure(path, (state.clock)(), SyncFailureKind::Failure, &detail)?;
+            }
+        }
+        SyncStepOutcome::Continue => unreachable!("failed git step cannot continue"),
+    }
+    let detail = detail.trim();
+    if !detail.is_empty() {
+        writeln!(out, "{detail}")?;
+    }
+    Ok(())
+}
+
+#[derive(Debug)]
+struct GitStepResult {
+    success: bool,
+    stdout: String,
+    stderr: String,
+}
+
+impl GitStepResult {
+    fn combined_output(&self) -> String {
+        let stdout = self.stdout.trim();
+        let stderr = self.stderr.trim();
+        match (stdout.is_empty(), stderr.is_empty()) {
+            (true, true) => String::new(),
+            (false, true) => stdout.to_string(),
+            (true, false) => stderr.to_string(),
+            (false, false) => format!("{stdout}\n{stderr}"),
+        }
+    }
+}
+
+fn run_git_command(root: &Path, command: &GitCommandPlan) -> Result<GitStepResult> {
+    let output = Command::new(&command.program)
+        .args(&command.args)
+        .current_dir(root)
+        .output()
+        .with_context(|| format!("failed to run {}", describe_git_command(command)))?;
+    Ok(GitStepResult {
+        success: output.status.success(),
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+    })
+}
+
+fn is_commit_command(command: &GitCommandPlan) -> bool {
+    command.program == "git" && command.args.first().is_some_and(|arg| arg == "commit")
+}
+
+fn git_output_is_nothing_to_commit(output: &str) -> bool {
+    let lower = output.to_ascii_lowercase();
+    lower.contains("nothing to commit") || lower.contains("no changes added to commit")
+}
+
+fn describe_git_command(command: &GitCommandPlan) -> String {
+    let mut parts = Vec::with_capacity(command.args.len() + 1);
+    parts.push(command.program.as_str());
+    parts.extend(command.args.iter().map(String::as_str));
+    parts.join(" ")
+}
+
 fn parse_sync_category_toggle(args: &str) -> Option<(&str, bool)> {
     let mut parts = args.split_whitespace();
     let category = parts.next()?;
@@ -2011,6 +2184,7 @@ pub fn save_draft_if_configured(state: &AppState) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use std::path::Path;
 
     #[test]
@@ -3831,7 +4005,7 @@ mod tests {
             ),
             (
                 "#push",
-                "sync push is not implemented yet; no git command run",
+                "sync remote is not configured; run #set-remote <git-url> first",
             ),
             ("#sync", "no git command run"),
         ] {
@@ -3921,6 +4095,91 @@ mod tests {
                 .items
                 .iter()
                 .all(|event| event.msg == "sync config changed")
+        );
+    }
+
+    #[test]
+    fn push_sync_runs_against_configured_local_git_remote() {
+        let temp = tempfile::tempdir().unwrap();
+        let remote = temp.path().join("remote.git");
+        let seed = temp.path().join("seed");
+        let root = temp.path().join("aish-home");
+
+        run_test_git(temp.path(), ["init", "--bare", remote.to_str().unwrap()]);
+        fs::create_dir_all(&seed).unwrap();
+        run_test_git(&seed, ["init"]);
+        run_test_git(&seed, ["config", "user.name", "Aish Test"]);
+        run_test_git(&seed, ["config", "user.email", "aish@example.invalid"]);
+        fs::write(seed.join("README.md"), "seed\n").unwrap();
+        run_test_git(&seed, ["add", "README.md"]);
+        run_test_git(&seed, ["commit", "-m", "seed"]);
+        run_test_git(&seed, ["remote", "add", "origin", remote.to_str().unwrap()]);
+        run_test_git(&seed, ["push", "-u", "origin", "HEAD"]);
+        run_test_git(
+            temp.path(),
+            ["clone", remote.to_str().unwrap(), root.to_str().unwrap()],
+        );
+        run_test_git(&root, ["config", "user.name", "Aish Test"]);
+        run_test_git(&root, ["config", "user.email", "aish@example.invalid"]);
+
+        let config_path = root.join("config.toml");
+        let events_path = root.join("logs/events.jsonl");
+        let mut config = config::Config::default();
+        config.storage.home = root.clone();
+        config.sync.remote = remote.to_string_lossy().into_owned();
+        config::save_config(&config_path, &config).unwrap();
+        let mut state = AppState {
+            config_path: Some(config_path),
+            events_path: Some(events_path.clone()),
+            sync_config: config.sync,
+            clock: || 11,
+            ..AppState::default()
+        };
+        state.draft.insert_str("#push");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(10),
+        )
+        .unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(
+            output.contains("sync step ok: git pull --rebase"),
+            "{output}"
+        );
+        assert!(
+            output.contains("sync step ok: git add -- .gitignore"),
+            "{output}"
+        );
+        assert!(output.contains("sync step ok: git commit"), "{output}");
+        assert!(output.contains("sync step ok: git push"), "{output}");
+        assert!(output.contains("sync push completed"), "{output}");
+        assert!(root.join(".gitignore").exists());
+        let events = load_events(&events_path).unwrap();
+        assert!(
+            events
+                .items
+                .iter()
+                .any(|event| event.msg == "sync push completed")
+        );
+    }
+
+    fn run_test_git<const N: usize>(cwd: &Path, args: [&str; N]) {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
         );
     }
 

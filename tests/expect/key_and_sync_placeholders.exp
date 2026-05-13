@@ -22,15 +22,15 @@ aish_enter
 aish_expect "encryption is not implemented yet; no data changed"
 aish_wait_prompt
 
+aish_send "#push"
+aish_enter
+aish_expect "sync remote is not configured; run #set-remote <git-url> first"
+aish_wait_prompt
+
 aish_send "#set-remote git@example.invalid:aish.git"
 aish_enter
 aish_expect "sync.remote=git@example.invalid:aish.git"
 aish_expect "no git command run"
-aish_wait_prompt
-
-aish_send "#push"
-aish_enter
-aish_expect "sync push is not implemented yet; no git command run"
 aish_wait_prompt
 
 aish_send "#sync"
