@@ -2,6 +2,16 @@
 
 This implementation plan turns `SPEC.md` into a working Rust project. It is ordered to build a usable core first, then layer AI, templates, encryption, and sync on top.
 
+## Current Completion Audit
+
+Status as of the latest full review:
+
+- Core interactive shell wrapper is implemented: PTY backend, raw terminal input, draft editing, continuation handling, history/AI modes, private command parsing, editor/paste flows, templates, completion, picker boundaries, AI request plumbing, context pseudo-pipe, event log, and diagnostics.
+- Rust unit/integration coverage and expect-driven real terminal coverage both exist for the implemented interactive behaviors. New user-facing terminal behavior should continue to receive both Rust-level and expect-level coverage.
+- Large intentionally incomplete areas remain: configurable key rebinding, GPG-backed secrets/encryption, git sync, fish integration, robust passthrough/interactive command detection, and user-facing documentation.
+- Placeholder commands for encryption/sync/key storage are deliberately safe no-ops until Phase 18/19 are implemented; they should not be marked functionally complete until they perform the actual encrypted storage or sync behavior.
+- The remaining unchecked items below are the source of truth for future work; do not skip them just because adjacent scaffolding exists.
+
 ---
 
 ## Phase 0: Repository and project foundation
