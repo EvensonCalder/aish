@@ -19,6 +19,26 @@ Aish does **not** try to replace Bash, Zsh, or Fish. The backend shell remains r
 8. **Editor-submitted content is raw shell input.** Aish does not parse line-leading `#` inside external editor content.
 9. **Encryption prioritizes confidentiality over speed.** When encrypted, Aish does not persist plaintext search indexes.
 10. **Git sync is conservative.** Aish never auto-resolves conflicts and never rewrites history or runs `git rm --cached` automatically.
+11. **End-to-end behavior must be tested as users experience it.** Every user-visible feature needs expect-driven coverage in addition to Rust unit/integration tests, including rendering, redraw boundaries, PTY output framing, shell continuation, keybindings, mode transitions, error paths, and regression cases.
+
+---
+
+## 1.1 End-to-end test requirements
+
+Expect tests are first-class acceptance tests for Aish. Unit tests may prove pure parsing or state transitions, but they are not enough for terminal behavior.
+
+Required coverage rules:
+
+- Every private `#` command must have at least one expect scenario for success or safe failure.
+- Every keybinding that changes user-visible state must have expect coverage or a documented reason why it cannot be exercised outside a pure Rust terminal test.
+- Every prompt redraw path must be covered by a screen-level assertion, including command output followed by prompt redraw, clear-screen behavior, completion panels, mode switches, continuation prompts, and editor/paste returns.
+- Every PTY output framing fix must have a regression test proving output remains visible in the terminal, not just present in an internal string.
+- Every backend shell integration change must have Rust PTY coverage and, where practical, an expect scenario through the real binary.
+- Every safety feature must have both a direct test and an end-to-end test for the user-visible behavior.
+- Every new bug fix must add a regression test that fails for the observed bug, preferably at the highest layer where the bug was visible to the user.
+- Expect scenarios must use isolated `AISH_HOME`, avoid network access, avoid persistent user-home side effects, and cleanly exit.
+
+The test suite should model real user workflows and edge cases, not just happy-path command strings.
 
 ---
 

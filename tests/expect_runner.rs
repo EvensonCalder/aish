@@ -103,6 +103,11 @@ fn basic_echo() {
 }
 
 #[test]
+fn output_visible_before_prompt() {
+    run_script("output_visible_before_prompt.exp");
+}
+
+#[test]
 fn cd_persists() {
     run_script("cd_persists.exp");
 }

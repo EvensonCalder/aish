@@ -465,7 +465,9 @@ fn parse_marker_output(
 ) -> Result<(String, i32, Option<String>, Option<String>)> {
     let marker_pos = find_complete_marker(raw, marker)
         .context("backend shell output did not contain prompt marker")?;
-    let before_marker = normalize_pty_newlines(raw[..marker_pos].trim_matches(['\r', '\n']));
+    let before_marker = normalize_pty_newlines(strip_marker_separator(&raw[..marker_pos]))
+        .trim_start_matches('\n')
+        .to_string();
     let started_command = parse_started_command(&before_marker);
     let output = clean_marker_echo(&before_marker, marker);
     let status_start = marker_pos + marker.len();
@@ -499,6 +501,14 @@ fn parse_started_command(output: &str) -> Option<String> {
         .next_back()
         .map(str::to_string)
         .filter(|command| !command.is_empty())
+}
+
+fn strip_marker_separator(output: &str) -> &str {
+    output
+        .strip_suffix("\r\n")
+        .or_else(|| output.strip_suffix('\n'))
+        .or_else(|| output.strip_suffix('\r'))
+        .unwrap_or(output)
 }
 
 fn parse_ready_cwd(raw: &str) -> Option<String> {
@@ -591,12 +601,14 @@ fn normalize_pty_newlines(text: &str) -> String {
 
 fn clean_marker_echo(output: &str, marker: &str) -> String {
     output
-        .lines()
-        .filter(|line| !(line.contains("__aish_status=$?") && line.contains(marker)))
-        .filter(|line| !line.contains(READY_MARKER))
-        .filter(|line| !line.contains(START_MARKER))
-        .collect::<Vec<_>>()
-        .join("\n")
+        .split_inclusive('\n')
+        .filter(|line| {
+            let text = line.trim_end_matches('\n');
+            !(text.contains(READY_MARKER)
+                || text.contains(START_MARKER)
+                || text.contains("__aish_status=$?") && text.contains(marker))
+        })
+        .collect()
 }
 
 #[cfg(test)]

@@ -1185,6 +1185,33 @@ mod tests {
     }
 
     #[test]
+    fn submit_output_stays_visible_above_redrawn_prompt() {
+        let mut state = AppState::default();
+        state.draft.insert_str("echo hello");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        handle_key(
+            key(KeyCode::Enter),
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let rendered = String::from_utf8(output).unwrap();
+        let screen = TestScreen::from_output(&rendered);
+        let prompt_row = screen
+            .rows
+            .iter()
+            .position(|row| row.iter().collect::<String>() == "> ")
+            .expect("redrawn prompt row");
+        assert!(prompt_row > 0, "screen was {:?}", screen.lines());
+        assert_eq!(screen.line(prompt_row - 1), "hello");
+    }
+
+    #[test]
     fn pending_context_confirmation_keys_return_confirmation_actions() {
         let mut state = AppState {
             pending_context: Some(crate::app::PendingContextPrompt {
@@ -1763,6 +1790,13 @@ mod tests {
 
         fn first_non_empty_line(&self) -> Option<usize> {
             self.rows.iter().position(|line| !line.is_empty())
+        }
+
+        fn lines(&self) -> Vec<String> {
+            self.rows
+                .iter()
+                .map(|line| line.iter().collect::<String>())
+                .collect()
         }
     }
 

@@ -1,0 +1,17 @@
+#!/usr/bin/env expect
+# Regression: ordinary command output must remain on its own line before the
+# redrawn Aish prompt. If Aish strips the shell output newline, prompt redraw can
+# clear or visually overwrite the output in real terminals.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "echo hello-visible"
+aish_enter
+aish_expect "hello-visible"
+aish_expect_re {\r\n|\n|\r}
+aish_wait_prompt
+
+aish_quit
