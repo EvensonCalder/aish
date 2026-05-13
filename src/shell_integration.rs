@@ -28,6 +28,49 @@ pub fn interactive_command_name(command: &str) -> Option<String> {
     }
 }
 
+pub fn alternate_screen_active_after(output: &str, initially_active: bool) -> bool {
+    let mut active = initially_active;
+    for event in alternate_screen_events(output) {
+        active = event == AlternateScreenEvent::Enter;
+    }
+    active
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AlternateScreenEvent {
+    Enter,
+    Exit,
+}
+
+fn alternate_screen_events(output: &str) -> Vec<AlternateScreenEvent> {
+    let mut events = Vec::new();
+    let bytes = output.as_bytes();
+    let mut index = 0;
+    while index + 2 < bytes.len() {
+        if bytes[index] == 0x1b && bytes[index + 1] == b'[' && bytes[index + 2] == b'?' {
+            let mut end = index + 3;
+            while end < bytes.len() && bytes[end].is_ascii_digit() {
+                end += 1;
+            }
+            if end < bytes.len() {
+                let code = &output[index + 3..end];
+                let event = match (code, bytes[end]) {
+                    ("47" | "1047" | "1049", b'h') => Some(AlternateScreenEvent::Enter),
+                    ("47" | "1047" | "1049", b'l') => Some(AlternateScreenEvent::Exit),
+                    _ => None,
+                };
+                if let Some(event) = event {
+                    events.push(event);
+                }
+            }
+            index = end.saturating_add(1);
+        } else {
+            index += 1;
+        }
+    }
+    events
+}
+
 fn skip_assignments(words: &[String], mut index: usize) -> usize {
     while words.get(index).is_some_and(|word| is_assignment(word)) {
         index += 1;
@@ -175,5 +218,37 @@ mod tests {
         ] {
             assert_eq!(interactive_command_name(command), None, "{command}");
         }
+    }
+
+    #[test]
+    fn alternate_screen_detection_tracks_common_enter_and_exit_sequences() {
+        assert!(alternate_screen_active_after(
+            "before\x1b[?1049hafter",
+            false
+        ));
+        assert!(!alternate_screen_active_after(
+            "before\x1b[?1049lafter",
+            true
+        ));
+        assert!(alternate_screen_active_after("\x1b[?47h", false));
+        assert!(!alternate_screen_active_after("\x1b[?1047l", true));
+    }
+
+    #[test]
+    fn alternate_screen_detection_uses_last_seen_event() {
+        assert!(!alternate_screen_active_after(
+            "\x1b[?1049hbody\x1b[?1049l",
+            false
+        ));
+        assert!(alternate_screen_active_after(
+            "\x1b[?1049lexit\x1b[?1049h",
+            false
+        ));
+    }
+
+    #[test]
+    fn alternate_screen_detection_ignores_unrelated_escape_sequences() {
+        assert!(!alternate_screen_active_after("\x1b[31mred\x1b[0m", false));
+        assert!(alternate_screen_active_after("\x1b[31mred\x1b[0m", true));
     }
 }

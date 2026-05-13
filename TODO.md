@@ -684,7 +684,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
   - [x] cwd reporting
 - [ ] Detect interactive commands for passthrough:
   - [x] command allowlist
-  - [ ] alternate screen buffer detection
+  - [x] alternate screen buffer detection
   - [ ] prompt return detection
 - [x] Add `#doctor` integration checks.
 
