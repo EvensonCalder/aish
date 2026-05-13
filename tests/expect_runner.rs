@@ -108,6 +108,11 @@ fn output_visible_before_prompt() {
 }
 
 #[test]
+fn output_then_redraw_interactions() {
+    run_script("output_then_redraw_interactions.exp");
+}
+
+#[test]
 fn cd_persists() {
     run_script("cd_persists.exp");
 }

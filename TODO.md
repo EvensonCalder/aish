@@ -820,7 +820,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 - [x] Cover passthrough key forwarding without Aish app-key interception.
 - [x] Define and maintain an expect coverage matrix for every user-visible feature.
 - [x] Add screen-level expect regressions for prompt redraw after ordinary command output.
-- [ ] Add expect coverage for command output followed by completion/redraw/mode switches.
+- [x] Add expect coverage for command output followed by completion/redraw/mode switches.
 - [ ] Add expect coverage for sync success/failure using local temporary git remotes.
 - [ ] Add expect coverage for representative safe failure paths for all private commands.
 - [ ] Add expect coverage for terminal resize and long/Unicode input workflows.

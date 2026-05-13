@@ -1,0 +1,39 @@
+#!/usr/bin/env expect
+# Exercises prompt redraw paths after ordinary command output: mode cycling and
+# completion acceptance must not visually erase or corrupt prior command output.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "cd $::env(AISH_HOME)"
+aish_enter
+aish_wait_prompt
+
+aish_send "touch one-output-redraw.txt"
+aish_enter
+aish_wait_prompt
+
+aish_send "echo before-redraw"
+aish_enter
+aish_expect "before-redraw"
+aish_expect_re {\r\n|\n|\r}
+aish_wait_prompt
+
+# Empty Tab cycles prompt modes after command output.
+aish_send "\t"
+aish_expect "\$ "
+aish_send "\t"
+aish_expect "% "
+aish_send "\t"
+aish_wait_prompt
+
+# Non-empty Tab accepts the unique path completion after command output.
+aish_send "cat one-output-redraw"
+aish_send "\t"
+aish_expect "one-output-redraw.txt"
+aish_enter
+aish_wait_prompt
+
+aish_quit

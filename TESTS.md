@@ -17,7 +17,7 @@ Current test inventory:
 - 1 first-run integration test.
 - 7 active bash PTY integration tests.
 - 2 active zsh PTY integration tests.
-- 38 expect-driven end-to-end interactive scenarios.
+- 39 expect-driven end-to-end interactive scenarios.
 - Bash PTY startup records the backend shell's initial cwd so the first prompt matches the shell state before any command executes.
 - Backend PTY startup inherits Aish's current directory and can be resized so child commands such as `ls` see the real terminal width.
 - 0 doctests.
@@ -53,12 +53,12 @@ Expect scenarios are the acceptance layer for user-visible terminal behavior. Th
 
 | Area | Current scenarios | Status | Known gaps |
 | --- | --- | --- | --- |
-| Basic command execution and prompt redraw | `basic_echo`, `output_visible_before_prompt` | Covered | Add mixed output plus redraw/mode-switch stress cases. |
+| Basic command execution and prompt redraw | `basic_echo`, `output_visible_before_prompt`, `output_then_redraw_interactions` | Covered | Add mixed stderr/stdout redraw stress cases if regressions appear. |
 | Backend cwd and shell state | `cd_persists` | Covered | Add zsh/fish-specific end-to-end variants when portable. |
 | Shell continuation UX | `dquote_continuation`, `squote_continuation`, `backslash_continuation`, `ctrl_c_cancels_continuation`, `no_backend_ps2_leak` | Covered | Add heredoc-style continuation if it becomes user-facing. |
 | Prompt/control keys | `ctrl_l_clear_screen`, `readline_editing_keys`, `escape_clears_draft`, `ctrl_x_unknown_chord_cancels`, `ctrl_d_exits`, `exit_command` | Covered | Add terminal resize, long input, and Unicode workflows. |
-| Mode switching and read-only behavior | `empty_tab_cycles_modes`, `history_mode_execute`, `read_only_edit_copies_to_draft`, `ai_mode_executes_sequence`, `ai_mode_edit_copies_to_draft` | Covered | Add output followed by mode switch redraw regression. |
-| Completion UI | `completion_accept_single`, `completion_panel_multiple` | Covered | Add completion after command output redraw regression. |
+| Mode switching and read-only behavior | `empty_tab_cycles_modes`, `history_mode_execute`, `read_only_edit_copies_to_draft`, `ai_mode_executes_sequence`, `ai_mode_edit_copies_to_draft`, `output_then_redraw_interactions` | Covered | Add more mode redraw regressions only for observed failures. |
+| Completion UI | `completion_accept_single`, `completion_panel_multiple`, `output_then_redraw_interactions` | Covered | Add completion-panel-after-output regression if observed. |
 | Private command UX and diagnostics | `help_lists_commands`, `unknown_private_command`, `status_doctor_config`, `key_and_sync_placeholders`, `key_clear_removes_stored_key`, `ai_config_persists` | Partial | Add representative safe failure paths for all private commands. |
 | Notes, context, and logs | `notes_are_swallowed`, `context_confirmation_skip`, `log_shows_context_skip` | Covered | Add dangerous-context end-to-end refusal case. |
 | Templates | `template_use_executes`, `template_crud`, `template_placeholder_blocks_execution` | Covered | Add completion/template interaction if UI changes. |
@@ -331,6 +331,7 @@ Implemented:
 - Bash marker integration has PTY coverage for prompt-ready initial cwd, command-start reporting, command-finish exit status, and cwd reporting after command execution.
 - Interactive passthrough command allowlist detects common fullscreen/interactive commands, basenames, shell quoting, assignments, and wrappers such as `sudo`, `env`, `command`, and `exec` without changing runtime behavior yet.
 - Prompt redraw after ordinary command output has both a Rust virtual-screen regression and an expect scenario requiring command output line termination before the next prompt.
+- Command output followed by mode-switch redraw and unique completion acceptance has expect coverage through the real binary.
 - `#key set` remains a placeholder, while `#key clear` removes the encrypted key file if present and logs the action without printing stored secret content.
 - `#completion` remains a private-command placeholder, but the internal completion engine is active for draft completion display and acceptance.
 - Completion has pure current-token detection helpers that handle first-token classification, non-first-token classification, quoted whitespace, escaped whitespace, cursor-in-line contexts, path-like tokens, and UTF-8 cursor snapping.
