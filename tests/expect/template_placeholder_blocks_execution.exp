@@ -1,0 +1,32 @@
+#!/usr/bin/env expect
+# Unresolved template placeholders must block execution in real terminal use.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "#mt unresolved echo {message}"
+aish_enter
+aish_expect "template stored: unresolved"
+aish_wait_prompt
+
+aish_send "#template use unresolved"
+aish_enter
+aish_expect "template copied to draft: unresolved"
+aish_expect "echo {message}"
+
+aish_enter
+aish_expect "cannot execute unresolved template placeholders: message"
+aish_expect "echo {message}"
+
+# A separate command still runs, proving no unresolved template command reached
+# the backend shell.
+aish_send "\x03"
+aish_wait_prompt
+aish_send "echo template-block-ok"
+aish_enter
+aish_expect "template-block-ok"
+aish_wait_prompt
+
+aish_quit

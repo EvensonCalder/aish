@@ -1,0 +1,20 @@
+#!/usr/bin/env expect
+# Context pseudo-pipe commands require confirmation by default and can be safely
+# skipped from the keyboard.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "# summarize this < echo context-output"
+aish_enter
+aish_expect "aish will run this command to collect context:"
+aish_expect "Run context command? \[Y/n\]"
+aish_expect "answer Y to run context command or n to skip"
+
+aish_send "n"
+aish_expect "context command skipped: echo context-output"
+aish_wait_prompt
+
+aish_quit

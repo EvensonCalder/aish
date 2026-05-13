@@ -778,10 +778,14 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 - [x] Cover persistent backend cwd with `cd /tmp` followed by `pwd`.
 - [x] Cover empty `Tab` mode cycling through draft/history/AI prompts.
 - [x] Cover `#help`, unknown private commands, `#exit`, and empty `Ctrl-D` exit.
+- [x] Cover `#status`, `#doctor`, and `#config` diagnostics.
+- [x] Cover note capture without backend shell execution.
+- [x] Cover context pseudo-pipe confirmation skip flow.
 - [x] Cover `Ctrl-L` clear-screen behavior.
 - [x] Cover single-candidate completion acceptance and multi-candidate completion panel display.
 - [x] Cover history-mode command execution.
 - [x] Cover template creation/use/execution flow.
+- [x] Cover unresolved template placeholder execution blocking.
 - [x] Cover key/encryption/sync placeholder commands as safe no-ops.
 - [x] Cover `echo "` and `echo '` continuation UX.
 - [x] Cover trailing backslash continuation UX.

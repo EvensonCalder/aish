@@ -1,0 +1,38 @@
+#!/usr/bin/env expect
+# `#status`, `#doctor`, and `#config` should be useful read-only diagnostics in
+# a real terminal session.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "false"
+aish_enter
+aish_wait_prompt
+
+aish_send "#status"
+aish_enter
+aish_expect "mode=>"
+aish_expect "last_status=1"
+aish_expect "keybindings="
+aish_wait_prompt
+
+aish_send "#doctor"
+aish_enter
+aish_expect "Aish doctor"
+aish_expect "mode=>"
+aish_expect "last_status=1"
+aish_expect "regular_history_entries="
+aish_expect "ai_sessions="
+aish_wait_prompt
+
+aish_send "#config"
+aish_enter
+aish_expect "Aish config"
+aish_expect "draft.persist="
+aish_expect "completion.max_results="
+aish_expect "context.enabled="
+aish_wait_prompt
+
+aish_quit

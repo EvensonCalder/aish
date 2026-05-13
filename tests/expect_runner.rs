@@ -187,5 +187,25 @@ fn key_and_sync_placeholders() {
     run_script("key_and_sync_placeholders.exp");
 }
 
+#[test]
+fn status_doctor_config() {
+    run_script("status_doctor_config.exp");
+}
+
+#[test]
+fn notes_are_swallowed() {
+    run_script("notes_are_swallowed.exp");
+}
+
+#[test]
+fn template_placeholder_blocks_execution() {
+    run_script("template_placeholder_blocks_execution.exp");
+}
+
+#[test]
+fn context_confirmation_skip() {
+    run_script("context_confirmation_skip.exp");
+}
+
 #[allow(dead_code)]
 fn _unused_path_check(_p: &Path) {}
