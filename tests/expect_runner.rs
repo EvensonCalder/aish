@@ -408,6 +408,11 @@ fn context_dangerous_refusal() {
 }
 
 #[test]
+fn home_default_context_dangerous_refusal() {
+    run_script("home_default_context_dangerous_refusal.exp");
+}
+
+#[test]
 fn external_editor_roundtrip() {
     run_script("external_editor_roundtrip.exp");
 }

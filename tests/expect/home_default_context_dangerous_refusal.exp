@@ -1,0 +1,58 @@
+#!/usr/bin/env expect
+# Production-style context safety: without AISH_HOME, dangerous context commands
+# should be refused, logged under $HOME/.aish, and never run when skipped.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set isolated_home "/tmp/aish-home-dangerous-context-[pid]-[clock clicks]"
+file delete -force $isolated_home
+file mkdir $isolated_home
+set old_home $::env(HOME)
+set old_aish_home_exists [info exists ::env(AISH_HOME)]
+if {$old_aish_home_exists} {
+    set old_aish_home $::env(AISH_HOME)
+}
+unset -nocomplain ::env(AISH_HOME)
+set ::env(HOME) $isolated_home
+set aish_home "$isolated_home/.aish"
+set marker "$isolated_home/dangerous-context-marker"
+set fh [open $marker w]
+puts $fh "must remain"
+close $fh
+
+aish_spawn_without_aish_home
+
+aish_send "# explain danger < rm -rf $marker"
+aish_enter
+aish_expect "dangerous context command requires confirmation: rm -rf $marker"
+aish_send "n"
+aish_expect "context command skipped: rm -rf $marker"
+aish_wait_prompt
+aish_quit
+
+if {![file exists $marker]} {
+    puts stderr "dangerous context command ran despite refusal"
+    exit 6
+}
+
+if {![file exists "$aish_home/logs/events.jsonl"]} {
+    puts stderr "missing dangerous context event log"
+    exit 6
+}
+
+aish_spawn_without_aish_home
+aish_send "#log 10"
+aish_enter
+aish_expect "dangerous context command requires confirmation"
+aish_expect "context command skipped"
+aish_wait_prompt
+aish_quit
+
+set ::env(HOME) $old_home
+if {$old_aish_home_exists} {
+    set ::env(AISH_HOME) $old_aish_home
+} else {
+    unset -nocomplain ::env(AISH_HOME)
+}
+file delete -force $isolated_home
