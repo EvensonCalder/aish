@@ -1,0 +1,30 @@
+#!/usr/bin/env expect
+# Portable passthrough smoke test: when `less` is available, Aish should hand the
+# terminal to it, accept `q`, and return to the prompt without intercepting keys.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+if {[catch {exec sh -c "command -v less"}]} {
+    exit 0
+}
+
+aish_spawn
+
+set fixture "$::env(AISH_HOME)/passthrough-less.txt"
+set fh [open $fixture w]
+puts $fh "passthrough-less-visible"
+close $fh
+
+aish_send "less $fixture"
+aish_enter
+aish_expect "passthrough-less-visible"
+aish_send "q"
+aish_wait_prompt
+
+aish_send "echo passthrough-less-ok"
+aish_enter
+aish_expect "passthrough-less-ok"
+aish_wait_prompt
+
+aish_quit

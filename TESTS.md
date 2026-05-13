@@ -12,13 +12,13 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 328 library unit tests.
+- 329 library unit tests.
 - 23 draft execution integration tests.
 - 1 first-run integration test.
 - 7 active bash PTY integration tests.
 - 2 active zsh PTY integration tests.
 - 1 conditional fish PTY integration test.
-- 43 expect-driven end-to-end interactive scenarios.
+- 44 expect-driven end-to-end interactive scenarios.
 - Bash PTY startup records the backend shell's initial cwd so the first prompt matches the shell state before any command executes.
 - Backend PTY startup inherits Aish's current directory and can be resized so child commands such as `ls` see the real terminal width.
 - 0 doctests.
@@ -65,7 +65,7 @@ Expect scenarios are the acceptance layer for user-visible terminal behavior. Th
 | Templates | `template_use_executes`, `template_crud`, `template_placeholder_blocks_execution` | Covered | Add completion/template interaction if UI changes. |
 | Editor and paste flows | `external_editor_roundtrip`, `editor_hash_content_bypasses_parser`, `multiline_paste_editor_review` | Covered | Add editor failure path and large paste boundary if practical. |
 | Sync | `key_and_sync_placeholders`, `sync_push_local_remote` | Covered | Add conflict-specific expect scenario if sync conflict UI changes. |
-| Passthrough/interactive programs | key forwarding is Rust-covered | Partial | Add portable expect scenarios for `less`, `fzf` fallback, or a simple TUI fixture. |
+| Passthrough/interactive programs | `passthrough_less` when `less` is available; key forwarding is Rust-covered | Partial | Full automatic passthrough detection still needs an async PTY design for alternate-screen/prompt-return detection. |
 | Encryption/GPG | `key_clear_removes_stored_key` | Partial | Add fake GPG or test-key flow before claiming encryption completion. |
 
 ## Feature Coverage
@@ -332,6 +332,7 @@ Implemented:
 - Bash marker integration has PTY coverage for prompt-ready initial cwd, command-start reporting, command-finish exit status, and cwd reporting after command execution.
 - Zsh hook integration has PTY coverage for `preexec` command-start reporting, `precmd` finish status, and cwd reporting after command execution when `/bin/zsh` is available.
 - Fish event integration has launch/unit coverage for `fish_preexec` and `fish_prompt` setup plus conditional PTY coverage for command-start, finish status, and cwd reporting when fish is installed.
+- Allowlisted interactive commands can run in a foreground passthrough path with raw mode disabled; `less` has skip-safe expect coverage when available.
 - Interactive passthrough command allowlist detects common fullscreen/interactive commands, basenames, shell quoting, assignments, and wrappers such as `sudo`, `env`, `command`, and `exec` without changing runtime behavior yet.
 - Prompt redraw after ordinary command output has both a Rust virtual-screen regression and an expect scenario requiring command output line termination before the next prompt.
 - Command output followed by mode-switch redraw and unique completion acceptance has expect coverage through the real binary.

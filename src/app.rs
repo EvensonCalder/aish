@@ -6,6 +6,7 @@ use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode, is_raw_mode_enabled};
 
 use crate::ai::{normalize_chat_completions_url, request_ai_items};
 use crate::commands::{
@@ -40,6 +41,7 @@ use crate::picker::{
     template_picker_candidates,
 };
 use crate::pty::PtyBackend;
+use crate::shell_integration::is_interactive_passthrough_command;
 use crate::sync::{
     GitCommandPlan, StartupSyncDecision, SyncFailureKind, SyncLock, SyncStepOutcome,
     classify_git_sync_step, conservative_sync_plan, init_repo_plan, log_sync_failure,
@@ -1155,20 +1157,46 @@ pub fn execute_draft(
     }
 
     state.mode = Mode::CommandRunning;
+    if !state.draft_from_editor && is_interactive_passthrough_command(&command) {
+        let exit_code = run_foreground_interactive_command(state, backend, &command)?;
+        record_completed_command(state, command, String::new(), exit_code, executing_ai)?;
+        return Ok(());
+    }
+
     let result = backend.run_command(&command, timeout)?;
     if !result.output.is_empty() {
         write_command_output(out, &result.output)?;
     }
+    record_completed_command(
+        state,
+        result.command.clone(),
+        result.output.clone(),
+        result.exit_code,
+        executing_ai,
+    )?;
+    if let Some(cwd) = result.cwd {
+        state.current_cwd = Some(PathBuf::from(cwd));
+    }
+    Ok(())
+}
+
+fn record_completed_command(
+    state: &mut AppState,
+    command: String,
+    output: String,
+    exit_code: i32,
+    executing_ai: bool,
+) -> Result<()> {
     state.push_output_entry(OutputEntry {
-        command: result.command.clone(),
-        output: result.output.clone(),
-        exit_code: result.exit_code,
+        command: command.clone(),
+        output: output.clone(),
+        exit_code,
     });
     if let Some(path) = &state.regular_history_path {
         let entry = HistoryEntry {
-            command: result.command.clone(),
+            command,
             t: (state.clock)(),
-            exit_code: Some(result.exit_code),
+            exit_code: Some(exit_code),
             source: if executing_ai {
                 HistorySource::Ai
             } else {
@@ -1178,15 +1206,12 @@ pub fn execute_draft(
         append_jsonl(path, &entry)?;
         state.regular_history.push(entry);
     }
-    state.last_status = Some(result.exit_code);
+    state.last_status = Some(exit_code);
     state.continuation_prompt = None;
-    if let Some(cwd) = result.cwd {
-        state.current_cwd = Some(PathBuf::from(cwd));
-    }
     state.draft.clear();
     state.draft_from_editor = false;
     state.draft_from_template = false;
-    if executing_ai && result.exit_code == 0 {
+    if executing_ai && exit_code == 0 {
         state.advance_after_ai_success();
     } else if executing_ai {
         state.mode = Mode::Ai;
@@ -1194,6 +1219,43 @@ pub fn execute_draft(
         state.mode = Mode::Draft;
     }
     Ok(())
+}
+
+fn run_foreground_interactive_command(
+    state: &AppState,
+    backend: &PtyBackend,
+    command: &str,
+) -> Result<i32> {
+    let shell = backend.shell_program();
+    let args = foreground_shell_args(shell, command);
+    let cwd = state
+        .current_cwd
+        .clone()
+        .unwrap_or(std::env::current_dir()?);
+    let raw_mode_was_enabled = is_raw_mode_enabled()?;
+    if raw_mode_was_enabled {
+        disable_raw_mode()?;
+    }
+    let status = Command::new(shell)
+        .args(&args)
+        .current_dir(cwd)
+        .status()
+        .with_context(|| format!("failed to run interactive command `{command}`"));
+    if raw_mode_was_enabled {
+        enable_raw_mode()?;
+    }
+    Ok(status?.code().unwrap_or(1))
+}
+
+fn foreground_shell_args(shell: &str, command: &str) -> Vec<String> {
+    let shell_name = Path::new(shell)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    match shell_name {
+        "fish" => vec!["-c".to_string(), command.to_string()],
+        _ => vec!["-lc".to_string(), command.to_string()],
+    }
 }
 
 fn write_command_output(out: &mut impl Write, output: &str) -> Result<()> {
@@ -4216,6 +4278,22 @@ mod tests {
                 .items
                 .iter()
                 .any(|event| event.msg == "sync push completed")
+        );
+    }
+
+    #[test]
+    fn foreground_shell_args_use_login_compatible_command_mode() {
+        assert_eq!(
+            foreground_shell_args("/bin/bash", "less file"),
+            ["-lc", "less file"]
+        );
+        assert_eq!(
+            foreground_shell_args("/bin/zsh", "vim file"),
+            ["-lc", "vim file"]
+        );
+        assert_eq!(
+            foreground_shell_args("/usr/bin/fish", "less file"),
+            ["-c", "less file"]
         );
     }
 

@@ -283,6 +283,11 @@ fn terminal_resize() {
 }
 
 #[test]
+fn passthrough_less() {
+    run_script("passthrough_less.exp");
+}
+
+#[test]
 fn escape_clears_draft() {
     run_script("escape_clears_draft.exp");
 }
