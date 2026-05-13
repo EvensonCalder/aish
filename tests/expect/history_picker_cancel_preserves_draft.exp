@@ -1,0 +1,39 @@
+#!/usr/bin/env expect
+# Ctrl-R history search uses external fzf. If fzf cancels, Aish should show a
+# useful message and preserve the current draft unchanged.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set bindir "/tmp/aish-fake-fzf-[pid]-[clock clicks]"
+file mkdir $bindir
+set fzf "$bindir/fzf"
+set fh [open $fzf w]
+puts $fh {#!/bin/sh}
+puts $fh {cat >/dev/null}
+puts $fh {exit 130}
+close $fh
+file attributes $fzf -permissions 0755
+set old_path $::env(PATH)
+set ::env(PATH) "$bindir:$old_path"
+
+aish_spawn
+
+aish_send "echo picker-history-source"
+aish_enter
+aish_expect "picker-history-source"
+aish_wait_prompt
+
+aish_send "echo keep-after-picker-cancel"
+aish_send "\x12"
+aish_expect "history search cancelled"
+aish_expect "> echo keep-after-picker-cancel"
+
+aish_enter
+aish_expect "keep-after-picker-cancel"
+aish_wait_prompt
+
+aish_quit
+
+set ::env(PATH) $old_path
+file delete -force $bindir

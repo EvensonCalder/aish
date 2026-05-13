@@ -208,6 +208,11 @@ fn history_persists_across_restarts() {
 }
 
 #[test]
+fn history_picker_cancel_preserves_draft() {
+    run_script("history_picker_cancel_preserves_draft.exp");
+}
+
+#[test]
 fn draft_persists_across_restarts() {
     run_script("draft_persists_across_restarts.exp");
 }
