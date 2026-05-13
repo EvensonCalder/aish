@@ -1465,6 +1465,10 @@ fn write_encryption_sync_status(state: &AppState, out: &mut impl Write) -> Resul
         "sync.schedule={}",
         config_value(&state.sync_config.schedule)
     )?;
+    writeln!(out, "sync.ai={}", state.sync_config.ai)?;
+    writeln!(out, "sync.history={}", state.sync_config.history)?;
+    writeln!(out, "sync.templates={}", state.sync_config.templates)?;
+    writeln!(out, "sync.drafts={}", state.sync_config.drafts)?;
     Ok(())
 }
 
@@ -1633,6 +1637,22 @@ fn set_sync_schedule(state: &mut AppState, out: &mut impl Write, args: &str) -> 
         writeln!(out, "no scheduler file created")?;
         return Ok(());
     }
+    if let Some((category, enabled)) = parse_sync_category_toggle(args) {
+        update_sync_config(state, |config| match category {
+            "ai" => config.sync.ai = enabled,
+            "history" => config.sync.history = enabled,
+            "templates" => config.sync.templates = enabled,
+            "drafts" => config.sync.drafts = enabled,
+            _ => unreachable!("validated category"),
+        })?;
+        writeln!(out, "sync.{category}={enabled}")?;
+        writeln!(out, "no git command run")?;
+        return Ok(());
+    }
+    if is_malformed_sync_category_toggle(args) {
+        writeln!(out, "usage: #sync ai|history|templates|drafts on|off")?;
+        return Ok(());
+    }
 
     update_sync_config(state, |config| {
         config.sync.enabled = true;
@@ -1642,6 +1662,32 @@ fn set_sync_schedule(state: &mut AppState, out: &mut impl Write, args: &str) -> 
     writeln!(out, "sync.schedule={args}")?;
     writeln!(out, "no scheduler file created")?;
     Ok(())
+}
+
+fn parse_sync_category_toggle(args: &str) -> Option<(&str, bool)> {
+    let mut parts = args.split_whitespace();
+    let category = parts.next()?;
+    let value = parts.next()?;
+    if parts.next().is_some() || !is_sync_category(category) {
+        return None;
+    }
+    match value {
+        "on" => Some((category, true)),
+        "off" => Some((category, false)),
+        _ => None,
+    }
+}
+
+fn is_malformed_sync_category_toggle(args: &str) -> bool {
+    let mut parts = args.split_whitespace();
+    let Some(category) = parts.next() else {
+        return false;
+    };
+    is_sync_category(category)
+}
+
+fn is_sync_category(value: &str) -> bool {
+    matches!(value, "ai" | "history" | "templates" | "drafts")
 }
 
 fn update_sync_config(
@@ -3795,6 +3841,11 @@ mod tests {
                 "sync.remote=git@example.invalid:aish.git",
             ),
             ("#sync 0 * * * *", "sync.schedule=0 * * * *"),
+            ("#sync ai on", "sync.ai=true"),
+            ("#sync history on", "sync.history=true"),
+            ("#sync templates on", "sync.templates=true"),
+            ("#sync drafts on", "sync.drafts=true"),
+            ("#sync drafts off", "sync.drafts=false"),
             ("#sync off", "sync.enabled=false"),
         ] {
             state.draft.insert_str(line);
@@ -3821,14 +3872,48 @@ mod tests {
         assert_eq!(loaded.sync.remote, "git@example.invalid:aish.git");
         assert!(!loaded.sync.enabled);
         assert!(loaded.sync.schedule.is_empty());
+        assert!(loaded.sync.ai);
+        assert!(loaded.sync.history);
+        assert!(loaded.sync.templates);
+        assert!(!loaded.sync.drafts);
         let events = load_events(&events_path).unwrap();
-        assert_eq!(events.items.len(), 3);
+        assert_eq!(events.items.len(), 8);
         assert!(
             events
                 .items
                 .iter()
                 .all(|event| event.msg == "sync config changed")
         );
+    }
+
+    #[test]
+    fn sync_category_toggle_rejects_invalid_usage_without_persisting() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("config.toml");
+        config::save_config(&config_path, &config::Config::default()).unwrap();
+        let mut state = AppState {
+            config_path: Some(config_path.clone()),
+            ..AppState::default()
+        };
+        state.draft.insert_str("#sync ai maybe");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        assert!(
+            String::from_utf8(output)
+                .unwrap()
+                .contains("usage: #sync ai|history|templates|drafts on|off")
+        );
+        let loaded = config::load_config(&config_path).unwrap();
+        assert_eq!(loaded.sync, SyncConfig::default());
     }
 
     #[test]

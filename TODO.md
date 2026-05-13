@@ -638,11 +638,11 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 - [ ] Implement `#push` manual sync.
 - [ ] Implement `#sync <cron-expression>`.
 - [x] Implement `#sync off`.
-- [ ] Implement category sync toggles:
-  - [ ] AI
-  - [ ] regular history
-  - [ ] templates
-  - [ ] drafts
+- [x] Implement category sync toggles:
+  - [x] AI
+  - [x] regular history
+  - [x] templates
+  - [x] drafts
 - [ ] Maintain managed `.gitignore` section.
 - [ ] Warn if files may already be tracked; do not run `git rm --cached` automatically.
 - [ ] Implement lock file.

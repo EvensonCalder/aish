@@ -46,4 +46,33 @@ aish_expect "sync.enabled=false"
 aish_expect "no scheduler file created"
 aish_wait_prompt
 
+aish_send "#sync ai on"
+aish_enter
+aish_expect "sync.ai=true"
+aish_expect "no git command run"
+aish_wait_prompt
+
+aish_send "#sync history on"
+aish_enter
+aish_expect "sync.history=true"
+aish_expect "no git command run"
+aish_wait_prompt
+
+aish_send "#sync templates on"
+aish_enter
+aish_expect "sync.templates=true"
+aish_expect "no git command run"
+aish_wait_prompt
+
+aish_send "#sync drafts on"
+aish_enter
+aish_expect "sync.drafts=true"
+aish_expect "no git command run"
+aish_wait_prompt
+
+aish_send "#sync ai maybe"
+aish_enter
+aish_expect "usage: #sync ai|history|templates|drafts on|off"
+aish_wait_prompt
+
 aish_quit

@@ -90,6 +90,10 @@ pub struct SyncConfig {
     pub remote: String,
     pub enabled: bool,
     pub schedule: String,
+    pub ai: bool,
+    pub history: bool,
+    pub templates: bool,
+    pub drafts: bool,
 }
 
 impl Default for ContextConfig {
@@ -376,6 +380,10 @@ mod tests {
                 remote: "  git@example.invalid:aish.git  ".to_string(),
                 enabled: true,
                 schedule: "  0 * * * *  ".to_string(),
+                ai: true,
+                history: false,
+                templates: true,
+                drafts: false,
             },
         };
 
@@ -397,6 +405,10 @@ mod tests {
             remote: "git@example.invalid:aish.git".to_string(),
             enabled: true,
             schedule: "0 * * * *".to_string(),
+            ai: true,
+            history: false,
+            templates: true,
+            drafts: false,
         };
         assert_eq!(config, expected);
     }
