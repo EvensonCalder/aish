@@ -8,8 +8,8 @@ Status as of the latest full review:
 
 - Core interactive shell wrapper is implemented: PTY backend, raw terminal input, draft editing, continuation handling, history/AI modes, private command parsing, editor/paste flows, templates, completion, picker boundaries, AI request plumbing, context pseudo-pipe, event log, and diagnostics.
 - Rust unit/integration coverage and expect-driven real terminal coverage both exist for the implemented interactive behaviors. New user-facing terminal behavior should continue to receive both Rust-level and expect-level coverage.
-- Large intentionally incomplete areas remain: configurable key rebinding, GPG-backed secrets/encryption, git sync, fish integration, robust passthrough/interactive command detection, and user-facing documentation.
-- Placeholder commands for encryption/sync/key storage are deliberately safe no-ops until Phase 18/19 are implemented; they should not be marked functionally complete until they perform the actual encrypted storage or sync behavior.
+- Large intentionally incomplete areas remain: configurable key rebinding, GPG-backed secrets/encryption, independent PTY/timer event-loop sources, and robust automatic passthrough for arbitrary interactive commands.
+- Placeholder commands for encryption/key storage are deliberately safe no-ops until Phase 18 is implemented; they should not be marked functionally complete until they perform the actual encrypted storage behavior.
 - The remaining unchecked items below are the source of truth for future work; do not skip them just because adjacent scaffolding exists.
 
 ---
@@ -1002,3 +1002,24 @@ enum AiItemKind {
 - [x] Git sync.
 - [x] Shell integration notes.
 - [x] Troubleshooting with `#doctor`.
+
+---
+
+## Phase 27: Phase 2 hardening
+
+### Tasks
+
+- [ ] Complete PHASE2 improvements and tests.
+- [ ] Keep `PHASE2.md` current as the active hardening checklist.
+- [ ] Record every Phase 2 issue that is found.
+- [ ] Fix every recorded Phase 2 issue or explicitly defer it with a documented reason.
+- [ ] Add expect-driven end-to-end regression coverage for every user-visible Phase 2 fix.
+- [ ] Replace weak tests with tests that prove real user workflows, safety behavior, persistence, or integration boundaries.
+- [ ] Keep `SPEC.md`, `TODO.md`, `TESTS.md`, `README.md`, and `PHASE2.md` aligned after every implementation change.
+
+### Acceptance criteria
+
+- `PHASE2.md` accurately describes remaining work, expected end-to-end coverage, and known gaps.
+- The full verification set passes before Phase 2 implementation commits.
+- No known Phase 2 issue remains unrecorded.
+- No completed Phase 2 item lacks meaningful Rust and expect coverage where practical.

@@ -106,7 +106,9 @@ Picker features use external `fzf`; Aish does not implement an internal picker U
 
 ## Encryption And Sync Status
 
-GPG-backed key storage, encrypted history/templates, and git sync execution are not implemented yet. Current `#key set`, `#encrypt`, and `#push` commands are safe placeholders and do not mutate secrets, encryption state, remotes, or git repositories. `#key clear` removes an existing encrypted key file if present. `#set-remote`, `#sync off`, and `#sync ai|history|templates|drafts on|off` persist sync configuration. `#sync <expr>` stores the requested schedule but does not create scheduler files or run git yet.
+GPG-backed key storage and encrypted history/templates are not implemented yet. Current `#key set` and `#encrypt` commands are safe placeholders except that `#encrypt on` warns about existing plaintext in git history. `#key clear` removes an existing encrypted key file if present.
+
+Git sync configuration and manual sync are implemented conservatively. `#set-remote`, `#sync off`, `#sync <expr>`, and `#sync ai|history|templates|drafts on|off` persist sync configuration without creating scheduler files. `#push` runs a conservative local git flow for configured remotes: pull with rebase, add managed enabled paths, commit if needed, and push. Aish does not auto-resolve conflicts, does not rewrite history, and does not run `git rm --cached` automatically.
 
 ## Shell Integration Notes
 
@@ -114,7 +116,7 @@ Aish starts a backend shell on a PTY. Bash and zsh are actively covered. Aish us
 
 Shell continuation uses shell-native syntax checks where possible. Incomplete quote input such as `echo "` or `echo '` becomes an Aish continuation draft with shell-style prompts. Odd trailing backslashes are treated as continuations to match interactive shell behavior.
 
-Fish integration and robust passthrough detection for programs such as `vim`, `ssh`, `top`, and `less` remain future work.
+Fish integration is implemented when `fish` is available. Allowlisted interactive commands such as `less`, `vim`, `nvim`, `ssh`, `top`, `fzf`, and `tmux` can use foreground passthrough. Full automatic passthrough for arbitrary alternate-screen programs remains future work.
 
 ## Testing
 
