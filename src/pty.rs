@@ -150,7 +150,7 @@ impl PtyBackend {
             .stderr(Stdio::piped())
             .spawn()
             .with_context(|| format!("failed to syntax-check input with {}", self.shell_program))?;
-        if let Some(stdin) = child.stdin.as_mut() {
+        if let Some(mut stdin) = child.stdin.take() {
             stdin
                 .write_all(input.as_bytes())
                 .context("failed to write input to shell syntax check")?;
@@ -489,6 +489,8 @@ fn is_incomplete_shell_syntax(stderr: &str) -> bool {
     let stderr = stderr.to_ascii_lowercase();
     stderr.contains("unexpected eof")
         || stderr.contains("unexpected end of file")
+        || stderr.contains("unmatched \"")
+        || stderr.contains("unmatched '")
         || stderr.contains("parse error near `\\n'")
         || stderr.contains("parse error near `\n'")
         || stderr.contains("parse error: unmatched")
@@ -652,6 +654,26 @@ mod tests {
         assert!(!is_incomplete_shell_syntax(
             "syntax error near unexpected token `fi'"
         ));
+    }
+
+    #[test]
+    fn bash_syntax_check_detects_incomplete_input_without_hanging() {
+        let backend = PtyBackend::spawn("/bin/bash").unwrap();
+
+        assert!(backend.input_needs_more_lines("echo \"").unwrap());
+        assert!(!backend.input_needs_more_lines("echo \"ok\"").unwrap());
+    }
+
+    #[test]
+    fn zsh_syntax_check_detects_incomplete_input_without_hanging() {
+        if !Path::new("/bin/zsh").exists() {
+            return;
+        }
+
+        let backend = PtyBackend::spawn("/bin/zsh").unwrap();
+
+        assert!(backend.input_needs_more_lines("echo \"").unwrap());
+        assert!(!backend.input_needs_more_lines("echo \"ok\"").unwrap());
     }
 
     #[test]
