@@ -133,6 +133,11 @@ fn home_default_config_persists() {
 }
 
 #[test]
+fn home_default_ai_key_source_redacts_secret() {
+    run_script("home_default_ai_key_source_redacts_secret.exp");
+}
+
+#[test]
 fn invalid_config_startup() {
     run_script("invalid_config_startup.exp");
 }
