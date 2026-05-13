@@ -1,0 +1,102 @@
+#!/usr/bin/env expect
+# Manual sync conflicts should be visible to the user and recorded in the event
+# log, using only local temporary git repositories.
+
+set timeout 25
+source [file dirname [info script]]/_lib.exp
+
+set root "/tmp/aish-sync-conflict-[pid]-[clock clicks]"
+set remote "$root/remote.git"
+set seed "$root/seed"
+set other "$root/other"
+set home "$root/aish-home"
+file mkdir $root
+file mkdir $seed
+
+proc run_git {args} {
+    if {[catch {exec git {*}$args 2>@1} output]} {
+        puts stderr $output
+        exit 6
+    }
+    return $output
+}
+
+run_git init --bare $remote
+run_git -C $seed init
+run_git -C $seed config user.name "Aish Expect"
+run_git -C $seed config user.email "aish@example.invalid"
+set fh [open "$seed/.gitignore" w]
+puts $fh "seed-line"
+puts $fh "# BEGIN AISH MANAGED"
+puts $fh "cache/"
+puts $fh "logs/"
+puts $fh "secrets/"
+puts $fh "*.tmp"
+puts $fh "# END AISH MANAGED"
+close $fh
+run_git -C $seed add .gitignore
+run_git -C $seed commit -m seed
+run_git -C $seed remote add origin $remote
+run_git -C $seed push -u origin HEAD
+
+run_git clone $remote $home
+run_git -C $home config user.name "Aish Expect"
+run_git -C $home config user.email "aish@example.invalid"
+run_git clone $remote $other
+run_git -C $other config user.name "Other Expect"
+run_git -C $other config user.email "other@example.invalid"
+
+# Aish-side local commit that will later conflict with the remote update.
+set fh [open "$home/.gitignore" w]
+puts $fh "aish-local-line"
+puts $fh "# BEGIN AISH MANAGED"
+puts $fh "cache/"
+puts $fh "logs/"
+puts $fh "secrets/"
+puts $fh "*.tmp"
+puts $fh "# END AISH MANAGED"
+close $fh
+run_git -C $home add .gitignore
+run_git -C $home commit -m local-change
+
+# Remote-side divergent commit on the same line.
+set fh [open "$other/.gitignore" w]
+puts $fh "remote-line"
+puts $fh "# BEGIN AISH MANAGED"
+puts $fh "cache/"
+puts $fh "logs/"
+puts $fh "secrets/"
+puts $fh "*.tmp"
+puts $fh "# END AISH MANAGED"
+close $fh
+run_git -C $other add .gitignore
+run_git -C $other commit -m remote-change
+run_git -C $other push
+
+set ::env(AISH_HOME) $home
+aish_spawn
+
+aish_send "#set-remote $remote"
+aish_enter
+aish_expect "sync.remote=$remote"
+aish_wait_prompt
+
+aish_send "#push"
+aish_enter
+aish_expect "sync aborted on conflict: git pull --rebase"
+aish_expect "CONFLICT"
+aish_wait_prompt
+
+aish_send "#log 5"
+aish_enter
+aish_expect "sync conflict"
+aish_wait_prompt
+
+if {[file exists "$home/cache/runtime/scheduler"]} {
+    puts stderr "unexpected scheduler file created"
+    exit 6
+}
+
+aish_quit
+
+file delete -force $root

@@ -263,6 +263,11 @@ fn sync_push_failure_logs() {
 }
 
 #[test]
+fn sync_push_conflict_logs() {
+    run_script("sync_push_conflict_logs.exp");
+}
+
+#[test]
 fn key_clear_removes_stored_key() {
     run_script("key_clear_removes_stored_key.exp");
 }
