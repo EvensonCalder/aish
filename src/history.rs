@@ -224,6 +224,29 @@ pub fn split_logical_commands(input: &str) -> Vec<String> {
     commands
 }
 
+pub fn split_logical_commands_and_comment_notes(
+    input: &str,
+) -> (Vec<String>, Vec<(NoteTag, String)>) {
+    let mut comment_lines = String::new();
+    for line in input.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('#') && !trimmed.starts_with("#!") {
+            comment_lines.push_str(trimmed);
+            comment_lines.push('\n');
+        }
+    }
+
+    let notes = comment_lines
+        .lines()
+        .filter_map(|line| match crate::commands::parse_line(line) {
+            crate::commands::ParsedLine::Note { tag, text } => Some((tag, text.to_string())),
+            _ => None,
+        })
+        .collect();
+
+    (split_logical_commands(input), notes)
+}
+
 fn line_ends_with_continuation(line: &str) -> bool {
     line.trim_end().ends_with('\\')
 }
@@ -885,6 +908,22 @@ mod tests {
         let commands = split_logical_commands("# comment\npwd\n  # another\necho done");
 
         assert_eq!(commands, ["pwd", "echo done"]);
+    }
+
+    #[test]
+    fn split_logical_commands_can_extract_comment_only_notes() {
+        let input = "# TODO: ship it\npwd\n  # NOTE: check logs\necho '# TODO: not a note'\n# plain comment\n";
+
+        let (commands, notes) = split_logical_commands_and_comment_notes(input);
+
+        assert_eq!(commands, ["pwd", "echo '# TODO: not a note'"]);
+        assert_eq!(
+            notes,
+            [
+                (NoteTag::Todo, "ship it".to_string()),
+                (NoteTag::Note, "check logs".to_string())
+            ]
+        );
     }
 
     #[test]

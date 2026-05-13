@@ -384,7 +384,7 @@ This is a future configurable enhancement. It must not replace the default faith
 - [x] Preserve heredoc blocks.
 - [x] Ignore blank lines.
 - [x] Ignore standalone comment lines in splitter output.
-- [ ] Store comment-only lines as notes if enabled.
+- [x] Store comment-only lines as notes if enabled.
 - [x] Add tests for common cases:
   - [x] two simple lines
   - [x] backslash continuation

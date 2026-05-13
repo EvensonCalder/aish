@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 276 library unit tests.
+- 277 library unit tests.
 - 23 draft execution integration tests.
 - 1 first-run integration test.
 - 6 active bash PTY integration tests.
@@ -331,6 +331,7 @@ Implemented:
 - Optional shell logical splitter ignores standalone comments and preserves inline `#` content.
 - Optional shell logical splitter preserves single-quoted and double-quoted newlines.
 - Optional shell logical splitter preserves heredoc blocks.
+- Optional shell logical splitter can extract standalone note comments as note candidates while preserving default command splitting behavior.
 - Optional shell logical splitter common-case coverage includes simple lines, blank lines, comments, backslash continuations, quotes, heredocs, and mixed command streams.
 - Editor roundtrip helper prepares a file, runs a fake editor, and reads successful edits back into draft while preserving the original draft on editor failure.
 - `Ctrl-X Ctrl-E` terminal handling resolves the editor, suspends raw mode when needed, runs the roundtrip, restores raw mode when needed, and reports success/failure.
@@ -745,6 +746,7 @@ Tests:
 - `history::tests::split_logical_commands_splits_simple_non_empty_lines`
 - `history::tests::split_logical_commands_preserves_backslash_continuations`
 - `history::tests::split_logical_commands_skips_standalone_comments`
+- `history::tests::split_logical_commands_can_extract_comment_only_notes`
 - `history::tests::split_logical_commands_preserves_inline_hash_content`
 - `history::tests::split_logical_commands_preserves_single_quoted_newlines`
 - `history::tests::split_logical_commands_preserves_double_quoted_newlines`
