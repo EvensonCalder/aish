@@ -115,6 +115,8 @@ pub struct AppState {
     pub context_config: ContextConfig,
     pub pending_context: Option<PendingContextPrompt>,
     pub completion_panel: Vec<String>,
+    pub last_rendered_lines: usize,
+    pub continuation_prompt: Option<String>,
     pub draft_from_editor: bool,
     pub draft_from_template: bool,
     pub ctrl_x_prefix: bool,
@@ -152,6 +154,8 @@ impl Default for AppState {
             context_config: ContextConfig::default(),
             pending_context: None,
             completion_panel: Vec::new(),
+            last_rendered_lines: 1,
+            continuation_prompt: None,
             draft_from_editor: false,
             draft_from_template: false,
             ctrl_x_prefix: false,
@@ -546,7 +550,13 @@ impl AppState {
             _ => self.draft.as_str(),
         };
         if self.mode == Mode::Draft && text.contains('\n') {
-            return render_multiline_draft(&self.prompt_prefix(), text);
+            return render_multiline_draft(
+                &self.prompt_prefix(),
+                self.continuation_prompt
+                    .as_deref()
+                    .unwrap_or(AppState::CONTINUATION_PREFIX),
+                text,
+            );
         }
         format!("{}{}", self.prompt_prefix(), text)
     }
@@ -584,7 +594,13 @@ impl AppState {
             _ => {
                 let before_cursor = &self.draft.as_str()[..self.draft.cursor()];
                 if before_cursor.contains('\n') {
-                    render_multiline_draft(&self.prompt_prefix(), before_cursor)
+                    render_multiline_draft(
+                        &self.prompt_prefix(),
+                        self.continuation_prompt
+                            .as_deref()
+                            .unwrap_or(AppState::CONTINUATION_PREFIX),
+                        before_cursor,
+                    )
                 } else {
                     format!("{}{}", self.prompt_prefix(), before_cursor)
                 }
@@ -635,13 +651,13 @@ impl AppState {
     }
 }
 
-fn render_multiline_draft(prompt_prefix: &str, text: &str) -> String {
+fn render_multiline_draft(prompt_prefix: &str, continuation_prefix: &str, text: &str) -> String {
     let mut lines = text.split('\n');
     let mut rendered = String::from(prompt_prefix);
     rendered.push_str(lines.next().unwrap_or_default());
     for line in lines {
         rendered.push('\n');
-        rendered.push_str(AppState::CONTINUATION_PREFIX);
+        rendered.push_str(continuation_prefix);
         rendered.push_str(line);
     }
     rendered
@@ -1129,10 +1145,14 @@ pub fn execute_draft(
         }
     }
 
-    if !state.draft_from_editor && backend.input_needs_more_lines(&command)? {
-        state.draft.insert_str("\n");
-        state.mode = Mode::Draft;
-        return Ok(());
+    if !state.draft_from_editor {
+        let continuation = backend.input_needs_more_lines(&command)?;
+        if continuation.needs_more {
+            state.continuation_prompt = continuation.prompt;
+            state.draft.insert_str("\n");
+            state.mode = Mode::Draft;
+            return Ok(());
+        }
     }
 
     state.mode = Mode::CommandRunning;
@@ -1160,6 +1180,7 @@ pub fn execute_draft(
         state.regular_history.push(entry);
     }
     state.last_status = Some(result.exit_code);
+    state.continuation_prompt = None;
     if let Some(cwd) = result.cwd {
         state.current_cwd = Some(PathBuf::from(cwd));
     }

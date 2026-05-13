@@ -1,0 +1,22 @@
+#!/usr/bin/env expect
+# An input that ends in a backslash should become a continuation draft via the
+# backend shell's own syntax check, then execute as a single command.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "echo aa \\"
+aish_enter
+# bash -n on `echo aa \` complains about unexpected EOF, so we should land in
+# a generic continuation prompt.
+aish_expect "> "
+
+aish_send "bb"
+aish_enter
+
+aish_expect "aa bb"
+aish_wait_prompt
+
+aish_quit

@@ -41,6 +41,12 @@ pub struct PtyBackend {
     integration: ShellIntegration,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContinuationCheck {
+    pub needs_more: bool,
+    pub prompt: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ShellIntegration {
     MarkerCommand,
@@ -128,7 +134,14 @@ impl PtyBackend {
         Ok(())
     }
 
-    pub fn input_needs_more_lines(&self, input: &str) -> Result<bool> {
+    pub fn input_needs_more_lines(&self, input: &str) -> Result<ContinuationCheck> {
+        if ends_with_shell_line_continuation(input) {
+            return Ok(ContinuationCheck {
+                needs_more: true,
+                prompt: Some("> ".to_string()),
+            });
+        }
+
         let shell_name = Path::new(&self.shell_program)
             .file_name()
             .and_then(|name| name.to_str())
@@ -141,7 +154,12 @@ impl PtyBackend {
             "zsh" => {
                 command.args(["-f", "-n"]);
             }
-            _ => return Ok(false),
+            _ => {
+                return Ok(ContinuationCheck {
+                    needs_more: false,
+                    prompt: None,
+                });
+            }
         }
 
         let mut child = command
@@ -162,11 +180,16 @@ impl PtyBackend {
             .wait_with_output()
             .context("failed to read shell syntax check result")?;
         if output.status.success() {
-            return Ok(false);
+            return Ok(ContinuationCheck {
+                needs_more: false,
+                prompt: None,
+            });
         }
-        Ok(is_incomplete_shell_syntax(&String::from_utf8_lossy(
-            &output.stderr,
-        )))
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Ok(ContinuationCheck {
+            needs_more: is_incomplete_shell_syntax(&stderr),
+            prompt: shell_continuation_prompt(&stderr),
+        })
     }
 
     pub fn run_command(&mut self, command: &str, timeout: Duration) -> Result<CommandResult> {
@@ -361,7 +384,7 @@ fn shell_launch(configured_shell: &str) -> ShellLaunch {
         "bash" => (
             vec!["--noprofile".to_string(), "--norc".to_string()],
             format!(
-                "export HISTCONTROL=ignorespace${{HISTCONTROL:+:$HISTCONTROL}}; stty -echo; printf '\\n{READY_MARKER}\\t%s\\n' \"$PWD\"\n"
+                "export HISTCONTROL=ignorespace${{HISTCONTROL:+:$HISTCONTROL}}; PS1=''; PS2=''; stty -echo; printf '\\n{READY_MARKER}\\t%s\\n' \"$PWD\"\n"
             ),
             ShellIntegration::MarkerCommand,
         ),
@@ -372,7 +395,7 @@ fn shell_launch(configured_shell: &str) -> ShellLaunch {
                 "histignorespace".to_string(),
             ],
             format!(
-                " stty -echo; unsetopt zle prompt_cr prompt_sp; PROMPT=''; RPROMPT=''; preexec() {{ printf '\\n{START_MARKER}\\t%s\\n' \"$1\"; }}; precmd() {{ printf '\\n{READY_MARKER}\\t%s\\t%s\\n' \"$?\" \"$PWD\"; }}; precmd\n"
+                " stty -echo; unsetopt zle prompt_cr prompt_sp; PROMPT=''; RPROMPT=''; PROMPT2=''; preexec() {{ printf '\\n{START_MARKER}\\t%s\\n' \"$1\"; }}; precmd() {{ printf '\\n{READY_MARKER}\\t%s\\t%s\\n' \"$?\" \"$PWD\"; }}; precmd\n"
             ),
             ShellIntegration::ZshHooks,
         ),
@@ -494,6 +517,30 @@ fn is_incomplete_shell_syntax(stderr: &str) -> bool {
         || stderr.contains("parse error near `\\n'")
         || stderr.contains("parse error near `\n'")
         || stderr.contains("parse error: unmatched")
+}
+
+fn shell_continuation_prompt(stderr: &str) -> Option<String> {
+    let stderr = stderr.to_ascii_lowercase();
+    if stderr.contains("unmatched \"") || stderr.contains("matching `\"'") {
+        return Some("dquote> ".to_string());
+    }
+    if stderr.contains("unmatched '") || stderr.contains("matching `''") {
+        return Some("quote> ".to_string());
+    }
+    if is_incomplete_shell_syntax(&stderr) {
+        return Some("> ".to_string());
+    }
+    None
+}
+
+fn ends_with_shell_line_continuation(input: &str) -> bool {
+    let trailing_backslashes = input
+        .as_bytes()
+        .iter()
+        .rev()
+        .take_while(|&&byte| byte == b'\\')
+        .count();
+    trailing_backslashes % 2 == 1
 }
 
 fn normalize_pty_newlines(text: &str) -> String {
@@ -657,11 +704,31 @@ mod tests {
     }
 
     #[test]
+    fn line_continuation_detects_odd_trailing_backslashes() {
+        assert!(ends_with_shell_line_continuation("echo aa \\"));
+        assert!(!ends_with_shell_line_continuation("echo aa \\\\"));
+        assert!(!ends_with_shell_line_continuation("echo aa"));
+    }
+
+    #[test]
     fn bash_syntax_check_detects_incomplete_input_without_hanging() {
         let backend = PtyBackend::spawn("/bin/bash").unwrap();
 
-        assert!(backend.input_needs_more_lines("echo \"").unwrap());
-        assert!(!backend.input_needs_more_lines("echo \"ok\"").unwrap());
+        let continued = backend.input_needs_more_lines("echo aa \\").unwrap();
+        assert!(continued.needs_more);
+        assert_eq!(continued.prompt.as_deref(), Some("> "));
+
+        let unclosed = backend.input_needs_more_lines("echo \"").unwrap();
+        assert!(unclosed.needs_more);
+        assert_eq!(unclosed.prompt.as_deref(), Some("dquote> "));
+
+        let single = backend.input_needs_more_lines("echo '").unwrap();
+        assert!(single.needs_more);
+        assert_eq!(single.prompt.as_deref(), Some("quote> "));
+
+        let complete = backend.input_needs_more_lines("echo \"ok\"").unwrap();
+        assert!(!complete.needs_more);
+        assert!(complete.prompt.is_none());
     }
 
     #[test]
@@ -672,8 +739,12 @@ mod tests {
 
         let backend = PtyBackend::spawn("/bin/zsh").unwrap();
 
-        assert!(backend.input_needs_more_lines("echo \"").unwrap());
-        assert!(!backend.input_needs_more_lines("echo \"ok\"").unwrap());
+        let unclosed = backend.input_needs_more_lines("echo \"").unwrap();
+        assert!(unclosed.needs_more);
+        assert_eq!(unclosed.prompt.as_deref(), Some("dquote> "));
+
+        let complete = backend.input_needs_more_lines("echo \"ok\"").unwrap();
+        assert!(!complete.needs_more);
     }
 
     #[test]

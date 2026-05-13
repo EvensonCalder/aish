@@ -1,0 +1,24 @@
+#!/usr/bin/env expect
+# Verifies Ctrl-C clears a continuation draft and returns to the normal prompt.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "echo \""
+aish_enter
+aish_expect "dquote> "
+
+# Ctrl-C
+aish_send "\x03"
+
+aish_wait_prompt
+
+# Sanity: backend still works after cancellation.
+aish_send "echo aish-ok"
+aish_enter
+aish_expect "aish-ok"
+aish_wait_prompt
+
+aish_quit

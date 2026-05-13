@@ -502,6 +502,7 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
         }
         (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
             state.draft.clear();
+            state.continuation_prompt = None;
             state.draft_from_editor = false;
             state.draft_from_template = false;
             KeyAction::Continue
@@ -613,6 +614,7 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
         }
         (_, KeyCode::Esc) => {
             state.draft.clear();
+            state.continuation_prompt = None;
             state.draft_from_editor = false;
             state.draft_from_template = false;
             state.mode = crate::modes::Mode::Draft;
@@ -679,9 +681,16 @@ fn expand_template_draft_if_inside_placeholder(state: &mut AppState) {
     }
 }
 
-pub fn redraw(state: &AppState, out: &mut impl Write) -> Result<()> {
+pub fn redraw(state: &mut AppState, out: &mut impl Write) -> Result<()> {
+    if state.last_rendered_lines > 1 {
+        execute!(
+            out,
+            MoveToPreviousLine((state.last_rendered_lines - 1) as u16)
+        )?;
+    }
     execute!(out, MoveToColumn(0), Clear(ClearType::FromCursorDown))?;
-    write!(out, "{}", state.rendered_text())?;
+    let rendered = state.rendered_text();
+    write!(out, "{}", rendered.replace('\n', "\r\n"))?;
     if !state.completion_panel.is_empty() {
         for line in &state.completion_panel {
             write!(out, "\r\n{line}")?;
@@ -693,6 +702,7 @@ pub fn redraw(state: &AppState, out: &mut impl Write) -> Result<()> {
         execute!(out, MoveToPreviousLine(cursor_row))?;
     }
     execute!(out, MoveToColumn(cursor_col))?;
+    state.last_rendered_lines = state.rendered_line_count() + state.completion_panel.len();
     out.flush()?;
     Ok(())
 }
@@ -899,7 +909,7 @@ mod tests {
         state.completion_panel = vec!["exec\tgit".to_string(), "exec\tgit-shell".to_string()];
         let mut output = Vec::new();
 
-        redraw(&state, &mut output).unwrap();
+        redraw(&mut state, &mut output).unwrap();
 
         let output = String::from_utf8(output).unwrap();
         assert!(output.contains("> git\r\nexec\tgit\r\nexec\tgit-shell"));
@@ -913,11 +923,11 @@ mod tests {
         state.draft.insert_str("echo \"\n123");
         let mut output = Vec::new();
 
-        redraw(&state, &mut output).unwrap();
+        redraw(&mut state, &mut output).unwrap();
 
         let output = String::from_utf8(output).unwrap();
         assert!(
-            output.contains("> echo \"\n.. 123"),
+            output.contains("> echo \"\r\n.. 123"),
             "output was {output:?}"
         );
         assert!(output.contains("\u{1b}[1F"), "output was {output:?}");

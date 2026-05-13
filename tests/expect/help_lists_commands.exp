@@ -1,0 +1,17 @@
+#!/usr/bin/env expect
+# `#help` prints the private commands list.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "#help"
+aish_enter
+
+aish_expect "#help"
+aish_expect "#status"
+aish_expect "#doctor"
+aish_wait_prompt
+
+aish_quit

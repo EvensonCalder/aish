@@ -12,11 +12,12 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 269 library unit tests.
-- 20 draft execution integration tests.
+- 274 library unit tests.
+- 21 draft execution integration tests.
 - 1 first-run integration test.
 - 5 active bash PTY integration tests.
 - 2 active zsh PTY integration tests.
+- 14 expect-driven end-to-end interactive scenarios.
 - Bash PTY startup records the backend shell's initial cwd so the first prompt matches the shell state before any command executes.
 - Backend PTY startup inherits Aish's current directory and can be resized so child commands such as `ls` see the real terminal width.
 - 0 doctests.
@@ -42,6 +43,7 @@ cargo test --lib
 cargo test --test draft_execution -- --nocapture
 cargo test --test first_run -- --nocapture
 cargo test --test pty_backend -- --nocapture
+cargo test --test expect_runner -- --nocapture
 cargo test -- --list
 ```
 
@@ -321,7 +323,9 @@ Implemented:
 - Phase 10 paste review is represented as opaque editor drafts rather than a separate inline paste editor.
 - Single-line paste copies read-only history/AI selections to draft before inserting pasted text.
 - Editor draft submission preserves multi-line backslash continuation and lets the backend shell interpret it.
-- Ordinary drafts use the configured backend shell's own `-n` syntax check to detect incomplete multi-line input before PTY submission, preserving `echo "` / continuation behavior without hand-parsing shell quotes in Aish.
+- Ordinary drafts use the configured backend shell's own `-n` syntax check to detect incomplete quote input before PTY submission, preserving `echo "` and `echo '` continuation behavior without hand-parsing shell quotes in Aish.
+- Ordinary drafts also detect odd trailing backslashes as shell line continuations because interactive shells continue those lines even though `bash -n` accepts the synthetic trailing newline used by syntax checks.
+- Multi-line draft redraw emits CRLF line breaks in raw terminal mode, tracks the previously rendered block height, and suppresses backend `PS2`/`PROMPT2` so shell continuation prompts do not leak into executed command output.
 - Ordinary and editor draft history preserve backslash continuations as one submitted command string.
 - Optional shell logical splitter helper splits simple lines while preserving backslash continuations; it is not wired into default history behavior.
 - Optional shell logical splitter ignores standalone comments and preserves inline `#` content.
@@ -356,6 +360,7 @@ Tests:
 - `editor_draft_can_send_line_leading_hash_to_shell`
 - `editor_draft_sends_multiline_backslash_continuation_to_shell`
 - `execute_draft_keeps_unfinished_quote_as_continuation_draft`
+- `execute_draft_keeps_unfinished_single_quote_as_continuation_draft`
 - `execute_draft_runs_completed_multiline_quote_after_continuation`
 - `execute_draft_preserves_backslash_continuation_and_history`
 - `editor_draft_preserves_backslash_continuation_in_history`
@@ -750,6 +755,34 @@ Tests:
 Status:
 
 - Passing.
+
+### Expect End-To-End Scenarios
+
+Implemented:
+
+- A Rust integration harness runs `expect` scenarios against the built `aish` binary with isolated `AISH_HOME` directories.
+- Interactive smoke coverage now checks real terminal input/output for basic command execution, cwd persistence, mode cycling, private command safety, help output, clear screen, exit paths, quote continuation, backslash continuation, Ctrl-C continuation cancellation, and backend prompt leak prevention.
+- Each new user-facing interactive feature should now receive both Rust-level tests and at least one expect scenario when it affects real terminal behavior.
+
+Tests:
+
+- `expect_runner::basic_echo`
+- `expect_runner::cd_persists`
+- `expect_runner::ctrl_d_exits`
+- `expect_runner::exit_command`
+- `expect_runner::empty_tab_cycles_modes`
+- `expect_runner::help_lists_commands`
+- `expect_runner::unknown_private_command`
+- `expect_runner::ctrl_l_clear_screen`
+- `expect_runner::dquote_continuation`
+- `expect_runner::squote_continuation`
+- `expect_runner::backslash_continuation`
+- `expect_runner::ctrl_c_cancels_continuation`
+- `expect_runner::no_backend_ps2_leak`
+
+Status:
+
+- Passing when `expect` is installed; the harness skips scenarios if `expect` is unavailable.
 
 ## Current Ignored Test
 

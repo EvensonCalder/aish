@@ -1,0 +1,45 @@
+#!/usr/bin/env expect
+# After a completed multi-line quote command runs, the backend shell's own PS2
+# (`dquote> `) MUST NOT appear in the output stream displayed to the user.
+#
+# A leaking backend PS2 produces the distinctive double prompt
+# `dquote> dquote> ` adjacent to the echoed lines, because the backend shell
+# emits its own continuation prompts for every embedded newline.
+# Aish's own UI never produces that adjacent doubling, so we test for it
+# directly in a captured log of the whole session.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set logpath "/tmp/aish-expect-ps2-[pid]-[clock clicks].log"
+log_file -a $logpath
+
+aish_spawn
+
+aish_send "echo \""
+aish_enter
+aish_expect "dquote> "
+
+aish_send "marker-line"
+aish_enter
+aish_expect "dquote> "
+
+aish_send "\""
+aish_enter
+
+aish_expect "marker-line"
+aish_wait_prompt
+
+aish_quit
+log_file
+
+# Check the captured session for the backend-PS2 leak signature.
+set fh [open $logpath r]
+set data [read $fh]
+close $fh
+file delete $logpath
+if {[string first "dquote> dquote>" $data] >= 0} {
+    puts stderr "backend PS2 leak detected"
+    exit 5
+}
+

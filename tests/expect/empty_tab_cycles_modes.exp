@@ -1,0 +1,18 @@
+#!/usr/bin/env expect
+# Empty Tab cycles draft -> history -> ai -> draft. Each mode has its own
+# prompt symbol (`>` `$` `%`).
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+# Initial draft prompt has trailing `> `.
+aish_send "\t"
+aish_expect "\$ "
+aish_send "\t"
+aish_expect "% "
+aish_send "\t"
+aish_expect "> "
+
+aish_quit

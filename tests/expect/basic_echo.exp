@@ -1,0 +1,14 @@
+#!/usr/bin/env expect
+# Verifies aish can run a simple command and return to the prompt.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "echo hello-aish"
+aish_enter
+aish_expect "hello-aish"
+aish_wait_prompt
+
+aish_quit

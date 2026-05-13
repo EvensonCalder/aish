@@ -1,0 +1,24 @@
+#!/usr/bin/env expect
+# Verifies `echo "` enters multi-line continuation and finishes cleanly.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "echo \""
+aish_enter
+aish_expect "dquote> "
+
+aish_send "123"
+aish_enter
+aish_expect "dquote> "
+
+aish_send "\""
+aish_enter
+
+# Output must contain 123, and Aish must return to its normal prompt.
+aish_expect "123"
+aish_wait_prompt
+
+aish_quit

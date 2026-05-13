@@ -119,11 +119,35 @@ fn execute_draft_keeps_unfinished_quote_as_continuation_draft() {
     assert!(String::from_utf8(output).unwrap().is_empty());
     assert_eq!(state.mode, Mode::Draft);
     assert_eq!(state.draft.as_str(), "echo \"\n");
+    assert_eq!(state.continuation_prompt.as_deref(), Some("dquote> "));
 
     let after = backend
         .run_command("printf 'backend-ok\\n'", Duration::from_secs(5))
         .unwrap();
     assert_eq!(after.output.trim(), "backend-ok");
+}
+
+#[test]
+fn execute_draft_keeps_unfinished_single_quote_as_continuation_draft() {
+    let _guard = pty_execution_guard();
+    let mut state = AppState::default();
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    state.draft.insert_str("echo '");
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    assert!(String::from_utf8(output).unwrap().is_empty());
+    assert_eq!(state.mode, Mode::Draft);
+    assert_eq!(state.draft.as_str(), "echo '\n");
+    assert_eq!(state.continuation_prompt.as_deref(), Some("quote> "));
 }
 
 #[test]
@@ -147,6 +171,7 @@ fn execute_draft_runs_completed_multiline_quote_after_continuation() {
     assert_eq!(state.last_status, Some(0));
     assert_eq!(state.mode, Mode::Draft);
     assert!(state.draft.is_empty());
+    assert!(state.continuation_prompt.is_none());
 }
 
 #[test]

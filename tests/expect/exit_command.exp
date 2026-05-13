@@ -1,0 +1,15 @@
+#!/usr/bin/env expect
+# `#exit` causes Aish to terminate.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "#exit"
+aish_enter
+
+expect {
+    eof     {}
+    timeout { puts stderr "did not exit on #exit"; exit 4 }
+}

@@ -323,6 +323,14 @@ Run context command? [Y/n]
 
 Aish supports visual continuation for `#` prompt and `#mt` template creation.
 
+Ordinary draft submission should also feel like a real shell when the typed input is incomplete:
+
+- Incomplete quote input such as `echo "` or `echo '` remains in Aish as a continuation draft instead of sending a partial command to the backend shell.
+- The continuation prompt mirrors shell conventions (`dquote> `, `quote> `, or generic `> `) without leaking backend `PS2`/`PROMPT2` prompts into displayed command output.
+- A trailing odd backslash, such as `echo foo \`, is treated as a line continuation because interactive shells continue those inputs even if non-interactive syntax checks accept a synthetic final newline.
+- `Ctrl-C` or `Esc` clears a continuation draft and returns to a normal prompt without wedging backend shell state.
+- Completed multi-line input is submitted as one command string and stored faithfully in history.
+
 AI prompt with context:
 
 ```text

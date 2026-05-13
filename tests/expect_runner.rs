@@ -1,0 +1,166 @@
+//! Runs every `tests/expect/*.exp` script against the built `aish` binary.
+//!
+//! Every Aish feature should have at least one `.exp` scenario in this folder so
+//! that interactive behavior (rendering, multi-line continuation, key handling,
+//! shell integration) is covered end-to-end alongside the Rust unit and
+//! integration tests.
+//!
+//! Conventions:
+//!   - One `.exp` file per scenario.
+//!   - `_lib.exp` is shared and not run on its own.
+//!   - Each scenario must finish with a clean exit (`aish_quit` or eof).
+//!   - Each scenario gets an isolated `AISH_HOME` provided by `_lib.exp`.
+
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+fn expect_bin() -> Option<PathBuf> {
+    for candidate in [
+        "/usr/bin/expect",
+        "/usr/local/bin/expect",
+        "/opt/homebrew/bin/expect",
+    ] {
+        let p = PathBuf::from(candidate);
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+fn scripts_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/expect")
+}
+
+fn aish_binary() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_aish"))
+}
+
+fn run_script(name: &str) {
+    let Some(expect) = expect_bin() else {
+        eprintln!("skipping {name}: `expect` not installed");
+        return;
+    };
+    let script = scripts_dir().join(name);
+    assert!(
+        script.exists(),
+        "missing expect script: {}",
+        script.display()
+    );
+
+    let output = Command::new(&expect)
+        .arg(&script)
+        .env("AISH_BIN", aish_binary())
+        .output()
+        .expect("failed to launch expect");
+
+    if !output.status.success() {
+        panic!(
+            "expect script failed: {}\nstatus: {}\nstdout:\n{}\nstderr:\n{}",
+            script.display(),
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+fn list_scripts() -> Vec<String> {
+    let dir = scripts_dir();
+    let mut names = Vec::new();
+    for entry in std::fs::read_dir(&dir).expect("cannot read tests/expect") {
+        let entry = entry.expect("bad dir entry");
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("exp") {
+            continue;
+        }
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+        if name.starts_with('_') {
+            continue;
+        }
+        names.push(name);
+    }
+    names.sort();
+    names
+}
+
+#[test]
+fn expect_scenarios_exist() {
+    let names = list_scripts();
+    assert!(
+        !names.is_empty(),
+        "no expect scenarios found under tests/expect"
+    );
+}
+
+#[test]
+fn basic_echo() {
+    run_script("basic_echo.exp");
+}
+
+#[test]
+fn cd_persists() {
+    run_script("cd_persists.exp");
+}
+
+#[test]
+fn ctrl_d_exits() {
+    run_script("ctrl_d_exits.exp");
+}
+
+#[test]
+fn dquote_continuation() {
+    run_script("dquote_continuation.exp");
+}
+
+#[test]
+fn squote_continuation() {
+    run_script("squote_continuation.exp");
+}
+
+#[test]
+fn ctrl_c_cancels_continuation() {
+    run_script("ctrl_c_cancels_continuation.exp");
+}
+
+#[test]
+fn no_backend_ps2_leak() {
+    run_script("no_backend_ps2_leak.exp");
+}
+
+#[test]
+fn empty_tab_cycles_modes() {
+    run_script("empty_tab_cycles_modes.exp");
+}
+
+#[test]
+fn help_lists_commands() {
+    run_script("help_lists_commands.exp");
+}
+
+#[test]
+fn exit_command() {
+    run_script("exit_command.exp");
+}
+
+#[test]
+fn backslash_continuation() {
+    run_script("backslash_continuation.exp");
+}
+
+#[test]
+fn ctrl_l_clear_screen() {
+    run_script("ctrl_l_clear_screen.exp");
+}
+
+#[test]
+fn unknown_private_command() {
+    run_script("unknown_private_command.exp");
+}
+
+#[allow(dead_code)]
+fn _unused_path_check(_p: &Path) {}

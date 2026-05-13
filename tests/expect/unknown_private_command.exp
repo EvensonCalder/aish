@@ -1,0 +1,15 @@
+#!/usr/bin/env expect
+# An unknown `#` command must NOT reach the backend shell and must report
+# itself instead.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "#nosuchcommand"
+aish_enter
+aish_expect "not implemented yet: #nosuchcommand"
+aish_wait_prompt
+
+aish_quit

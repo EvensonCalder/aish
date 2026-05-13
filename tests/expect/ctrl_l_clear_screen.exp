@@ -1,0 +1,19 @@
+#!/usr/bin/env expect
+# Ctrl-L sends the terminal clear-screen sequence and keeps Aish ready.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+# Ctrl-L
+aish_send "\x0c"
+# After clear, Aish should still be at a prompt.
+aish_wait_prompt
+
+aish_send "echo after-clear"
+aish_enter
+aish_expect "after-clear"
+aish_wait_prompt
+
+aish_quit

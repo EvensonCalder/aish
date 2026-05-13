@@ -1,0 +1,14 @@
+#!/usr/bin/env expect
+# Verifies that Ctrl-D on an empty draft exits Aish cleanly.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+# Ctrl-D
+aish_send "\x04"
+expect {
+    eof     {}
+    timeout { puts stderr "aish did not exit on Ctrl-D"; exit 4 }
+}

@@ -1,0 +1,80 @@
+# Shared helpers for Aish expect tests.
+#
+# Sourced by every scenario. Provides:
+#   - aish_spawn   : spawn the debug aish binary in an isolated AISH_HOME
+#   - aish_expect  : require that a literal substring appears soon
+#   - aish_send    : send literal text to aish
+#   - aish_enter   : send Enter
+#   - aish_quit    : send `exit` + Enter and wait for eof
+#   - assert_no    : fail if a forbidden substring appears in recent buffer
+#
+# All scripts must set `set timeout` themselves before using the helpers.
+
+log_user 0
+set ::env(NO_COLOR) "1"
+set ::env(TERM) "xterm-256color"
+
+# Pick an isolated AISH_HOME per spawn so concurrent runs do not collide.
+proc aish_spawn {} {
+    global spawn_id
+    set tmp "/tmp/aish-expect-[pid]-[clock clicks]"
+    file mkdir $tmp
+    set ::env(AISH_HOME) $tmp
+    # Force the test binary path; cargo sets CARGO_BIN_EXE_aish when running tests.
+    set bin $::env(AISH_BIN)
+    spawn -noecho $bin
+    aish_wait_prompt
+}
+
+# Wait for the trailing `> ` of the draft prompt, allowing ANSI cursor codes
+# (e.g. ESC[19G) immediately after it.
+proc aish_wait_prompt {} {
+    expect {
+        -re {> \x1b\[}     {}
+        timeout            { puts stderr "no prompt"; exit 2 }
+        eof                { puts stderr "eof before prompt"; exit 2 }
+    }
+}
+
+proc aish_expect {needle} {
+    expect {
+        -ex $needle    {}
+        timeout        { puts stderr "expected: $needle"; exit 3 }
+        eof            { puts stderr "eof while expecting: $needle"; exit 3 }
+    }
+}
+
+proc aish_expect_re {pattern} {
+    expect {
+        -re $pattern   {}
+        timeout        { puts stderr "expected re: $pattern"; exit 3 }
+        eof            { puts stderr "eof while expecting re: $pattern"; exit 3 }
+    }
+}
+
+proc aish_send {text} {
+    send -- $text
+}
+
+proc aish_enter {} {
+    send -- "\r"
+}
+
+proc aish_quit {} {
+    send -- "exit\r"
+    expect {
+        eof            {}
+        timeout        { puts stderr "aish did not exit"; exit 4 }
+    }
+}
+
+# Assert that a forbidden substring is NOT present until `until` arrives.
+# Used to assert e.g. no leaked `dquote>` from bash PS2.
+proc assert_no {forbidden until} {
+    expect {
+        -ex $forbidden { puts stderr "found forbidden: $forbidden"; exit 5 }
+        -ex $until     {}
+        timeout        { puts stderr "neither forbidden nor expected appeared"; exit 5 }
+        eof            { puts stderr "eof while asserting no $forbidden"; exit 5 }
+    }
+}

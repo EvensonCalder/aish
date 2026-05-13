@@ -1,0 +1,23 @@
+#!/usr/bin/env expect
+# Verifies `echo '` enters multi-line continuation and finishes cleanly.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "echo '"
+aish_enter
+aish_expect "quote> "
+
+aish_send "hello"
+aish_enter
+aish_expect "quote> "
+
+aish_send "'"
+aish_enter
+
+aish_expect "hello"
+aish_wait_prompt
+
+aish_quit

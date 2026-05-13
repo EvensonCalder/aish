@@ -156,6 +156,8 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
   - [x] `Ctrl-K`
 - [x] Implement redraw with cursor placement.
 - [x] Implement multi-line draft buffer support for editor-returned content.
+- [x] Implement interactive continuation drafts for unfinished quotes and trailing backslash continuations.
+- [x] Keep continuation redraw stable in raw terminal mode and suppress backend secondary prompts from displayed command output.
 - [x] Implement command submission from draft to PTY.
 
 ### Acceptance criteria
@@ -743,31 +745,44 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 
 ### Unit tests
 
-- [ ] Config load/save/defaults.
-- [ ] Prompt rendering.
-- [ ] Mode transitions.
-- [ ] `#` parser.
-- [ ] Continuation parser.
-- [ ] Context parser.
-- [ ] Completion matching.
-- [ ] Placeholder parser/editor behavior.
-- [ ] History trimming.
-- [ ] Logical command splitter.
-- [ ] AI JSON schema parsing.
-- [ ] URL normalization.
-- [ ] Keybinding resolution.
+- [x] Config load/save/defaults.
+- [x] Prompt rendering.
+- [x] Mode transitions.
+- [x] `#` parser.
+- [x] Continuation parser.
+- [x] Context parser.
+- [x] Completion matching.
+- [x] Placeholder parser/editor behavior.
+- [x] History trimming.
+- [x] Logical command splitter.
+- [x] AI JSON schema parsing.
+- [x] URL normalization.
+- [x] Keybinding resolution.
 
 ### Integration tests
 
-- [ ] PTY starts backend shell.
-- [ ] `cd` persists across commands.
-- [ ] Command exit status captured.
-- [ ] History mode read-only behavior.
-- [ ] AI mode read-only behavior.
-- [ ] External editor roundtrip using a fake editor script.
-- [ ] Multi-line paste editor-review flow.
+- [x] PTY starts backend shell.
+- [x] `cd` persists across commands.
+- [x] Command exit status captured.
+- [x] History mode read-only behavior.
+- [x] AI mode read-only behavior.
+- [x] External editor roundtrip using a fake editor script.
+- [x] Multi-line paste editor-review flow.
 - [ ] GPG fake command or test key flow.
 - [ ] Git sync in temporary repo.
+
+### Expect end-to-end tests
+
+- [x] Add an `expect` runner that launches the built `aish` binary with isolated `AISH_HOME`.
+- [x] Cover basic command execution and prompt return.
+- [x] Cover persistent backend cwd with `cd /tmp` followed by `pwd`.
+- [x] Cover empty `Tab` mode cycling through draft/history/AI prompts.
+- [x] Cover `#help`, unknown private commands, `#exit`, and empty `Ctrl-D` exit.
+- [x] Cover `Ctrl-L` clear-screen behavior.
+- [x] Cover `echo "` and `echo '` continuation UX.
+- [x] Cover trailing backslash continuation UX.
+- [x] Cover `Ctrl-C` cancellation from continuation drafts.
+- [x] Cover backend `PS2`/`PROMPT2` leak prevention.
 
 ### Manual tests
 

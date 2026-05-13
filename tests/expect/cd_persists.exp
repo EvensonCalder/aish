@@ -1,0 +1,18 @@
+#!/usr/bin/env expect
+# Verifies that `cd` persists across commands in the same aish session.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "cd /tmp"
+aish_enter
+aish_wait_prompt
+
+aish_send "pwd"
+aish_enter
+aish_expect "/tmp"
+aish_wait_prompt
+
+aish_quit
