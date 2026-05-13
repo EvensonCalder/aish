@@ -50,6 +50,11 @@ pub struct GitCommandPlan {
     pub args: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InitRepoPlan {
+    pub commands: Vec<GitCommandPlan>,
+}
+
 #[derive(Debug)]
 pub struct SyncLock {
     path: PathBuf,
@@ -340,6 +345,35 @@ pub fn push_plan() -> GitCommandPlan {
         program: "git".to_string(),
         args: vec!["push".to_string()],
     }
+}
+
+pub fn init_repo_plan(remote: &str) -> Option<InitRepoPlan> {
+    let remote = sanitize_remote(remote)?;
+    Some(InitRepoPlan {
+        commands: vec![
+            GitCommandPlan {
+                program: "git".to_string(),
+                args: vec!["init".to_string()],
+            },
+            GitCommandPlan {
+                program: "git".to_string(),
+                args: vec![
+                    "remote".to_string(),
+                    "add".to_string(),
+                    "origin".to_string(),
+                    remote,
+                ],
+            },
+        ],
+    })
+}
+
+fn sanitize_remote(remote: &str) -> Option<String> {
+    let remote = remote.trim();
+    if remote.is_empty() || remote.chars().any(char::is_control) {
+        return None;
+    }
+    Some(remote.to_string())
 }
 
 fn sanitize_commit_message(message: &str) -> String {
@@ -708,6 +742,39 @@ mod tests {
                 program: "git".to_string(),
                 args: vec!["push".to_string()]
             }
+        );
+    }
+
+    #[test]
+    fn init_repo_plan_uses_fixed_git_arguments() {
+        assert_eq!(
+            init_repo_plan(" git@example.test:aish.git ").unwrap(),
+            InitRepoPlan {
+                commands: vec![
+                    GitCommandPlan {
+                        program: "git".to_string(),
+                        args: vec!["init".to_string()]
+                    },
+                    GitCommandPlan {
+                        program: "git".to_string(),
+                        args: vec![
+                            "remote".to_string(),
+                            "add".to_string(),
+                            "origin".to_string(),
+                            "git@example.test:aish.git".to_string()
+                        ]
+                    }
+                ]
+            }
+        );
+    }
+
+    #[test]
+    fn init_repo_plan_rejects_empty_or_control_character_remote() {
+        assert_eq!(init_repo_plan(""), None);
+        assert_eq!(
+            init_repo_plan("git@example.test:aish.git\n--upload-pack=x"),
+            None
         );
     }
 }

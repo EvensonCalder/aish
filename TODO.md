@@ -633,7 +633,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 
 ### Tasks
 
-- [ ] Initialize git repository in `~/.aish` if requested.
+- [x] Initialize git repository in `~/.aish` if requested.
 - [x] Implement `#set-remote`.
 - [ ] Implement `#push` manual sync.
 - [ ] Implement `#sync <cron-expression>`.
