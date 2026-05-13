@@ -18,7 +18,7 @@ Current test inventory:
 - 7 active bash PTY integration tests.
 - 2 active zsh PTY integration tests.
 - 1 conditional fish PTY integration test.
-- 64 expect-driven end-to-end interactive scenarios.
+- 65 expect-driven end-to-end interactive scenarios.
 - Bash PTY startup records the backend shell's initial cwd so the first prompt matches the shell state before any command executes.
 - Backend PTY startup inherits Aish's current directory and can be resized so child commands such as `ls` see the real terminal width.
 - 0 doctests.
@@ -62,7 +62,7 @@ Expect scenarios are the acceptance layer for user-visible terminal behavior. Th
 | Completion UI | `completion_accept_single`, `completion_panel_multiple`, `output_then_redraw_interactions` | Covered | Add completion-panel-after-output regression if observed. |
 | Picker cancellation UX | `history_picker_cancel_preserves_draft`, `file_picker_cancel_preserves_draft`, `template_picker_cancel_preserves_draft`, `git_branch_picker_cancel_preserves_draft`, `env_var_picker_cancel_preserves_draft` | Covered | Add picker success-path expect scenarios only when picker replacement UI changes; Rust tests cover replacement logic. |
 | Private command UX and diagnostics | `first_run_doctor`, `home_default_first_run_doctor`, `home_default_config_persists`, `invalid_config_startup`, `help_lists_commands`, `unknown_private_command`, `private_command_safe_failures`, `status_doctor_config`, `key_and_sync_placeholders`, `key_clear_removes_stored_key`, `ai_config_persists` | Covered | Add new safe-failure scenarios when new private commands are added. |
-| Notes, context, and logs | `notes_are_swallowed`, `context_confirmation_skip`, `context_dangerous_refusal`, `log_shows_context_skip` | Covered | Add new context scenarios only for observed regressions. |
+| Notes, context, and logs | `notes_are_swallowed`, `context_confirmation_skip`, `context_dangerous_refusal`, `log_shows_context_skip`, `home_default_event_log_persists` | Covered | Add new context scenarios only for observed regressions. |
 | Templates | `template_use_executes`, `template_crud`, `template_placeholder_blocks_execution`, `home_default_template_persists` | Covered | Add completion/template interaction if UI changes. |
 | Editor and paste flows | `external_editor_roundtrip`, `external_editor_failure_preserves_draft`, `editor_hash_content_bypasses_parser`, `multiline_paste_editor_review` | Covered | Add large paste boundary if practical. |
 | Sync | `key_and_sync_placeholders`, `home_default_sync_config_persists`, `sync_push_local_remote`, `sync_push_failure_logs`, `sync_push_conflict_logs` | Covered | Add new sync scenarios only when sync user-visible behavior changes. |
@@ -102,6 +102,7 @@ Implemented:
 - Draft restore from `$HOME/.aish/history/draft.jsonl` when `AISH_HOME` is unset.
 - Template persistence under `$HOME/.aish/templates/templates.jsonl` when `AISH_HOME` is unset.
 - Sync config persistence under `$HOME/.aish/config.toml` when `AISH_HOME` is unset, without scheduler files.
+- Event log persistence under `$HOME/.aish/logs/events.jsonl` when `AISH_HOME` is unset.
 - Missing config creates default `config.toml`.
 - Invalid config returns a readable error.
 - Draft config defaults: `persist = true`, `sync = false`.

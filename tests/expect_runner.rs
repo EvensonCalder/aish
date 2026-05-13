@@ -353,6 +353,11 @@ fn log_shows_context_skip() {
 }
 
 #[test]
+fn home_default_event_log_persists() {
+    run_script("home_default_event_log_persists.exp");
+}
+
+#[test]
 fn ai_mode_executes_sequence() {
     run_script("ai_mode_executes_sequence.exp");
 }
