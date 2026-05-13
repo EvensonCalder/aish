@@ -505,6 +505,7 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
             state.continuation_prompt = None;
             state.draft_from_editor = false;
             state.draft_from_template = false;
+            state.mode = crate::modes::Mode::Draft;
             KeyAction::Continue
         }
         (KeyModifiers::CONTROL, KeyCode::Char('l')) => KeyAction::ClearScreen,
@@ -956,6 +957,27 @@ mod tests {
 
         assert!(state.draft.is_empty());
         assert_eq!(state.mode, crate::modes::Mode::Draft);
+        assert_eq!(state.render_prompt_line(), "> ");
+    }
+
+    #[test]
+    fn ctrl_c_from_history_mode_returns_to_draft_prompt() {
+        let mut state = AppState {
+            regular_history: vec![crate::history::HistoryEntry {
+                t: 1,
+                command: "echo older".to_string(),
+                exit_code: Some(0),
+                source: crate::history::HistorySource::User,
+            }],
+            mode: crate::modes::Mode::History,
+            selected_history_index: Some(0),
+            ..AppState::default()
+        };
+
+        apply_key_to_state(ctrl('c'), &mut state);
+
+        assert_eq!(state.mode, crate::modes::Mode::Draft);
+        assert!(state.draft.is_empty());
         assert_eq!(state.render_prompt_line(), "> ");
     }
 

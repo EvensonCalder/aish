@@ -1,0 +1,45 @@
+#!/usr/bin/env expect
+# `#history <count>` should trim persisted regular history and update in-memory
+# browsing state in a real terminal session.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "echo hist-one"
+aish_enter
+aish_expect "hist-one"
+aish_wait_prompt
+
+aish_send "echo hist-two"
+aish_enter
+aish_expect "hist-two"
+aish_wait_prompt
+
+aish_send "echo hist-three"
+aish_enter
+aish_expect "hist-three"
+aish_wait_prompt
+
+aish_send "#history 2"
+aish_enter
+aish_expect "history trimmed to 2"
+aish_wait_prompt
+
+aish_send "#doctor"
+aish_enter
+aish_expect "regular_history_entries=2"
+aish_wait_prompt
+
+# History browsing should still work after trim and should expose the newest
+# retained item first.
+aish_send "\t"
+aish_expect "\$ "
+aish_send "\033\[A"
+aish_expect "echo hist-three"
+
+aish_send "\x03"
+aish_wait_prompt
+
+aish_quit

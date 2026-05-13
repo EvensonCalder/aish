@@ -257,5 +257,10 @@ fn ctrl_x_unknown_chord_cancels() {
     run_script("ctrl_x_unknown_chord_cancels.exp");
 }
 
+#[test]
+fn history_trim_persists() {
+    run_script("history_trim_persists.exp");
+}
+
 #[allow(dead_code)]
 fn _unused_path_check(_p: &Path) {}

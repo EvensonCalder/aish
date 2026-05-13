@@ -212,7 +212,7 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
 
 ### Tasks
 
-- [ ] Define JSONL formats:
+- [x] Define JSONL formats:
   - [x] regular history entry
   - [x] draft entry
   - [x] AI session entry
@@ -242,7 +242,7 @@ This implementation plan turns `SPEC.md` into a working Rust project. It is orde
 
 - [x] Implement `$` history mode browsing.
 - [x] Implement `%` AI mode browsing.
-- [ ] In history mode:
+- [x] In history mode:
   - [x] `Up/Down` browse regular history only.
   - [x] `Enter` executes selected item.
   - [x] modification copies item to draft.
@@ -787,6 +787,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 - [x] Cover `Ctrl-L` clear-screen behavior.
 - [x] Cover single-candidate completion acceptance and multi-candidate completion panel display.
 - [x] Cover history-mode command execution.
+- [x] Cover persisted regular history trimming and post-trim browsing.
 - [x] Cover read-only history edit-copy behavior.
 - [x] Cover AI-mode command sequencing and read-only edit-copy behavior.
 - [x] Cover AI config persistence and diagnostic key-source redaction.
