@@ -1,5 +1,8 @@
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::Mutex;
+
+static TMUX_RUN_LOCK: Mutex<()> = Mutex::new(());
 
 fn tmux_available() -> bool {
     Command::new("tmux")
@@ -27,7 +30,20 @@ fn tmux_unicode_output_matches_real_terminal_screen() {
     );
 }
 
+#[test]
+fn tmux_ctrl_l_clears_visible_screen_and_keeps_prompt_usable() {
+    let captured = run_tmux_script("clear_screen.sh");
+    assert_adjacent_output(&captured, "echo after-clear", "after-clear");
+    assert!(
+        !captured.contains("before-clear"),
+        "captured pane still contained pre-clear output: {captured:?}"
+    );
+}
+
 fn run_tmux_script(name: &str) -> String {
+    let _guard = TMUX_RUN_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     if !tmux_available() {
         eprintln!("skipping {name}: tmux not installed");
         return String::new();
