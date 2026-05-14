@@ -12,7 +12,7 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 339 library unit tests.
+- 342 library unit tests.
 - 23 draft execution integration tests.
 - 1 first-run integration test.
 - 7 active bash PTY integration tests.

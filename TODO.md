@@ -781,7 +781,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 - [x] AI mode read-only behavior.
 - [x] External editor roundtrip using a fake editor script.
 - [x] Multi-line paste editor-review flow.
-- [ ] GPG fake command or test key flow.
+- [x] GPG fake command flow.
 - [x] Git sync in temporary repo.
 
 ### Expect end-to-end tests
