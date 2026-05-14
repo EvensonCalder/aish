@@ -1,0 +1,27 @@
+#!/usr/bin/env expect
+# When context is disabled, pseudo-pipe commands should not run and should fail
+# with a readable message instead of prompting or executing the command.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set marker "/tmp/aish-context-disabled-marker-[pid]-[clock clicks]"
+
+aish_spawn
+
+aish_send "#context off"
+aish_enter
+aish_expect "context.enabled=false"
+aish_wait_prompt
+
+aish_send "# explain this < touch $marker"
+aish_enter
+aish_expect "context collection is disabled; context command not executed: touch $marker"
+aish_wait_prompt
+
+if {[file exists $marker]} {
+    puts stderr "context command ran while context was disabled"
+    exit 6
+}
+
+aish_quit

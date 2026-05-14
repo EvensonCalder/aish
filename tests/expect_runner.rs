@@ -448,6 +448,11 @@ fn context_config_persists() {
 }
 
 #[test]
+fn context_off_blocks_pseudopipe() {
+    run_script("context_off_blocks_pseudopipe.exp");
+}
+
+#[test]
 fn context_dangerous_refusal() {
     run_script("context_dangerous_refusal.exp");
 }
