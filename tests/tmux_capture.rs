@@ -70,6 +70,13 @@ fn tmux_ctrl_c_cancels_continuation_and_shell_recovers() {
     );
 }
 
+#[test]
+fn tmux_mode_redraw_preserves_prior_output_and_shell_recovers() {
+    let captured = run_tmux_script("mode_redraw_preserves_output.sh");
+    assert_adjacent_output(&captured, "echo before-mode-redraw", "before-mode-redraw");
+    assert_adjacent_output(&captured, "echo after-mode-redraw", "after-mode-redraw");
+}
+
 fn run_tmux_script(name: &str) -> String {
     let _guard = TMUX_RUN_LOCK
         .lock()
