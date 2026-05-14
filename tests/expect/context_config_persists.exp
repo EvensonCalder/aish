@@ -1,0 +1,44 @@
+#!/usr/bin/env expect
+# #context settings should persist and be reflected by #config in a real session.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "#context"
+aish_enter
+aish_expect "context.enabled=true"
+aish_expect "context.confirm=true"
+aish_expect "context.max_bytes=65536"
+aish_wait_prompt
+
+aish_send "#context off"
+aish_enter
+aish_expect "context.enabled=false"
+aish_expect "context.confirm=true"
+aish_expect "context.max_bytes=65536"
+aish_wait_prompt
+
+aish_send "#context confirm off"
+aish_enter
+aish_expect "context.enabled=false"
+aish_expect "context.confirm=false"
+aish_expect "context.max_bytes=65536"
+aish_wait_prompt
+
+aish_send "#context 1234"
+aish_enter
+aish_expect "context.enabled=false"
+aish_expect "context.confirm=false"
+aish_expect "context.max_bytes=1234"
+aish_wait_prompt
+
+aish_send "#config"
+aish_enter
+aish_expect "context.enabled=false"
+aish_expect "context.confirm=false"
+aish_expect "context.max_bytes=1234"
+aish_wait_prompt
+
+aish_quit

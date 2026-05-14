@@ -443,6 +443,11 @@ fn context_confirmation_skip() {
 }
 
 #[test]
+fn context_config_persists() {
+    run_script("context_config_persists.exp");
+}
+
+#[test]
 fn context_dangerous_refusal() {
     run_script("context_dangerous_refusal.exp");
 }
