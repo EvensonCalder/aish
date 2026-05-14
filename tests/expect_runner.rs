@@ -468,6 +468,11 @@ fn context_dangerous_refusal() {
 }
 
 #[test]
+fn context_dangerous_still_prompts_when_confirm_off() {
+    run_script("context_dangerous_still_prompts_when_confirm_off.exp");
+}
+
+#[test]
 fn home_default_context_dangerous_refusal() {
     run_script("home_default_context_dangerous_refusal.exp");
 }
