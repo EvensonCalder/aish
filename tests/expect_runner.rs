@@ -264,6 +264,16 @@ fn completion_panel_multiple() {
 }
 
 #[test]
+fn completion_inline_off_accepts_first() {
+    run_script("completion_inline_off_accepts_first.exp");
+}
+
+#[test]
+fn completion_tab_accept_word() {
+    run_script("completion_tab_accept_word.exp");
+}
+
+#[test]
 fn completion_no_matches_panel() {
     run_script("completion_no_matches_panel.exp");
 }

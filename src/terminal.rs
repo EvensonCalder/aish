@@ -10,8 +10,14 @@ use crossterm::terminal::{
     Clear, ClearType, disable_raw_mode, enable_raw_mode, is_raw_mode_enabled, size,
 };
 
-use crate::app::{AppState, answer_context_confirmation, execute_draft, save_draft_if_configured};
-use crate::completion::{accept_completion, current_token_context, render_completion_candidates};
+use crate::app::{
+    AppState, InlineCompletion, answer_context_confirmation, execute_draft,
+    save_draft_if_configured,
+};
+use crate::completion::{
+    accept_completion_with_mode, current_token_context, ghost_completion_suffix, limit_candidates,
+    render_completion_candidates_for_width, truncate_with_ellipsis,
+};
 use crate::editor::resolve_editor_command;
 use crate::picker::{
     PickerAction, PickerRunResult, env_var_picker_candidates, file_picker_candidates,
@@ -482,8 +488,8 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
             .unwrap_or(KeyAction::Continue);
     }
 
-    if key.code != KeyCode::Tab {
-        state.completion_panel.clear();
+    if !matches!(key.code, KeyCode::Tab | KeyCode::Right) {
+        state.clear_completion_ui();
     }
 
     if state.pending_context.is_some() {
@@ -608,6 +614,7 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
                 {
                     return KeyAction::AcceptCompletion;
                 }
+                state.clear_completion_ui();
                 state.draft.move_right();
             }
             KeyAction::Continue
@@ -651,6 +658,7 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
             if !state.draft.is_empty() && state.mode == crate::modes::Mode::Draft {
                 return KeyAction::CompleteOrShow;
             }
+            state.clear_completion_ui();
             state.handle_empty_tab();
             KeyAction::Continue
         }
@@ -739,6 +747,9 @@ pub fn redraw(state: &mut AppState, out: &mut impl Write) -> Result<()> {
     execute!(out, MoveToColumn(0), Clear(ClearType::FromCursorDown))?;
     let rendered = state.rendered_text();
     write!(out, "{}", rendered.replace('\n', "\r\n"))?;
+    if let Some(suffix) = render_inline_completion_suffix(state, terminal_display_width()) {
+        write_inline_completion_suffix(out, &suffix)?;
+    }
     if !state.completion_panel.is_empty() {
         for line in &state.completion_panel {
             write!(out, "\r\n{line}")?;
@@ -756,39 +767,99 @@ pub fn redraw(state: &mut AppState, out: &mut impl Write) -> Result<()> {
 }
 
 pub fn write_completion_candidates(state: &AppState, out: &mut impl Write) -> Result<()> {
-    let candidates = state.completion_candidates()?;
+    let candidates = state.completion_panel_candidates()?;
     if candidates.is_empty() {
         writeln!(out, "no completions")?;
         return Ok(());
     }
-    for line in render_completion_candidates(&candidates) {
+    let token = current_token_context(state.draft.as_str(), state.draft.cursor());
+    for line in
+        render_completion_candidates_for_width(&candidates, &token, terminal_display_width())
+    {
         writeln!(out, "{line}")?;
     }
     Ok(())
 }
 
 pub fn complete_or_show_candidates(state: &mut AppState) -> Result<()> {
-    let decision_candidates = state.completion_candidates_with_max_results(
-        state.completion_config.max_results.saturating_add(1),
-    )?;
-    match decision_candidates.len() {
-        0 => {
+    complete_or_show_candidates_for_width(state, terminal_display_width())
+}
+
+pub fn complete_or_show_candidates_for_width(state: &mut AppState, width: usize) -> Result<()> {
+    if state.completion_config.inline {
+        if accept_inline_completion(state)? {
+            return Ok(());
+        }
+        let candidates = state.completion_candidates()?;
+        if candidates.is_empty() {
+            state.completion_inline = None;
             state.completion_panel = vec!["no completions".to_string()];
-            Ok(())
+            return Ok(());
         }
-        1 => {
-            state.completion_panel.clear();
-            accept_completion_candidate(state, decision_candidates.into_iter().next().unwrap())?;
-            Ok(())
-        }
-        _ => {
-            state.completion_panel = render_completion_candidates(&state.completion_candidates()?);
-            Ok(())
-        }
+        let token = current_token_context(state.draft.as_str(), state.draft.cursor());
+        state.completion_inline = candidates.first().and_then(|candidate| {
+            ghost_completion_suffix(&token, candidate).map(|suffix| InlineCompletion {
+                candidate: candidate.clone(),
+                suffix,
+            })
+        });
+        let panel_candidates = limit_candidates(candidates, state.completion_config.max_results);
+        state.completion_panel =
+            render_completion_candidates_for_width(&panel_candidates, &token, width);
+        return Ok(());
     }
+
+    state.clear_completion_ui();
+    let Some(candidate) = state.completion_candidates()?.into_iter().next() else {
+        state.completion_panel = vec!["no completions".to_string()];
+        return Ok(());
+    };
+    accept_completion_candidate(state, candidate)?;
+    Ok(())
+}
+
+fn accept_inline_completion(state: &mut AppState) -> Result<bool> {
+    let Some(inline) = state.completion_inline.clone() else {
+        return Ok(false);
+    };
+    state.clear_completion_ui();
+    accept_completion_candidate(state, inline.candidate)
+}
+
+fn render_inline_completion_suffix(state: &AppState, width: usize) -> Option<String> {
+    if state.mode != crate::modes::Mode::Draft
+        || state.draft_from_editor
+        || state.draft.cursor() != state.draft.as_str().len()
+    {
+        return None;
+    }
+    let suffix = &state.completion_inline.as_ref()?.suffix;
+    let (_, cursor_col) = state.terminal_cursor_position();
+    let remaining = width.saturating_sub(cursor_col as usize);
+    let suffix = truncate_with_ellipsis(suffix, remaining);
+    (!suffix.is_empty()).then_some(suffix)
+}
+
+fn write_inline_completion_suffix(out: &mut impl Write, suffix: &str) -> Result<()> {
+    if std::env::var_os("NO_COLOR").is_some() {
+        write!(out, "{suffix}")?;
+    } else {
+        write!(out, "\x1b[2m{suffix}\x1b[0m")?;
+    }
+    Ok(())
+}
+
+fn terminal_display_width() -> usize {
+    size()
+        .map(|(columns, _)| columns as usize)
+        .unwrap_or(80)
+        .max(1)
 }
 
 pub fn accept_first_completion(state: &mut AppState) -> Result<bool> {
+    if accept_inline_completion(state)? {
+        return Ok(true);
+    }
     let Some(candidate) = state.completion_candidates()?.into_iter().next() else {
         return Ok(false);
     };
@@ -800,9 +871,15 @@ fn accept_completion_candidate(
     candidate: crate::completion::CompletionCandidate,
 ) -> Result<bool> {
     let token = current_token_context(state.draft.as_str(), state.draft.cursor());
-    let accepted = accept_completion(state.draft.as_str(), &token, &candidate);
+    let accepted = accept_completion_with_mode(
+        state.draft.as_str(),
+        &token,
+        &candidate,
+        state.completion_config.tab_accept,
+    );
     if state.draft.replace(accepted.line, accepted.cursor) {
         state.draft_from_template = false;
+        state.clear_completion_ui();
         Ok(true)
     } else {
         Ok(false)
@@ -812,7 +889,7 @@ fn accept_completion_candidate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::EditorConfig;
+    use crate::config::{CompletionConfig, CompletionTabAccept, EditorConfig};
     use crate::modes::Mode;
     use std::path::Path;
 
@@ -894,7 +971,7 @@ mod tests {
     }
 
     #[test]
-    fn tab_accepts_single_completion_candidate() {
+    fn tab_with_inline_enabled_shows_single_completion_before_accepting() {
         let temp = tempfile::tempdir().unwrap();
         let mut state = AppState {
             current_cwd: Some(temp.path().to_path_buf()),
@@ -905,8 +982,36 @@ mod tests {
 
         complete_or_show_candidates(&mut state).unwrap();
 
-        assert!(state.completion_panel.is_empty());
+        assert_eq!(state.draft.as_str(), "cat si");
+        assert_eq!(state.completion_inline.as_ref().unwrap().suffix, "ngle.txt");
+        assert_eq!(state.completion_panel, ["file\tsingle.txt"]);
+
+        complete_or_show_candidates(&mut state).unwrap();
+
         assert_eq!(state.draft.as_str(), "cat single.txt");
+        assert!(state.completion_inline.is_none());
+        assert!(state.completion_panel.is_empty());
+    }
+
+    #[test]
+    fn tab_with_inline_disabled_accepts_first_completion_candidate() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut state = AppState {
+            current_cwd: Some(temp.path().to_path_buf()),
+            completion_config: CompletionConfig {
+                inline: false,
+                ..CompletionConfig::default()
+            },
+            ..AppState::default()
+        };
+        std::fs::write(temp.path().join("single.txt"), "").unwrap();
+        state.draft.insert_str("cat si");
+
+        complete_or_show_candidates(&mut state).unwrap();
+
+        assert_eq!(state.draft.as_str(), "cat single.txt");
+        assert!(state.completion_inline.is_none());
+        assert!(state.completion_panel.is_empty());
     }
 
     #[test]
@@ -934,9 +1039,9 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let mut state = AppState {
             current_cwd: Some(temp.path().to_path_buf()),
-            completion_config: crate::config::CompletionConfig {
+            completion_config: CompletionConfig {
                 max_results: 1,
-                ..crate::config::CompletionConfig::default()
+                ..CompletionConfig::default()
             },
             ..AppState::default()
         };
@@ -966,6 +1071,49 @@ mod tests {
     }
 
     #[test]
+    fn redraw_renders_inline_completion_suffix_without_moving_cursor() {
+        let mut state = AppState::default();
+        state.draft.insert_str("cat Car");
+        state.completion_inline = Some(InlineCompletion {
+            candidate: crate::completion::CompletionCandidate {
+                display: "Cargo.toml".to_string(),
+                replacement: "Cargo.toml".to_string(),
+                is_dir: false,
+                source: crate::completion::CompletionSource::Path,
+            },
+            suffix: "go.toml".to_string(),
+        });
+        let mut output = Vec::new();
+
+        redraw(&mut state, &mut output).unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("> cat Car"), "output was {output:?}");
+        assert!(output.contains("go.toml"), "output was {output:?}");
+        assert!(output.ends_with("\u{1b}[10G"), "output was {output:?}");
+    }
+
+    #[test]
+    fn inline_completion_suffix_elides_to_terminal_width() {
+        let mut state = AppState::default();
+        state.draft.insert_str("cat very");
+        state.completion_inline = Some(InlineCompletion {
+            candidate: crate::completion::CompletionCandidate {
+                display: "very-long-target.txt".to_string(),
+                replacement: "very-long-target.txt".to_string(),
+                is_dir: false,
+                source: crate::completion::CompletionSource::Path,
+            },
+            suffix: "-long-target.txt".to_string(),
+        });
+
+        assert_eq!(
+            render_inline_completion_suffix(&state, "> cat very-l...".len()),
+            Some("-l...".to_string())
+        );
+    }
+
+    #[test]
     fn redraw_positions_cursor_on_multiline_draft_last_line() {
         let mut state = AppState::default();
         state.draft.insert_str("echo \"\n123");
@@ -986,6 +1134,15 @@ mod tests {
     fn editing_after_completion_panel_clears_panel() {
         let mut state = AppState {
             completion_panel: vec!["exec\tgit".to_string()],
+            completion_inline: Some(InlineCompletion {
+                candidate: crate::completion::CompletionCandidate {
+                    display: "git status".to_string(),
+                    replacement: "git status".to_string(),
+                    is_dir: false,
+                    source: crate::completion::CompletionSource::History,
+                },
+                suffix: " status".to_string(),
+            }),
             ..AppState::default()
         };
         state.draft.insert_str("git");
@@ -993,6 +1150,7 @@ mod tests {
         apply_key_to_state(key(KeyCode::Char('x')), &mut state);
 
         assert!(state.completion_panel.is_empty());
+        assert!(state.completion_inline.is_none());
     }
 
     #[test]
@@ -1097,6 +1255,50 @@ mod tests {
 
         assert_eq!(state.draft.as_str(), "git status");
         assert_eq!(state.draft.cursor(), "git status".len());
+    }
+
+    #[test]
+    fn tab_accept_word_mode_accepts_only_next_word_from_inline_suggestion() {
+        let mut state = AppState {
+            regular_history: vec![crate::history::HistoryEntry {
+                t: 1,
+                command: "kubectl apply -f deployment.yaml".to_string(),
+                exit_code: Some(0),
+                source: crate::history::HistorySource::User,
+            }],
+            completion_config: CompletionConfig {
+                tab_accept: CompletionTabAccept::Word,
+                ..CompletionConfig::default()
+            },
+            ..AppState::default()
+        };
+        state.draft.insert_str("kub");
+
+        complete_or_show_candidates(&mut state).unwrap();
+        complete_or_show_candidates(&mut state).unwrap();
+
+        assert_eq!(state.draft.as_str(), "kubectl");
+        assert_eq!(state.draft.cursor(), "kubectl".len());
+    }
+
+    #[test]
+    fn right_accepts_inline_completion_when_available() {
+        let mut state = AppState {
+            regular_history: vec![crate::history::HistoryEntry {
+                t: 1,
+                command: "git status".to_string(),
+                exit_code: Some(0),
+                source: crate::history::HistorySource::User,
+            }],
+            ..AppState::default()
+        };
+        state.draft.insert_str("git");
+        complete_or_show_candidates(&mut state).unwrap();
+
+        assert!(accept_first_completion(&mut state).unwrap());
+
+        assert_eq!(state.draft.as_str(), "git status");
+        assert!(state.completion_inline.is_none());
     }
 
     #[test]

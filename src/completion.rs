@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::config::CompletionTabAccept;
 use crate::history::HistoryEntry;
 use crate::templates::TemplateEntry;
 
@@ -345,6 +346,26 @@ pub fn render_completion_candidates(candidates: &[CompletionCandidate]) -> Vec<S
         .collect()
 }
 
+pub fn render_completion_candidates_for_width(
+    candidates: &[CompletionCandidate],
+    token: &TokenContext,
+    width: usize,
+) -> Vec<String> {
+    candidates
+        .iter()
+        .map(|candidate| {
+            truncate_with_ellipsis(
+                &format!(
+                    "{}\t{}",
+                    completion_candidate_label(candidate),
+                    anchored_candidate_display(token, candidate)
+                ),
+                width,
+            )
+        })
+        .collect()
+}
+
 pub fn ghost_completion_suffix(
     token: &TokenContext,
     candidate: &CompletionCandidate,
@@ -361,16 +382,83 @@ pub fn accept_completion(
     token: &TokenContext,
     candidate: &CompletionCandidate,
 ) -> AcceptedCompletion {
+    accept_completion_with_mode(line, token, candidate, CompletionTabAccept::Full)
+}
+
+pub fn accept_completion_with_mode(
+    line: &str,
+    token: &TokenContext,
+    candidate: &CompletionCandidate,
+    mode: CompletionTabAccept,
+) -> AcceptedCompletion {
+    let replacement = accepted_replacement(token, candidate, mode);
     let mut accepted =
-        String::with_capacity(line.len() - (token.end - token.start) + candidate.replacement.len());
+        String::with_capacity(line.len() - (token.end - token.start) + replacement.len());
     accepted.push_str(&line[..token.start]);
-    accepted.push_str(&candidate.replacement);
+    accepted.push_str(&replacement);
     accepted.push_str(&line[token.end..]);
-    let cursor = token.start + candidate.replacement.len();
+    let cursor = token.start + replacement.len();
     AcceptedCompletion {
         line: accepted,
         cursor,
     }
+}
+
+pub fn truncate_with_ellipsis(value: &str, width: usize) -> String {
+    let len = value.chars().count();
+    if len <= width {
+        return value.to_string();
+    }
+    if width == 0 {
+        return String::new();
+    }
+    if width <= 3 {
+        return ".".repeat(width);
+    }
+    let prefix: String = value.chars().take(width - 3).collect();
+    format!("{prefix}...")
+}
+
+fn anchored_candidate_display(token: &TokenContext, candidate: &CompletionCandidate) -> String {
+    if candidate.source == CompletionSource::Template {
+        return candidate.display.clone();
+    }
+    if let Some(suffix) = candidate.replacement.strip_prefix(&token.text)
+        && !suffix.is_empty()
+    {
+        return format!("{}{}", token.text, suffix);
+    }
+    candidate.display.clone()
+}
+
+fn accepted_replacement(
+    token: &TokenContext,
+    candidate: &CompletionCandidate,
+    mode: CompletionTabAccept,
+) -> String {
+    match mode {
+        CompletionTabAccept::Full => candidate.replacement.clone(),
+        CompletionTabAccept::Word => {
+            let Some(suffix) = candidate.replacement.strip_prefix(&token.text) else {
+                return candidate.replacement.clone();
+            };
+            format!("{}{}", token.text, accepted_word_suffix(suffix))
+        }
+    }
+}
+
+fn accepted_word_suffix(suffix: &str) -> &str {
+    let mut seen_non_whitespace = false;
+    for (index, ch) in suffix.char_indices() {
+        if ch.is_whitespace() {
+            if seen_non_whitespace {
+                return &suffix[..index];
+            }
+        } else {
+            seen_non_whitespace = true;
+        }
+    }
+    suffix
 }
 
 fn completion_source_label(source: CompletionSource) -> &'static str {
@@ -1005,6 +1093,37 @@ mod tests {
     }
 
     #[test]
+    fn render_completion_candidates_for_width_elides_without_wrapping() {
+        let token = current_token_context("cat very-long", "cat very-long".len());
+        let candidates = vec![CompletionCandidate {
+            display: "very-long-file-name-that-will-not-fit.txt".to_string(),
+            replacement: "very-long-file-name-that-will-not-fit.txt".to_string(),
+            is_dir: false,
+            source: CompletionSource::Path,
+        }];
+
+        let rows = render_completion_candidates_for_width(&candidates, &token, 24);
+
+        assert_eq!(rows, ["file\tvery-long-file-n..."]);
+        assert!(rows[0].chars().count() <= 24);
+    }
+
+    #[test]
+    fn render_completion_candidates_for_width_keeps_source_label_when_possible() {
+        let token = current_token_context("git", "git".len());
+        let candidates = vec![CompletionCandidate {
+            display: "git status --short".to_string(),
+            replacement: "git status --short".to_string(),
+            is_dir: false,
+            source: CompletionSource::History,
+        }];
+
+        let rows = render_completion_candidates_for_width(&candidates, &token, 80);
+
+        assert_eq!(rows, ["history\tgit status --short"]);
+    }
+
+    #[test]
     fn ghost_completion_suffix_is_display_only_tail() {
         let token = current_token_context("git sta", "git sta".len());
         let candidate = CompletionCandidate {
@@ -1036,6 +1155,66 @@ mod tests {
             AcceptedCompletion {
                 line: "git status --short".to_string(),
                 cursor: 10,
+            }
+        );
+    }
+
+    #[test]
+    fn accept_completion_word_mode_stops_at_next_word_boundary() {
+        let line = "kub";
+        let token = current_token_context(line, line.len());
+        let candidate = CompletionCandidate {
+            display: "kubectl apply -f file.yaml".to_string(),
+            replacement: "kubectl apply -f file.yaml".to_string(),
+            is_dir: false,
+            source: CompletionSource::History,
+        };
+
+        assert_eq!(
+            accept_completion_with_mode(line, &token, &candidate, CompletionTabAccept::Word),
+            AcceptedCompletion {
+                line: "kubectl".to_string(),
+                cursor: "kubectl".len(),
+            }
+        );
+    }
+
+    #[test]
+    fn accept_completion_word_mode_includes_leading_space_and_next_word() {
+        let line = "git";
+        let token = current_token_context(line, line.len());
+        let candidate = CompletionCandidate {
+            display: "git status --short".to_string(),
+            replacement: "git status --short".to_string(),
+            is_dir: false,
+            source: CompletionSource::History,
+        };
+
+        assert_eq!(
+            accept_completion_with_mode(line, &token, &candidate, CompletionTabAccept::Word),
+            AcceptedCompletion {
+                line: "git status".to_string(),
+                cursor: "git status".len(),
+            }
+        );
+    }
+
+    #[test]
+    fn accept_completion_word_mode_uses_full_suffix_without_boundary() {
+        let line = "cat Car";
+        let token = current_token_context(line, line.len());
+        let candidate = CompletionCandidate {
+            display: "Cargo.toml".to_string(),
+            replacement: "Cargo.toml".to_string(),
+            is_dir: false,
+            source: CompletionSource::Path,
+        };
+
+        assert_eq!(
+            accept_completion_with_mode(line, &token, &candidate, CompletionTabAccept::Word),
+            AcceptedCompletion {
+                line: "cat Cargo.toml".to_string(),
+                cursor: "cat Cargo.toml".len(),
             }
         );
     }

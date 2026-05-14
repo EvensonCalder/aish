@@ -1,0 +1,29 @@
+#!/usr/bin/env expect
+# Word acceptance should accept only the next shell word from the inline
+# suggestion, leaving the rest of a longer history command untouched.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "printf 'seed-word\\n'"
+aish_enter
+aish_expect "seed-word"
+aish_wait_prompt
+
+aish_send "#completion tab-accept word"
+aish_enter
+aish_expect "completion.tab_accept=word"
+aish_wait_prompt
+
+aish_send "pri"
+aish_send "\t"
+aish_expect "history\tprintf 'seed-word\\n'"
+aish_send "\t"
+aish_expect "> printf"
+
+aish_send "\x03"
+aish_wait_prompt
+
+aish_quit

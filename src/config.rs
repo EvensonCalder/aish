@@ -2,7 +2,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use serde::{Deserialize, Serialize};
+use serde::de::{self, Unexpected};
+use serde::{Deserialize, Deserializer, Serialize};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -66,6 +67,47 @@ pub struct CompletionConfig {
     pub max_results: usize,
     pub ignore_spaces: bool,
     pub template_first: bool,
+    pub inline: bool,
+    pub tab_accept: CompletionTabAccept,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CompletionTabAccept {
+    Full,
+    Word,
+}
+
+impl CompletionTabAccept {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::Word => "word",
+        }
+    }
+}
+
+impl Default for CompletionTabAccept {
+    fn default() -> Self {
+        Self::Full
+    }
+}
+
+impl<'de> Deserialize<'de> for CompletionTabAccept {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        match value.trim() {
+            "" | "full" => Ok(Self::Full),
+            "word" => Ok(Self::Word),
+            other => Err(de::Error::invalid_value(
+                Unexpected::Str(other),
+                &"\"full\" or \"word\"",
+            )),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -156,6 +198,8 @@ impl Default for CompletionConfig {
             max_results: 5,
             ignore_spaces: true,
             template_first: true,
+            inline: true,
+            tab_accept: CompletionTabAccept::Full,
         }
     }
 }
@@ -357,6 +401,8 @@ mod tests {
         assert_eq!(config.completion.max_results, 5);
         assert!(config.completion.ignore_spaces);
         assert!(config.completion.template_first);
+        assert!(config.completion.inline);
+        assert_eq!(config.completion.tab_accept, CompletionTabAccept::Full);
         assert_eq!(config.ai, AiConfig::default());
         assert_eq!(config.context, ContextConfig::default());
         assert_eq!(config.sync, SyncConfig::default());
@@ -390,6 +436,8 @@ mod tests {
                 max_results: 0,
                 ignore_spaces: true,
                 template_first: true,
+                inline: true,
+                tab_accept: CompletionTabAccept::Full,
             },
             ai: AiConfig {
                 model: "  gpt-test  ".to_string(),
@@ -466,6 +514,32 @@ mod tests {
 
         assert!(err.contains("invalid config"));
         assert!(err.contains("config.toml"));
+    }
+
+    #[test]
+    fn completion_tab_accept_empty_normalizes_to_default() {
+        let raw = r#"
+            [completion]
+            tab_accept = ""
+        "#;
+
+        let config: Config = toml::from_str(raw).unwrap();
+
+        assert_eq!(config.completion.tab_accept, CompletionTabAccept::Full);
+    }
+
+    #[test]
+    fn completion_tab_accept_rejects_unsupported_modes() {
+        let raw = r#"
+            [completion]
+            tab_accept = "line"
+        "#;
+
+        let err = toml::from_str::<Config>(raw).unwrap_err().to_string();
+
+        assert!(err.contains("invalid value"));
+        assert!(err.contains("full"));
+        assert!(err.contains("word"));
     }
 
     #[test]

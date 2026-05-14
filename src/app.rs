@@ -17,8 +17,8 @@ use crate::completion::{
     complete_non_first_token_with_options, current_token_context,
 };
 use crate::config::{
-    self, AiConfig, CompletionConfig, ContextConfig, EditorConfig, PasteConfig, PromptConfig,
-    SyncConfig,
+    self, AiConfig, CompletionConfig, CompletionTabAccept, ContextConfig, EditorConfig,
+    PasteConfig, PromptConfig, SyncConfig,
 };
 use crate::context::{
     build_contextual_ai_prompt, is_dangerous_context_command, run_context_command,
@@ -130,12 +130,19 @@ pub struct AppState {
     pub sync_config: SyncConfig,
     pub pending_context: Option<PendingContextPrompt>,
     pub completion_panel: Vec<String>,
+    pub completion_inline: Option<InlineCompletion>,
     pub last_rendered_lines: usize,
     pub continuation_prompt: Option<String>,
     pub draft_from_editor: bool,
     pub draft_from_template: bool,
     pub ctrl_x_prefix: bool,
     pub clock: fn() -> i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InlineCompletion {
+    pub candidate: CompletionCandidate,
+    pub suffix: String,
 }
 
 impl Default for AppState {
@@ -172,6 +179,7 @@ impl Default for AppState {
             sync_config: SyncConfig::default(),
             pending_context: None,
             completion_panel: Vec::new(),
+            completion_inline: None,
             last_rendered_lines: 1,
             continuation_prompt: None,
             draft_from_editor: false,
@@ -334,6 +342,10 @@ impl AppState {
     }
 
     pub fn completion_candidates(&self) -> Result<Vec<CompletionCandidate>> {
+        self.completion_candidates_with_max_results(usize::MAX)
+    }
+
+    pub fn completion_panel_candidates(&self) -> Result<Vec<CompletionCandidate>> {
         self.completion_candidates_with_max_results(self.completion_config.max_results)
     }
 
@@ -372,6 +384,11 @@ impl AppState {
                 options,
             ))
         }
+    }
+
+    pub fn clear_completion_ui(&mut self) {
+        self.completion_panel.clear();
+        self.completion_inline = None;
     }
 
     pub fn apply_picker_selection(&mut self, value: &str, action: PickerAction) -> bool {
@@ -737,6 +754,7 @@ pub fn execute_draft(
     out: &mut impl Write,
     timeout: Duration,
 ) -> Result<()> {
+    state.clear_completion_ui();
     if state.pending_context.is_some() {
         writeln!(out, "context confirmation is pending; answer Y or n")?;
         state.mode = Mode::Draft;
@@ -1519,6 +1537,12 @@ fn write_status_report(state: &AppState, out: &mut impl Write) -> Result<()> {
         "completion.template_first={}",
         state.completion_config.template_first
     )?;
+    writeln!(out, "completion.inline={}", state.completion_config.inline)?;
+    writeln!(
+        out,
+        "completion.tab_accept={}",
+        state.completion_config.tab_accept.as_str()
+    )?;
     writeln!(out, "keybindings={}", default_keybindings().len())?;
     Ok(())
 }
@@ -1601,6 +1625,12 @@ fn write_config_report(state: &AppState, out: &mut impl Write) -> Result<()> {
         out,
         "completion.template_first={}",
         state.completion_config.template_first
+    )?;
+    writeln!(out, "completion.inline={}", state.completion_config.inline)?;
+    writeln!(
+        out,
+        "completion.tab_accept={}",
+        state.completion_config.tab_accept.as_str()
     )?;
     writeln!(out, "ai.model={}", config_value(&state.ai_config.model))?;
     writeln!(
@@ -2190,7 +2220,31 @@ fn update_completion_config(state: &mut AppState, out: &mut impl Write, args: &s
                 Ok(())
             })
         }
-        _ => writeln!(out, "usage: #completion max <count>").map_err(Into::into),
+        (Some("inline"), Some(value), None) => {
+            let Some(inline) = parse_on_off(value) else {
+                writeln!(out, "usage: #completion inline on|off")?;
+                return Ok(());
+            };
+            set_completion_config(state, out, |config| {
+                config.completion.inline = inline;
+                Ok(())
+            })
+        }
+        (Some("tab-accept"), Some(value), None) => {
+            let Some(tab_accept) = parse_completion_tab_accept(value) else {
+                writeln!(out, "usage: #completion tab-accept full|word")?;
+                return Ok(());
+            };
+            set_completion_config(state, out, |config| {
+                config.completion.tab_accept = tab_accept;
+                Ok(())
+            })
+        }
+        _ => writeln!(
+            out,
+            "usage: #completion max <count>|inline on|off|tab-accept full|word"
+        )
+        .map_err(Into::into),
     }
 }
 
@@ -2224,7 +2278,25 @@ fn write_completion_config(out: &mut impl Write, config: &CompletionConfig) -> R
     writeln!(out, "completion.max_results={}", config.max_results)?;
     writeln!(out, "completion.ignore_spaces={}", config.ignore_spaces)?;
     writeln!(out, "completion.template_first={}", config.template_first)?;
+    writeln!(out, "completion.inline={}", config.inline)?;
+    writeln!(out, "completion.tab_accept={}", config.tab_accept.as_str())?;
     Ok(())
+}
+
+fn parse_completion_tab_accept(value: &str) -> Option<CompletionTabAccept> {
+    match value {
+        "full" => Some(CompletionTabAccept::Full),
+        "word" => Some(CompletionTabAccept::Word),
+        _ => None,
+    }
+}
+
+fn parse_on_off(value: &str) -> Option<bool> {
+    match value {
+        "on" => Some(true),
+        "off" => Some(false),
+        _ => None,
+    }
 }
 
 fn parse_template_args(args: &str) -> Option<(&str, &str)> {
@@ -2545,12 +2617,14 @@ mod tests {
                 max_results: 2,
                 ignore_spaces: true,
                 template_first: true,
+                inline: true,
+                tab_accept: CompletionTabAccept::Full,
             },
             ..AppState::default()
         };
         state.draft.insert_str("git");
 
-        let candidates = state.completion_candidates().unwrap();
+        let candidates = state.completion_candidates_with_max_results(2).unwrap();
 
         assert_eq!(candidates.len(), 2);
         assert_eq!(candidates[0].display, "git-save");
@@ -2584,6 +2658,28 @@ mod tests {
             candidates[0].source,
             crate::completion::CompletionSource::Path
         );
+    }
+
+    #[test]
+    fn completion_candidates_split_discovery_from_panel_row_limit() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("alpha-one.txt"), "").unwrap();
+        std::fs::write(temp.path().join("alpha-two.txt"), "").unwrap();
+        let mut state = AppState {
+            current_cwd: Some(temp.path().to_path_buf()),
+            completion_config: CompletionConfig {
+                max_results: 1,
+                ..CompletionConfig::default()
+            },
+            ..AppState::default()
+        };
+        state.draft.insert_str("cat alpha-");
+
+        let all_candidates = state.completion_candidates().unwrap();
+        let panel_candidates = state.completion_panel_candidates().unwrap();
+
+        assert_eq!(all_candidates.len(), 2);
+        assert_eq!(panel_candidates.len(), 1);
     }
 
     #[test]
@@ -3818,11 +3914,21 @@ mod tests {
 
         for (line, expected) in [
             ("#completion max 2", "completion.max_results=2"),
+            ("#completion inline off", "completion.inline=false"),
+            ("#completion tab-accept word", "completion.tab_accept=word"),
             (
                 "#completion max 0",
                 "completion max results must be greater than 0",
             ),
             ("#completion max nope", "usage: #completion max <count>"),
+            (
+                "#completion inline maybe",
+                "usage: #completion inline on|off",
+            ),
+            (
+                "#completion tab-accept line",
+                "usage: #completion tab-accept full|word",
+            ),
         ] {
             state.draft.insert_str(line);
             let mut output = Vec::new();
@@ -3843,13 +3949,15 @@ mod tests {
         }
 
         assert_eq!(state.completion_config.max_results, 2);
+        assert!(!state.completion_config.inline);
         assert_eq!(
-            config::load_config(&config_path)
-                .unwrap()
-                .completion
-                .max_results,
-            2
+            state.completion_config.tab_accept,
+            CompletionTabAccept::Word
         );
+        let loaded = config::load_config(&config_path).unwrap().completion;
+        assert_eq!(loaded.max_results, 2);
+        assert!(!loaded.inline);
+        assert_eq!(loaded.tab_accept, CompletionTabAccept::Word);
     }
 
     #[test]
@@ -4631,6 +4739,8 @@ mod tests {
                 max_results: 8,
                 ignore_spaces: false,
                 template_first: true,
+                inline: false,
+                tab_accept: CompletionTabAccept::Word,
             },
             ai_config: AiConfig {
                 model: "gpt-test".to_string(),
@@ -4669,6 +4779,8 @@ mod tests {
         assert!(output.contains("completion.max_results=8"));
         assert!(output.contains("completion.ignore_spaces=false"));
         assert!(output.contains("completion.template_first=true"));
+        assert!(output.contains("completion.inline=false"));
+        assert!(output.contains("completion.tab_accept=word"));
         assert!(output.contains("ai.model=gpt-test"));
         assert!(output.contains("ai.base_url=https://example.invalid/v1"));
         assert!(output.contains("ai.env_key=OPENAI_API_KEY"));

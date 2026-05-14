@@ -80,6 +80,36 @@ fn tmux_common_shell_workflow_matches_zsh_backend_real_terminal_screen() {
 }
 
 #[test]
+fn tmux_inline_completion_matches_bash_backend_real_terminal_screen() {
+    if !Path::new("/bin/bash").exists() {
+        eprintln!("skipping bash inline completion tmux workflow: /bin/bash not found");
+        return;
+    }
+    let Some(captured) = run_tmux_script_with_env(
+        "inline_completion_backend_independent.sh",
+        &[("AISH_BACKEND_SHELL", "/bin/bash")],
+    ) else {
+        return;
+    };
+    assert_adjacent_output(&captured, "echo inline-history", "inline-history");
+}
+
+#[test]
+fn tmux_inline_completion_matches_zsh_backend_real_terminal_screen() {
+    if !Path::new("/bin/zsh").exists() {
+        eprintln!("skipping zsh inline completion tmux workflow: /bin/zsh not found");
+        return;
+    }
+    let Some(captured) = run_tmux_script_with_env(
+        "inline_completion_backend_independent.sh",
+        &[("AISH_BACKEND_SHELL", "/bin/zsh")],
+    ) else {
+        return;
+    };
+    assert_adjacent_output(&captured, "echo inline-history", "inline-history");
+}
+
+#[test]
 fn tmux_common_shell_workflow_matches_fish_backend_real_terminal_screen() {
     if !fish_backend_tests_enabled() {
         eprintln!("skipping fish backend tmux workflow: set AISH_TEST_FISH=1 to opt in");

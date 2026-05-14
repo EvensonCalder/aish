@@ -9,6 +9,8 @@ aish_spawn
 aish_send "#completion"
 aish_enter
 aish_expect "completion.max_results=5"
+aish_expect "completion.inline=true"
+aish_expect "completion.tab_accept=full"
 aish_wait_prompt
 
 aish_send "#completion max 2"
@@ -16,9 +18,31 @@ aish_enter
 aish_expect "completion.max_results=2"
 aish_wait_prompt
 
+aish_send "#completion inline off"
+aish_enter
+aish_expect "completion.inline=false"
+aish_wait_prompt
+
+aish_send "#completion inline on"
+aish_enter
+aish_expect "completion.inline=true"
+aish_wait_prompt
+
+aish_send "#completion tab-accept word"
+aish_enter
+aish_expect "completion.tab_accept=word"
+aish_wait_prompt
+
+aish_send "#completion tab-accept full"
+aish_enter
+aish_expect "completion.tab_accept=full"
+aish_wait_prompt
+
 aish_send "#config"
 aish_enter
 aish_expect "completion.max_results=2"
+aish_expect "completion.inline=true"
+aish_expect "completion.tab_accept=full"
 aish_wait_prompt
 
 aish_send "#completion max 0"
