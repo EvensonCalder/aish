@@ -45,8 +45,17 @@ This document describes the behavior implemented in the current codebase. It is 
 - Fish launch/event integration exists and is tested conditionally when fish is installed.
 - Command completion markers include exit status and cwd.
 - Command output is displayed as terminal protocol without Aish-added framing newlines.
+- In actual terminal use, a command's visible output appears directly below the submitted command line without an Aish-inserted blank line, and remains visible above the next prompt after redraw.
 - Failed commands are stored with exit status.
 - `clear`-style terminal output and mixed stdout/stderr redraw back to a visible prompt.
+
+## Terminal Acceptance
+
+- Byte-stream expect assertions are not sufficient for prompt/output regressions.
+- Output visibility regressions must be checked against final rendered terminal state, not only against text that appeared in raw PTY output at some point.
+- Persistent `tmux` screen-capture tests cover real terminal workflows where redraw or cursor motion could otherwise hide output.
+- Real interactive expect scenarios are serialized in the test runner because parallel terminal sessions can create scheduler and PTY races that do not represent single-user operation.
+- Unicode final-screen behavior is covered through `tmux` pane capture rather than Tcl/expect when expect's own Unicode handling is unstable.
 
 ## Continuation
 
@@ -201,6 +210,7 @@ This document describes the behavior implemented in the current codebase. It is 
 ## Human Required Tests
 
 - Run Aish interactively under Bash, Zsh, and Fish on a real terminal.
+- Manually verify `whoami`, repeated `whoami`, and `echo 123` show output directly under each submitted command with no extra blank line and no disappearing output.
 - Verify real `vim`/`nvim` foreground editing, suspend/resume, save/failure behavior, and terminal restoration.
 - Verify `ssh` passthrough to a local or test host, including password/key prompts and exit restoration.
 - Verify `less`, `top`/`htop`, `fzf`, and `tmux`/`screen` behavior in real alternate-screen terminals.
