@@ -33,6 +33,13 @@ aish_send "# explain truncation < printf 123456789"
 aish_enter
 aish_expect "context output truncated to 4 bytes"
 aish_wait_prompt
+
+aish_send "#log 10"
+aish_enter
+aish_expect "context command captured output"
+aish_expect "context output truncated"
+aish_wait_prompt
+
 aish_quit
 
 unset -nocomplain ::env(AISH_EXPECT_CONTEXT_KEY)
