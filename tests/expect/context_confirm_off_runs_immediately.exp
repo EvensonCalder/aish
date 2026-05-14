@@ -1,0 +1,49 @@
+#!/usr/bin/env expect
+# With #context confirm off, safe pseudo-pipe commands should run immediately
+# without showing the confirmation prompt.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set marker "/tmp/aish-context-confirm-off-[pid]-[clock clicks]"
+set ::env(AISH_EXPECT_CONTEXT_KEY) "test-key"
+
+aish_spawn
+
+aish_send "#base-url https://127.0.0.1:1/v1"
+aish_enter
+aish_expect "#base-url=https://127.0.0.1:1/v1/chat/completions"
+aish_wait_prompt
+
+aish_send "#env-key AISH_EXPECT_CONTEXT_KEY"
+aish_enter
+aish_expect "#env-key=AISH_EXPECT_CONTEXT_KEY"
+aish_wait_prompt
+
+aish_send "#context confirm off"
+aish_enter
+aish_expect "context.confirm=false"
+aish_wait_prompt
+
+aish_send "# explain this < touch $marker"
+aish_enter
+
+set old_timeout $timeout
+set timeout 1
+expect {
+    -ex "Run context command? \[Y/n\]" { puts stderr "unexpected context confirmation prompt"; exit 5 }
+    timeout {}
+    eof { puts stderr "eof while checking for unexpected confirmation prompt"; exit 5 }
+}
+set timeout $old_timeout
+
+if {![file exists $marker]} {
+    puts stderr "context command did not run immediately when confirmation was disabled"
+    exit 6
+}
+
+aish_wait_prompt
+aish_quit
+
+unset -nocomplain ::env(AISH_EXPECT_CONTEXT_KEY)
+file delete -force $marker

@@ -458,6 +458,11 @@ fn context_off_blocks_pseudopipe() {
 }
 
 #[test]
+fn context_confirm_off_runs_immediately() {
+    run_script("context_confirm_off_runs_immediately.exp");
+}
+
+#[test]
 fn context_dangerous_refusal() {
     run_script("context_dangerous_refusal.exp");
 }
