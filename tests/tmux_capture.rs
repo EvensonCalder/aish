@@ -77,6 +77,16 @@ fn tmux_mode_redraw_preserves_prior_output_and_shell_recovers() {
     assert_adjacent_output(&captured, "echo after-mode-redraw", "after-mode-redraw");
 }
 
+#[test]
+fn tmux_history_mode_executes_selected_command() {
+    let captured = run_tmux_script("history_mode_execute.sh");
+    assert!(
+        captured.contains("$ "),
+        "captured pane history did not show history prompt: {captured:?}"
+    );
+    assert_at_least_n_lines(&captured, "history-tmux-ok", 2);
+}
+
 fn run_tmux_script(name: &str) -> String {
     let _guard = TMUX_RUN_LOCK
         .lock()
@@ -119,5 +129,16 @@ fn assert_adjacent_output(captured: &str, command: &str, expected_output: &str) 
     }
     panic!(
         "expected {expected_output:?} immediately after {command:?}; captured pane was {captured:?}"
+    );
+}
+
+fn assert_at_least_n_lines(captured: &str, expected_line: &str, min_count: usize) {
+    let count = captured
+        .lines()
+        .filter(|line| *line == expected_line)
+        .count();
+    assert!(
+        count >= min_count,
+        "expected at least {min_count} {expected_line:?} lines, got {count}; captured pane was {captured:?}"
     );
 }

@@ -29,6 +29,7 @@ This document describes the behavior implemented in the current codebase. It is 
 - Cursor-only movement in read-only modes does not copy into draft.
 - `Esc` clears the draft and returns to draft mode.
 - Mode-switch redraw is validated with terminal pane capture: output visible before `$`/`%`/`>` cycling should remain visible, and the next command should execute normally after returning to draft mode.
+- History-mode execution is validated with terminal pane capture: a command selected from `$` mode should execute and produce visible output in the real terminal.
 
 ## Draft Editing
 
