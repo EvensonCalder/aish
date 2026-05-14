@@ -21,6 +21,16 @@ aish_enter
 aish_expect "completion.max_results=2"
 aish_wait_prompt
 
+aish_send "#completion max 0"
+aish_enter
+aish_expect "completion max results must be greater than 0"
+aish_wait_prompt
+
+aish_send "#config"
+aish_enter
+aish_expect "completion.max_results=2"
+aish_wait_prompt
+
 aish_send "cd /tmp && touch aish-complete-one.txt aish-complete-two.txt aish-complete-three.txt"
 aish_enter
 aish_wait_prompt
