@@ -50,6 +50,12 @@ fn tmux_completion_no_matches_panel_remains_usable() {
     assert_adjacent_output(&captured, "echo after-completion", "after-completion");
 }
 
+#[test]
+fn tmux_completion_right_accepts_first_and_executes() {
+    let captured = run_tmux_script("completion_right_accepts.sh");
+    assert_adjacent_output(&captured, "cat right-target.txt", "accepted-right");
+}
+
 fn run_tmux_script(name: &str) -> String {
     let _guard = TMUX_RUN_LOCK
         .lock()
