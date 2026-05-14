@@ -40,6 +40,16 @@ fn tmux_ctrl_l_clears_visible_screen_and_keeps_prompt_usable() {
     );
 }
 
+#[test]
+fn tmux_completion_no_matches_panel_remains_usable() {
+    let captured = run_tmux_script("completion_no_matches.sh");
+    assert!(
+        captured.contains("no completions"),
+        "captured pane history did not show no-completions panel: {captured:?}"
+    );
+    assert_adjacent_output(&captured, "echo after-completion", "after-completion");
+}
+
 fn run_tmux_script(name: &str) -> String {
     let _guard = TMUX_RUN_LOCK
         .lock()
