@@ -1,7 +1,14 @@
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
 const INTERACTIVE_ALLOWLIST: &[&str] = &[
     "vi", "vim", "nvim", "nano", "emacs", "hx", "helix", "kak", "less", "more", "man", "top",
-    "htop", "btop", "ssh", "mosh", "fzf", "tmux", "screen", "python", "python3", "node", "ipython",
-    "psql",
+    "htop", "btop", "ssh", "mosh", "sftp", "ftp", "telnet", "fzf", "tmux", "screen", "sh", "bash",
+    "zsh", "fish", "python", "python3", "ipython", "node", "psql", "mysql", "sqlite3", "irb",
+    "pry", "ruby", "php", "perl", "lua", "R", "gdb", "lldb", "gpg", "gpg2", "pinentry",
+];
+
+const STDIN_FOREGROUND_COMMANDS: &[&str] = &[
+    "cat", "grep", "egrep", "fgrep", "sed", "awk", "sort", "uniq", "wc", "tee", "base64", "openssl",
 ];
 
 pub fn is_interactive_passthrough_command(command: &str) -> bool {
@@ -24,8 +31,32 @@ pub fn interactive_command_name(command: &str) -> Option<String> {
                 index = skip_simple_wrapper(&words, index + 1);
             }
             name if INTERACTIVE_ALLOWLIST.contains(&name) => return Some(name.to_string()),
+            name if should_foreground_stdin_command(name, command) => {
+                return Some(name.to_string());
+            }
             _ => return None,
         }
+    }
+}
+
+pub fn passthrough_key_bytes(key: KeyEvent) -> Option<String> {
+    match (key.modifiers, key.code) {
+        (KeyModifiers::CONTROL, KeyCode::Char(ch)) if ch.is_ascii_alphabetic() => {
+            let code = (ch.to_ascii_lowercase() as u8) - b'a' + 1;
+            Some(char::from(code).to_string())
+        }
+        (KeyModifiers::ALT, KeyCode::Char(ch)) => Some(format!("\x1b{ch}")),
+        (_, KeyCode::Char(ch)) => Some(ch.to_string()),
+        (_, KeyCode::Enter) => Some("\r".to_string()),
+        (_, KeyCode::Tab) => Some("\t".to_string()),
+        (_, KeyCode::Backspace) => Some("\x7f".to_string()),
+        (_, KeyCode::Esc) => Some("\x1b".to_string()),
+        (_, KeyCode::Up) => Some("\x1b[A".to_string()),
+        (_, KeyCode::Down) => Some("\x1b[B".to_string()),
+        (_, KeyCode::Right) => Some("\x1b[C".to_string()),
+        (_, KeyCode::Left) => Some("\x1b[D".to_string()),
+        (_, KeyCode::Delete) => Some("\x1b[3~".to_string()),
+        _ => None,
     }
 }
 
@@ -143,6 +174,29 @@ fn basename(word: &str) -> String {
     word.rsplit('/').next().unwrap_or(word).to_string()
 }
 
+fn should_foreground_stdin_command(name: &str, command: &str) -> bool {
+    STDIN_FOREGROUND_COMMANDS.contains(&name) && !has_shell_control_syntax(command)
+}
+
+fn has_shell_control_syntax(input: &str) -> bool {
+    let mut quote = None;
+    let mut escaped = false;
+    for ch in input.chars() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match (quote, ch) {
+            (Some('"'), '\\') | (None, '\\') => escaped = true,
+            (Some(q), ch) if ch == q => quote = None,
+            (None, '\'' | '"') => quote = Some(ch),
+            (None, '|' | '&' | ';' | '<' | '>') => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
 fn shell_words(input: &str) -> Vec<String> {
     let mut words = Vec::new();
     let mut current = String::new();
@@ -190,6 +244,7 @@ mod tests {
             "top",
             "less README.md",
             "fzf",
+            "gpg",
             "python3",
             "node",
         ] {
@@ -230,12 +285,35 @@ mod tests {
     }
 
     #[test]
+    fn interactive_allowlist_matches_stdin_commands() {
+        for (command, expected) in [
+            ("cat README.md", "cat"),
+            ("grep needle", "grep"),
+            ("sed 's/a/b/'", "sed"),
+            ("awk '{ print }'", "awk"),
+        ] {
+            assert_eq!(
+                interactive_command_name(command),
+                Some(expected.to_string()),
+                "{command}"
+            );
+        }
+    }
+
+    #[test]
+    fn stdin_foreground_detection_skips_shell_control_syntax() {
+        assert_eq!(interactive_command_name("cat README.md | grep ok"), None);
+    }
+
+    #[test]
     fn interactive_allowlist_does_not_match_noninteractive_commands() {
         for command in [
             "echo vim",
-            "cat README.md",
             "git status",
             "printf 'less'",
+            "ls",
+            "make",
+            "unknown-repl",
             "VAR=value",
         ] {
             assert_eq!(interactive_command_name(command), None, "{command}");

@@ -1,6 +1,6 @@
 use std::path::Path;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::{env, ffi::OsString};
 
 use aish::pty::PtyBackend;
@@ -102,6 +102,35 @@ fn pty_backend_captures_failed_command_exit_status() {
 
     assert_eq!(result.exit_code, 1);
     assert!(result.output.trim().is_empty());
+}
+
+#[test]
+fn pty_backend_wait_callback_can_interrupt_long_running_commands() {
+    let _guard = pty_test_guard();
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+
+    let started = Instant::now();
+    let mut interrupted = false;
+    let result = backend
+        .run_command_with_wait_callback("sleep 30", Duration::from_secs(5), |backend| {
+            if !interrupted {
+                backend.write_raw("\x03")?;
+                interrupted = true;
+                return Ok(true);
+            }
+            Ok(false)
+        })
+        .unwrap();
+
+    assert!(interrupted);
+    assert!(started.elapsed() < Duration::from_secs(5));
+    assert_ne!(result.exit_code, 0);
+
+    let recovered = backend
+        .run_command("printf 'after-interrupt\\n'", Duration::from_secs(5))
+        .unwrap();
+    assert_eq!(recovered.exit_code, 0);
+    assert_eq!(recovered.output.trim(), "after-interrupt");
 }
 
 #[test]

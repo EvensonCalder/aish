@@ -6,6 +6,7 @@ use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
+use crossterm::event::{self, Event};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, is_raw_mode_enabled};
 
 use crate::ai::{normalize_chat_completions_url, request_ai_items};
@@ -42,7 +43,7 @@ use crate::picker::{
     template_picker_candidates,
 };
 use crate::pty::PtyBackend;
-use crate::shell_integration::is_interactive_passthrough_command;
+use crate::shell_integration::{is_interactive_passthrough_command, passthrough_key_bytes};
 use crate::sync::{
     GitCommandPlan, StartupSyncDecision, SyncFailureKind, SyncLock, SyncStepOutcome,
     classify_git_sync_step, conservative_sync_plan_for_existing_paths, init_repo_plan,
@@ -1222,7 +1223,11 @@ pub fn execute_draft(
         return Ok(());
     }
 
-    let result = backend.run_command(&command, timeout)?;
+    let result = backend.run_command_with_wait_callback(
+        &command,
+        timeout,
+        forward_terminal_input_to_backend,
+    )?;
     if !result.output.is_empty() {
         write_command_output(out, &result.output)?;
     }
@@ -1295,15 +1300,103 @@ fn run_foreground_interactive_command(
     if raw_mode_was_enabled {
         disable_raw_mode()?;
     }
-    let status = Command::new(shell)
+    let child = Command::new(shell)
         .args(&args)
         .current_dir(cwd)
-        .status()
+        .spawn()
         .with_context(|| format!("failed to run interactive command `{command}`"));
+    let status = match child {
+        Ok(mut child) => {
+            let _sigint_guard = SigintIgnoreGuard::ignore();
+            child
+                .wait()
+                .with_context(|| format!("failed to wait for interactive command `{command}`"))
+        }
+        Err(err) => Err(err),
+    };
     if raw_mode_was_enabled {
         enable_raw_mode()?;
     }
     Ok(status?.code().unwrap_or(1))
+}
+
+fn forward_terminal_input_to_backend(backend: &mut PtyBackend) -> Result<bool> {
+    if !is_raw_mode_enabled().unwrap_or(false) {
+        return Ok(false);
+    }
+
+    let mut marker_may_need_reissue = false;
+    while event::poll(Duration::from_millis(0))? {
+        match event::read()? {
+            Event::Key(key) => {
+                if matches!(
+                    (key.modifiers, key.code),
+                    (
+                        crossterm::event::KeyModifiers::CONTROL,
+                        crossterm::event::KeyCode::Char('c' | 'd')
+                    )
+                ) {
+                    marker_may_need_reissue = true;
+                }
+                if let Some(bytes) = passthrough_key_bytes(key) {
+                    backend.write_raw(&bytes)?;
+                }
+            }
+            Event::Paste(text) => {
+                backend.write_raw(&text)?;
+            }
+            Event::Resize(cols, rows) => {
+                backend.resize(crate::pty::pty_size(cols, rows))?;
+            }
+            _ => {}
+        }
+    }
+    Ok(marker_may_need_reissue)
+}
+
+#[cfg(unix)]
+struct SigintIgnoreGuard {
+    previous: SignalHandler,
+}
+
+#[cfg(unix)]
+type SignalHandler = usize;
+
+#[cfg(unix)]
+impl SigintIgnoreGuard {
+    fn ignore() -> Self {
+        unsafe extern "C" {
+            fn signal(signum: i32, handler: SignalHandler) -> SignalHandler;
+        }
+
+        const SIGINT: i32 = 2;
+        const SIG_IGN: SignalHandler = 1;
+
+        let previous = unsafe { signal(SIGINT, SIG_IGN) };
+        Self { previous }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for SigintIgnoreGuard {
+    fn drop(&mut self) {
+        unsafe extern "C" {
+            fn signal(signum: i32, handler: SignalHandler) -> SignalHandler;
+        }
+
+        const SIGINT: i32 = 2;
+        let _ = unsafe { signal(SIGINT, self.previous) };
+    }
+}
+
+#[cfg(not(unix))]
+struct SigintIgnoreGuard;
+
+#[cfg(not(unix))]
+impl SigintIgnoreGuard {
+    fn ignore() -> Self {
+        Self
+    }
 }
 
 fn foreground_shell_args(shell: &str, command: &str) -> Vec<String> {

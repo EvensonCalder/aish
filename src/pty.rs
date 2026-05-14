@@ -109,7 +109,8 @@ impl PtyBackend {
 
     fn initialize_shell(&mut self, launch: &ShellLaunch) -> Result<()> {
         self.write_raw(&launch.init_command)?;
-        let raw = self.read_until_ready(Duration::from_secs(5))?;
+        let mut on_wait = no_wait;
+        let raw = self.read_until_ready(Duration::from_secs(5), &mut on_wait)?;
         self.initial_cwd = parse_ready_cwd(&raw);
         let _ = self.drain_for(Duration::from_millis(150));
         Ok(())
@@ -198,24 +199,40 @@ impl PtyBackend {
     }
 
     pub fn run_command(&mut self, command: &str, timeout: Duration) -> Result<CommandResult> {
+        self.run_command_with_wait_callback(command, timeout, no_wait)
+    }
+
+    pub fn run_command_with_wait_callback<F>(
+        &mut self,
+        command: &str,
+        timeout: Duration,
+        mut on_wait: F,
+    ) -> Result<CommandResult>
+    where
+        F: FnMut(&mut Self) -> Result<bool>,
+    {
         if matches!(
             self.integration,
             ShellIntegration::ZshHooks | ShellIntegration::FishEvents
         ) {
             if self.integration == ShellIntegration::ZshHooks && command.contains('\n') {
-                return self.run_command_with_marker(command, timeout);
+                return self.run_command_with_marker(command, timeout, &mut on_wait);
             }
-            return self.run_command_with_shell_events(command, timeout);
+            return self.run_command_with_shell_events(command, timeout, &mut on_wait);
         }
 
-        self.run_command_with_marker(command, timeout)
+        self.run_command_with_marker(command, timeout, &mut on_wait)
     }
 
-    fn run_command_with_marker(
+    fn run_command_with_marker<F>(
         &mut self,
         command: &str,
         timeout: Duration,
-    ) -> Result<CommandResult> {
+        on_wait: &mut F,
+    ) -> Result<CommandResult>
+    where
+        F: FnMut(&mut Self) -> Result<bool>,
+    {
         let _ = self.drain_for(Duration::from_millis(25));
         let marker = next_marker();
         let start_command = start_marker_command(command);
@@ -231,7 +248,7 @@ impl PtyBackend {
         }
         self.write_raw(&marker_command)?;
 
-        let raw = self.read_until_marker(&marker, timeout)?;
+        let raw = self.read_until_marker(&marker, &marker_command, timeout, on_wait)?;
         let (output, exit_code, cwd, started_command) = parse_marker_output(&raw, &marker)?;
         let command_text = command.trim_end_matches('\n').to_string();
         Ok(CommandResult {
@@ -243,7 +260,16 @@ impl PtyBackend {
         })
     }
 
-    fn read_until_marker(&mut self, marker: &str, timeout: Duration) -> Result<String> {
+    fn read_until_marker<F>(
+        &mut self,
+        marker: &str,
+        recovery_marker_command: &str,
+        timeout: Duration,
+        on_wait: &mut F,
+    ) -> Result<String>
+    where
+        F: FnMut(&mut Self) -> Result<bool>,
+    {
         let deadline = Instant::now() + timeout;
         let mut data = Vec::new();
         loop {
@@ -260,24 +286,34 @@ impl PtyBackend {
                 .min(Duration::from_millis(50));
             match self.output.recv_timeout(remaining) {
                 Ok(chunk) => data.extend(chunk),
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if on_wait(self)? {
+                        std::thread::sleep(Duration::from_millis(100));
+                        self.write_raw("\n")?;
+                        self.write_raw(recovery_marker_command)?;
+                    }
+                }
                 Err(mpsc::RecvTimeoutError::Disconnected) => bail!("backend shell PTY closed"),
             }
         }
     }
 
-    fn run_command_with_shell_events(
+    fn run_command_with_shell_events<F>(
         &mut self,
         command: &str,
         timeout: Duration,
-    ) -> Result<CommandResult> {
+        on_wait: &mut F,
+    ) -> Result<CommandResult>
+    where
+        F: FnMut(&mut Self) -> Result<bool>,
+    {
         let _ = self.drain_for(Duration::from_millis(25));
         self.write_raw(command)?;
         if !command.ends_with('\n') {
             self.write_raw("\n")?;
         }
 
-        let raw = self.read_until_ready(timeout)?;
+        let raw = self.read_until_ready(timeout, on_wait)?;
         let parsed =
             parse_ready_status_output(&raw, self.integration == ShellIntegration::FishEvents)?;
         Ok(CommandResult {
@@ -289,7 +325,10 @@ impl PtyBackend {
         })
     }
 
-    fn read_until_ready(&mut self, timeout: Duration) -> Result<String> {
+    fn read_until_ready<F>(&mut self, timeout: Duration, on_wait: &mut F) -> Result<String>
+    where
+        F: FnMut(&mut Self) -> Result<bool>,
+    {
         let deadline = Instant::now() + timeout;
         let mut data = Vec::new();
         loop {
@@ -305,7 +344,9 @@ impl PtyBackend {
                 .min(Duration::from_millis(50));
             match self.output.recv_timeout(remaining) {
                 Ok(chunk) => data.extend(chunk),
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    let _ = on_wait(self)?;
+                }
                 Err(mpsc::RecvTimeoutError::Disconnected) => bail!("backend shell PTY closed"),
             }
         }
@@ -352,6 +393,10 @@ impl Drop for PtyBackend {
     fn drop(&mut self) {
         let _ = self.child.kill();
     }
+}
+
+fn no_wait(_: &mut PtyBackend) -> Result<bool> {
+    Ok(false)
 }
 
 fn next_marker() -> String {

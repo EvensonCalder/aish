@@ -18,12 +18,12 @@ git diff --check
 
 Current test inventory:
 
-- 370 library unit tests.
+- 372 library unit tests.
 - 23 draft execution integration tests.
 - 1 first-run integration test.
-- 30 tmux screen-capture integration tests.
+- 31 tmux screen-capture integration tests.
 - 9 of the tmux tests are manual-equivalent workflows that replaced deterministic rows from `MUNUAL_TESTS.md`: real-world shell commands, prompt editing keys, completion UX mechanics, private commands/notes, templates/editor/default home, AI/context/sync config, local sync, `less` passthrough smoke, and startup failure messages.
-- 7 active bash PTY integration tests.
+- 8 active bash PTY integration tests.
 - 2 active zsh PTY integration tests.
 - 2 opt-in fish PTY integration tests, gated by `AISH_TEST_FISH=1` until fish support is validated across macOS and Linux distributions.
 - 106 expect-driven end-to-end interactive scenarios.
@@ -84,7 +84,7 @@ Expect scenarios are the acceptance layer for user-visible terminal behavior. Th
 | Templates | `template_use_executes`, `template_crud`, `template_placeholder_blocks_execution`, `home_default_template_persists`, `tmux_manual_templates_editor_and_default_home_match_visible_terminal_behavior` | Covered | Add completion/template interaction if UI changes. |
 | Editor and paste flows | `external_editor_roundtrip`, `home_default_external_editor_roundtrip`, `external_editor_failure_preserves_draft`, `home_default_external_editor_failure_preserves_draft`, `tmux_manual_templates_editor_and_default_home_match_visible_terminal_behavior`, `tmux_editor_and_paste_review_render_cleanly`, `editor_hash_content_bypasses_parser`, `multiline_paste_editor_review`, `home_default_multiline_paste_editor_review` | Covered | Real OS clipboard and full-screen editor behavior remains human-only in `MUNUAL_TESTS.md`. |
 | Sync | `key_and_sync_placeholders`, `home_default_sync_config_persists`, `home_default_startup_sync_runs`, `home_default_startup_sync_unsupported_schedule`, `home_default_startup_sync_failure_logs`, `home_default_startup_sync_disabled_noops`, `home_default_sync_push_local_remote`, `sync_push_local_remote`, `sync_push_failure_logs`, `sync_push_conflict_logs`, `tmux_manual_ai_context_and_sync_config_match_visible_terminal_behavior`, `tmux_manual_sync_local_remote_matches_visible_terminal_behavior` | Covered | Real remote auth and human conflict review remain manual-only. |
-| Passthrough/interactive programs | `passthrough_less`, `tmux_manual_passthrough_less_recovers_prompt_when_available` when `less` is available, `tmux_python_repl_passthrough_recovers_prompt_when_available` when `python3` is available; key forwarding is Rust-covered | Partial | Broader real interactive programs remain human-only because alternate-screen and job-control behavior vary by environment. |
+| Passthrough/interactive programs | `passthrough_less`, `tmux_manual_passthrough_less_recovers_prompt_when_available` when `less` is available, `tmux_python_repl_passthrough_recovers_prompt_when_available` when `python3` is available, `tmux_stdin_and_gpg_like_passthrough_recovers_prompt`, backend interrupt recovery through `pty_backend_wait_callback_can_interrupt_long_running_commands`; key forwarding is Rust-covered | Partial | Broader real interactive programs remain human-only because alternate-screen and job-control behavior vary by environment. |
 | Encryption/GPG | `key_clear_removes_stored_key`, `home_default_key_clear_removes_stored_key`, `home_default_encrypt_placeholder_noops`, `key_and_sync_placeholders` | Partial | Add end-to-end fake GPG or test-key flow before claiming encryption completion. |
 
 ## Feature Coverage
@@ -368,7 +368,7 @@ Implemented:
 - Zsh hook integration has PTY coverage for `preexec` command-start reporting, `precmd` finish status, and cwd reporting after command execution when `/bin/zsh` is available.
 - Fish event integration has launch/unit coverage for `fish_preexec` and `fish_prompt` setup plus opt-in PTY coverage for command-start, finish status, cwd reporting, and command-token-like output preservation when `AISH_TEST_FISH=1` is set.
 - Allowlisted interactive commands can run in a foreground passthrough path with raw mode disabled; `less` has skip-safe expect coverage when available.
-- Interactive passthrough command allowlist detects common fullscreen/interactive commands, basenames, shell quoting, assignments, and wrappers such as `sudo`, `env`, `command`, and `exec` without changing runtime behavior yet.
+- Interactive passthrough command detection covers common fullscreen tools, REPLs, shells, stdin-oriented commands such as `gpg` and `cat`, basenames, shell quoting, assignments, and wrappers such as `sudo`, `env`, `command`, and `exec`.
 - Alternate-screen buffer detection tracks common enter/exit CSI sequences (`?47`, `?1047`, `?1049`) and ignores unrelated terminal styling escapes.
 - Passthrough prompt-return detection requires process exit and normal-screen state before Aish redraws its prompt after an interactive command.
 - Shell integration rollup is covered across bash marker integration, zsh hooks, opt-in fish events, foreground passthrough for allowlisted interactive commands, and local temporary git sync integration tests.

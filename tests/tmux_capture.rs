@@ -385,6 +385,16 @@ fn tmux_python_repl_passthrough_recovers_prompt_when_available() {
     assert_line_present(&captured, "after-python-repl");
 }
 
+#[test]
+fn tmux_stdin_and_gpg_like_passthrough_recovers_prompt() {
+    let Some(captured) = run_tmux_script("passthrough_stdin_recovery.sh") else {
+        return;
+    };
+    assert_line_present(&captured, "stdin-blocker-ready");
+    assert_line_present(&captured, "after-stdin-blocker");
+    assert_line_present(&captured, "after-gpg");
+}
+
 fn run_tmux_script(name: &str) -> Option<String> {
     run_tmux_script_with_env(name, &[])
 }

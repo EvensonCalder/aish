@@ -24,6 +24,7 @@ use crate::picker::{
     git_branch_picker_candidates, run_fzf_picker, shell_env_var_reference,
 };
 use crate::pty::{PtyBackend, pty_size};
+use crate::shell_integration::passthrough_key_bytes;
 use crate::templates::template_placeholder_spans;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -706,27 +707,6 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
             KeyAction::Continue
         }
         _ => KeyAction::Continue,
-    }
-}
-
-fn passthrough_key_bytes(key: KeyEvent) -> Option<String> {
-    match (key.modifiers, key.code) {
-        (KeyModifiers::CONTROL, KeyCode::Char(ch)) if ch.is_ascii_alphabetic() => {
-            let code = (ch.to_ascii_lowercase() as u8) - b'a' + 1;
-            Some(char::from(code).to_string())
-        }
-        (KeyModifiers::ALT, KeyCode::Char(ch)) => Some(format!("\x1b{ch}")),
-        (_, KeyCode::Char(ch)) => Some(ch.to_string()),
-        (_, KeyCode::Enter) => Some("\r".to_string()),
-        (_, KeyCode::Tab) => Some("\t".to_string()),
-        (_, KeyCode::Backspace) => Some("\x7f".to_string()),
-        (_, KeyCode::Esc) => Some("\x1b".to_string()),
-        (_, KeyCode::Up) => Some("\x1b[A".to_string()),
-        (_, KeyCode::Down) => Some("\x1b[B".to_string()),
-        (_, KeyCode::Right) => Some("\x1b[C".to_string()),
-        (_, KeyCode::Left) => Some("\x1b[D".to_string()),
-        (_, KeyCode::Delete) => Some("\x1b[3~".to_string()),
-        _ => None,
     }
 }
 
