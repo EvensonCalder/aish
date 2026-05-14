@@ -1,0 +1,17 @@
+#!/usr/bin/env expect
+# Right arrow at end-of-line should accept the first completion candidate rather
+# than only moving the cursor.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "cat Cargo.t"
+send -- "\u001b\[C"
+aish_expect "Cargo.toml"
+
+send -- "\x03"
+aish_wait_prompt
+
+aish_quit

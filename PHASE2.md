@@ -24,6 +24,10 @@ Current state:
 - Full automatic passthrough for arbitrary interactive/alternate-screen programs remains incomplete; allowlisted foreground passthrough exists.
 - Some documentation had become stale during implementation and must stay aligned with actual behavior as Phase 2 continues.
 - Fixed during Phase 2: `#completion` no longer reports the completion engine as unimplemented; it reports config and persists `#completion max <count>`.
+- New critical defect found in real manual use: backend shell output can disappear from the final visible screen in actual `zsh` terminal sessions even though earlier PTY/unit and expect-byte-stream tests passed.
+- Testing route correction: prompt/output regressions must be verified against final rendered terminal state; byte-stream-only expect assertions are not sufficient when later redraw clears or cursor motion can visually erase output.
+- Test-harness correction: real interactive expect scenarios must not run concurrently inside one test binary. Parallel terminal sessions produced false `no prompt`/SIGBUS failures and do not represent actual single-user terminal behavior.
+- Test-harness correction: Unicode final-screen behavior is covered through `tmux` pane capture instead of Tcl/expect when expect itself is unstable with the input encoding.
 
 ## Phase 2 Rules
 
@@ -31,6 +35,7 @@ Current state:
 - Do not mark a feature complete until the implementation, documentation, Rust tests, and expect tests agree.
 - Every user-visible behavior must have an expect scenario unless it is impossible to exercise through a portable terminal test; the reason must be documented.
 - Every bug found during Phase 2 must be recorded, fixed, and covered by a regression test at the highest practical layer.
+- When byte-stream expect tests are insufficient for a real bug, add persistent real-terminal capture coverage, such as `tmux` pane capture scripts, and treat that as the acceptance layer for the defect.
 - Useless tests should be replaced by tests that prove user-visible behavior, safety boundaries, persistence, or integration correctness.
 - Do not create scheduler files.
 - Do not rewrite git history, auto-resolve sync conflicts, or remove tracked files automatically.
@@ -121,6 +126,7 @@ Required tests:
 
 - Rust virtual-screen regressions for every redraw/framing fix.
 - Expect tests for visible output ordering after commands, editor returns, paste review, completion panels, and clears.
+- Add persistent `tmux`-driven scripts for actual-screen capture of prompt/output regressions that can escape byte-stream-only tests.
 
 ## Workstream 4: Keybindings And Pickers
 

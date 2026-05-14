@@ -12,13 +12,15 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 348 library unit tests.
+- 349 library unit tests.
 - 23 draft execution integration tests.
 - 1 first-run integration test.
+- 2 tmux screen-capture integration tests.
 - 7 active bash PTY integration tests.
 - 2 active zsh PTY integration tests.
 - 1 conditional fish PTY integration test.
 - 102 expect-driven end-to-end interactive scenarios.
+- Expect scenarios are serialized inside `expect_runner` because they launch real interactive terminals; parallel execution created false `no prompt` and Tcl/expect crash failures that did not match actual single-user operation.
 - Bash PTY startup records the backend shell's initial cwd so the first prompt matches the shell state before any command executes.
 - Backend PTY startup inherits Aish's current directory and can be resized so child commands such as `ls` see the real terminal width.
 - 0 doctests.
@@ -57,9 +59,9 @@ Expect scenarios are the acceptance layer for user-visible terminal behavior. Th
 | Basic command execution and prompt redraw | `basic_echo`, `output_visible_before_prompt`, `output_then_redraw_interactions`, `mixed_stdout_stderr_redraw` | Covered | Add new redraw stress cases only for observed regressions. |
 | Backend cwd and shell state | `cd_persists` | Covered | Add zsh/fish-specific end-to-end variants when portable. |
 | Shell continuation UX | `dquote_continuation`, `squote_continuation`, `backslash_continuation`, `ctrl_c_cancels_continuation`, `no_backend_ps2_leak` | Covered | Add heredoc-style continuation if it becomes user-facing. |
-| Prompt/control keys | `ctrl_l_clear_screen`, `readline_editing_keys`, `long_unicode_input`, `terminal_resize`, `escape_clears_draft`, `ctrl_x_unknown_chord_cancels`, `ctrl_d_exits`, `exit_command` | Covered | Add new prompt-control scenarios only for observed regressions. |
+| Prompt/control keys | `ctrl_l_clear_screen`, `readline_editing_keys`, `tmux_unicode_output_matches_real_terminal_screen`, `terminal_resize`, `escape_clears_draft`, `ctrl_x_unknown_chord_cancels`, `ctrl_d_exits`, `exit_command` | Covered | Add new prompt-control scenarios only for observed regressions. |
 | Mode switching and read-only behavior | `empty_tab_cycles_modes`, `history_mode_execute`, `history_persists_across_restarts`, `home_default_history_persists`, `home_default_history_trim_persists`, `draft_persists_across_restarts`, `home_default_draft_persists`, `read_only_edit_copies_to_draft`, `ai_mode_executes_sequence`, `home_default_ai_mode_executes_sequence`, `ai_mode_edit_copies_to_draft`, `home_default_ai_mode_edit_copies_to_draft`, `output_then_redraw_interactions` | Covered | Add more mode redraw regressions only for observed failures. |
-| Completion UI | `completion_accept_single`, `completion_panel_multiple`, `completion_no_matches_panel`, `completion_config_persists`, `completion_first_token_source_order`, `home_default_completion_ui`, `output_then_redraw_interactions` | Covered | Add completion-panel-after-output regression if observed. |
+| Completion UI | `completion_accept_single`, `completion_panel_multiple`, `completion_no_matches_panel`, `completion_right_accepts_first`, `completion_config_persists`, `completion_first_token_source_order`, `home_default_completion_ui`, `output_then_redraw_interactions` | Covered | Add completion-panel-after-output regression if observed. |
 | Picker cancellation UX | `history_picker_cancel_preserves_draft`, `home_default_history_picker_cancel_preserves_draft`, `file_picker_cancel_preserves_draft`, `home_default_file_picker_cancel_preserves_draft`, `template_picker_cancel_preserves_draft`, `home_default_template_picker_cancel_preserves_draft`, `git_branch_picker_cancel_preserves_draft`, `home_default_git_branch_picker_cancel_preserves_draft`, `env_var_picker_cancel_preserves_draft`, `home_default_env_var_picker_cancel_preserves_draft` | Covered | Add picker success-path expect scenarios only when picker replacement UI changes; Rust tests cover replacement logic. |
 | Private command UX and diagnostics | `first_run_doctor`, `home_default_first_run_doctor`, `home_default_config_persists`, `home_default_ai_key_source_redacts_secret`, `invalid_config_startup`, `home_default_invalid_config_startup`, `home_missing_fails_cleanly`, `aish_home_empty_uses_home`, `aish_home_relative_fails_cleanly`, `home_unwritable_fails_cleanly`, `home_path_with_spaces_works`, `home_aish_path_file_fails_cleanly`, `help_lists_commands`, `unknown_private_command`, `private_command_safe_failures`, `status_doctor_config`, `key_and_sync_placeholders`, `key_clear_removes_stored_key`, `ai_config_persists` | Covered | Add new safe-failure scenarios when new private commands are added. |
 | Notes, context, and logs | `notes_are_swallowed`, `home_default_notes_are_swallowed`, `context_config_persists`, `context_off_blocks_pseudopipe`, `context_confirm_off_runs_immediately`, `context_confirmation_skip`, `context_dangerous_refusal`, `context_dangerous_still_prompts_when_confirm_off`, `context_truncation_reports_limit`, `home_default_context_dangerous_refusal`, `log_shows_context_skip`, `home_default_event_log_persists` | Covered | Add new context scenarios only for observed regressions. |
@@ -353,12 +355,12 @@ Implemented:
 - Shell integration rollup is covered across bash marker integration, zsh hooks, fish events, foreground passthrough for allowlisted interactive commands, and local temporary git sync integration tests.
 - `#encrypt on` warns that existing plaintext may remain in git history and that Aish will not rewrite history automatically, while encryption remains otherwise unimplemented.
 - Dangerous context pseudo-pipe commands have expect coverage proving refusal skips execution and leaves the target file intact.
-- Prompt redraw after ordinary command output has both a Rust virtual-screen regression and an expect scenario requiring command output line termination before the next prompt.
+- Prompt redraw after ordinary command output has both a Rust virtual-screen regression and a real `tmux` pane-capture regression proving final visible shell output remains above the next prompt in actual use.
 - Command output followed by mode-switch redraw and unique completion acceptance has expect coverage through the real binary.
 - Manual `#push` sync has expect coverage against a local temporary bare git remote, including managed `.gitignore` push and no scheduler file creation.
 - Manual `#push` sync failure has expect coverage with a missing local remote, including visible failure output, event-log recording, and no scheduler file creation.
 - Representative private-command safe failures have expect coverage for invalid history/log/template/context/sync usage, followed by a backend command proving the session remains usable.
-- Long and Unicode input has expect coverage for UTF-8 command execution and Ctrl-A/Ctrl-E editing around emoji text.
+- Unicode command output has real `tmux` pane-capture coverage so UTF-8 behavior is checked against final visible terminal state without relying on Tcl/expect Unicode handling.
 - Terminal size has expect coverage proving startup outer terminal rows/columns propagate to backend child commands via `stty size`; runtime backend resize is covered by PTY integration.
 - `#key set` remains a placeholder, while `#key clear` removes the encrypted key file if present and logs the action without printing stored secret content.
 - `#completion` reports current completion config and persists `#completion max <count>`.

@@ -13,6 +13,9 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
+
+static EXPECT_RUN_LOCK: Mutex<()> = Mutex::new(());
 
 fn expect_bin() -> Option<PathBuf> {
     for candidate in [
@@ -37,6 +40,9 @@ fn aish_binary() -> PathBuf {
 }
 
 fn run_script(name: &str) {
+    let _guard = EXPECT_RUN_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let Some(expect) = expect_bin() else {
         eprintln!("skipping {name}: `expect` not installed");
         return;
@@ -255,6 +261,11 @@ fn completion_panel_multiple() {
 #[test]
 fn completion_no_matches_panel() {
     run_script("completion_no_matches_panel.exp");
+}
+
+#[test]
+fn completion_right_accepts_first() {
+    run_script("completion_right_accepts_first.exp");
 }
 
 #[test]
@@ -560,11 +571,6 @@ fn ai_config_persists() {
 #[test]
 fn readline_editing_keys() {
     run_script("readline_editing_keys.exp");
-}
-
-#[test]
-fn long_unicode_input() {
-    run_script("long_unicode_input.exp");
 }
 
 #[test]

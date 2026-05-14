@@ -94,6 +94,8 @@ Status as of the latest full review:
   - [x] paste events
   - [ ] PTY output events
   - [ ] timer/background events
+- [x] Fix real-terminal backend output visibility regressions that old expect byte-stream tests missed.
+- [x] Add persistent `tmux`-driven end-to-end screen-capture scripts for real terminal verification.
 - [x] Add redraw function for prompt/input line.
 - [x] Add `Ctrl-D` empty input exit.
 - [x] Add safe terminal cleanup guard.

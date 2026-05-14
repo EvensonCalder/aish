@@ -33,10 +33,13 @@ Required coverage rules:
 - Every keybinding that changes user-visible state must have expect coverage or a documented reason why it cannot be exercised outside a pure Rust terminal test.
 - Every prompt redraw path must be covered by a screen-level assertion, including command output followed by prompt redraw, clear-screen behavior, completion panels, mode switches, continuation prompts, and editor/paste returns.
 - Every PTY output framing fix must have a regression test proving output remains visible in the terminal, not just present in an internal string.
+- For prompt/output regressions, a screen-level assertion must validate final visible terminal state. Byte-stream assertions alone are insufficient when later redraw, clear, or cursor movement can visually erase already-emitted output.
 - Every backend shell integration change must have Rust PTY coverage and, where practical, an expect scenario through the real binary.
+- If a real manual-use bug is missed by existing expect-byte-stream tests, add a persistent real-terminal capture script, such as a `tmux`-driven pane capture workflow, and use that as the acceptance regression.
 - Every safety feature must have both a direct test and an end-to-end test for the user-visible behavior.
 - Every new bug fix must add a regression test that fails for the observed bug, preferably at the highest layer where the bug was visible to the user.
 - Expect scenarios must use isolated `AISH_HOME`, avoid network access, avoid persistent user-home side effects, and cleanly exit.
+- Expect scenarios that drive real interactive terminals should be serialized unless a scenario explicitly proves concurrent behavior. Parallel execution can introduce scheduler and terminal races that do not match normal user operation.
 
 The test suite should model real user workflows and edge cases, not just happy-path command strings.
 

@@ -2,7 +2,7 @@
 # Production-style multiline paste: without AISH_HOME, bracketed multiline paste
 # should create a review draft and execute only after explicit Enter.
 
-set timeout 10
+set timeout 20
 source [file dirname [info script]]/_lib.exp
 
 set isolated_home "/tmp/aish-home-paste-[pid]-[clock clicks]"

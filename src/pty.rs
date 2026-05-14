@@ -560,11 +560,20 @@ fn parse_ready_status_output(raw: &str) -> Result<HookCommandResult> {
     let exit_code = status
         .parse::<i32>()
         .context("invalid shell exit status in ready marker")?;
+    while output_lines.first().is_some_and(|line| line.is_empty()) {
+        output_lines.remove(0);
+    }
+    while output_lines.last().is_some_and(|line| line.is_empty()) {
+        output_lines.pop();
+    }
+    let output = if output_lines.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n", output_lines.join("\n"))
+    };
+
     Ok(HookCommandResult {
-        output: output_lines
-            .join("\n")
-            .trim_matches(['\r', '\n'])
-            .to_string(),
+        output,
         exit_code,
         cwd: cwd.to_string(),
         started_command,
@@ -790,12 +799,23 @@ mod tests {
         assert_eq!(
             parse_ready_status_output(&raw).unwrap(),
             HookCommandResult {
-                output: "hello".to_string(),
+                output: "hello\n".to_string(),
                 exit_code: 7,
                 cwd: "/tmp/aish".to_string(),
                 started_command: Some("echo hello".to_string()),
             }
         );
+    }
+
+    #[test]
+    fn parse_ready_status_output_preserves_user_output_line_breaks() {
+        let raw = format!(
+            "first\nsecond\n{START_MARKER}\tprintf first\\nsecond\\n\n{READY_MARKER}\t0\t/tmp/aish\n"
+        );
+
+        let parsed = parse_ready_status_output(&raw).unwrap();
+
+        assert_eq!(parsed.output, "first\nsecond\n");
     }
 
     #[test]
