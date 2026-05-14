@@ -355,7 +355,7 @@ Implemented:
 - Shell integration rollup is covered across bash marker integration, zsh hooks, fish events, foreground passthrough for allowlisted interactive commands, and local temporary git sync integration tests.
 - `#encrypt on` warns that existing plaintext may remain in git history and that Aish will not rewrite history automatically, while encryption remains otherwise unimplemented.
 - Dangerous context pseudo-pipe commands have expect coverage proving refusal skips execution and leaves the target file intact.
-- Prompt redraw after ordinary command output has both a Rust virtual-screen regression and a real `tmux` pane-capture regression proving final visible shell output remains above the next prompt in actual use.
+- Prompt redraw after ordinary command output has both a Rust virtual-screen regression and a real `tmux` pane-capture regression proving final visible shell output remains above the next prompt in actual use; the tmux scripts run the Cargo-provided `CARGO_BIN_EXE_aish` binary via `AISH_BIN` so they cannot accidentally validate a stale `target/debug/aish`.
 - Command output followed by mode-switch redraw and unique completion acceptance has expect coverage through the real binary.
 - Manual `#push` sync has expect coverage against a local temporary bare git remote, including managed `.gitignore` push and no scheduler file creation.
 - Manual `#push` sync failure has expect coverage with a missing local remote, including visible failure output, event-log recording, and no scheduler file creation.

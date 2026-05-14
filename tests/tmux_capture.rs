@@ -40,6 +40,7 @@ fn run_tmux_script(name: &str) -> String {
     let output = Command::new("sh")
         .arg(&script)
         .current_dir(&repo)
+        .env("AISH_BIN", env!("CARGO_BIN_EXE_aish"))
         .output()
         .expect("failed to launch tmux script");
 
