@@ -37,6 +37,11 @@ aish_enter
 aish_expect "usage: #context \[on|off|confirm on|confirm off|<bytes>\]"
 aish_wait_prompt
 
+aish_send "#completion max nope"
+aish_enter
+aish_expect "usage: #completion max <count>"
+aish_wait_prompt
+
 aish_send "#sync ai maybe"
 aish_enter
 aish_expect "usage: #sync ai|history|templates|drafts on|off"

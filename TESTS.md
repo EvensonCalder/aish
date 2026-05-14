@@ -305,8 +305,8 @@ Implemented:
 - Ordinary input is sent to shell.
 - Notes are recognized.
 - Private commands are recognized.
-- AI prompts are recognized as placeholders but not sent to AI yet.
-- AI prompts with context pseudo-pipe syntax are recognized as placeholders.
+- AI prompts are parsed and routed to the AI request pipeline.
+- AI prompts with context pseudo-pipe syntax are parsed and can execute controlled context collection.
 - Visual continuation lines for `#` prompts and `#mt` template creation can be normalized by a pure parser helper.
 - Context pseudo-pipe commands are not executed yet.
 - Unknown private commands are not sent to shell.
@@ -361,7 +361,7 @@ Implemented:
 - Long and Unicode input has expect coverage for UTF-8 command execution and Ctrl-A/Ctrl-E editing around emoji text.
 - Terminal size has expect coverage proving startup outer terminal rows/columns propagate to backend child commands via `stty size`; runtime backend resize is covered by PTY integration.
 - `#key set` remains a placeholder, while `#key clear` removes the encrypted key file if present and logs the action without printing stored secret content.
-- `#completion` remains a private-command placeholder, but the internal completion engine is active for draft completion display and acceptance.
+- `#completion` reports current completion config and persists `#completion max <count>`.
 - Completion has pure current-token detection helpers that handle first-token classification, non-first-token classification, quoted whitespace, escaped whitespace, cursor-in-line contexts, path-like tokens, and UTF-8 cursor snapping.
 - Completion has a pure path completion helper that reads matching file and directory candidates, preserves directory prefixes, sorts candidates, marks directories with trailing `/`, preserves opening quotes in replacements, and handles missing directories as no matches.
 - Completion has a pure first-token helper that returns template candidates before newest-first history commands before PATH executables, with per-source deduplication.
@@ -413,7 +413,7 @@ Implemented:
 - Template use copies rendered content to a protected template draft and blocks execution while placeholders remain unresolved.
 - Template draft editing treats unresolved placeholders as spans: outside Backspace/Delete removes the whole placeholder, while editing inside expands the draft to plain editable text.
 - Encryption and sync commands are recognized as placeholders but do not change files, encryption state, remotes, or run git commands yet.
-- `#context` reports that context collection is currently disabled/not implemented.
+- `#context` reports and persists current context configuration.
 - `#config` prints read-only runtime configuration and does not create missing storage files.
 - `#doctor` prints read-only diagnostics and does not create missing storage files.
 - `#doctor` includes shell/integration checks for backend shell, PTY, GPG, git, fzf, editor, AI config, and storage paths.
@@ -598,9 +598,9 @@ Status:
 
 Known gaps:
 
-- Most private commands from `SPEC.md` are still not implemented.
-- Continuation parsing is pure parser logic only; terminal multiline collection is not wired yet.
-- Context pseudo-pipe execution is not implemented.
+- Encryption/key-storage features remain intentionally incomplete until real GPG-backed flows are wired.
+- Key rebinding remains incomplete.
+- PTY output/timer event sources are still not modeled as independent central loop sources.
 
 ### Regular History Storage
 
@@ -729,10 +729,9 @@ Status:
 
 Known gaps:
 
-- No AI client yet.
-- No chat completions API usage yet.
-- No AI prompt execution pipeline yet.
-- AI browsing currently depends on pre-existing stored AI sessions; prompt-to-session generation is not implemented yet.
+- Direct AI prompts use the chat-completions request pipeline when configured.
+- Live network/provider behavior is intentionally not covered by automated tests.
+- GPG-backed secret fallback for AI credentials remains incomplete.
 
 ### JSONL Storage Helpers
 
