@@ -13,6 +13,11 @@
 log_user 0
 set ::env(NO_COLOR) "1"
 set ::env(TERM) "xterm-256color"
+# Expect scenarios create temporary git repositories; do not let a user's global
+# commit signing config make those local commits depend on GPG or pinentry.
+set ::env(GIT_CONFIG_COUNT) "1"
+set ::env(GIT_CONFIG_KEY_0) "commit.gpgsign"
+set ::env(GIT_CONFIG_VALUE_0) "false"
 
 # Pick an isolated AISH_HOME per spawn so concurrent runs do not collide.
 proc aish_new_home {} {

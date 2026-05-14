@@ -276,7 +276,8 @@ impl PtyBackend {
         }
 
         let raw = self.read_until_ready(timeout)?;
-        let parsed = parse_ready_status_output(&raw)?;
+        let parsed =
+            parse_ready_status_output(&raw, self.integration == ShellIntegration::FishEvents)?;
         Ok(CommandResult {
             command: command.trim_end_matches('\n').to_string(),
             started_command: parsed.started_command,
@@ -434,9 +435,9 @@ fn shell_launch(configured_shell: &str) -> ShellLaunch {
             ShellIntegration::ZshHooks,
         ),
         "fish" => (
-            vec!["--no-config".to_string()],
+            fish_launch_args(&program),
             format!(
-                "stty -echo; function __aish_preexec --on-event fish_preexec; printf '\n{START_MARKER}\\t%s\n' $argv[1]; end; function fish_prompt; printf '\n{READY_MARKER}\\t%s\\t%s\n' $status $PWD; end; function fish_right_prompt; end; fish_prompt\n"
+                "stty -echo; set -g fish_greeting; function fish_title; end; function __aish_preexec --on-event fish_preexec; printf '\n{START_MARKER}\\t%s\n' $argv[1]; end; function fish_prompt; printf '\n{READY_MARKER}\\t%s\\t%s\n' $status $PWD; end; function fish_right_prompt; end; function fish_mode_prompt; end; fish_prompt\n"
             ),
             ShellIntegration::FishEvents,
         ),
@@ -453,6 +454,25 @@ fn shell_launch(configured_shell: &str) -> ShellLaunch {
         init_command,
         integration,
     }
+}
+
+fn fish_launch_args(program: &str) -> Vec<String> {
+    let mut args = vec!["--no-config".to_string()];
+    if fish_supports_features(program, "no-query-term,no-mark-prompt") {
+        args.push("--features".to_string());
+        args.push("no-query-term,no-mark-prompt".to_string());
+    }
+    args
+}
+
+fn fish_supports_features(program: &str, features: &str) -> bool {
+    ProcessCommand::new(program)
+        .args(["--no-config", "--features", features, "-c", "true"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
 }
 
 fn shell_command_builder(launch: &ShellLaunch) -> CommandBuilder {
@@ -526,40 +546,58 @@ fn parse_ready_cwd(raw: &str) -> Option<String> {
     let prefix = format!("{READY_MARKER}\t");
     normalize_pty_newlines(raw)
         .lines()
-        .find_map(|line| line.strip_prefix(&prefix))
+        .find_map(|line| {
+            let cleaned = strip_terminal_control_sequences(line);
+            cleaned
+                .trim_start()
+                .strip_prefix(&prefix)
+                .map(str::to_string)
+        })
         .and_then(|rest| {
             let mut parts = rest.split('\t');
             let first = parts.next()?;
-            Some(parts.next().unwrap_or(first).to_string())
+            Some(
+                strip_terminal_control_sequences(parts.next().unwrap_or(first))
+                    .trim_end()
+                    .to_string(),
+            )
         })
         .filter(|cwd| !cwd.is_empty())
 }
 
-fn parse_ready_status_output(raw: &str) -> Result<HookCommandResult> {
+fn parse_ready_status_output(raw: &str, strip_terminal_repaint: bool) -> Result<HookCommandResult> {
     let raw = normalize_pty_newlines(raw);
     let mut ready_line = None;
     let mut started_command = None;
     let mut output_lines = Vec::new();
 
     for line in raw.lines() {
-        if let Some(command) = line.strip_prefix(&format!("{START_MARKER}\t")) {
+        let cleaned_marker_line = strip_terminal_control_sequences(line);
+        let marker_line = cleaned_marker_line.trim_start();
+        if let Some(command) = marker_line.strip_prefix(&format!("{START_MARKER}\t")) {
             started_command = Some(command.to_string());
             continue;
         }
-        if let Some(rest) = line.strip_prefix(&format!("{READY_MARKER}\t")) {
+        if let Some(rest) = marker_line.strip_prefix(&format!("{READY_MARKER}\t")) {
             ready_line = Some(rest.to_string());
             continue;
         }
-        output_lines.push(line);
+        output_lines.push(line.to_string());
     }
 
     let ready = ready_line.context("backend shell output did not contain ready marker")?;
     let (status, cwd) = ready
         .split_once('\t')
         .context("backend shell ready marker did not include cwd")?;
+    let status = strip_terminal_control_sequences(status);
+    let cwd = strip_terminal_control_sequences(cwd).trim_end().to_string();
     let exit_code = status
+        .trim()
         .parse::<i32>()
         .context("invalid shell exit status in ready marker")?;
+    if strip_terminal_repaint {
+        output_lines = clean_fish_repaint_lines(output_lines, started_command.as_deref());
+    }
     while output_lines.first().is_some_and(|line| line.is_empty()) {
         output_lines.remove(0);
     }
@@ -575,9 +613,174 @@ fn parse_ready_status_output(raw: &str) -> Result<HookCommandResult> {
     Ok(HookCommandResult {
         output,
         exit_code,
-        cwd: cwd.to_string(),
+        cwd,
         started_command,
     })
+}
+
+fn clean_fish_repaint_lines(
+    output_lines: Vec<String>,
+    started_command: Option<&str>,
+) -> Vec<String> {
+    let lines: Vec<(String, bool)> = output_lines
+        .into_iter()
+        .filter_map(|line| {
+            let had_terminal_control = contains_terminal_control(&line);
+            let cleaned = strip_terminal_control_sequences(&line);
+            let visible = cleaned.trim();
+            if visible.starts_with('\u{23ce}') {
+                return None;
+            }
+            if visible.is_empty() && had_terminal_control {
+                return None;
+            }
+            if let Some(command) = started_command {
+                if is_fish_repaint_echo_fragment(visible, command, had_terminal_control) {
+                    return None;
+                }
+            }
+            Some((cleaned.trim_end().to_string(), had_terminal_control))
+        })
+        .collect();
+
+    let mut deduped = Vec::new();
+    let mut index = 0;
+    while index < lines.len() {
+        let line = &lines[index].0;
+        let mut end = index + 1;
+        while end < lines.len() && lines[end].0 == *line {
+            end += 1;
+        }
+        let run = &lines[index..end];
+        if run.len() == 1 {
+            deduped.push(line.clone());
+        } else {
+            let normal_lines: Vec<String> = run
+                .iter()
+                .filter(|(_, had_terminal_control)| !*had_terminal_control)
+                .map(|(line, _)| line.clone())
+                .collect();
+            if normal_lines.is_empty() {
+                deduped.push(line.clone());
+            } else {
+                deduped.extend(normal_lines);
+            }
+        }
+        index = end;
+    }
+    deduped
+}
+
+fn is_fish_repaint_echo_fragment(line: &str, command: &str, had_terminal_control: bool) -> bool {
+    if line.is_empty() {
+        return false;
+    }
+    let line = line.trim_start_matches(['>', '=']).trim_start().trim_end();
+    if line.is_empty() {
+        return true;
+    }
+    line == command
+        || command.starts_with(line)
+        || shell_syntax_fragment(line)
+            && (command.ends_with(line) || command_contains_repaint_token(command, line))
+        || had_terminal_control && command_contains_repaint_token(command, line)
+}
+
+fn command_contains_repaint_token(command: &str, line: &str) -> bool {
+    if line.is_empty() {
+        return false;
+    }
+    if line
+        .chars()
+        .all(|ch| matches!(ch, ';' | '|' | '&' | '<' | '>'))
+    {
+        return command.contains(line);
+    }
+    let line = line.trim_matches(['\'', '"', ';']);
+    let tokens: Vec<&str> = command
+        .split(|ch: char| ch.is_whitespace() || matches!(ch, ';' | '|' | '&' | '<' | '>'))
+        .map(|part| part.trim_matches(['\'', '"']))
+        .filter(|part| !part.is_empty())
+        .collect();
+    if !line.contains(['\'', '"', '\\', ';', '|', '&', '<', '>']) {
+        return tokens
+            .iter()
+            .position(|part| *part == line)
+            .is_some_and(|index| index + 1 < tokens.len());
+    }
+    tokens.iter().any(|part| *part == line)
+}
+
+fn shell_syntax_fragment(line: &str) -> bool {
+    line.contains(['\'', '"', '\\', ';', '|', '&', '<', '>'])
+}
+
+fn contains_terminal_control(text: &str) -> bool {
+    text.as_bytes()
+        .iter()
+        .any(|byte| *byte == 0x1b || *byte < 0x20 && *byte != b'\t')
+}
+
+fn strip_terminal_control_sequences(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut output = String::new();
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            0x1b => {
+                index += 1;
+                if index >= bytes.len() {
+                    break;
+                }
+                match bytes[index] {
+                    b'[' => {
+                        index += 1;
+                        while index < bytes.len() {
+                            let byte = bytes[index];
+                            index += 1;
+                            if (0x40..=0x7e).contains(&byte) {
+                                break;
+                            }
+                        }
+                    }
+                    b']' | b'P' | b'^' | b'_' => {
+                        index += 1;
+                        while index < bytes.len() {
+                            if bytes[index] == 0x07 {
+                                index += 1;
+                                break;
+                            }
+                            if bytes[index] == 0x1b
+                                && index + 1 < bytes.len()
+                                && bytes[index + 1] == b'\\'
+                            {
+                                index += 2;
+                                break;
+                            }
+                            index += 1;
+                        }
+                    }
+                    b'(' | b')' | b'*' | b'+' => {
+                        index = (index + 2).min(bytes.len());
+                    }
+                    _ => {
+                        index += 1;
+                    }
+                }
+            }
+            byte if byte < 0x20 && byte != b'\t' => {
+                index += 1;
+            }
+            _ => {
+                let Some(ch) = text[index..].chars().next() else {
+                    break;
+                };
+                output.push(ch);
+                index += ch.len_utf8();
+            }
+        }
+    }
+    output
 }
 
 fn is_incomplete_shell_syntax(stderr: &str) -> bool {
@@ -683,7 +886,13 @@ mod tests {
         let launch = shell_launch("/usr/bin/fish");
 
         assert_eq!(launch.program, "/usr/bin/fish");
-        assert_eq!(launch.args, ["--no-config"]);
+        assert_eq!(launch.args.first().map(String::as_str), Some("--no-config"));
+        if launch.args.len() > 1 {
+            assert_eq!(
+                launch.args,
+                ["--no-config", "--features", "no-query-term,no-mark-prompt"]
+            );
+        }
         assert_eq!(launch.integration, ShellIntegration::FishEvents);
         assert!(launch.init_command.contains("--on-event fish_preexec"));
         assert!(launch.init_command.contains("function fish_prompt"));
@@ -743,6 +952,12 @@ mod tests {
     }
 
     #[test]
+    fn parser_strips_terminal_controls_from_ready_marker_cwd() {
+        let raw = format!("noise\r\n\x1b[K{READY_MARKER}\t0\t/tmp/aish\x1b[K\r\n");
+        assert_eq!(parse_ready_cwd(&raw).as_deref(), Some("/tmp/aish"));
+    }
+
+    #[test]
     fn parser_ignores_ready_marker_in_echoed_init_command() {
         let raw = format!(
             "stty -echo; printf '\\n{READY_MARKER}\\t%s\\n' \"$PWD\"\r\n{READY_MARKER}\t/tmp/aish\r\n"
@@ -797,7 +1012,7 @@ mod tests {
         let raw = format!("hello\n{START_MARKER}\techo hello\n{READY_MARKER}\t7\t/tmp/aish\n");
 
         assert_eq!(
-            parse_ready_status_output(&raw).unwrap(),
+            parse_ready_status_output(&raw, false).unwrap(),
             HookCommandResult {
                 output: "hello\n".to_string(),
                 exit_code: 7,
@@ -813,9 +1028,67 @@ mod tests {
             "first\nsecond\n{START_MARKER}\tprintf first\\nsecond\\n\n{READY_MARKER}\t0\t/tmp/aish\n"
         );
 
-        let parsed = parse_ready_status_output(&raw).unwrap();
+        let parsed = parse_ready_status_output(&raw, false).unwrap();
 
         assert_eq!(parsed.output, "first\nsecond\n");
+    }
+
+    #[test]
+    fn parse_ready_status_output_can_filter_fish_repaint_sequences() {
+        let raw = format!(
+            "{START_MARKER}\tprintf 'fish-ok\\n'\n\
+             printf \n\
+             \x1b[50C\x1b[?2004l\x1b[?2031l\x1b[>4;0m\x1b>'fish-ok\\n'\n\
+             \x1b[61C\x1b[18Dprintf 'fish-ok\\n'\n\
+             \x1b[61C\n\
+             \x1b[m\n\
+             \x1b]0;printf 'fish-ok\\n' ~/aish\x07\x1b[m\n\
+             fish-ok\n\
+             \x1b[?25h\x1b[2m\u{23ce}\x1b[m\n\
+             \u{23ce} \n\
+             \x1b[K\x1b]0;~/aish\x07\x1b[m\x1b[?2004h\x1b[?2031h\x1b[>4;1m\x1b=\x1b[K\n\
+             \x1b[43C\n\
+             {READY_MARKER}\t0\t/tmp/aish\n"
+        );
+
+        let parsed = parse_ready_status_output(&raw, true).unwrap();
+
+        assert_eq!(parsed.output, "fish-ok\n");
+        assert_eq!(
+            parsed.started_command.as_deref(),
+            Some("printf 'fish-ok\\n'")
+        );
+    }
+
+    #[test]
+    fn fish_repaint_filter_preserves_plain_output_matching_command_suffix() {
+        let raw = format!(
+            "{START_MARKER}\tcat common/items.txt | grep beta\n\
+             \x1b[50Ccommon/items.txt\n\
+             \x1b[50C|\n\
+             \x1b[50Cgrep\n\
+             \x1b[50Cbeta\n\
+             beta\n\
+             {READY_MARKER}\t0\t/tmp/aish\n"
+        );
+
+        let parsed = parse_ready_status_output(&raw, true).unwrap();
+
+        assert_eq!(parsed.output, "beta\n");
+    }
+
+    #[test]
+    fn fish_repaint_filter_removes_semicolon_command_fragments() {
+        let raw = format!(
+            "{START_MARKER}\ttest -f c/i; and echo file-exists\n\
+             c/i;\n\
+             file-exists\n\
+             {READY_MARKER}\t0\t/tmp/aish\n"
+        );
+
+        let parsed = parse_ready_status_output(&raw, true).unwrap();
+
+        assert_eq!(parsed.output, "file-exists\n");
     }
 
     #[test]

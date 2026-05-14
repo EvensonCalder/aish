@@ -21,5 +21,9 @@ sleep 2
 CAPTURE="$(tmux capture-pane -p -t "$SESSION")"
 printf '%s\n' "$CAPTURE"
 
-printf '%s\n' "$CAPTURE" | rg -q "^${EXPECTED_USER}$"
+count="$(printf '%s\n' "$CAPTURE" | rg -c "^${EXPECTED_USER}$")"
+if [ "$count" -lt 2 ]; then
+    printf 'expected repeated whoami output at least twice, got %s\n' "$count" >&2
+    exit 1
+fi
 printf '%s\n' "$CAPTURE" | rg -q '^123$'

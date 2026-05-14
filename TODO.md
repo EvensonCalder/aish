@@ -681,9 +681,10 @@ Status: direct AI prompts are wired to the chat-completions request path using c
   - [x] `preexec`
   - [x] cwd reporting
   - [x] surface command-start events beyond output filtering
-- [x] Fish integration:
+- [ ] Fish integration:
   - [x] prompt/event functions
   - [x] cwd reporting
+  - [ ] Promote fish from opt-in experimental support only after validation across macOS and representative Linux distributions.
 - [x] Detect interactive commands for passthrough:
   - [x] command allowlist
   - [x] alternate screen buffer detection
@@ -773,6 +774,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 - [x] AI JSON schema parsing.
 - [x] URL normalization.
 - [x] Keybinding resolution.
+- [x] GPG fake command-boundary flow.
 
 ### Integration tests
 
@@ -783,13 +785,14 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 - [x] AI mode read-only behavior.
 - [x] External editor roundtrip using a fake editor script.
 - [x] Multi-line paste editor-review flow.
-- [x] GPG fake command flow.
 - [x] Git sync in temporary repo.
 
 ### Expect end-to-end tests
 
 - [x] Add an `expect` runner that launches the built `aish` binary with isolated `AISH_HOME`.
 - [x] Cover basic command execution and prompt return.
+- [x] Cover common shell workflows with redirection, pipes, quoting, exports, file tests, failures, and recovery.
+- [x] Cover backend-specific tmux common workflows for bash and zsh by default, with fish coverage kept opt-in through `AISH_TEST_FISH=1`.
 - [x] Cover persistent backend cwd with `cd /tmp` followed by `pwd`.
 - [x] Cover empty `Tab` mode cycling through draft/history/AI prompts.
 - [x] Cover `#help`, unknown private commands, `#exit`, and empty `Ctrl-D` exit.
@@ -825,7 +828,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 - [x] Add expect coverage for command output followed by completion/redraw/mode switches.
 - [x] Add expect coverage for sync success/failure using local temporary git remotes.
 - [x] Add expect coverage for representative safe failure paths for all private commands.
-- [x] Add expect coverage for long/Unicode input workflows.
+- [x] Add terminal coverage for long/Unicode input workflows.
 - [x] Add expect coverage for terminal resize workflows.
 - [x] Add expect coverage for passthrough candidates where portable in CI (`less`, `fzf` fallback, simple TUI fixture).
 
@@ -903,7 +906,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 
 ### v1.0: hardening
 
-- Bash/Zsh/Fish shell integration.
+- Bash/Zsh shell integration; Fish only after cross-platform validation.
 - Robust passthrough detection.
 - Safety test coverage.
 - Documentation.
@@ -1026,3 +1029,53 @@ enum AiItemKind {
 - The full verification set passes before Phase 2 implementation commits.
 - No known Phase 2 issue remains unrecorded.
 - No completed Phase 2 item lacks meaningful Rust and expect coverage where practical.
+
+---
+
+## Phase 28: Inline completion UX
+
+Status: planned for the next completion UX pass. Current v0.1.0 completion still uses simple panel display plus direct first-candidate acceptance; inline ghost suggestions and width-aware panel rows are not implemented yet.
+
+### Tasks
+
+- [ ] Add completion config fields:
+  - [ ] `completion.inline = true` by default.
+  - [ ] `completion.tab_accept = "full"` by default.
+  - [ ] Valid `completion.tab_accept` values are `"full"` and `"word"`.
+- [ ] Normalize invalid or empty completion config values without silently accepting unsupported modes.
+- [ ] Persist and report inline completion settings through `#completion`, `#config`, and `#status`.
+- [ ] Add private commands:
+  - [ ] `#completion inline on|off`
+  - [ ] `#completion tab-accept full|word`
+- [ ] Split completion candidate discovery from panel row limiting so `completion.max_results` controls only below-prompt row count.
+- [ ] Track the current inline suggestion separately from the draft buffer, cursor, history, persisted draft, and below-prompt panel state.
+- [ ] Render the highest-ranked completion candidate as an inline ghost suffix in dim or light text when inline completion is enabled.
+- [ ] Ensure editing, cursor movement, mode switching, prompt redraw, and command execution clear stale inline suggestions.
+- [ ] Make `Tab` accept the inline suggestion when inline completion is enabled.
+- [ ] Preserve legacy first-candidate acceptance when inline completion is disabled.
+- [ ] Implement `completion.tab_accept = "full"` to accept the complete untyped suffix.
+- [ ] Implement `completion.tab_accept = "word"` to accept only through the next whitespace boundary in the untyped suffix, or the full suffix when no boundary remains.
+- [ ] Keep `Right` at end-of-line aligned with the configured inline accept amount; keep `Right` inside the line as ordinary cursor movement.
+- [ ] Render below-prompt candidate rows within the current terminal width without wrapping.
+- [ ] Use the user's current command text as the overlap anchor for panel rows, show as much untyped candidate text as possible, and elide right-edge overflow with ASCII `...`.
+
+### Required tests
+
+- [ ] Config default, roundtrip, normalization, and invalid-value tests for `completion.inline` and `completion.tab_accept`.
+- [ ] Private-command tests proving `#completion inline on|off` and `#completion tab-accept full|word` persist, report, and reject invalid input without changing config.
+- [ ] Pure completion tests for computing an inline suffix from history, templates, executables, paths, and non-first-token arguments.
+- [ ] Pure acceptance tests for full-suggestion and word-boundary acceptance, including quoted arguments and candidates with spaces.
+- [ ] Terminal rendering tests proving the inline ghost is display-only, uses subdued styling, does not move the real cursor, and does not mutate draft text.
+- [ ] Terminal state tests proving stale inline suggestions clear after editing, cursor movement, mode changes, command execution, and no-match completion.
+- [ ] Panel rendering tests for `completion.max_results`, narrow terminal widths, overlap anchoring, source labels, no wrapping, and `...` elision.
+- [ ] Expect scenarios for inline visibility, disabled legacy mode, `Tab` full accept, `Tab` word accept, `Right` accept at end-of-line, and `Right` cursor movement inside a line.
+- [ ] Tmux screen-capture tests for narrow-width panel elision and no-wrap behavior in a real terminal.
+- [ ] Backend independence coverage for bash and zsh by default, plus opt-in fish coverage after cross-platform validation, proving inline completion behavior is owned by Aish and not by backend-shell completion.
+
+### Acceptance criteria
+
+- Inline suggestions behave like fish-style ghost text: visible enough to guide the user, but never part of the command until accepted.
+- `completion.max_results` controls only the below-prompt panel row count.
+- `Tab` acceptance is predictable and configurable between full-suggestion and next-word behavior.
+- The below-prompt panel remains readable in narrow terminals and never wraps candidate rows.
+- The feature passes pure Rust, expect, and tmux coverage before any Phase 28 checklist item is marked complete.

@@ -1,0 +1,56 @@
+#!/usr/bin/env expect
+# Common shell workflows should pass through Aish unchanged and leave the
+# backend shell usable after both successful and failed commands.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "cd $::env(AISH_HOME)"
+aish_enter
+aish_wait_prompt
+
+aish_send {mkdir -p common && printf 'alpha\nbeta\n' > common/items.txt}
+aish_enter
+aish_wait_prompt
+
+aish_send {cat common/items.txt | grep beta}
+aish_enter
+aish_expect "beta"
+aish_wait_prompt
+
+aish_send {printf 'quoted:%s\n' "value with spaces"}
+aish_enter
+aish_expect "quoted:value with spaces"
+aish_wait_prompt
+
+aish_send {export AISH_COMMON_VALUE=visible}
+aish_enter
+aish_wait_prompt
+
+aish_send {printf 'env:%s\n' "$AISH_COMMON_VALUE"}
+aish_enter
+aish_expect "env:visible"
+aish_wait_prompt
+
+aish_send {test -f common/items.txt && echo file-exists}
+aish_enter
+aish_expect "file-exists"
+aish_wait_prompt
+
+aish_send "false"
+aish_enter
+aish_wait_prompt
+
+aish_send "#status"
+aish_enter
+aish_expect "last_status=1"
+aish_wait_prompt
+
+aish_send "echo after-failure"
+aish_enter
+aish_expect "after-failure"
+aish_wait_prompt
+
+aish_quit

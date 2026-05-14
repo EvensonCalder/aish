@@ -221,6 +221,10 @@ fn zsh_pty_backend_keeps_user_commands_but_not_aish_internal_markers_in_history(
 #[test]
 fn fish_pty_backend_runs_commands_and_reports_cwd_when_available() {
     let _guard = pty_test_guard();
+    if !fish_backend_tests_enabled() {
+        eprintln!("skipping fish PTY backend test: set AISH_TEST_FISH=1 to opt in");
+        return;
+    }
     let Some(fish) = find_shell(&[
         "/opt/homebrew/bin/fish",
         "/usr/local/bin/fish",
@@ -255,9 +259,69 @@ fn fish_pty_backend_runs_commands_and_reports_cwd_when_available() {
     assert_eq!(pwd.output.trim(), "/tmp");
 }
 
+#[test]
+fn fish_pty_backend_preserves_output_that_matches_command_tokens_when_available() {
+    let _guard = pty_test_guard();
+    if !fish_backend_tests_enabled() {
+        eprintln!("skipping fish PTY backend test: set AISH_TEST_FISH=1 to opt in");
+        return;
+    }
+    let Some(fish) = find_shell(&[
+        "/opt/homebrew/bin/fish",
+        "/usr/local/bin/fish",
+        "/usr/bin/fish",
+        "/bin/fish",
+    ]) else {
+        return;
+    };
+
+    let temp = tempfile::Builder::new()
+        .prefix("aish-fish-")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let mut backend = PtyBackend::spawn(fish).unwrap();
+    let cd = backend
+        .run_command(
+            &format!("cd {}", temp.path().display()),
+            Duration::from_secs(5),
+        )
+        .unwrap();
+    assert_eq!(cd.exit_code, 0);
+
+    let setup = backend
+        .run_command(
+            "mkdir -p c; printf 'alpha\\nbeta\\n' > c/i",
+            Duration::from_secs(5),
+        )
+        .unwrap();
+    assert_eq!(setup.exit_code, 0);
+
+    let grep = backend
+        .run_command("cat c/i | grep beta", Duration::from_secs(5))
+        .unwrap();
+    assert_eq!(grep.exit_code, 0);
+    assert_eq!(grep.output.trim(), "beta", "{grep:?}");
+
+    let file_test = backend
+        .run_command("test -f c/i; and echo file-exists", Duration::from_secs(5))
+        .unwrap();
+    assert_eq!(file_test.exit_code, 0);
+    assert_eq!(file_test.output.trim(), "file-exists", "{file_test:?}");
+
+    let echo = backend
+        .run_command("echo after-failure", Duration::from_secs(5))
+        .unwrap();
+    assert_eq!(echo.exit_code, 0);
+    assert_eq!(echo.output.trim(), "after-failure", "{echo:?}");
+}
+
 fn find_shell(candidates: &[&'static str]) -> Option<&'static str> {
     candidates
         .iter()
         .copied()
         .find(|candidate| Path::new(candidate).exists())
+}
+
+fn fish_backend_tests_enabled() -> bool {
+    env::var_os("AISH_TEST_FISH").is_some()
 }

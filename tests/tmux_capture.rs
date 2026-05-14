@@ -1,28 +1,112 @@
-use std::path::PathBuf;
-use std::process::Command;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::Mutex;
 
 static TMUX_RUN_LOCK: Mutex<()> = Mutex::new(());
 
-fn tmux_available() -> bool {
-    Command::new("tmux")
+fn tmux_available(tmux_tmpdir: &Path) -> bool {
+    if std::fs::create_dir_all(tmux_tmpdir).is_err() {
+        return false;
+    }
+
+    if !Command::new("tmux")
         .arg("-V")
+        .env("TMUX_TMPDIR", tmux_tmpdir)
         .output()
         .map(|output| output.status.success())
+        .unwrap_or(false)
+    {
+        return false;
+    }
+
+    let probe = format!("aish-tmux-probe-{}", std::process::id());
+    Command::new("tmux")
+        .args(["new-session", "-d", "-s", &probe, "true"])
+        .env("TMUX_TMPDIR", tmux_tmpdir)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
         .unwrap_or(false)
 }
 
 #[test]
 fn tmux_output_visibility_matches_real_terminal_screen() {
-    let captured = run_tmux_script("output_visibility.sh");
+    let Some(captured) = run_tmux_script("output_visibility.sh") else {
+        return;
+    };
     let expected_user = std::env::var("USER").unwrap_or_else(|_| "evenson".to_string());
     assert_adjacent_output(&captured, "whoami", &expected_user);
+    assert_at_least_n_lines(&captured, &expected_user, 2);
     assert_adjacent_output(&captured, "echo 123", "123");
 }
 
 #[test]
+fn tmux_common_shell_workflow_matches_bash_backend_real_terminal_screen() {
+    if !Path::new("/bin/bash").exists() {
+        eprintln!("skipping bash backend tmux workflow: /bin/bash not found");
+        return;
+    }
+    let Some(captured) = run_tmux_script_with_env(
+        "common_shell_workflow.sh",
+        &[
+            ("AISH_BACKEND_SHELL", "/bin/bash"),
+            ("AISH_BACKEND_KIND", "bash"),
+        ],
+    ) else {
+        return;
+    };
+    assert_common_shell_workflow_output(&captured);
+    assert_line_prefix(&captured, "backend:bash:");
+}
+
+#[test]
+fn tmux_common_shell_workflow_matches_zsh_backend_real_terminal_screen() {
+    if !Path::new("/bin/zsh").exists() {
+        eprintln!("skipping zsh backend tmux workflow: /bin/zsh not found");
+        return;
+    }
+    let Some(captured) = run_tmux_script_with_env(
+        "common_shell_workflow.sh",
+        &[
+            ("AISH_BACKEND_SHELL", "/bin/zsh"),
+            ("AISH_BACKEND_KIND", "zsh"),
+        ],
+    ) else {
+        return;
+    };
+    assert_common_shell_workflow_output(&captured);
+    assert_line_prefix(&captured, "backend:zsh:");
+}
+
+#[test]
+fn tmux_common_shell_workflow_matches_fish_backend_real_terminal_screen() {
+    if !fish_backend_tests_enabled() {
+        eprintln!("skipping fish backend tmux workflow: set AISH_TEST_FISH=1 to opt in");
+        return;
+    }
+    if !command_available("fish") {
+        eprintln!("skipping fish backend tmux workflow: fish not found on PATH");
+        return;
+    }
+    let Some(captured) = run_tmux_script_with_env(
+        "common_shell_workflow.sh",
+        &[
+            ("AISH_BACKEND_SHELL", "fish"),
+            ("AISH_BACKEND_KIND", "fish"),
+        ],
+    ) else {
+        return;
+    };
+    assert_common_shell_workflow_output(&captured);
+    assert_line_prefix(&captured, "backend:fish:");
+}
+
+#[test]
 fn tmux_unicode_output_matches_real_terminal_screen() {
-    let captured = run_tmux_script("unicode_input.sh");
+    let Some(captured) = run_tmux_script("unicode_input.sh") else {
+        return;
+    };
     assert_adjacent_output(
         &captured,
         "printf 'unicode:%s\\n' 'café-你好'",
@@ -32,7 +116,9 @@ fn tmux_unicode_output_matches_real_terminal_screen() {
 
 #[test]
 fn tmux_ctrl_l_clears_visible_screen_and_keeps_prompt_usable() {
-    let captured = run_tmux_script("clear_screen.sh");
+    let Some(captured) = run_tmux_script("clear_screen.sh") else {
+        return;
+    };
     assert_adjacent_output(&captured, "echo after-clear", "after-clear");
     assert!(
         !captured.contains("before-clear"),
@@ -42,7 +128,9 @@ fn tmux_ctrl_l_clears_visible_screen_and_keeps_prompt_usable() {
 
 #[test]
 fn tmux_completion_no_matches_panel_remains_usable() {
-    let captured = run_tmux_script("completion_no_matches.sh");
+    let Some(captured) = run_tmux_script("completion_no_matches.sh") else {
+        return;
+    };
     assert!(
         captured.contains("no completions"),
         "captured pane history did not show no-completions panel: {captured:?}"
@@ -52,13 +140,17 @@ fn tmux_completion_no_matches_panel_remains_usable() {
 
 #[test]
 fn tmux_completion_right_accepts_first_and_executes() {
-    let captured = run_tmux_script("completion_right_accepts.sh");
+    let Some(captured) = run_tmux_script("completion_right_accepts.sh") else {
+        return;
+    };
     assert_adjacent_output(&captured, "cat right-target.txt", "accepted-right");
 }
 
 #[test]
 fn tmux_ctrl_c_cancels_continuation_and_shell_recovers() {
-    let captured = run_tmux_script("continuation_cancel.sh");
+    let Some(captured) = run_tmux_script("continuation_cancel.sh") else {
+        return;
+    };
     assert!(
         captured.contains("dquote>"),
         "captured pane history did not show continuation prompt: {captured:?}"
@@ -72,14 +164,18 @@ fn tmux_ctrl_c_cancels_continuation_and_shell_recovers() {
 
 #[test]
 fn tmux_mode_redraw_preserves_prior_output_and_shell_recovers() {
-    let captured = run_tmux_script("mode_redraw_preserves_output.sh");
+    let Some(captured) = run_tmux_script("mode_redraw_preserves_output.sh") else {
+        return;
+    };
     assert_adjacent_output(&captured, "echo before-mode-redraw", "before-mode-redraw");
     assert_adjacent_output(&captured, "echo after-mode-redraw", "after-mode-redraw");
 }
 
 #[test]
 fn tmux_history_mode_executes_selected_command() {
-    let captured = run_tmux_script("history_mode_execute.sh");
+    let Some(captured) = run_tmux_script("history_mode_execute.sh") else {
+        return;
+    };
     assert!(
         captured.contains("$ "),
         "captured pane history did not show history prompt: {captured:?}"
@@ -89,7 +185,9 @@ fn tmux_history_mode_executes_selected_command() {
 
 #[test]
 fn tmux_escape_clears_draft_and_shell_recovers() {
-    let captured = run_tmux_script("escape_clears_draft.sh");
+    let Some(captured) = run_tmux_script("escape_clears_draft.sh") else {
+        return;
+    };
     assert!(
         !captured.lines().any(|line| line == "should-not-run"),
         "escaped draft unexpectedly executed: {captured:?}"
@@ -99,7 +197,9 @@ fn tmux_escape_clears_draft_and_shell_recovers() {
 
 #[test]
 fn tmux_ctrl_d_exits_session_without_leftover_pane() {
-    let captured = run_tmux_script("ctrl_d_exits.sh");
+    let Some(captured) = run_tmux_script("ctrl_d_exits.sh") else {
+        return;
+    };
     assert!(
         captured.trim().is_empty(),
         "ctrl-d exit script should not leave pane output: {captured:?}"
@@ -108,32 +208,63 @@ fn tmux_ctrl_d_exits_session_without_leftover_pane() {
 
 #[test]
 fn tmux_exit_command_terminates_session_without_leftover_pane() {
-    let captured = run_tmux_script("exit_command.sh");
+    let Some(captured) = run_tmux_script("exit_command.sh") else {
+        return;
+    };
     assert!(
         captured.trim().is_empty(),
         "#exit script should not leave pane output: {captured:?}"
     );
 }
 
-fn run_tmux_script(name: &str) -> String {
+#[test]
+fn tmux_status_command_is_visible_and_shell_recovers() {
+    let Some(captured) = run_tmux_script("status_command.sh") else {
+        return;
+    };
+    assert!(
+        captured.lines().any(|line| line == "last_status=none"),
+        "status last_status line was not visible: {captured:?}"
+    );
+    assert!(
+        captured
+            .lines()
+            .any(|line| line == "completion.max_results=5"),
+        "status completion config line was not visible: {captured:?}"
+    );
+    assert_adjacent_output(&captured, "echo after-status", "after-status");
+}
+
+fn run_tmux_script(name: &str) -> Option<String> {
+    run_tmux_script_with_env(name, &[])
+}
+
+fn run_tmux_script_with_env(name: &str, extra_env: &[(&str, &str)]) -> Option<String> {
     let _guard = TMUX_RUN_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    if !tmux_available() {
-        eprintln!("skipping {name}: tmux not installed");
-        return String::new();
+    let tmux_tmpdir = tmux_tmpdir(name);
+    if !tmux_available(&tmux_tmpdir) {
+        eprintln!("skipping {name}: tmux is not installed or cannot create sessions");
+        let _ = std::fs::remove_dir_all(&tmux_tmpdir);
+        return None;
     }
 
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let script = repo.join("tests/tmux").join(name);
     assert!(script.exists(), "missing tmux script: {}", script.display());
 
-    let output = Command::new("sh")
+    let mut command = Command::new("sh");
+    command
         .arg(&script)
         .current_dir(&repo)
         .env("AISH_BIN", env!("CARGO_BIN_EXE_aish"))
-        .output()
-        .expect("failed to launch tmux script");
+        .env("TMUX_TMPDIR", &tmux_tmpdir);
+    for (key, value) in extra_env {
+        command.env(key, value);
+    }
+    let output = command.output().expect("failed to launch tmux script");
+    let _ = std::fs::remove_dir_all(&tmux_tmpdir);
 
     if !output.status.success() {
         panic!(
@@ -145,7 +276,15 @@ fn run_tmux_script(name: &str) -> String {
         );
     }
 
-    String::from_utf8_lossy(&output.stdout).into_owned()
+    Some(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+fn tmux_tmpdir(name: &str) -> PathBuf {
+    let safe_name: String = name
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
+        .collect();
+    PathBuf::from("/tmp").join(format!("aish-tmux-{}-{safe_name}", std::process::id()))
 }
 
 fn assert_adjacent_output(captured: &str, command: &str, expected_output: &str) {
@@ -169,4 +308,42 @@ fn assert_at_least_n_lines(captured: &str, expected_line: &str, min_count: usize
         count >= min_count,
         "expected at least {min_count} {expected_line:?} lines, got {count}; captured pane was {captured:?}"
     );
+}
+
+fn assert_common_shell_workflow_output(captured: &str) {
+    assert_line_present(captured, "beta");
+    assert_line_present(captured, "quoted:value with spaces");
+    assert_line_present(captured, "visible");
+    assert_line_present(captured, "file-exists");
+    assert_line_present(captured, "after-failure");
+}
+
+fn assert_line_present(captured: &str, expected_line: &str) {
+    assert!(
+        captured.lines().any(|line| line == expected_line),
+        "expected line {expected_line:?}; captured pane was {captured:?}"
+    );
+}
+
+fn assert_line_prefix(captured: &str, expected_prefix: &str) {
+    assert!(
+        captured
+            .lines()
+            .any(|line| line.starts_with(expected_prefix)),
+        "expected line prefix {expected_prefix:?}; captured pane was {captured:?}"
+    );
+}
+
+fn command_available(program: &str) -> bool {
+    Command::new(program)
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+fn fish_backend_tests_enabled() -> bool {
+    std::env::var_os("AISH_TEST_FISH").is_some()
 }

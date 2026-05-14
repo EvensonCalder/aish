@@ -4389,6 +4389,7 @@ mod tests {
         run_test_git(&seed, ["init"]);
         run_test_git(&seed, ["config", "user.name", "Aish Test"]);
         run_test_git(&seed, ["config", "user.email", "aish@example.invalid"]);
+        run_test_git(&seed, ["config", "commit.gpgsign", "false"]);
         fs::write(seed.join("README.md"), "seed\n").unwrap();
         run_test_git(&seed, ["add", "README.md"]);
         run_test_git(&seed, ["commit", "-m", "seed"]);
@@ -4400,6 +4401,7 @@ mod tests {
         );
         run_test_git(&root, ["config", "user.name", "Aish Test"]);
         run_test_git(&root, ["config", "user.email", "aish@example.invalid"]);
+        run_test_git(&root, ["config", "commit.gpgsign", "false"]);
 
         let config_path = root.join("config.toml");
         let events_path = root.join("logs/events.jsonl");
@@ -4538,6 +4540,9 @@ mod tests {
         let output = Command::new("git")
             .args(args)
             .current_dir(cwd)
+            .env("GIT_CONFIG_COUNT", "1")
+            .env("GIT_CONFIG_KEY_0", "commit.gpgsign")
+            .env("GIT_CONFIG_VALUE_0", "false")
             .output()
             .unwrap();
         assert!(
@@ -4557,6 +4562,7 @@ mod tests {
         run_test_git(seed, ["init"]);
         run_test_git(seed, ["config", "user.name", "Aish Test"]);
         run_test_git(seed, ["config", "user.email", "aish@example.invalid"]);
+        run_test_git(seed, ["config", "commit.gpgsign", "false"]);
         fs::write(seed.join("README.md"), "seed\n").unwrap();
         run_test_git(seed, ["add", "README.md"]);
         run_test_git(seed, ["commit", "-m", "seed"]);
@@ -4568,6 +4574,7 @@ mod tests {
         );
         run_test_git(root, ["config", "user.name", "Aish Test"]);
         run_test_git(root, ["config", "user.email", "aish@example.invalid"]);
+        run_test_git(root, ["config", "commit.gpgsign", "false"]);
     }
 
     #[test]

@@ -117,7 +117,7 @@ Aish starts a backend shell on a PTY. Bash and zsh are actively covered. Aish us
 
 Shell continuation uses shell-native syntax checks where possible. Incomplete quote input such as `echo "` or `echo '` becomes an Aish continuation draft with shell-style prompts. Odd trailing backslashes are treated as continuations to match interactive shell behavior.
 
-Fish integration is implemented when `fish` is available. Allowlisted interactive commands such as `less`, `vim`, `nvim`, `ssh`, `top`, `fzf`, and `tmux` can use foreground passthrough. Full automatic passthrough for arbitrary alternate-screen programs remains future work.
+Fish integration is experimental and kept out of the default verification matrix until it is validated across macOS and representative Linux distributions; set `AISH_TEST_FISH=1` to run the opt-in fish PTY/tmux tests. Allowlisted interactive commands such as `less`, `vim`, `nvim`, `ssh`, `top`, `fzf`, and `tmux` can use foreground passthrough. Full automatic passthrough for arbitrary alternate-screen programs remains future work.
 
 ## Testing
 

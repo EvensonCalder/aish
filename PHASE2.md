@@ -52,6 +52,7 @@ cargo test --lib
 cargo test --test draft_execution
 cargo test --test pty_backend
 cargo test --test expect_runner
+cargo test --test tmux_capture -- --test-threads=1
 cargo test --test first_run
 cargo clippy --all-targets -- -D warnings
 git diff --check

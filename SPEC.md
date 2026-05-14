@@ -105,7 +105,7 @@ Behavior:
 - Executed commands are appended to regular history after execution.
 - Up/down navigation may show both draft entries and regular history entries.
 - If draft content is empty, `Tab` switches modes.
-- If draft content is non-empty, `Tab` opens completion.
+- If draft content is non-empty, `Tab` opens or accepts completion according to completion configuration.
 
 #### `$` History mode
 
@@ -734,16 +734,39 @@ For command completion:
 - Template candidates are shown before history candidates.
 - History candidates are ordered newest to oldest.
 - Matching ignores spaces when configured.
-- Display at most `completion.max_results` candidates.
+- The below-prompt panel displays at most `completion.max_results` candidates.
 
 ### 10.3 Tab behavior
 
 - Empty draft `Tab` switches modes.
 - Non-empty draft `Tab` computes completion candidates for the current token.
 - If there are no candidates, Aish displays `no completions` below the prompt and redraws the current draft.
-- If there is exactly one candidate, Aish accepts it immediately.
-- If there are multiple candidates, Aish displays at most `completion.max_results` candidates below the prompt and redraws the current draft.
-- Candidate display must not append text to the active prompt line.
+- If inline suggestions are enabled and at least one candidate exists, Aish shows the best candidate as an inline ghost suggestion in dim text on the active prompt line.
+- The inline ghost suggestion is display-only. It must not modify the draft buffer, cursor position, history, or persisted draft until the user explicitly accepts it.
+- Pressing `Tab` with an inline ghost suggestion accepts the inline suggestion, not an arbitrary first row from the below-prompt panel.
+- If inline suggestions are disabled, non-empty `Tab` accepts the first ranked candidate directly, preserving the legacy behavior.
+- `completion.tab_accept = "full"` accepts the complete selected suggestion.
+- `completion.tab_accept = "word"` accepts only through the next whitespace boundary in the untyped suffix. If no whitespace boundary remains, it accepts the full suffix.
+- `Right` at end-of-line may also accept the inline suggestion according to the configured accept amount. `Right` inside the line keeps ordinary cursor movement.
+- The below-prompt candidate panel is informational. It displays at most `completion.max_results` candidates and must not decide how much `Tab` accepts.
+- Candidate display must not permanently append text to the active prompt line.
+
+### 10.4 Inline suggestion and panel rendering
+
+Inline suggestions:
+
+- The inline suggestion should be derived from the highest-ranked completion candidate after applying the same source ordering, filtering, and matching rules used for the below-prompt panel.
+- The inline suggestion should show only the untyped portion of the candidate when that can be computed unambiguously.
+- Inline suggestion color/style should be visually subdued, such as dim or light gray text, while preserving a usable fallback for terminals without color support.
+- Redraw must restore the cursor to the user's real draft cursor, not to the end of the ghost text.
+
+Below-prompt candidate panel:
+
+- `completion.max_results` controls only the number of rows displayed in the below-prompt panel.
+- Candidate rows must fit within the current terminal width and must not wrap.
+- Candidate rows should use the user's current command text as the overlap anchor and show as much of the untyped candidate text as possible.
+- When a row cannot fit, Aish should elide at the right edge with ASCII `...`.
+- The panel may include source labels, but labels must not consume so much width that the useful untyped candidate portion disappears when there is still room to show it.
 
 
 Config:
@@ -753,15 +776,19 @@ Config:
 max_results = 5
 ignore_spaces = true
 template_first = true
+inline = true
+tab_accept = "full" # "full" or "word"
 ```
 
 Command:
 
 ```text
 #completion max 8
+#completion inline on|off
+#completion tab-accept full|word
 ```
 
-### 10.4 Ghost suggestions
+### 10.5 Ghost suggestions
 
 Ghost suggestions are display-only.
 
@@ -922,6 +949,8 @@ max_bytes = 65536
 max_results = 5
 ignore_spaces = true
 template_first = true
+inline = true
+tab_accept = "full" # "full" or "word"
 
 [editor]
 command = ["nvim"]
@@ -1134,6 +1163,8 @@ Initial command set:
 #context confirm on|off
 
 #completion max <count>
+#completion inline on|off
+#completion tab-accept full|word
 
 #history <count>
 #log <count>

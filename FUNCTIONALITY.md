@@ -46,10 +46,11 @@ This document describes the behavior implemented in the current codebase. It is 
 
 - Bash uses marker-based integration with clean startup flags.
 - Zsh uses `preexec`/`precmd` hooks when available.
-- Fish launch/event integration exists and is tested conditionally when fish is installed.
+- Fish launch/event integration exists as experimental support; real fish PTY and tmux coverage is opt-in with `AISH_TEST_FISH=1` until it is validated across macOS and Linux distributions.
 - Command completion markers include exit status and cwd.
 - Command output is displayed as terminal protocol without Aish-added framing newlines.
 - In actual terminal use, a command's visible output appears directly below the submitted command line without an Aish-inserted blank line, and remains visible above the next prompt after redraw.
+- Common shell workflows are covered through the real binary and backend-specific tmux runs for bash and zsh by default, with opt-in fish coverage available through `AISH_TEST_FISH=1`, including persistent `cd`, `mkdir`, redirection, `cat | grep`, quoted arguments, exported environment variables, file tests, failed commands, and prompt recovery afterward.
 - Failed commands are stored with exit status.
 - `clear`-style terminal output and mixed stdout/stderr redraw back to a visible prompt.
 
@@ -58,6 +59,7 @@ This document describes the behavior implemented in the current codebase. It is 
 - Byte-stream expect assertions are not sufficient for prompt/output regressions.
 - Output visibility regressions must be checked against final rendered terminal state, not only against text that appeared in raw PTY output at some point.
 - Persistent `tmux` screen-capture tests cover real terminal workflows where redraw or cursor motion could otherwise hide output.
+- Longer backend-specific tmux workflows capture pane scrollback to validate the whole interactive session after normal terminal scrolling.
 - `Ctrl-L` clear-screen behavior is validated against final terminal pane state: pre-clear output should be gone, the prompt should remain usable, and post-clear command output should appear normally.
 - Completion no-match behavior is validated with terminal pane capture: `no completions` should become visible before dismissal, `Esc` should return to a usable prompt, and the next command should execute normally.
 - Completion acceptance via `Right` at end-of-line is validated with terminal pane capture: accepting a file completion should update the visible command and execute that completed command normally.
@@ -79,6 +81,7 @@ This document describes the behavior implemented in the current codebase. It is 
 
 - `#help` lists private commands and keybindings.
 - `#status` prints runtime status, shell, AI URL/key source, encryption state, sync state, context config, completion config, and keybinding count.
+- `#status` visibility is validated with tmux: status detail lines should be visible in the real terminal, while full header coverage remains in expect because long status output can scroll in a small pane; the next backend-shell command should execute normally.
 - `#config` prints runtime config values and storage paths.
 - `#doctor` prints read-only diagnostics for shell, PTY, GPG/git/fzf placeholders, editor, AI config, sync, encryption, and storage paths.
 - `#exit` and `#quit` exit Aish.
@@ -220,7 +223,7 @@ This document describes the behavior implemented in the current codebase. It is 
 
 ## Human Required Tests
 
-- Run Aish interactively under Bash, Zsh, and Fish on a real terminal.
+- Run Aish interactively under Bash and Zsh on a real terminal by default; validate Fish on a cross-platform matrix before promoting it from opt-in experimental support.
 - Manually verify `whoami`, repeated `whoami`, and `echo 123` show output directly under each submitted command with no extra blank line and no disappearing output.
 - Verify real `vim`/`nvim` foreground editing, suspend/resume, save/failure behavior, and terminal restoration.
 - Verify `ssh` passthrough to a local or test host, including password/key prompts and exit restoration.

@@ -124,6 +124,11 @@ fn mixed_stdout_stderr_redraw() {
 }
 
 #[test]
+fn common_shell_workflow() {
+    run_script("common_shell_workflow.exp");
+}
+
+#[test]
 fn first_run_doctor() {
     run_script("first_run_doctor.exp");
 }

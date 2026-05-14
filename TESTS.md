@@ -12,16 +12,21 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 349 library unit tests.
+- 353 library unit tests.
 - 23 draft execution integration tests.
 - 1 first-run integration test.
-- 11 tmux screen-capture integration tests.
+- 15 tmux screen-capture integration tests.
 - 7 active bash PTY integration tests.
 - 2 active zsh PTY integration tests.
-- 1 conditional fish PTY integration test.
-- 102 expect-driven end-to-end interactive scenarios.
+- 2 opt-in fish PTY integration tests, gated by `AISH_TEST_FISH=1` until fish support is validated across macOS and Linux distributions.
+- 103 expect-driven end-to-end interactive scenarios.
 - Expect scenarios are serialized inside `expect_runner` because they launch real interactive terminals; parallel execution created false `no prompt` and Tcl/expect crash failures that did not match actual single-user operation.
-- Tmux screen-capture tests are serialized inside `tmux_capture` for the same reason: they launch real terminal panes and assert final screen state.
+- Expect scenarios force `commit.gpgsign=false` through `GIT_CONFIG_COUNT` so temporary local git repositories do not depend on a developer's global GPG/pinentry setup.
+- Tmux screen-capture tests are serialized inside `tmux_capture` for the same reason: they launch real terminal panes and assert screen state.
+- Most tmux tests assert final visible rows; longer backend-specific workflows capture pane scrollback so normal scrolling does not make earlier command output disappear from the assertion window.
+- Tmux screen-capture tests use an isolated short `TMUX_TMPDIR` under `/tmp` so they do not attach to a user's tmux server or exceed Unix socket path limits on macOS.
+- Tmux screen-capture tests skip cleanly when `tmux` is unavailable or cannot create a local session.
+- Backend-specific tmux workflows write an isolated `shell.backend` config and run against bash and zsh by default; fish is available as opt-in coverage with `AISH_TEST_FISH=1`.
 - Tmux pane capture trims trailing spaces, so tmux tests must not be used as the only assertion for prompt suffix spaces; expect byte-stream and Rust rendering tests cover those details.
 - Bash PTY startup records the backend shell's initial cwd so the first prompt matches the shell state before any command executes.
 - Backend PTY startup inherits Aish's current directory and can be resized so child commands such as `ls` see the real terminal width.
@@ -49,6 +54,7 @@ cargo test --test draft_execution -- --nocapture
 cargo test --test first_run -- --nocapture
 cargo test --test pty_backend -- --nocapture
 cargo test --test expect_runner -- --nocapture
+cargo test --test tmux_capture -- --test-threads=1 --nocapture
 cargo test -- --list
 ```
 
@@ -58,20 +64,20 @@ Expect scenarios are the acceptance layer for user-visible terminal behavior. Th
 
 | Area | Current scenarios | Status | Known gaps |
 | --- | --- | --- | --- |
-| Basic command execution and prompt redraw | `basic_echo`, `output_visible_before_prompt`, `output_then_redraw_interactions`, `mixed_stdout_stderr_redraw` | Covered | Add new redraw stress cases only for observed regressions. |
-| Backend cwd and shell state | `cd_persists` | Covered | Add zsh/fish-specific end-to-end variants when portable. |
+| Basic command execution and prompt redraw | `basic_echo`, `common_shell_workflow`, `tmux_common_shell_workflow_matches_bash_backend_real_terminal_screen`, `tmux_common_shell_workflow_matches_zsh_backend_real_terminal_screen`, `tmux_common_shell_workflow_matches_fish_backend_real_terminal_screen`, `output_visible_before_prompt`, `output_then_redraw_interactions`, `mixed_stdout_stderr_redraw` | Covered for bash/zsh by default | Fish tmux coverage is opt-in with `AISH_TEST_FISH=1` until cross-platform fish behavior is validated. |
+| Backend cwd and shell state | `cd_persists`, `tmux_common_shell_workflow_matches_bash_backend_real_terminal_screen`, `tmux_common_shell_workflow_matches_zsh_backend_real_terminal_screen`, `tmux_common_shell_workflow_matches_fish_backend_real_terminal_screen` | Covered for bash/zsh by default | Fish tmux coverage is opt-in with `AISH_TEST_FISH=1`; add shell-specific variants only when new backend integration behavior is added. |
 | Shell continuation UX | `dquote_continuation`, `squote_continuation`, `backslash_continuation`, `ctrl_c_cancels_continuation`, `tmux_ctrl_c_cancels_continuation_and_shell_recovers`, `no_backend_ps2_leak` | Covered | Add heredoc-style continuation if it becomes user-facing. |
 | Prompt/control keys | `ctrl_l_clear_screen`, `tmux_ctrl_l_clears_visible_screen_and_keeps_prompt_usable`, `readline_editing_keys`, `tmux_unicode_output_matches_real_terminal_screen`, `terminal_resize`, `escape_clears_draft`, `tmux_escape_clears_draft_and_shell_recovers`, `ctrl_x_unknown_chord_cancels`, `ctrl_d_exits`, `tmux_ctrl_d_exits_session_without_leftover_pane`, `exit_command`, `tmux_exit_command_terminates_session_without_leftover_pane` | Covered | Add new prompt-control scenarios only for observed regressions. |
 | Mode switching and read-only behavior | `empty_tab_cycles_modes`, `tmux_mode_redraw_preserves_prior_output_and_shell_recovers`, `history_mode_execute`, `tmux_history_mode_executes_selected_command`, `history_persists_across_restarts`, `home_default_history_persists`, `home_default_history_trim_persists`, `draft_persists_across_restarts`, `home_default_draft_persists`, `read_only_edit_copies_to_draft`, `ai_mode_executes_sequence`, `home_default_ai_mode_executes_sequence`, `ai_mode_edit_copies_to_draft`, `home_default_ai_mode_edit_copies_to_draft`, `output_then_redraw_interactions` | Covered | Add more mode redraw regressions only for observed failures. |
-| Completion UI | `completion_accept_single`, `completion_panel_multiple`, `completion_no_matches_panel`, `tmux_completion_no_matches_panel_remains_usable`, `completion_right_accepts_first`, `tmux_completion_right_accepts_first_and_executes`, `completion_config_persists`, `completion_first_token_source_order`, `home_default_completion_ui`, `output_then_redraw_interactions` | Covered | Add completion-panel-after-output regression if observed. |
+| Completion UI | `completion_accept_single`, `completion_panel_multiple`, `completion_no_matches_panel`, `tmux_completion_no_matches_panel_remains_usable`, `completion_right_accepts_first`, `tmux_completion_right_accepts_first_and_executes`, `completion_config_persists`, `completion_first_token_source_order`, `home_default_completion_ui`, `output_then_redraw_interactions` | Covered | Phase 28 must add inline ghost completion, configurable full/word `Tab` acceptance, and width-aware no-wrap panel coverage. |
 | Picker cancellation UX | `history_picker_cancel_preserves_draft`, `home_default_history_picker_cancel_preserves_draft`, `file_picker_cancel_preserves_draft`, `home_default_file_picker_cancel_preserves_draft`, `template_picker_cancel_preserves_draft`, `home_default_template_picker_cancel_preserves_draft`, `git_branch_picker_cancel_preserves_draft`, `home_default_git_branch_picker_cancel_preserves_draft`, `env_var_picker_cancel_preserves_draft`, `home_default_env_var_picker_cancel_preserves_draft` | Covered | Add picker success-path expect scenarios only when picker replacement UI changes; Rust tests cover replacement logic. |
-| Private command UX and diagnostics | `first_run_doctor`, `home_default_first_run_doctor`, `home_default_config_persists`, `home_default_ai_key_source_redacts_secret`, `invalid_config_startup`, `home_default_invalid_config_startup`, `home_missing_fails_cleanly`, `aish_home_empty_uses_home`, `aish_home_relative_fails_cleanly`, `home_unwritable_fails_cleanly`, `home_path_with_spaces_works`, `home_aish_path_file_fails_cleanly`, `help_lists_commands`, `unknown_private_command`, `private_command_safe_failures`, `status_doctor_config`, `key_and_sync_placeholders`, `key_clear_removes_stored_key`, `ai_config_persists` | Covered | Add new safe-failure scenarios when new private commands are added. |
+| Private command UX and diagnostics | `first_run_doctor`, `home_default_first_run_doctor`, `home_default_config_persists`, `home_default_ai_key_source_redacts_secret`, `invalid_config_startup`, `home_default_invalid_config_startup`, `home_missing_fails_cleanly`, `aish_home_empty_uses_home`, `aish_home_relative_fails_cleanly`, `home_unwritable_fails_cleanly`, `home_path_with_spaces_works`, `home_aish_path_file_fails_cleanly`, `help_lists_commands`, `unknown_private_command`, `private_command_safe_failures`, `status_doctor_config`, `tmux_status_command_is_visible_and_shell_recovers`, `key_and_sync_placeholders`, `key_clear_removes_stored_key`, `ai_config_persists` | Covered | Add new safe-failure scenarios when new private commands are added. |
 | Notes, context, and logs | `notes_are_swallowed`, `home_default_notes_are_swallowed`, `context_config_persists`, `context_off_blocks_pseudopipe`, `context_confirm_off_runs_immediately`, `context_confirmation_skip`, `context_dangerous_refusal`, `context_dangerous_still_prompts_when_confirm_off`, `context_truncation_reports_limit`, `home_default_context_dangerous_refusal`, `log_shows_context_skip`, `home_default_event_log_persists` | Covered | Add new context scenarios only for observed regressions. |
 | Templates | `template_use_executes`, `template_crud`, `template_placeholder_blocks_execution`, `home_default_template_persists` | Covered | Add completion/template interaction if UI changes. |
 | Editor and paste flows | `external_editor_roundtrip`, `home_default_external_editor_roundtrip`, `external_editor_failure_preserves_draft`, `home_default_external_editor_failure_preserves_draft`, `editor_hash_content_bypasses_parser`, `multiline_paste_editor_review`, `home_default_multiline_paste_editor_review` | Covered | Add large paste boundary if practical. |
 | Sync | `key_and_sync_placeholders`, `home_default_sync_config_persists`, `home_default_startup_sync_runs`, `home_default_startup_sync_unsupported_schedule`, `home_default_startup_sync_failure_logs`, `home_default_startup_sync_disabled_noops`, `home_default_sync_push_local_remote`, `sync_push_local_remote`, `sync_push_failure_logs`, `sync_push_conflict_logs` | Covered | Add new sync scenarios only when sync user-visible behavior changes. |
 | Passthrough/interactive programs | `passthrough_less` when `less` is available; key forwarding is Rust-covered | Partial | Full automatic passthrough detection still needs an async PTY design for alternate-screen/prompt-return detection. |
-| Encryption/GPG | `key_clear_removes_stored_key`, `home_default_key_clear_removes_stored_key`, `home_default_encrypt_placeholder_noops`, `key_and_sync_placeholders` | Partial | Add fake GPG or test-key flow before claiming encryption completion. |
+| Encryption/GPG | `key_clear_removes_stored_key`, `home_default_key_clear_removes_stored_key`, `home_default_encrypt_placeholder_noops`, `key_and_sync_placeholders` | Partial | Add end-to-end fake GPG or test-key flow before claiming encryption completion. |
 
 ## Feature Coverage
 
@@ -220,6 +226,9 @@ Tests:
 - `terminal::tests::passthrough_mode_forwards_navigation_escape_sequences`
 - `app::tests::terminal_cursor_column_tracks_draft_cursor`
 - `app::tests::private_exit_requests_app_exit`
+- `tmux_ctrl_l_clears_visible_screen_and_keeps_prompt_usable`
+- `tmux_ctrl_d_exits_session_without_leftover_pane`
+- `tmux_exit_command_terminates_session_without_leftover_pane`
 
 Status:
 
@@ -229,7 +238,7 @@ Known gaps:
 
 - PTY output is not yet integrated as a separate event-loop source.
 - Timer/background events are not implemented.
-- Binary-level raw terminal smoke test was attempted with `expectrl` but was not stable enough to keep. Current coverage is unit/integration level rather than full interactive terminal automation.
+- Raw terminal behavior is covered by expect scenarios and tmux pane-capture regressions for portable workflows; add new tmux coverage only when final-screen behavior matters.
 
 ### Core Modes
 
@@ -349,15 +358,16 @@ Implemented:
 - Marker-based shell integration now emits and parses command-start markers, with shell-quoting tests and PTY coverage that bash reports `started_command` without leaking internal markers into history.
 - Bash marker integration has PTY coverage for prompt-ready initial cwd, command-start reporting, command-finish exit status, and cwd reporting after command execution.
 - Zsh hook integration has PTY coverage for `preexec` command-start reporting, `precmd` finish status, and cwd reporting after command execution when `/bin/zsh` is available.
-- Fish event integration has launch/unit coverage for `fish_preexec` and `fish_prompt` setup plus conditional PTY coverage for command-start, finish status, and cwd reporting when fish is installed.
+- Fish event integration has launch/unit coverage for `fish_preexec` and `fish_prompt` setup plus opt-in PTY coverage for command-start, finish status, cwd reporting, and command-token-like output preservation when `AISH_TEST_FISH=1` is set.
 - Allowlisted interactive commands can run in a foreground passthrough path with raw mode disabled; `less` has skip-safe expect coverage when available.
 - Interactive passthrough command allowlist detects common fullscreen/interactive commands, basenames, shell quoting, assignments, and wrappers such as `sudo`, `env`, `command`, and `exec` without changing runtime behavior yet.
 - Alternate-screen buffer detection tracks common enter/exit CSI sequences (`?47`, `?1047`, `?1049`) and ignores unrelated terminal styling escapes.
 - Passthrough prompt-return detection requires process exit and normal-screen state before Aish redraws its prompt after an interactive command.
-- Shell integration rollup is covered across bash marker integration, zsh hooks, fish events, foreground passthrough for allowlisted interactive commands, and local temporary git sync integration tests.
+- Shell integration rollup is covered across bash marker integration, zsh hooks, opt-in fish events, foreground passthrough for allowlisted interactive commands, and local temporary git sync integration tests.
 - `#encrypt on` warns that existing plaintext may remain in git history and that Aish will not rewrite history automatically, while encryption remains otherwise unimplemented.
 - Dangerous context pseudo-pipe commands have expect coverage proving refusal skips execution and leaves the target file intact.
-- Prompt redraw after ordinary command output has both a Rust virtual-screen regression and a real `tmux` pane-capture regression proving final visible shell output remains above the next prompt in actual use; the tmux scripts run the Cargo-provided `CARGO_BIN_EXE_aish` binary via `AISH_BIN` so they cannot accidentally validate a stale `target/debug/aish`.
+- Prompt redraw after ordinary command output has both a Rust virtual-screen regression and a real `tmux` pane-capture regression proving repeated final visible shell output remains above the next prompt in actual use; the tmux scripts run the Cargo-provided `CARGO_BIN_EXE_aish` binary via `AISH_BIN` so they cannot accidentally validate a stale `target/debug/aish`.
+- Common real-world shell workflows have expect and backend-specific tmux coverage proving Aish passes through persistent `cd`, `mkdir`, file redirection, `cat | grep`, quoted arguments, exported environment variables, file tests, failing commands, and recovery after failure across bash and zsh by default; fish coverage is opt-in with `AISH_TEST_FISH=1`.
 - Command output followed by mode-switch redraw and unique completion acceptance has expect coverage through the real binary.
 - Manual `#push` sync has expect coverage against a local temporary bare git remote, including managed `.gitignore` push and no scheduler file creation.
 - Manual `#push` sync failure has expect coverage with a missing local remote, including visible failure output, event-log recording, and no scheduler file creation.
@@ -366,6 +376,7 @@ Implemented:
 - Terminal size has expect coverage proving startup outer terminal rows/columns propagate to backend child commands via `stty size`; runtime backend resize is covered by PTY integration.
 - `#key set` remains a placeholder, while `#key clear` removes the encrypted key file if present and logs the action without printing stored secret content.
 - `#completion` reports current completion config and persists `#completion max <count>`.
+- Inline ghost completion, configurable full/word `Tab` acceptance, and width-aware candidate row elision are planned for Phase 28 and are not part of the current implemented coverage.
 - Completion has pure current-token detection helpers that handle first-token classification, non-first-token classification, quoted whitespace, escaped whitespace, cursor-in-line contexts, path-like tokens, and UTF-8 cursor snapping.
 - Completion has a pure path completion helper that reads matching file and directory candidates, preserves directory prefixes, sorts candidates, marks directories with trailing `/`, preserves opening quotes in replacements, and handles missing directories as no matches.
 - Completion has a pure first-token helper that returns template candidates before newest-first history commands before PATH executables, with per-source deduplication.
