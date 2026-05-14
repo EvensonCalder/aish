@@ -37,6 +37,7 @@ This document describes the behavior implemented in the current codebase. It is 
 - Draft editing is UTF-8 safe.
 - Supported editing keys include printable input, `Left`, `Right`, `Ctrl-A`, `Ctrl-E`, `Ctrl-U`, `Ctrl-K`, `Ctrl-W`, `Backspace`, `Delete`, `Alt-B`, `Alt-F`, `Alt-Left`, and `Alt-Right`.
 - `Ctrl-D` exits only on an empty draft; otherwise it deletes at cursor.
+- `Ctrl-D` empty-draft exit is validated with tmux: the Aish pane should terminate instead of leaving a hidden running process behind.
 - `Ctrl-C` clears draft/continuation state and returns to draft mode.
 - `Ctrl-L` clears the screen and redraws the prompt without adding a blank first row.
 - Multi-line ordinary drafts can be submitted as one shell input when complete.

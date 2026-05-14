@@ -97,6 +97,15 @@ fn tmux_escape_clears_draft_and_shell_recovers() {
     assert_adjacent_output(&captured, "echo after-escape", "after-escape");
 }
 
+#[test]
+fn tmux_ctrl_d_exits_session_without_leftover_pane() {
+    let captured = run_tmux_script("ctrl_d_exits.sh");
+    assert!(
+        captured.trim().is_empty(),
+        "ctrl-d exit script should not leave pane output: {captured:?}"
+    );
+}
+
 fn run_tmux_script(name: &str) -> String {
     let _guard = TMUX_RUN_LOCK
         .lock()
