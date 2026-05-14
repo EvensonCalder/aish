@@ -19,7 +19,6 @@ aish_wait_prompt
 
 aish_send "pri"
 aish_send "\t"
-aish_expect "history\tprintf 'seed-word\\n'"
 aish_send "\t"
 aish_expect "> printf"
 

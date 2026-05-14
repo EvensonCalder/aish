@@ -9,8 +9,7 @@ aish_spawn
 
 aish_send "cat Cargo."
 aish_send "\t"
-aish_expect "file\tCargo.lock"
-aish_expect "file\tCargo.toml"
+aish_expect "file\ttoml"
 
 # The next Tab accepts the inline suggestion instead of refreshing the panel.
 aish_send "\t"

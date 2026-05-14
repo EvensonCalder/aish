@@ -97,7 +97,7 @@ printf '%s\n' "$NARROW_PANEL"
 printf '%s\n' "$PANEL_ONE" | rg -q 'unique-target.txt'
 printf '%s\n' "$WIDE_CAPTURE" | rg -q '^unique-content$'
 
-MAX_COUNT="$(printf '%s\n' "$PANEL_MAX_ONE" | rg '^(file|history|template|exec)[[:space:]]+alpha-' | wc -l | tr -d ' ')"
+MAX_COUNT="$(printf '%s\n' "$PANEL_MAX_ONE" | rg '^(file|history|template|exec)[[:space:]]+' | wc -l | tr -d ' ')"
 test "$MAX_COUNT" = "1"
 
 printf '%s\n' "$WIDE_CAPTURE" | rg -q '^completion max results must be greater than 0$'

@@ -32,9 +32,9 @@ set ::env(EDITOR) $editor
 aish_spawn_without_aish_home
 
 aish_send "\x18\x05"
-aish_expect "\[editor draft: 1 line(s)"
-aish_expect "review before Enter"
-aish_expect "Enter to run"
+aish_expect "\[draft: 1 line"
+aish_expect "Enter run"
+aish_expect "Ctrl-X Ctrl-E edit"
 
 aish_enter
 aish_expect "home-editor-ok"

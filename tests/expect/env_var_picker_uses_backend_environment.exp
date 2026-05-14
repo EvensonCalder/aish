@@ -1,0 +1,37 @@
+#!/usr/bin/env expect
+# Ctrl-X Ctrl-V should prefer variables exported inside the backend shell, not
+# only variables inherited by the Aish process at startup.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set bindir "/tmp/aish-env-success-fake-fzf-[pid]-[clock clicks]"
+file mkdir $bindir
+set fzf "$bindir/fzf"
+set fh [open $fzf w]
+puts $fh {#!/bin/sh}
+puts $fh {grep '^AISH_PICKER_TEST_VAR$' | head -n 1}
+close $fh
+file attributes $fzf -permissions 0755
+set old_path $::env(PATH)
+set ::env(PATH) "$bindir:$old_path"
+unset -nocomplain ::env(AISH_PICKER_TEST_VAR)
+
+aish_spawn
+
+aish_send "export AISH_PICKER_TEST_VAR=picker-env-ok"
+aish_enter
+aish_wait_prompt
+
+aish_send "echo "
+aish_send "\x18\x16"
+aish_expect {$AISH_PICKER_TEST_VAR}
+
+aish_enter
+aish_expect "picker-env-ok"
+aish_wait_prompt
+
+aish_quit
+
+set ::env(PATH) $old_path
+file delete -force $bindir

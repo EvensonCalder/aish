@@ -350,6 +350,41 @@ fn tmux_manual_startup_failures_are_readable_in_terminal() {
     assert_at_least_n_lines(&captured, "aish-exit:1", 3);
 }
 
+#[test]
+fn tmux_narrow_long_input_redraw_does_not_duplicate_prompt() {
+    let Some(captured) = run_tmux_script("narrow_long_input_redraw.sh") else {
+        return;
+    };
+    assert_line_present(&captured, "after-narrow-redraw");
+}
+
+#[test]
+fn tmux_editor_and_paste_review_render_cleanly() {
+    let Some(captured) = run_tmux_script("editor_paste_review_rendering.sh") else {
+        return;
+    };
+    assert_line_present(&captured, "edited-by-tmux");
+}
+
+#[test]
+fn tmux_picker_cancellation_message_starts_on_own_line() {
+    let Some(captured) = run_tmux_script("picker_cancel_rendering.sh") else {
+        return;
+    };
+    assert_line_present(&captured, "history search cancelled");
+}
+
+#[test]
+fn tmux_python_repl_passthrough_recovers_prompt_when_available() {
+    let Some(captured) = run_tmux_script("passthrough_python_repl.sh") else {
+        return;
+    };
+    if captured.contains("skipping python passthrough tmux workflow") {
+        return;
+    }
+    assert_line_present(&captured, "after-python-repl");
+}
+
 fn run_tmux_script(name: &str) -> Option<String> {
     run_tmux_script_with_env(name, &[])
 }

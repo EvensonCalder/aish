@@ -1,6 +1,7 @@
 #!/usr/bin/env expect
 # First-token completion should rank template candidates before history commands
-# before PATH executables when all three sources match the same prefix.
+# before PATH executables when all three sources match the same prefix. Rows for
+# non-template candidates show only the suffix beyond the typed prefix.
 
 set timeout 10
 source [file dirname [info script]]/_lib.exp
@@ -31,8 +32,8 @@ aish_send "foo"
 send -- "\t"
 
 aish_expect "template\tfootemplate"
-aish_expect "history\tfoohistory"
-aish_expect "exec\tfooexec"
+aish_expect "history\thistory"
+aish_expect "exec\texec"
 
 send -- "\u001b"
 aish_wait_prompt

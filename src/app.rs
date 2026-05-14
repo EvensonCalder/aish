@@ -14,7 +14,7 @@ use crate::commands::{
 };
 use crate::completion::{
     CompletionCandidate, CompletionOptions, complete_first_token_with_options,
-    complete_non_first_token_with_options, current_token_context,
+    complete_non_first_token_for_line_with_options, current_token_context,
 };
 use crate::config::{
     self, AiConfig, CompletionConfig, CompletionTabAccept, ContextConfig, EditorConfig,
@@ -132,6 +132,7 @@ pub struct AppState {
     pub completion_panel: Vec<String>,
     pub completion_inline: Option<InlineCompletion>,
     pub last_rendered_lines: usize,
+    pub last_rendered_cursor_row: usize,
     pub continuation_prompt: Option<String>,
     pub draft_from_editor: bool,
     pub draft_from_template: bool,
@@ -181,6 +182,7 @@ impl Default for AppState {
             completion_panel: Vec::new(),
             completion_inline: None,
             last_rendered_lines: 1,
+            last_rendered_cursor_row: 0,
             continuation_prompt: None,
             draft_from_editor: false,
             draft_from_template: false,
@@ -313,9 +315,9 @@ impl AppState {
         &mut self,
         session: &PreparedEditorSession,
     ) -> Result<()> {
-        let content = read_editor_file(session)?;
+        let content = normalize_editor_draft_content(&read_editor_file(session)?);
         self.draft = InputBuffer::from(content);
-        self.draft_from_editor = true;
+        self.draft_from_editor = !self.draft.is_empty();
         self.draft_from_template = false;
         self.mode = Mode::Draft;
         Ok(())
@@ -335,8 +337,9 @@ impl AppState {
     }
 
     pub fn replace_draft_from_editor_text(&mut self, content: impl Into<String>) {
-        self.draft = InputBuffer::from(content.into());
-        self.draft_from_editor = true;
+        let content = normalize_editor_draft_content(&content.into());
+        self.draft = InputBuffer::from(content);
+        self.draft_from_editor = !self.draft.is_empty();
         self.draft_from_template = false;
         self.mode = Mode::Draft;
     }
@@ -376,8 +379,9 @@ impl AppState {
                 options,
             ))
         } else {
-            Ok(complete_non_first_token_with_options(
-                &token.text,
+            Ok(complete_non_first_token_for_line_with_options(
+                self.draft.as_str(),
+                self.draft.cursor(),
                 &completion_cwd(&self.current_cwd),
                 &history_newest_first,
                 &templates,
@@ -580,7 +584,11 @@ impl AppState {
             Mode::History => self.selected_history_command().unwrap_or(""),
             Mode::Ai => self.selected_ai_command().unwrap_or(""),
             Mode::Draft if self.draft_from_editor => {
-                return format!("{}{}", self.prompt_prefix(), self.editor_draft_summary());
+                return format!(
+                    "{}{}",
+                    self.prompt_prefix(),
+                    self.editor_draft_summary_for_terminal()
+                );
             }
             _ => self.draft.as_str(),
         };
@@ -624,7 +632,11 @@ impl AppState {
                 self.selected_ai_command().unwrap_or("")
             ),
             Mode::Draft if self.draft_from_editor => {
-                format!("{}{}", self.prompt_prefix(), self.editor_draft_summary())
+                format!(
+                    "{}{}",
+                    self.prompt_prefix(),
+                    self.editor_draft_summary_for_terminal()
+                )
             }
             _ => {
                 let before_cursor = &self.draft.as_str()[..self.draft.cursor()];
@@ -663,12 +675,17 @@ impl AppState {
             .min(u16::MAX as usize) as u16
     }
 
-    fn editor_draft_summary(&self) -> String {
+    pub(crate) fn editor_draft_summary_for_terminal(&self) -> String {
         let bytes = self.draft.as_str().len();
-        let lines = self.draft.as_str().lines().count().max(1);
-        format!(
-            "[editor draft: {lines} line(s), {bytes} byte(s); review before Enter; Ctrl-X Ctrl-E to edit, Enter to run]"
-        )
+        let lines = self
+            .draft
+            .as_str()
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .count()
+            .max(1);
+        let line_label = if lines == 1 { "line" } else { "lines" };
+        format!("[draft: {lines} {line_label}, {bytes} bytes; Enter run, Ctrl-X Ctrl-E edit]")
     }
 
     fn push_output_entry(&mut self, entry: OutputEntry) {
@@ -696,6 +713,14 @@ fn render_multiline_draft(prompt_prefix: &str, continuation_prefix: &str, text: 
         rendered.push_str(line);
     }
     rendered
+}
+
+fn normalize_editor_draft_content(content: &str) -> String {
+    content
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .trim_end_matches('\n')
+        .to_string()
 }
 
 pub fn run() -> Result<()> {
@@ -3232,7 +3257,7 @@ mod tests {
 
         assert_eq!(
             state.render_prompt_line(),
-            "> [editor draft: 2 line(s), 17 byte(s); review before Enter; Ctrl-X Ctrl-E to edit, Enter to run]"
+            "> [draft: 2 lines, 17 bytes; Enter run, Ctrl-X Ctrl-E edit]"
         );
         assert_eq!(
             state.terminal_cursor_column(),
@@ -3249,11 +3274,7 @@ mod tests {
         assert_eq!(state.mode, Mode::Draft);
         assert!(state.draft_from_editor);
         assert_eq!(state.draft.as_str(), "echo one\necho two");
-        assert!(
-            state
-                .render_prompt_line()
-                .contains("[editor draft: 2 line(s)")
-        );
+        assert!(state.render_prompt_line().contains("[draft: 2 lines"));
     }
 
     #[test]

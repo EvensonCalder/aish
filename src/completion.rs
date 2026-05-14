@@ -255,6 +255,103 @@ pub fn complete_non_first_token_with_options(
     limit_candidates(candidates, options.max_results)
 }
 
+pub fn complete_non_first_token_for_line_with_options(
+    line: &str,
+    cursor: usize,
+    cwd: &Path,
+    history_newest_first: &[HistoryEntry],
+    templates: &[TemplateEntry],
+    options: CompletionOptions,
+) -> Vec<CompletionCandidate> {
+    let token = current_token_context(line, cursor);
+    let mut candidates = complete_structural_history_for_line(
+        line,
+        cursor,
+        &token,
+        history_newest_first,
+        options.ignore_spaces,
+    );
+    candidates.extend(complete_history_arguments(
+        &token.text,
+        history_newest_first,
+        options.ignore_spaces,
+    ));
+    candidates.extend(complete_path(&token.text, cwd));
+    candidates.extend(complete_template_placeholders(
+        &token.text,
+        templates,
+        options.ignore_spaces,
+    ));
+    dedupe_completion_candidates(&mut candidates);
+    limit_candidates(candidates, options.max_results)
+}
+
+fn complete_structural_history_for_line(
+    line: &str,
+    cursor: usize,
+    token: &TokenContext,
+    history_newest_first: &[HistoryEntry],
+    ignore_spaces: bool,
+) -> Vec<CompletionCandidate> {
+    if cursor != line.len() {
+        return Vec::new();
+    }
+    let words_before_cursor = split_shell_like_words(&line[..cursor]);
+    if words_before_cursor.is_empty() {
+        return Vec::new();
+    }
+    let current_word_index = if token.text.is_empty() {
+        words_before_cursor.len()
+    } else {
+        words_before_cursor.len().saturating_sub(1)
+    };
+    let previous_words = &words_before_cursor[..current_word_index.min(words_before_cursor.len())];
+    let mut seen = HashSet::new();
+    let mut candidates = Vec::new();
+
+    for entry in history_newest_first {
+        let history_words = split_shell_like_words(&entry.command);
+        if history_words.len() <= current_word_index {
+            continue;
+        }
+        if !previous_words.iter().enumerate().all(|(index, word)| {
+            history_words
+                .get(index)
+                .is_some_and(|history| history == word)
+        }) {
+            continue;
+        }
+
+        let replacement = if token.text.is_empty()
+            || matches_completion_prefix(
+                &history_words[current_word_index],
+                &token.text,
+                ignore_spaces,
+            ) {
+            join_words(&history_words[current_word_index..])
+        } else if history_words.len() > current_word_index + 1 {
+            format!(
+                "{} {}",
+                token.text,
+                join_words(&history_words[current_word_index + 1..])
+            )
+        } else {
+            continue;
+        };
+
+        if replacement == token.text || !seen.insert(replacement.clone()) {
+            continue;
+        }
+        candidates.push(CompletionCandidate {
+            display: replacement.clone(),
+            replacement,
+            is_dir: false,
+            source: CompletionSource::History,
+        });
+    }
+    candidates
+}
+
 fn complete_history_arguments(
     prefix: &str,
     history_newest_first: &[HistoryEntry],
@@ -277,6 +374,17 @@ fn complete_history_arguments(
         }
     }
     candidates
+}
+
+fn dedupe_completion_candidates(candidates: &mut Vec<CompletionCandidate>) {
+    let mut seen = HashSet::new();
+    candidates.retain(|candidate| {
+        seen.insert((
+            candidate.source,
+            candidate.replacement.clone(),
+            candidate.display.clone(),
+        ))
+    });
 }
 
 fn complete_template_placeholders(
@@ -426,7 +534,7 @@ fn anchored_candidate_display(token: &TokenContext, candidate: &CompletionCandid
     if let Some(suffix) = candidate.replacement.strip_prefix(&token.text)
         && !suffix.is_empty()
     {
-        return format!("{}{}", token.text, suffix);
+        return suffix.to_string();
     }
     candidate.display.clone()
 }
@@ -535,6 +643,68 @@ fn command_arguments(command: &str) -> Vec<&str> {
         arguments.push(command[token_start..].trim_matches(['\'', '"']));
     }
     arguments
+}
+
+fn split_shell_like_words(command: &str) -> Vec<String> {
+    command_arguments_with_first(command)
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+}
+
+fn command_arguments_with_first(command: &str) -> Vec<&str> {
+    let mut words = Vec::new();
+    let mut token_start = 0;
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    let mut token_seen = false;
+
+    for (index, ch) in command.char_indices() {
+        if escaped {
+            escaped = false;
+            token_seen = true;
+            continue;
+        }
+        match quote {
+            Some(active) if ch == active => {
+                quote = None;
+                token_seen = true;
+            }
+            Some(_) => {
+                if ch == '\\' && quote == Some('"') {
+                    escaped = true;
+                }
+                token_seen = true;
+            }
+            None if ch == '\\' => {
+                escaped = true;
+                token_seen = true;
+            }
+            None if ch == '\'' || ch == '"' => {
+                quote = Some(ch);
+                token_seen = true;
+            }
+            None if ch.is_whitespace() => {
+                if token_seen {
+                    words.push(command[token_start..index].trim_matches(['\'', '"']));
+                }
+                token_seen = false;
+                token_start = index + ch.len_utf8();
+            }
+            None => {
+                token_seen = true;
+            }
+        }
+    }
+
+    if token_seen {
+        words.push(command[token_start..].trim_matches(['\'', '"']));
+    }
+    words
+}
+
+fn join_words(words: &[String]) -> String {
+    words.join(" ")
 }
 
 fn complete_path_executables(prefix: &str, path_dirs: &[PathBuf]) -> Vec<CompletionCandidate> {
@@ -1041,6 +1211,64 @@ mod tests {
     }
 
     #[test]
+    fn complete_non_first_token_for_line_uses_structural_history_context() {
+        let history = vec![HistoryEntry {
+            t: 1,
+            command: "command add 100 file".to_string(),
+            exit_code: Some(0),
+            source: crate::history::HistorySource::User,
+        }];
+
+        let candidates = complete_non_first_token_for_line_with_options(
+            "command add 200",
+            "command add 200".len(),
+            Path::new("/"),
+            &history,
+            &[],
+            CompletionOptions::default(),
+        );
+
+        assert_eq!(
+            candidates.first(),
+            Some(&CompletionCandidate {
+                display: "200 file".to_string(),
+                replacement: "200 file".to_string(),
+                is_dir: false,
+                source: CompletionSource::History,
+            })
+        );
+    }
+
+    #[test]
+    fn complete_non_first_token_for_line_keeps_whole_history_suffix() {
+        let history = vec![HistoryEntry {
+            t: 1,
+            command: "echo word-alpha word-beta word-gamma".to_string(),
+            exit_code: Some(0),
+            source: crate::history::HistorySource::User,
+        }];
+
+        let candidates = complete_non_first_token_for_line_with_options(
+            "echo word",
+            "echo word".len(),
+            Path::new("/"),
+            &history,
+            &[],
+            CompletionOptions::default(),
+        );
+
+        assert_eq!(
+            candidates.first(),
+            Some(&CompletionCandidate {
+                display: "word-alpha word-beta word-gamma".to_string(),
+                replacement: "word-alpha word-beta word-gamma".to_string(),
+                is_dir: false,
+                source: CompletionSource::History,
+            })
+        );
+    }
+
+    #[test]
     fn matches_completion_prefix_can_ignore_spaces() {
         assert!(matches_completion_prefix("git status", "g s", true));
         assert!(!matches_completion_prefix("git status", "g s", false));
@@ -1104,7 +1332,7 @@ mod tests {
 
         let rows = render_completion_candidates_for_width(&candidates, &token, 24);
 
-        assert_eq!(rows, ["file\tvery-long-file-n..."]);
+        assert_eq!(rows, ["file\t-file-name-that-..."]);
         assert!(rows[0].chars().count() <= 24);
     }
 
@@ -1120,7 +1348,7 @@ mod tests {
 
         let rows = render_completion_candidates_for_width(&candidates, &token, 80);
 
-        assert_eq!(rows, ["history\tgit status --short"]);
+        assert_eq!(rows, ["history\t status --short"]);
     }
 
     #[test]

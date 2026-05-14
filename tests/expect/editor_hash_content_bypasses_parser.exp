@@ -18,9 +18,9 @@ set ::env(EDITOR) $editor
 aish_spawn
 
 aish_send "\x18\x05"
-aish_expect "\[editor draft: 2 line(s)"
-aish_expect "review before Enter"
-aish_expect "Enter to run"
+aish_expect "\[draft: 2 lines"
+aish_expect "Enter run"
+aish_expect "Ctrl-X Ctrl-E edit"
 
 aish_enter
 aish_expect "editor-hash-ok"

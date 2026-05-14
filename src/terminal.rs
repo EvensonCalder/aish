@@ -3,7 +3,7 @@ use std::panic;
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::cursor::{MoveTo, MoveToColumn, MoveToPreviousLine, MoveUp};
+use crossterm::cursor::{MoveDown, MoveTo, MoveToColumn, MoveToPreviousLine, MoveUp};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
@@ -182,7 +182,7 @@ fn handle_key(
         }
         KeyAction::EnvVarPicker => {
             let mut display_out = CrLfWriter::new(out);
-            run_env_var_picker(state, &mut display_out)?;
+            run_env_var_picker(state, backend, &mut display_out)?;
         }
         KeyAction::AdvancedKeyPlaceholder(name) => {
             let mut display_out = CrLfWriter::new(out);
@@ -198,7 +198,7 @@ fn handle_key(
             if had_completion_panel {
                 redraw(state, out)?;
             }
-            execute!(out, MoveToColumn(state.rendered_last_line_column()),)?;
+            move_to_rendered_end(state, out, terminal_display_width())?;
             write!(out, "\r\n")?;
             let mut display_out = CrLfWriter::new(out);
             execute_draft(state, backend, &mut display_out, command_timeout)?;
@@ -207,7 +207,7 @@ fn handle_key(
             }
         }
         KeyAction::ConfirmContext(accepted) => {
-            execute!(out, MoveToColumn(state.rendered_last_line_column()))?;
+            move_to_rendered_end(state, out, terminal_display_width())?;
             write!(out, "\r\n")?;
             let mut display_out = CrLfWriter::new(out);
             answer_context_confirmation(state, accepted, &mut display_out, command_timeout)?;
@@ -224,6 +224,7 @@ fn handle_key(
 
 fn clear_screen_for_redraw(state: &mut AppState, out: &mut impl Write) -> Result<()> {
     state.last_rendered_lines = 0;
+    state.last_rendered_cursor_row = 0;
     execute!(
         out,
         MoveTo(0, 0),
@@ -262,8 +263,12 @@ pub fn run_external_editor(
 
     let result = result?;
     if result.exit_code == Some(0) {
-        writeln!(out, "editor saved draft")?;
-        if state.editor_config.execute_after_save {
+        if state.draft_from_editor {
+            writeln!(out, "editor saved draft")?;
+        } else {
+            writeln!(out, "editor empty; canceled")?;
+        }
+        if state.editor_config.execute_after_save && state.draft_from_editor {
             execute_draft(state, backend, out, command_timeout)?;
         }
     } else {
@@ -331,8 +336,12 @@ pub fn run_git_branch_picker(state: &mut AppState, out: &mut impl Write) -> Resu
     apply_git_branch_picker_result(state, result, out)
 }
 
-pub fn run_env_var_picker(state: &mut AppState, out: &mut impl Write) -> Result<()> {
-    let candidates = env_var_picker_candidates();
+pub fn run_env_var_picker(
+    state: &mut AppState,
+    backend: &mut PtyBackend,
+    out: &mut impl Write,
+) -> Result<()> {
+    let candidates = env_var_picker_candidates_from_backend(backend);
     if candidates.is_empty() {
         writeln!(out, "environment variable picker has no candidates")?;
         return Ok(());
@@ -342,12 +351,27 @@ pub fn run_env_var_picker(state: &mut AppState, out: &mut impl Write) -> Result<
     apply_env_var_picker_result(state, result, out)
 }
 
+fn env_var_picker_candidates_from_backend(backend: &mut PtyBackend) -> Vec<String> {
+    let mut names = Vec::new();
+    if let Ok(result) = backend.run_command(" env", Duration::from_secs(2)) {
+        names.extend(
+            result
+                .output
+                .lines()
+                .filter_map(|line| line.split_once('=').map(|(name, _)| name.to_string())),
+        );
+    }
+    names.extend(env_var_picker_candidates());
+    crate::picker::env_var_picker_candidates_from_names(names)
+}
+
 fn apply_env_var_picker_result(
     state: &mut AppState,
     result: PickerRunResult,
     out: &mut impl Write,
 ) -> Result<()> {
     let Some(selected) = result.selected else {
+        writeln!(out)?;
         writeln!(out, "environment variable picker cancelled")?;
         return Ok(());
     };
@@ -371,6 +395,7 @@ fn apply_git_branch_picker_result(
     out: &mut impl Write,
 ) -> Result<()> {
     let Some(selected) = result.selected else {
+        writeln!(out)?;
         writeln!(out, "git branch picker cancelled")?;
         return Ok(());
     };
@@ -387,6 +412,7 @@ fn apply_template_picker_result(
     out: &mut impl Write,
 ) -> Result<()> {
     let Some(selected) = result.selected else {
+        writeln!(out)?;
         writeln!(out, "template picker cancelled")?;
         return Ok(());
     };
@@ -405,6 +431,7 @@ fn apply_history_picker_result(
     out: &mut impl Write,
 ) -> Result<()> {
     let Some(selected) = result.selected else {
+        writeln!(out)?;
         writeln!(out, "history search cancelled")?;
         return Ok(());
     };
@@ -419,6 +446,7 @@ fn apply_file_picker_result(
     out: &mut impl Write,
 ) -> Result<()> {
     let Some(selected) = result.selected else {
+        writeln!(out)?;
         writeln!(out, "file picker cancelled")?;
         return Ok(());
     };
@@ -451,23 +479,24 @@ pub enum PasteAction {
 }
 
 pub fn apply_paste_to_state(text: &str, state: &mut AppState) -> PasteAction {
-    if !text.contains('\n') && !text.contains('\r') {
+    let text = normalize_paste_newlines(text);
+    if !text.contains('\n') {
         state.copy_read_only_selection_to_draft();
         if state.draft.is_empty() {
             state.draft_from_editor = false;
             state.draft_from_template = false;
         }
-        state.draft.insert_str(text);
+        state.draft.insert_str(&text);
         return PasteAction::Continue;
     }
 
     match state.paste_config.multiline.as_str() {
         "editor" | "execute" if state.paste_config.confirm_execute => {
-            state.replace_draft_from_editor_text(normalize_paste_newlines(text));
+            state.replace_draft_from_editor_text(text);
             PasteAction::Continue
         }
         "execute" => {
-            state.replace_draft_from_editor_text(normalize_paste_newlines(text));
+            state.replace_draft_from_editor_text(text);
             PasteAction::Submit
         }
         _ => PasteAction::Continue,
@@ -475,7 +504,10 @@ pub fn apply_paste_to_state(text: &str, state: &mut AppState) -> PasteAction {
 }
 
 fn normalize_paste_newlines(text: &str) -> String {
-    text.replace("\r\n", "\n").replace('\r', "\n")
+    text.replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .trim_end_matches('\n')
+        .to_string()
 }
 
 pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
@@ -738,30 +770,34 @@ fn expand_template_draft_if_inside_placeholder(state: &mut AppState) {
 }
 
 pub fn redraw(state: &mut AppState, out: &mut impl Write) -> Result<()> {
-    if state.last_rendered_lines > 1 {
+    if state.last_rendered_cursor_row > 0 {
         execute!(
             out,
-            MoveToPreviousLine((state.last_rendered_lines - 1) as u16)
+            MoveToPreviousLine(state.last_rendered_cursor_row as u16)
         )?;
     }
     execute!(out, MoveToColumn(0), Clear(ClearType::FromCursorDown))?;
+    let width = terminal_display_width();
     let rendered = state.rendered_text();
     write!(out, "{}", rendered.replace('\n', "\r\n"))?;
-    if let Some(suffix) = render_inline_completion_suffix(state, terminal_display_width()) {
-        write_inline_completion_suffix(out, &suffix)?;
+    let inline_suffix = render_inline_completion_suffix(state, width);
+    if let Some(suffix) = &inline_suffix {
+        write_inline_completion_suffix(out, suffix)?;
     }
     if !state.completion_panel.is_empty() {
         for line in &state.completion_panel {
             write!(out, "\r\n{line}")?;
         }
-        execute!(out, MoveUp(state.completion_panel.len() as u16))?;
     }
-    let (cursor_row, cursor_col) = state.terminal_cursor_position();
-    if cursor_row > 0 {
-        execute!(out, MoveToPreviousLine(cursor_row))?;
+    let full_render = full_rendered_text_for_width(&rendered, inline_suffix.as_deref(), state);
+    let final_row = visual_line_count(&full_render, width).saturating_sub(1);
+    let (cursor_row, cursor_col) = terminal_cursor_position_for_width(state, width);
+    if final_row > cursor_row {
+        execute!(out, MoveUp((final_row - cursor_row) as u16))?;
     }
     execute!(out, MoveToColumn(cursor_col))?;
-    state.last_rendered_lines = state.rendered_line_count() + state.completion_panel.len();
+    state.last_rendered_lines = final_row + 1;
+    state.last_rendered_cursor_row = cursor_row;
     out.flush()?;
     Ok(())
 }
@@ -797,13 +833,21 @@ pub fn complete_or_show_candidates_for_width(state: &mut AppState, width: usize)
             return Ok(());
         }
         let token = current_token_context(state.draft.as_str(), state.draft.cursor());
-        state.completion_inline = candidates.first().and_then(|candidate| {
+        let inline_completion = candidates.first().and_then(|candidate| {
             ghost_completion_suffix(&token, candidate).map(|suffix| InlineCompletion {
                 candidate: candidate.clone(),
                 suffix,
             })
         });
-        let panel_candidates = limit_candidates(candidates, state.completion_config.max_results);
+        let skip_inline_candidate = inline_completion.is_some();
+        state.completion_inline = inline_completion;
+        let panel_candidates = if skip_inline_candidate {
+            candidates.into_iter().skip(1).collect()
+        } else {
+            candidates
+        };
+        let panel_candidates =
+            limit_candidates(panel_candidates, state.completion_config.max_results);
         state.completion_panel =
             render_completion_candidates_for_width(&panel_candidates, &token, width);
         return Ok(());
@@ -834,7 +878,7 @@ fn render_inline_completion_suffix(state: &AppState, width: usize) -> Option<Str
         return None;
     }
     let suffix = &state.completion_inline.as_ref()?.suffix;
-    let (_, cursor_col) = state.terminal_cursor_position();
+    let (_, cursor_col) = terminal_cursor_position_for_width(state, width);
     let remaining = width.saturating_sub(cursor_col as usize);
     let suffix = truncate_with_ellipsis(suffix, remaining);
     (!suffix.is_empty()).then_some(suffix)
@@ -854,6 +898,128 @@ fn terminal_display_width() -> usize {
         Ok((columns, _)) if columns >= 20 => columns as usize,
         _ => 80,
     }
+}
+
+fn move_to_rendered_end(state: &AppState, out: &mut impl Write, width: usize) -> Result<()> {
+    let (cursor_row, _) = terminal_cursor_position_for_width(state, width);
+    let rendered = state.rendered_text();
+    let (end_row, end_col) = visual_position(&rendered, width);
+    if end_row > cursor_row {
+        execute!(out, MoveDown((end_row - cursor_row) as u16))?;
+    } else if cursor_row > end_row {
+        execute!(out, MoveUp((cursor_row - end_row) as u16))?;
+    }
+    execute!(out, MoveToColumn(end_col))?;
+    Ok(())
+}
+
+fn full_rendered_text_for_width(
+    rendered: &str,
+    inline_suffix: Option<&str>,
+    state: &AppState,
+) -> String {
+    let mut full = String::from(rendered);
+    if let Some(suffix) = inline_suffix {
+        full.push_str(suffix);
+    }
+    for line in &state.completion_panel {
+        full.push('\n');
+        full.push_str(line);
+    }
+    full
+}
+
+fn terminal_cursor_position_for_width(state: &AppState, width: usize) -> (usize, u16) {
+    let rendered_before_cursor = rendered_text_before_cursor(state);
+    let (row, col) = visual_position(&rendered_before_cursor, width);
+    (row, col)
+}
+
+fn rendered_text_before_cursor(state: &AppState) -> String {
+    if let Some(pending) = &state.pending_context {
+        let marker = if pending.dangerous {
+            "[dangerous context confirmation: Y/n]"
+        } else {
+            "[context confirmation: Y/n]"
+        };
+        return format!("{}{}", state.prompt_prefix(), marker);
+    }
+    match state.mode {
+        crate::modes::Mode::History => format!(
+            "{}{}",
+            state.prompt_prefix(),
+            state.selected_history_command().unwrap_or("")
+        ),
+        crate::modes::Mode::Ai => format!(
+            "{}{}",
+            state.prompt_prefix(),
+            state.selected_ai_command().unwrap_or("")
+        ),
+        crate::modes::Mode::Draft if state.draft_from_editor => {
+            format!(
+                "{}{}",
+                state.prompt_prefix(),
+                state.editor_draft_summary_for_terminal()
+            )
+        }
+        _ => {
+            let before_cursor = &state.draft.as_str()[..state.draft.cursor()];
+            if before_cursor.contains('\n') {
+                render_multiline_for_terminal(
+                    &state.prompt_prefix(),
+                    state.continuation_prompt.as_deref().unwrap_or(".. "),
+                    before_cursor,
+                )
+            } else {
+                format!("{}{}", state.prompt_prefix(), before_cursor)
+            }
+        }
+    }
+}
+
+fn visual_line_count(text: &str, width: usize) -> usize {
+    text.split('\n')
+        .map(|line| visual_rows_for_line(line, width))
+        .sum::<usize>()
+        .max(1)
+}
+
+fn visual_position(text: &str, width: usize) -> (usize, u16) {
+    let width = width.max(1);
+    let mut row = 0;
+    let mut lines = text.split('\n').peekable();
+    while let Some(line) = lines.next() {
+        let len = line.chars().count();
+        let line_row = len / width;
+        let col = len % width;
+        if lines.peek().is_none() {
+            return (row + line_row, col.min(u16::MAX as usize) as u16);
+        }
+        row += visual_rows_for_line(line, width);
+    }
+    (0, 0)
+}
+
+fn visual_rows_for_line(line: &str, width: usize) -> usize {
+    let width = width.max(1);
+    let len = line.chars().count();
+    (len / width) + 1
+}
+
+fn render_multiline_for_terminal(
+    prompt_prefix: &str,
+    continuation_prefix: &str,
+    text: &str,
+) -> String {
+    let mut lines = text.split('\n');
+    let mut rendered = String::from(prompt_prefix);
+    rendered.push_str(lines.next().unwrap_or_default());
+    for line in lines {
+        rendered.push('\n');
+        rendered.push_str(continuation_prefix);
+        rendered.push_str(line);
+    }
+    rendered
 }
 
 pub fn accept_first_completion(state: &mut AppState) -> Result<bool> {
@@ -984,7 +1150,7 @@ mod tests {
 
         assert_eq!(state.draft.as_str(), "cat si");
         assert_eq!(state.completion_inline.as_ref().unwrap().suffix, "ngle.txt");
-        assert_eq!(state.completion_panel, ["file\tsingle.txt"]);
+        assert!(state.completion_panel.is_empty());
 
         complete_or_show_candidates(&mut state).unwrap();
 
@@ -1027,10 +1193,7 @@ mod tests {
 
         complete_or_show_candidates(&mut state).unwrap();
 
-        assert_eq!(
-            state.completion_panel,
-            vec!["file\tone.txt".to_string(), "file\tonly.log".to_string()]
-        );
+        assert_eq!(state.completion_panel, vec!["file\tnly.log".to_string()]);
         assert_eq!(state.draft.as_str(), "cat o");
     }
 
@@ -1126,7 +1289,6 @@ mod tests {
             output.contains("> echo \"\r\n.. 123"),
             "output was {output:?}"
         );
-        assert!(output.contains("\u{1b}[1F"), "output was {output:?}");
         assert!(output.ends_with("\u{1b}[7G"), "output was {output:?}");
     }
 
@@ -1606,7 +1768,7 @@ mod tests {
         assert_eq!(state.draft.as_str(), "cat old.txt");
         assert_eq!(
             String::from_utf8(output).unwrap(),
-            "file picker cancelled\n"
+            "\nfile picker cancelled\n"
         );
     }
 
@@ -1650,7 +1812,7 @@ mod tests {
         assert_eq!(state.draft.as_str(), "partial");
         assert_eq!(
             String::from_utf8(output).unwrap(),
-            "history search cancelled\n"
+            "\nhistory search cancelled\n"
         );
     }
 
@@ -1709,7 +1871,7 @@ mod tests {
         assert_eq!(state.draft.as_str(), "partial");
         assert_eq!(
             String::from_utf8(output).unwrap(),
-            "template picker cancelled\n"
+            "\ntemplate picker cancelled\n"
         );
     }
 
@@ -1754,7 +1916,7 @@ mod tests {
         assert_eq!(state.draft.as_str(), "git checkout old");
         assert_eq!(
             String::from_utf8(output).unwrap(),
-            "git branch picker cancelled\n"
+            "\ngit branch picker cancelled\n"
         );
     }
 
@@ -1822,7 +1984,7 @@ mod tests {
         assert_eq!(state.draft.as_str(), "echo OLD");
         assert_eq!(
             String::from_utf8(output).unwrap(),
-            "environment variable picker cancelled\n"
+            "\nenvironment variable picker cancelled\n"
         );
     }
 
@@ -2244,6 +2406,7 @@ mod tests {
             normalize_paste_newlines("one\r\ntwo\rthree"),
             "one\ntwo\nthree"
         );
+        assert_eq!(normalize_paste_newlines("one\r\n"), "one");
     }
 
     #[test]
@@ -2294,11 +2457,20 @@ mod tests {
         assert_eq!(state.mode, Mode::Draft);
         assert!(state.draft_from_editor);
         assert_eq!(state.draft.as_str(), "echo one\necho two");
-        assert!(
-            state
-                .render_prompt_line()
-                .contains("[editor draft: 2 line(s)")
+        assert!(state.render_prompt_line().contains("[draft: 2 lines"));
+    }
+
+    #[test]
+    fn pasted_single_line_with_trailing_newline_inserts_without_review() {
+        let mut state = AppState::default();
+
+        assert_eq!(
+            apply_paste_to_state("echo pasted\n", &mut state),
+            PasteAction::Continue
         );
+
+        assert_eq!(state.draft.as_str(), "echo pasted");
+        assert!(!state.draft_from_editor);
     }
 
     #[test]

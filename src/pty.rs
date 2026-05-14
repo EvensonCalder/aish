@@ -222,7 +222,9 @@ impl PtyBackend {
         let marker_command = format!(
             " __aish_status=$?; printf '\\n%s%s\\t%s\\n' '{marker}' \"$__aish_status\" \"$PWD\"; sh -c \"exit $__aish_status\"\n"
         );
-        self.write_raw(&start_command)?;
+        if !command.contains('\n') {
+            self.write_raw(&start_command)?;
+        }
         self.write_raw(command)?;
         if !command.ends_with('\n') {
             self.write_raw("\n")?;

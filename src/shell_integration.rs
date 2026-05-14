@@ -1,6 +1,7 @@
 const INTERACTIVE_ALLOWLIST: &[&str] = &[
     "vi", "vim", "nvim", "nano", "emacs", "hx", "helix", "kak", "less", "more", "man", "top",
-    "htop", "btop", "ssh", "mosh", "fzf", "tmux", "screen",
+    "htop", "btop", "ssh", "mosh", "fzf", "tmux", "screen", "python", "python3", "node", "ipython",
+    "psql",
 ];
 
 pub fn is_interactive_passthrough_command(command: &str) -> bool {
@@ -189,6 +190,8 @@ mod tests {
             "top",
             "less README.md",
             "fzf",
+            "python3",
+            "node",
         ] {
             assert!(is_interactive_passthrough_command(command), "{command}");
         }

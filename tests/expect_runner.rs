@@ -364,6 +364,11 @@ fn env_var_picker_cancel_preserves_draft() {
 }
 
 #[test]
+fn env_var_picker_uses_backend_environment() {
+    run_script("env_var_picker_uses_backend_environment.exp");
+}
+
+#[test]
 fn home_default_env_var_picker_cancel_preserves_draft() {
     run_script("home_default_env_var_picker_cancel_preserves_draft.exp");
 }
