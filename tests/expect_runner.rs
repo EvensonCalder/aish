@@ -253,6 +253,11 @@ fn completion_panel_multiple() {
 }
 
 #[test]
+fn completion_no_matches_panel() {
+    run_script("completion_no_matches_panel.exp");
+}
+
+#[test]
 fn completion_config_persists() {
     run_script("completion_config_persists.exp");
 }
