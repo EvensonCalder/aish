@@ -78,6 +78,20 @@ fn pty_backend_resizes_visible_columns_for_child_commands() {
 }
 
 #[test]
+fn pty_backend_clear_output_does_not_end_with_newline() {
+    let _guard = pty_test_guard();
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+
+    let result = backend
+        .run_command("clear", Duration::from_secs(5))
+        .unwrap();
+
+    assert_eq!(result.exit_code, 0);
+    assert!(result.output.contains("\x1b[2J"), "{:?}", result.output);
+    assert!(!result.output.ends_with('\n'), "{:?}", result.output);
+}
+
+#[test]
 fn pty_backend_runs_multiline_commands_before_marker() {
     let _guard = pty_test_guard();
     let mut backend = PtyBackend::spawn("/bin/bash").unwrap();

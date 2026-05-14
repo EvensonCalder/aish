@@ -1415,7 +1415,20 @@ fn write_command_output(out: &mut impl Write, output: &str) -> Result<()> {
     // corrupt commands like `clear`: ESC[H ESC[2J followed by an Aish-added LF
     // moves the prompt to row 1, leaving a blank first row.
     write!(out, "{output}")?;
+    if output_clears_visible_screen(output) {
+        write!(out, "\x1b[H")?;
+    }
     Ok(())
+}
+
+fn output_clears_visible_screen(output: &str) -> bool {
+    output.contains("\x1b[2J")
+        || output.contains("\x1bc")
+        || (output_contains_cursor_home(output) && output.contains("\x1b[J"))
+}
+
+fn output_contains_cursor_home(output: &str) -> bool {
+    output.contains("\x1b[H") || output.contains("\x1b[;H") || output.contains("\x1b[1;1H")
 }
 
 pub fn answer_context_confirmation(
@@ -3082,7 +3095,7 @@ mod tests {
 
         assert_eq!(
             String::from_utf8(output).unwrap(),
-            "\x1b[H\x1b[2J\x1b[3J\x1b[H"
+            "\x1b[H\x1b[2J\x1b[3J\x1b[H\x1b[H"
         );
     }
 
@@ -3092,7 +3105,37 @@ mod tests {
 
         write_command_output(&mut output, "\x1b[H\x1b[2J").unwrap();
 
-        assert_eq!(String::from_utf8(output).unwrap(), "\x1b[H\x1b[2J");
+        assert_eq!(String::from_utf8(output).unwrap(), "\x1b[H\x1b[2J\x1b[H");
+    }
+
+    #[test]
+    fn command_output_homes_cursor_after_terminfo_clear_sequence() {
+        let mut output = Vec::new();
+
+        write_command_output(&mut output, "\x1b[3J\x1b[H\x1b[2J").unwrap();
+
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            "\x1b[3J\x1b[H\x1b[2J\x1b[H"
+        );
+    }
+
+    #[test]
+    fn command_output_does_not_home_after_partial_clear_to_screen_end() {
+        let mut output = Vec::new();
+
+        write_command_output(&mut output, "\x1b[J").unwrap();
+
+        assert_eq!(String::from_utf8(output).unwrap(), "\x1b[J");
+    }
+
+    #[test]
+    fn command_output_does_not_home_after_scrollback_only_clear() {
+        let mut output = Vec::new();
+
+        write_command_output(&mut output, "\x1b[3J").unwrap();
+
+        assert_eq!(String::from_utf8(output).unwrap(), "\x1b[3J");
     }
 
     #[test]

@@ -164,6 +164,18 @@ fn tmux_ctrl_l_clears_visible_screen_and_keeps_prompt_usable() {
 }
 
 #[test]
+fn tmux_shell_clear_command_redraws_prompt_on_first_line() {
+    let Some(captured) = run_tmux_script("shell_clear_command.sh") else {
+        return;
+    };
+    assert!(
+        !captured.contains("before-shell-clear"),
+        "captured pane still contained pre-clear output: {captured:?}"
+    );
+    assert_first_non_empty_line(&captured, 0);
+}
+
+#[test]
 fn tmux_completion_no_matches_panel_remains_usable() {
     let Some(captured) = run_tmux_script("completion_no_matches.sh") else {
         return;
@@ -491,6 +503,17 @@ fn assert_line_prefix(captured: &str, expected_prefix: &str) {
             .lines()
             .any(|line| line.starts_with(expected_prefix)),
         "expected line prefix {expected_prefix:?}; captured pane was {captured:?}"
+    );
+}
+
+fn assert_first_non_empty_line(captured: &str, expected_index: usize) {
+    let index = captured
+        .lines()
+        .position(|line| !line.trim().is_empty())
+        .unwrap_or(usize::MAX);
+    assert_eq!(
+        index, expected_index,
+        "expected first non-empty line index {expected_index}; captured pane was {captured:?}"
     );
 }
 
