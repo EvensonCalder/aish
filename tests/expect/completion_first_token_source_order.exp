@@ -1,0 +1,43 @@
+#!/usr/bin/env expect
+# First-token completion should rank template candidates before history commands
+# before PATH executables when all three sources match the same prefix.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set bindir "/tmp/aish-completion-path-[pid]-[clock clicks]"
+file delete -force $bindir
+file mkdir $bindir
+set fh [open "$bindir/fooexec" w]
+puts $fh "#!/bin/sh\nexit 0"
+close $fh
+file attributes "$bindir/fooexec" -permissions 0755
+
+set old_path $::env(PATH)
+set ::env(PATH) "$bindir:$old_path"
+
+aish_spawn
+
+aish_send "foohistory"
+aish_enter
+aish_wait_prompt
+
+aish_send "#mt footemplate echo from-template"
+aish_enter
+aish_expect "template stored: footemplate"
+aish_wait_prompt
+
+aish_send "foo"
+send -- "\t"
+
+aish_expect "template\tfootemplate"
+aish_expect "history\tfoohistory"
+aish_expect "exec\tfooexec"
+
+send -- "\u001b"
+aish_wait_prompt
+
+aish_quit
+
+set ::env(PATH) $old_path
+file delete -force $bindir

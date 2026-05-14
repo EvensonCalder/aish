@@ -258,6 +258,11 @@ fn completion_config_persists() {
 }
 
 #[test]
+fn completion_first_token_source_order() {
+    run_script("completion_first_token_source_order.exp");
+}
+
+#[test]
 fn home_default_completion_ui() {
     run_script("home_default_completion_ui.exp");
 }
