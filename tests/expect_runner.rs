@@ -473,6 +473,11 @@ fn context_dangerous_still_prompts_when_confirm_off() {
 }
 
 #[test]
+fn context_truncation_reports_limit() {
+    run_script("context_truncation_reports_limit.exp");
+}
+
+#[test]
 fn home_default_context_dangerous_refusal() {
     run_script("home_default_context_dangerous_refusal.exp");
 }
