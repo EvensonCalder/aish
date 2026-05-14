@@ -56,6 +56,20 @@ fn tmux_completion_right_accepts_first_and_executes() {
     assert_adjacent_output(&captured, "cat right-target.txt", "accepted-right");
 }
 
+#[test]
+fn tmux_ctrl_c_cancels_continuation_and_shell_recovers() {
+    let captured = run_tmux_script("continuation_cancel.sh");
+    assert!(
+        captured.contains("dquote>"),
+        "captured pane history did not show continuation prompt: {captured:?}"
+    );
+    assert_adjacent_output(&captured, "echo after-cancel", "after-cancel");
+    assert!(
+        !captured.contains("dquote> echo after-cancel"),
+        "continuation prompt survived Ctrl-C: {captured:?}"
+    );
+}
+
 fn run_tmux_script(name: &str) -> String {
     let _guard = TMUX_RUN_LOCK
         .lock()

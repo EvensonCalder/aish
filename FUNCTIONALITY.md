@@ -60,6 +60,7 @@ This document describes the behavior implemented in the current codebase. It is 
 - Real interactive expect scenarios are serialized in the test runner because parallel terminal sessions can create scheduler and PTY races that do not represent single-user operation.
 - Real `tmux` screen-capture tests are serialized for the same reason; they model one user driving one terminal workflow at a time.
 - Unicode final-screen behavior is covered through `tmux` pane capture rather than Tcl/expect when expect's own Unicode handling is unstable.
+- `tmux capture-pane -p` trims trailing spaces from captured lines, so tmux tests must not use it to prove prompt or continuation trailing-space behavior; use expect byte-stream assertions or Rust terminal rendering tests for those details.
 
 ## Continuation
 
@@ -68,6 +69,7 @@ This document describes the behavior implemented in the current codebase. It is 
 - Odd trailing backslashes show generic `> ` continuation.
 - Backend shell `PS2`/`PROMPT2` prompts are suppressed from visible command output.
 - `Ctrl-C` cancels continuation state without wedging the backend shell.
+- Continuation cancellation is validated with terminal pane capture: the continuation prompt should be visible before cancellation, `Ctrl-C` should return to a normal prompt, and the next command should execute normally.
 
 ## Private Commands
 
