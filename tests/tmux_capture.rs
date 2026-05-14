@@ -87,6 +87,16 @@ fn tmux_history_mode_executes_selected_command() {
     assert_at_least_n_lines(&captured, "history-tmux-ok", 2);
 }
 
+#[test]
+fn tmux_escape_clears_draft_and_shell_recovers() {
+    let captured = run_tmux_script("escape_clears_draft.sh");
+    assert!(
+        !captured.lines().any(|line| line == "should-not-run"),
+        "escaped draft unexpectedly executed: {captured:?}"
+    );
+    assert_adjacent_output(&captured, "echo after-escape", "after-escape");
+}
+
 fn run_tmux_script(name: &str) -> String {
     let _guard = TMUX_RUN_LOCK
         .lock()

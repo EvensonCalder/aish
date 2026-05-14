@@ -28,6 +28,7 @@ This document describes the behavior implemented in the current codebase. It is 
 - History and AI modes are read-only; typed edits copy the selected item into draft mode first.
 - Cursor-only movement in read-only modes does not copy into draft.
 - `Esc` clears the draft and returns to draft mode.
+- `Esc` draft clearing is validated with terminal pane capture: a cleared draft should not execute, and the next command should execute normally.
 - Mode-switch redraw is validated with terminal pane capture: output visible before `$`/`%`/`>` cycling should remain visible, and the next command should execute normally after returning to draft mode.
 - History-mode execution is validated with terminal pane capture: a command selected from `$` mode should execute and produce visible output in the real terminal.
 
