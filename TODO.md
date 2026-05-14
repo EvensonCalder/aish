@@ -616,7 +616,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 - [ ] Decrypt asynchronously on startup.
 - [ ] Show `history is still unlocking...` when needed.
 - [ ] Handle GPG/pinentry by temporarily entering UnlockPassthrough.
-- [ ] Use atomic writes.
+- [x] Add atomic encrypted-write helper.
 - [x] Warn about existing plaintext in git history.
 
 ### Acceptance criteria
