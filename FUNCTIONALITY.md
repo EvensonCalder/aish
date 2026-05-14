@@ -82,6 +82,7 @@ This document describes the behavior implemented in the current codebase. It is 
 - `#config` prints runtime config values and storage paths.
 - `#doctor` prints read-only diagnostics for shell, PTY, GPG/git/fzf placeholders, editor, AI config, sync, encryption, and storage paths.
 - `#exit` and `#quit` exit Aish.
+- `#exit` is validated with tmux: the Aish pane should terminate instead of leaving a hidden running process behind.
 - Unknown private commands never reach the backend shell and may show a nearest-command suggestion.
 - Invalid private command usage leaves the session usable.
 

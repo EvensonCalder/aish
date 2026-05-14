@@ -106,6 +106,15 @@ fn tmux_ctrl_d_exits_session_without_leftover_pane() {
     );
 }
 
+#[test]
+fn tmux_exit_command_terminates_session_without_leftover_pane() {
+    let captured = run_tmux_script("exit_command.sh");
+    assert!(
+        captured.trim().is_empty(),
+        "#exit script should not leave pane output: {captured:?}"
+    );
+}
+
 fn run_tmux_script(name: &str) -> String {
     let _guard = TMUX_RUN_LOCK
         .lock()
