@@ -12,14 +12,14 @@ cargo clippy --all-targets -- -D warnings
 
 Current test inventory:
 
-- 353 library unit tests.
+- 367 library unit tests.
 - 23 draft execution integration tests.
 - 1 first-run integration test.
-- 15 tmux screen-capture integration tests.
+- 17 tmux screen-capture integration tests.
 - 7 active bash PTY integration tests.
 - 2 active zsh PTY integration tests.
 - 2 opt-in fish PTY integration tests, gated by `AISH_TEST_FISH=1` until fish support is validated across macOS and Linux distributions.
-- 103 expect-driven end-to-end interactive scenarios.
+- 105 expect-driven end-to-end interactive scenarios.
 - Expect scenarios are serialized inside `expect_runner` because they launch real interactive terminals; parallel execution created false `no prompt` and Tcl/expect crash failures that did not match actual single-user operation.
 - Expect scenarios force `commit.gpgsign=false` through `GIT_CONFIG_COUNT` so temporary local git repositories do not depend on a developer's global GPG/pinentry setup.
 - Tmux screen-capture tests are serialized inside `tmux_capture` for the same reason: they launch real terminal panes and assert screen state.
@@ -69,7 +69,7 @@ Expect scenarios are the acceptance layer for user-visible terminal behavior. Th
 | Shell continuation UX | `dquote_continuation`, `squote_continuation`, `backslash_continuation`, `ctrl_c_cancels_continuation`, `tmux_ctrl_c_cancels_continuation_and_shell_recovers`, `no_backend_ps2_leak` | Covered | Add heredoc-style continuation if it becomes user-facing. |
 | Prompt/control keys | `ctrl_l_clear_screen`, `tmux_ctrl_l_clears_visible_screen_and_keeps_prompt_usable`, `readline_editing_keys`, `tmux_unicode_output_matches_real_terminal_screen`, `terminal_resize`, `escape_clears_draft`, `tmux_escape_clears_draft_and_shell_recovers`, `ctrl_x_unknown_chord_cancels`, `ctrl_d_exits`, `tmux_ctrl_d_exits_session_without_leftover_pane`, `exit_command`, `tmux_exit_command_terminates_session_without_leftover_pane` | Covered | Add new prompt-control scenarios only for observed regressions. |
 | Mode switching and read-only behavior | `empty_tab_cycles_modes`, `tmux_mode_redraw_preserves_prior_output_and_shell_recovers`, `history_mode_execute`, `tmux_history_mode_executes_selected_command`, `history_persists_across_restarts`, `home_default_history_persists`, `home_default_history_trim_persists`, `draft_persists_across_restarts`, `home_default_draft_persists`, `read_only_edit_copies_to_draft`, `ai_mode_executes_sequence`, `home_default_ai_mode_executes_sequence`, `ai_mode_edit_copies_to_draft`, `home_default_ai_mode_edit_copies_to_draft`, `output_then_redraw_interactions` | Covered | Add more mode redraw regressions only for observed failures. |
-| Completion UI | `completion_accept_single`, `completion_panel_multiple`, `completion_no_matches_panel`, `tmux_completion_no_matches_panel_remains_usable`, `completion_right_accepts_first`, `tmux_completion_right_accepts_first_and_executes`, `completion_config_persists`, `completion_first_token_source_order`, `home_default_completion_ui`, `output_then_redraw_interactions` | Covered | Phase 28 must add inline ghost completion, configurable full/word `Tab` acceptance, and width-aware no-wrap panel coverage. |
+| Completion UI | `completion_accept_single`, `completion_panel_multiple`, `completion_inline_off_accepts_first`, `completion_tab_accept_word`, `completion_no_matches_panel`, `tmux_completion_no_matches_panel_remains_usable`, `completion_right_accepts_first`, `tmux_completion_right_accepts_first_and_executes`, `tmux_inline_completion_matches_bash_backend_real_terminal_screen`, `tmux_inline_completion_matches_zsh_backend_real_terminal_screen`, `completion_config_persists`, `completion_first_token_source_order`, `home_default_completion_ui`, `output_then_redraw_interactions` | Covered for bash/zsh by default | Fish backend completion remains opt-in with `AISH_TEST_FISH=1` until cross-platform fish behavior is validated. |
 | Picker cancellation UX | `history_picker_cancel_preserves_draft`, `home_default_history_picker_cancel_preserves_draft`, `file_picker_cancel_preserves_draft`, `home_default_file_picker_cancel_preserves_draft`, `template_picker_cancel_preserves_draft`, `home_default_template_picker_cancel_preserves_draft`, `git_branch_picker_cancel_preserves_draft`, `home_default_git_branch_picker_cancel_preserves_draft`, `env_var_picker_cancel_preserves_draft`, `home_default_env_var_picker_cancel_preserves_draft` | Covered | Add picker success-path expect scenarios only when picker replacement UI changes; Rust tests cover replacement logic. |
 | Private command UX and diagnostics | `first_run_doctor`, `home_default_first_run_doctor`, `home_default_config_persists`, `home_default_ai_key_source_redacts_secret`, `invalid_config_startup`, `home_default_invalid_config_startup`, `home_missing_fails_cleanly`, `aish_home_empty_uses_home`, `aish_home_relative_fails_cleanly`, `home_unwritable_fails_cleanly`, `home_path_with_spaces_works`, `home_aish_path_file_fails_cleanly`, `help_lists_commands`, `unknown_private_command`, `private_command_safe_failures`, `status_doctor_config`, `tmux_status_command_is_visible_and_shell_recovers`, `key_and_sync_placeholders`, `key_clear_removes_stored_key`, `ai_config_persists` | Covered | Add new safe-failure scenarios when new private commands are added. |
 | Notes, context, and logs | `notes_are_swallowed`, `home_default_notes_are_swallowed`, `context_config_persists`, `context_off_blocks_pseudopipe`, `context_confirm_off_runs_immediately`, `context_confirmation_skip`, `context_dangerous_refusal`, `context_dangerous_still_prompts_when_confirm_off`, `context_truncation_reports_limit`, `home_default_context_dangerous_refusal`, `log_shows_context_skip`, `home_default_event_log_persists` | Covered | Add new context scenarios only for observed regressions. |
@@ -375,20 +375,20 @@ Implemented:
 - Unicode command output has real `tmux` pane-capture coverage so UTF-8 behavior is checked against final visible terminal state without relying on Tcl/expect Unicode handling.
 - Terminal size has expect coverage proving startup outer terminal rows/columns propagate to backend child commands via `stty size`; runtime backend resize is covered by PTY integration.
 - `#key set` remains a placeholder, while `#key clear` removes the encrypted key file if present and logs the action without printing stored secret content.
-- `#completion` reports current completion config and persists `#completion max <count>`.
-- Inline ghost completion, configurable full/word `Tab` acceptance, and width-aware candidate row elision are planned for Phase 28 and are not part of the current implemented coverage.
+- `#completion` reports current completion config and persists `#completion max <count>`, `#completion inline on|off`, and `#completion tab-accept full|word`.
+- Inline ghost completion, configurable full/word `Tab` acceptance, and width-aware candidate row elision are implemented with Rust, expect, and tmux coverage.
 - Completion has pure current-token detection helpers that handle first-token classification, non-first-token classification, quoted whitespace, escaped whitespace, cursor-in-line contexts, path-like tokens, and UTF-8 cursor snapping.
 - Completion has a pure path completion helper that reads matching file and directory candidates, preserves directory prefixes, sorts candidates, marks directories with trailing `/`, preserves opening quotes in replacements, and handles missing directories as no matches.
 - Completion has a pure first-token helper that returns template candidates before newest-first history commands before PATH executables, with per-source deduplication.
 - Completion has a pure non-first-token helper that returns path candidates, history argument candidates, and template placeholder candidates in spec order with per-source deduplication.
-- Completion helpers support ignore-spaces matching and max-result limiting; config defaults expose `completion.max_results = 5`, `completion.ignore_spaces = true`, and `completion.template_first = true`.
-- Runtime state carries completion config and `#config` reports completion settings read-only.
+- Completion helpers support ignore-spaces matching and panel max-result limiting; config defaults expose `completion.max_results = 5`, `completion.ignore_spaces = true`, `completion.template_first = true`, `completion.inline = true`, and `completion.tab_accept = "full"`.
+- Runtime state carries completion config and `#config`/`#status` report completion settings read-only.
 - Prompt cwd rendering abbreviates the user home directory as `~` and paths inside it as `~/...`.
 - Raw-terminal display writes normalize line feeds to CRLF through a terminal display writer, so multi-line shell output and UI messages return to column zero without corrupting stored command output.
-- Runtime state can build completion candidates from current draft, templates, in-memory history, cwd, PATH, and completion config without mutating input or terminal UI.
-- Non-empty Tab accepts the single completion candidate immediately, stores zero/multiple candidates in a refreshable panel below the prompt, redraws the prompt with the cursor restored to the input line, and terminal completion display prints labeled candidate rows.
-- Right at end-of-line accepts the first completion candidate; Right inside the line keeps ordinary cursor movement.
-- Completion helpers can render labeled candidate rows, compute display-only ghost suffixes, and return accepted completion text/cursor without mutating input state.
+- Runtime state can build completion candidates from current draft, templates, in-memory history, cwd, PATH, and completion config without mutating input or terminal UI; candidate discovery is separate from below-prompt row limiting.
+- Non-empty Tab with inline completion enabled shows a display-only ghost suffix plus a labeled below-prompt panel, then accepts the inline suggestion on the next Tab. Inline-disabled mode accepts the first ranked candidate directly.
+- Right at end-of-line accepts the current inline suggestion or first completion candidate according to the configured accept amount; Right inside the line keeps ordinary cursor movement.
+- Completion helpers can render labeled width-aware candidate rows, compute display-only ghost suffixes, elide overflow with `...`, and return full or next-word accepted completion text/cursor without mutating input state.
 - Picker helpers support shell quoting and pure result edits for insert-at-cursor, replace-current-token, append-as-argument, and replace-line actions.
 - Picker command runner uses external `fzf` by default, can feed candidates to a command, capture the selected stdout line, report cancel status as no selection, and reject empty commands.
 - File picker helpers collect sorted relative file/path candidates and can apply selected paths to draft with shell quoting.
@@ -549,21 +549,34 @@ Tests:
 - `completion::tests::matches_completion_prefix_can_ignore_spaces`
 - `completion::tests::render_completion_candidates_labels_sources_without_mutating_input`
 - `completion::tests::render_completion_candidates_labels_directories_separately_from_files`
+- `completion::tests::render_completion_candidates_for_width_elides_without_wrapping`
+- `completion::tests::render_completion_candidates_for_width_keeps_source_label_when_possible`
 - `completion::tests::ghost_completion_suffix_is_display_only_tail`
+- `completion::tests::ghost_completion_suffix_works_across_completion_sources`
 - `completion::tests::accept_completion_replaces_token_and_returns_new_cursor`
+- `completion::tests::accept_completion_word_mode_stops_at_next_word_boundary`
+- `completion::tests::accept_completion_word_mode_includes_leading_space_and_next_word`
+- `completion::tests::accept_completion_word_mode_uses_full_suffix_without_boundary`
 - `app::tests::completion_candidates_use_templates_before_history_for_first_token`
 - `app::tests::completion_candidates_use_path_completion_for_path_like_token`
+- `app::tests::completion_candidates_split_discovery_from_panel_row_limit`
 - `app::tests::completion_candidates_skip_editor_drafts_and_read_only_modes`
 - `terminal::tests::non_empty_tab_requests_completion_display_without_editing_draft`
 - `terminal::tests::write_completion_candidates_prints_labeled_rows`
+- `terminal::tests::tab_with_inline_enabled_shows_single_completion_before_accepting`
+- `terminal::tests::tab_with_inline_disabled_accepts_first_completion_candidate`
 - `terminal::tests::tab_shows_multiple_completion_candidates_below_prompt`
 - `terminal::tests::tab_display_respects_completion_max_results`
 - `terminal::tests::redraw_renders_completion_panel_below_prompt_and_restores_cursor`
+- `terminal::tests::redraw_renders_inline_completion_suffix_without_moving_cursor`
+- `terminal::tests::inline_completion_suffix_elides_to_terminal_width`
 - `terminal::tests::editing_after_completion_panel_clears_panel`
+- `terminal::tests::tab_accept_word_mode_accepts_only_next_word_from_inline_suggestion`
 - `input::tests::replace_updates_text_and_cursor_when_cursor_is_valid_boundary`
 - `input::tests::replace_rejects_invalid_cursor_boundary`
 - `terminal::tests::right_at_end_requests_completion_accept_without_editing_immediately`
 - `terminal::tests::right_inside_line_keeps_cursor_movement_behavior`
+- `terminal::tests::right_accepts_inline_completion_when_available`
 - `terminal::tests::accept_first_completion_replaces_current_token`
 - `picker::tests::shell_quote_leaves_safe_values_unquoted`
 - `picker::tests::shell_quote_quotes_spaces_and_embedded_single_quotes`
@@ -876,6 +889,8 @@ Tests:
 - `expect_runner::no_backend_ps2_leak`
 - `expect_runner::completion_accept_single`
 - `expect_runner::completion_panel_multiple`
+- `expect_runner::completion_inline_off_accepts_first`
+- `expect_runner::completion_tab_accept_word`
 - `expect_runner::history_mode_execute`
 - `expect_runner::template_use_executes`
 - `expect_runner::key_and_sync_placeholders`

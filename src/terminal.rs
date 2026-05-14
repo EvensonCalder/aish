@@ -850,10 +850,10 @@ fn write_inline_completion_suffix(out: &mut impl Write, suffix: &str) -> Result<
 }
 
 fn terminal_display_width() -> usize {
-    size()
-        .map(|(columns, _)| columns as usize)
-        .unwrap_or(80)
-        .max(1)
+    match size() {
+        Ok((columns, _)) if columns >= 20 => columns as usize,
+        _ => 80,
+    }
 }
 
 pub fn accept_first_completion(state: &mut AppState) -> Result<bool> {

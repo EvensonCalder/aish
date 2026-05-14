@@ -1140,6 +1140,61 @@ mod tests {
     }
 
     #[test]
+    fn ghost_completion_suffix_works_across_completion_sources() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(temp.path().join("src")).unwrap();
+        let bin = temp.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        let executable = bin.join("mytool");
+        std::fs::write(&executable, "").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = std::fs::metadata(&executable).unwrap().permissions();
+            permissions.set_mode(0o755);
+            std::fs::set_permissions(&executable, permissions).unwrap();
+        }
+        let templates = vec![TemplateEntry {
+            name: "git-save".to_string(),
+            body: "git add . && git commit".to_string(),
+        }];
+        let history = vec![HistoryEntry {
+            t: 1,
+            command: "git checkout feature/test".to_string(),
+            exit_code: Some(0),
+            source: crate::history::HistorySource::User,
+        }];
+
+        let template_token = current_token_context("git", 3);
+        let template = complete_first_token("git", &templates, &[], &[]);
+        assert_eq!(
+            ghost_completion_suffix(&template_token, &template[0]),
+            Some(" add . && git commit".to_string())
+        );
+
+        let executable_token = current_token_context("my", 2);
+        let executable = complete_first_token("my", &[], &[], &[bin]);
+        assert_eq!(
+            ghost_completion_suffix(&executable_token, &executable[0]),
+            Some("tool".to_string())
+        );
+
+        let path_token = current_token_context("cat sr", "cat sr".len());
+        let path = complete_path("sr", temp.path());
+        assert_eq!(
+            ghost_completion_suffix(&path_token, &path[0]),
+            Some("c/".to_string())
+        );
+
+        let argument_token = current_token_context("git checkout fea", "git checkout fea".len());
+        let argument = complete_non_first_token("fea", temp.path(), &history, &[]);
+        assert_eq!(
+            ghost_completion_suffix(&argument_token, &argument[0]),
+            Some("ture/test".to_string())
+        );
+    }
+
+    #[test]
     fn accept_completion_replaces_token_and_returns_new_cursor() {
         let line = "git sta --short";
         let token = current_token_context(line, 7);

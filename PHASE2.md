@@ -16,18 +16,29 @@ Reviewed sources:
 
 Current state:
 
-- The PTY shell wrapper, prompt rendering, draft editor, history/AI modes, private command parser, context flow, event log, templates, completion, external editor, multiline paste review, shell continuation handling, sync flow, diagnostics, and shell integration scaffolding are implemented and tested.
+- The PTY shell wrapper, prompt rendering, draft editor, history/AI modes, private command parser, context flow, event log, templates, inline completion, external editor, multiline paste review, shell continuation handling, sync flow, diagnostics, and shell integration scaffolding are implemented and tested.
 - Expect-driven end-to-end coverage exists and is the acceptance layer for visible terminal behavior.
 - Phase 18 encryption/GPG remains the largest intentionally incomplete product area.
 - Configurable key rebinding remains incomplete.
 - PTY output events and timer/background events are not represented as independent central event-loop sources yet.
 - Full automatic passthrough for arbitrary interactive/alternate-screen programs remains incomplete; allowlisted foreground passthrough exists.
 - Some documentation had become stale during implementation and must stay aligned with actual behavior as Phase 2 continues.
-- Fixed during Phase 2: `#completion` no longer reports the completion engine as unimplemented; it reports config and persists `#completion max <count>`.
+- Fixed during Phase 2: `#completion` no longer reports the completion engine as unimplemented; it reports config and persists `#completion max <count>`, `#completion inline on|off`, and `#completion tab-accept full|word`.
 - New critical defect found in real manual use: backend shell output can disappear from the final visible screen in actual `zsh` terminal sessions even though earlier PTY/unit and expect-byte-stream tests passed.
 - Testing route correction: prompt/output regressions must be verified against final rendered terminal state; byte-stream-only expect assertions are not sufficient when later redraw clears or cursor motion can visually erase output.
 - Test-harness correction: real interactive expect scenarios must not run concurrently inside one test binary. Parallel terminal sessions produced false `no prompt`/SIGBUS failures and do not represent actual single-user terminal behavior.
 - Test-harness correction: Unicode final-screen behavior is covered through `tmux` pane capture instead of Tcl/expect when expect itself is unstable with the input encoding.
+- Completion UX correction: inline completion is owned by Aish, not the backend shell; bash and zsh are covered by default through real tmux panes, while fish remains opt-in until cross-platform behavior is validated.
+
+## Phase 2 Closure Notes
+
+This hardening pass is complete for the implemented v0.1 terminal wrapper surface. The remaining items below are explicitly deferred instead of being treated as partially complete Phase 2 fixes:
+
+- GPG-backed secret storage and encrypted history/template storage stay deferred to the encryption workstream because they require a full fake-GPG or isolated-key integration path before user secrets can be handled safely.
+- Configurable key rebinding stays deferred until a stable config schema is chosen; default keybindings remain covered and documented.
+- Independent PTY output and timer/background event sources stay deferred until a concrete feature requires asynchronous events beyond command-response execution.
+- Automatic passthrough for arbitrary interactive programs stays deferred; the current product supports allowlisted foreground passthrough and key-forwarding tests.
+- Fish backend tests remain opt-in with `AISH_TEST_FISH=1`; bash and zsh are the default backend compatibility baseline for cross-platform CI until fish behavior is validated across macOS and Linux distributions.
 
 ## Phase 2 Rules
 

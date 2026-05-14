@@ -120,16 +120,19 @@ This document describes the behavior implemented in the current codebase. It is 
 ## Completion
 
 - Non-empty `Tab` in draft mode computes completion candidates.
-- One candidate is accepted immediately.
-- Multiple candidates are displayed below the prompt with source labels.
+- Inline completion is enabled by default; the first completion action displays the highest-ranked candidate as a display-only inline suffix and shows below-prompt candidate rows.
+- A following `Tab` accepts the inline suggestion. `completion.tab_accept = "full"` accepts the full suffix; `"word"` accepts only through the next shell word.
+- When inline completion is disabled, non-empty `Tab` accepts the first ranked candidate directly.
+- Candidate rows are displayed below the prompt with source labels, are limited by `completion.max_results`, and are elided with `...` instead of wrapping in narrow terminals.
 - No candidates displays `no completions` below the prompt.
-- `Right` at end-of-line accepts the first completion; `Right` inside a line moves the cursor.
+- `Right` at end-of-line accepts completion using the configured accept amount; `Right` inside a line moves the cursor.
 - First-token completion ranks templates before history before PATH executables.
 - Non-first-token completion includes history arguments, filesystem paths, and template placeholders.
 - Directory path candidates end with `/`.
 - Matching can ignore spaces by default.
 - `#completion` prints completion config.
 - `#completion max <count>` persists the maximum number of visible completion candidates; zero and non-numeric values are rejected without changing config.
+- `#completion inline on|off` and `#completion tab-accept full|word` persist inline completion behavior and reject invalid values without changing config.
 
 ## Pickers
 

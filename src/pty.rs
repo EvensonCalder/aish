@@ -634,10 +634,10 @@ fn clean_fish_repaint_lines(
             if visible.is_empty() && had_terminal_control {
                 return None;
             }
-            if let Some(command) = started_command {
-                if is_fish_repaint_echo_fragment(visible, command, had_terminal_control) {
-                    return None;
-                }
+            if let Some(command) = started_command
+                && is_fish_repaint_echo_fragment(visible, command, had_terminal_control)
+            {
+                return None;
             }
             Some((cleaned.trim_end().to_string(), had_terminal_control))
         })
@@ -708,7 +708,7 @@ fn command_contains_repaint_token(command: &str, line: &str) -> bool {
             .position(|part| *part == line)
             .is_some_and(|index| index + 1 < tokens.len());
     }
-    tokens.iter().any(|part| *part == line)
+    tokens.contains(&line)
 }
 
 fn shell_syntax_fragment(line: &str) -> bool {

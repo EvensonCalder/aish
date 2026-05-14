@@ -31,8 +31,8 @@ Press empty `Tab` to cycle modes. Editing a read-only history or AI item copies 
 
 - `Enter`: submit the draft or selected read-only item.
 - `Tab` on an empty draft: cycle `>` / `$` / `%` modes.
-- `Tab` on a non-empty draft: accept a unique completion or show candidate rows.
-- `Right` at the end of a non-empty draft: accept completion.
+- `Tab` on a non-empty draft: show inline completion guidance, then accept the inline suggestion on the next `Tab`; when inline completion is disabled, accept the first ranked candidate directly.
+- `Right` at the end of a non-empty draft: accept completion using the configured completion accept mode.
 - `Ctrl-C`: clear the current draft or cancel pending continuation/context confirmation.
 - `Ctrl-D` on an empty draft: exit.
 - `Ctrl-L`: clear screen.
@@ -58,7 +58,9 @@ Implemented commands include:
 - `#base-url <url>`: set and normalize chat-completions base URL.
 - `#env-key <NAME>`: configure the API key environment variable name.
 - `#context on|off|confirm on|confirm off|<bytes>`: configure context capture.
-- `#completion max <count>`: configure the completion candidate display limit.
+- `#completion max <count>`: configure the below-prompt completion row limit.
+- `#completion inline on|off`: enable or disable inline completion guidance.
+- `#completion tab-accept full|word`: choose whether `Tab` accepts the full suggestion or only the next shell word.
 - `#log <count>`: print recent event log entries.
 - `#history <count>`: trim combined regular and AI command history.
 - `#mt <name> <body>`: store a template.
@@ -101,7 +103,7 @@ Unresolved template placeholders block execution, so `echo {message}` from a tem
 
 ## Completion And Pickers
 
-Completion works directly in draft mode. Template completions rank before history and executable candidates for first-token completion. Non-first-token completion can use history arguments, template placeholders, and filesystem paths.
+Completion works directly in draft mode. Template completions rank before history and executable candidates for first-token completion. Non-first-token completion can use history arguments, template placeholders, and filesystem paths. Inline completion is enabled by default; the below-prompt panel is informational and limited by `completion.max_results`.
 
 Picker features use external `fzf`; Aish does not implement an internal picker UI.
 

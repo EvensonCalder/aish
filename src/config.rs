@@ -71,9 +71,10 @@ pub struct CompletionConfig {
     pub tab_accept: CompletionTabAccept,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CompletionTabAccept {
+    #[default]
     Full,
     Word,
 }
@@ -84,12 +85,6 @@ impl CompletionTabAccept {
             Self::Full => "full",
             Self::Word => "word",
         }
-    }
-}
-
-impl Default for CompletionTabAccept {
-    fn default() -> Self {
-        Self::Full
     }
 }
 

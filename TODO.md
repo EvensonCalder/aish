@@ -1014,14 +1014,14 @@ enum AiItemKind {
 
 ### Tasks
 
-- [ ] Complete PHASE2 improvements and tests.
-- [ ] Keep `PHASE2.md` current as the active hardening checklist.
-- [ ] Record every Phase 2 issue that is found.
-- [ ] Fix every recorded Phase 2 issue or explicitly defer it with a documented reason.
+- [x] Complete PHASE2 improvements and tests.
+- [x] Keep `PHASE2.md` current as the active hardening checklist.
+- [x] Record every Phase 2 issue that is found.
+- [x] Fix every recorded Phase 2 issue or explicitly defer it with a documented reason.
 - [x] Fix stale `#completion` placeholder output after completion shipped.
-- [ ] Add expect-driven end-to-end regression coverage for every user-visible Phase 2 fix.
-- [ ] Replace weak tests with tests that prove real user workflows, safety behavior, persistence, or integration boundaries.
-- [ ] Keep `SPEC.md`, `TODO.md`, `TESTS.md`, `README.md`, and `PHASE2.md` aligned after every implementation change.
+- [x] Add expect-driven end-to-end regression coverage for every user-visible Phase 2 fix.
+- [x] Replace weak tests with tests that prove real user workflows, safety behavior, persistence, or integration boundaries.
+- [x] Keep `SPEC.md`, `TODO.md`, `TESTS.md`, `README.md`, and `PHASE2.md` aligned after every implementation change.
 
 ### Acceptance criteria
 
@@ -1034,43 +1034,43 @@ enum AiItemKind {
 
 ## Phase 28: Inline completion UX
 
-Status: planned for the next completion UX pass. Current v0.1.0 completion still uses simple panel display plus direct first-candidate acceptance; inline ghost suggestions and width-aware panel rows are not implemented yet.
+Status: implemented. Inline completion is enabled by default, `completion.max_results` controls only the below-prompt panel row count, and bash/zsh real-terminal coverage proves completion behavior is owned by Aish rather than the backend shell. Fish backend coverage remains opt-in with `AISH_TEST_FISH=1` until cross-platform behavior is validated across macOS and Linux distributions.
 
 ### Tasks
 
-- [ ] Add completion config fields:
-  - [ ] `completion.inline = true` by default.
-  - [ ] `completion.tab_accept = "full"` by default.
-  - [ ] Valid `completion.tab_accept` values are `"full"` and `"word"`.
-- [ ] Normalize invalid or empty completion config values without silently accepting unsupported modes.
-- [ ] Persist and report inline completion settings through `#completion`, `#config`, and `#status`.
-- [ ] Add private commands:
-  - [ ] `#completion inline on|off`
-  - [ ] `#completion tab-accept full|word`
-- [ ] Split completion candidate discovery from panel row limiting so `completion.max_results` controls only below-prompt row count.
-- [ ] Track the current inline suggestion separately from the draft buffer, cursor, history, persisted draft, and below-prompt panel state.
-- [ ] Render the highest-ranked completion candidate as an inline ghost suffix in dim or light text when inline completion is enabled.
-- [ ] Ensure editing, cursor movement, mode switching, prompt redraw, and command execution clear stale inline suggestions.
-- [ ] Make `Tab` accept the inline suggestion when inline completion is enabled.
-- [ ] Preserve legacy first-candidate acceptance when inline completion is disabled.
-- [ ] Implement `completion.tab_accept = "full"` to accept the complete untyped suffix.
-- [ ] Implement `completion.tab_accept = "word"` to accept only through the next whitespace boundary in the untyped suffix, or the full suffix when no boundary remains.
-- [ ] Keep `Right` at end-of-line aligned with the configured inline accept amount; keep `Right` inside the line as ordinary cursor movement.
-- [ ] Render below-prompt candidate rows within the current terminal width without wrapping.
-- [ ] Use the user's current command text as the overlap anchor for panel rows, show as much untyped candidate text as possible, and elide right-edge overflow with ASCII `...`.
+- [x] Add completion config fields:
+  - [x] `completion.inline = true` by default.
+  - [x] `completion.tab_accept = "full"` by default.
+  - [x] Valid `completion.tab_accept` values are `"full"` and `"word"`.
+- [x] Normalize invalid or empty completion config values without silently accepting unsupported modes.
+- [x] Persist and report inline completion settings through `#completion`, `#config`, and `#status`.
+- [x] Add private commands:
+  - [x] `#completion inline on|off`
+  - [x] `#completion tab-accept full|word`
+- [x] Split completion candidate discovery from panel row limiting so `completion.max_results` controls only below-prompt row count.
+- [x] Track the current inline suggestion separately from the draft buffer, cursor, history, persisted draft, and below-prompt panel state.
+- [x] Render the highest-ranked completion candidate as an inline ghost suffix in dim or light text when inline completion is enabled.
+- [x] Ensure editing, cursor movement, mode switching, prompt redraw, and command execution clear stale inline suggestions.
+- [x] Make `Tab` accept the inline suggestion when inline completion is enabled.
+- [x] Preserve legacy first-candidate acceptance when inline completion is disabled.
+- [x] Implement `completion.tab_accept = "full"` to accept the complete untyped suffix.
+- [x] Implement `completion.tab_accept = "word"` to accept only through the next whitespace boundary in the untyped suffix, or the full suffix when no boundary remains.
+- [x] Keep `Right` at end-of-line aligned with the configured inline accept amount; keep `Right` inside the line as ordinary cursor movement.
+- [x] Render below-prompt candidate rows within the current terminal width without wrapping.
+- [x] Use the user's current command text as the overlap anchor for panel rows, show as much untyped candidate text as possible, and elide right-edge overflow with ASCII `...`.
 
 ### Required tests
 
-- [ ] Config default, roundtrip, normalization, and invalid-value tests for `completion.inline` and `completion.tab_accept`.
-- [ ] Private-command tests proving `#completion inline on|off` and `#completion tab-accept full|word` persist, report, and reject invalid input without changing config.
-- [ ] Pure completion tests for computing an inline suffix from history, templates, executables, paths, and non-first-token arguments.
-- [ ] Pure acceptance tests for full-suggestion and word-boundary acceptance, including quoted arguments and candidates with spaces.
-- [ ] Terminal rendering tests proving the inline ghost is display-only, uses subdued styling, does not move the real cursor, and does not mutate draft text.
-- [ ] Terminal state tests proving stale inline suggestions clear after editing, cursor movement, mode changes, command execution, and no-match completion.
-- [ ] Panel rendering tests for `completion.max_results`, narrow terminal widths, overlap anchoring, source labels, no wrapping, and `...` elision.
-- [ ] Expect scenarios for inline visibility, disabled legacy mode, `Tab` full accept, `Tab` word accept, `Right` accept at end-of-line, and `Right` cursor movement inside a line.
-- [ ] Tmux screen-capture tests for narrow-width panel elision and no-wrap behavior in a real terminal.
-- [ ] Backend independence coverage for bash and zsh by default, plus opt-in fish coverage after cross-platform validation, proving inline completion behavior is owned by Aish and not by backend-shell completion.
+- [x] Config default, roundtrip, normalization, and invalid-value tests for `completion.inline` and `completion.tab_accept`.
+- [x] Private-command tests proving `#completion inline on|off` and `#completion tab-accept full|word` persist, report, and reject invalid input without changing config.
+- [x] Pure completion tests for computing an inline suffix from history, templates, executables, paths, and non-first-token arguments.
+- [x] Pure acceptance tests for full-suggestion and word-boundary acceptance, including quoted arguments and candidates with spaces.
+- [x] Terminal rendering tests proving the inline ghost is display-only, uses subdued styling, does not move the real cursor, and does not mutate draft text.
+- [x] Terminal state tests proving stale inline suggestions clear after editing, cursor movement, mode changes, command execution, and no-match completion.
+- [x] Panel rendering tests for `completion.max_results`, narrow terminal widths, overlap anchoring, source labels, no wrapping, and `...` elision.
+- [x] Expect scenarios for inline visibility, disabled legacy mode, `Tab` full accept, `Tab` word accept, `Right` accept at end-of-line, and `Right` cursor movement inside a line.
+- [x] Tmux screen-capture tests for narrow-width panel elision and no-wrap behavior in a real terminal.
+- [x] Backend independence coverage for bash and zsh by default, plus opt-in fish coverage after cross-platform validation, proving inline completion behavior is owned by Aish and not by backend-shell completion.
 
 ### Acceptance criteria
 

@@ -15,7 +15,7 @@ sleep 2
 tmux send-keys -t "$SESSION" 'echo after-status' Enter
 sleep 2
 
-CAPTURE="$(tmux capture-pane -p -t "$SESSION")"
+CAPTURE="$(tmux capture-pane -p -S - -t "$SESSION")"
 printf '%s\n' "$CAPTURE"
 
 printf '%s\n' "$CAPTURE" | rg -q '^last_status=none$'

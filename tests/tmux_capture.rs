@@ -20,14 +20,21 @@ fn tmux_available(tmux_tmpdir: &Path) -> bool {
     }
 
     let probe = format!("aish-tmux-probe-{}", std::process::id());
-    Command::new("tmux")
+    let available = Command::new("tmux")
         .args(["new-session", "-d", "-s", &probe, "true"])
         .env("TMUX_TMPDIR", tmux_tmpdir)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
         .map(|status| status.success())
-        .unwrap_or(false)
+        .unwrap_or(false);
+    let _ = Command::new("tmux")
+        .args(["kill-session", "-t", &probe])
+        .env("TMUX_TMPDIR", tmux_tmpdir)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    available
 }
 
 #[test]
