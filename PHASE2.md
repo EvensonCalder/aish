@@ -23,6 +23,7 @@ Current state:
 - PTY output events and timer/background events are not represented as independent central event-loop sources yet.
 - Full automatic passthrough for arbitrary interactive/alternate-screen programs remains incomplete; allowlisted foreground passthrough exists.
 - Some documentation had become stale during implementation and must stay aligned with actual behavior as Phase 2 continues.
+- Fixed during Phase 2: `#completion` no longer reports the completion engine as unimplemented; it reports config and persists `#completion max <count>`.
 
 ## Phase 2 Rules
 

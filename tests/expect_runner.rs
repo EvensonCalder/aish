@@ -253,6 +253,11 @@ fn completion_panel_multiple() {
 }
 
 #[test]
+fn completion_config_persists() {
+    run_script("completion_config_persists.exp");
+}
+
+#[test]
 fn home_default_completion_ui() {
     run_script("home_default_completion_ui.exp");
 }

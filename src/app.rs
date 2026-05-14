@@ -878,8 +878,7 @@ pub fn execute_draft(
                         return Ok(());
                     }
                     "completion" => {
-                        writeln!(out, "completion.enabled=false")?;
-                        writeln!(out, "completion engine is not implemented yet")?;
+                        update_completion_config(state, out, args)?;
                         state.draft.clear();
                         state.mode = Mode::Draft;
                         return Ok(());
@@ -2169,6 +2168,62 @@ fn write_context_config(out: &mut impl Write, config: &ContextConfig) -> Result<
         "context.enabled={} context.confirm={} context.max_bytes={}",
         config.enabled, config.confirm, config.max_bytes
     )?;
+    Ok(())
+}
+
+fn update_completion_config(state: &mut AppState, out: &mut impl Write, args: &str) -> Result<()> {
+    let mut parts = args.split_whitespace();
+    match (parts.next(), parts.next(), parts.next()) {
+        (None, None, None) => write_completion_config(out, &state.completion_config),
+        (Some("max"), Some(count), None) => {
+            let max_results = count.parse::<usize>();
+            let Ok(max_results) = max_results else {
+                writeln!(out, "usage: #completion max <count>")?;
+                return Ok(());
+            };
+            if max_results == 0 {
+                writeln!(out, "completion max results must be greater than 0")?;
+                return Ok(());
+            }
+            set_completion_config(state, out, |config| {
+                config.completion.max_results = max_results;
+                Ok(())
+            })
+        }
+        _ => writeln!(out, "usage: #completion max <count>").map_err(Into::into),
+    }
+}
+
+fn set_completion_config(
+    state: &mut AppState,
+    out: &mut impl Write,
+    update: impl FnOnce(&mut config::Config) -> Result<()>,
+) -> Result<()> {
+    let Some(path) = &state.config_path else {
+        writeln!(out, "config path is not configured; #completion not saved")?;
+        return Ok(());
+    };
+    let mut config = match config::load_config(path) {
+        Ok(config) => config,
+        Err(err) => {
+            state.append_event(EventLevel::Error, "config error")?;
+            return Err(err);
+        }
+    };
+    update(&mut config)?;
+    config::normalize_config(&mut config);
+    if let Err(err) = config::save_config(path, &config) {
+        state.append_event(EventLevel::Error, "config error")?;
+        return Err(err);
+    }
+    state.completion_config = config.completion;
+    write_completion_config(out, &state.completion_config)
+}
+
+fn write_completion_config(out: &mut impl Write, config: &CompletionConfig) -> Result<()> {
+    writeln!(out, "completion.max_results={}", config.max_results)?;
+    writeln!(out, "completion.ignore_spaces={}", config.ignore_spaces)?;
+    writeln!(out, "completion.template_first={}", config.template_first)?;
     Ok(())
 }
 
@@ -3722,9 +3777,9 @@ mod tests {
     }
 
     #[test]
-    fn subsystem_commands_report_placeholders() {
+    fn subsystem_commands_report_current_state() {
         for (line, expected) in [
-            ("#completion", "completion engine is not implemented yet"),
+            ("#completion", "completion.max_results=5"),
             ("#editor", "editor temp directory is not configured"),
         ] {
             let mut state = AppState::default();
@@ -3748,6 +3803,53 @@ mod tests {
             assert_eq!(state.last_status, None);
             assert!(state.draft.is_empty());
         }
+    }
+
+    #[test]
+    fn completion_config_commands_persist_and_reject_invalid_values() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("config.toml");
+        config::save_config(&config_path, &config::Config::default()).unwrap();
+        let mut state = AppState {
+            config_path: Some(config_path.clone()),
+            ..AppState::default()
+        };
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+
+        for (line, expected) in [
+            ("#completion max 2", "completion.max_results=2"),
+            (
+                "#completion max 0",
+                "completion max results must be greater than 0",
+            ),
+            ("#completion max nope", "usage: #completion max <count>"),
+        ] {
+            state.draft.insert_str(line);
+            let mut output = Vec::new();
+            execute_draft(
+                &mut state,
+                &mut backend,
+                &mut output,
+                Duration::from_secs(5),
+            )
+            .unwrap();
+
+            let output = String::from_utf8(output).unwrap();
+            assert!(
+                output.contains(expected),
+                "missing {expected:?} in {output:?}"
+            );
+            assert!(state.draft.is_empty());
+        }
+
+        assert_eq!(state.completion_config.max_results, 2);
+        assert_eq!(
+            config::load_config(&config_path)
+                .unwrap()
+                .completion
+                .max_results,
+            2
+        );
     }
 
     #[test]

@@ -1013,6 +1013,7 @@ enum AiItemKind {
 - [ ] Keep `PHASE2.md` current as the active hardening checklist.
 - [ ] Record every Phase 2 issue that is found.
 - [ ] Fix every recorded Phase 2 issue or explicitly defer it with a documented reason.
+- [x] Fix stale `#completion` placeholder output after completion shipped.
 - [ ] Add expect-driven end-to-end regression coverage for every user-visible Phase 2 fix.
 - [ ] Replace weak tests with tests that prove real user workflows, safety behavior, persistence, or integration boundaries.
 - [ ] Keep `SPEC.md`, `TODO.md`, `TESTS.md`, `README.md`, and `PHASE2.md` aligned after every implementation change.

@@ -58,6 +58,7 @@ Implemented commands include:
 - `#base-url <url>`: set and normalize chat-completions base URL.
 - `#env-key <NAME>`: configure the API key environment variable name.
 - `#context on|off|confirm on|confirm off|<bytes>`: configure context capture.
+- `#completion max <count>`: configure the completion candidate display limit.
 - `#log <count>`: print recent event log entries.
 - `#history <count>`: trim combined regular and AI command history.
 - `#mt <name> <body>`: store a template.

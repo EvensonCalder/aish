@@ -1,0 +1,44 @@
+#!/usr/bin/env expect
+# #completion should persist max-results config and affect the real completion UI.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "#completion"
+aish_enter
+aish_expect "completion.max_results=5"
+aish_wait_prompt
+
+aish_send "#completion max 2"
+aish_enter
+aish_expect "completion.max_results=2"
+aish_wait_prompt
+
+aish_send "#config"
+aish_enter
+aish_expect "completion.max_results=2"
+aish_wait_prompt
+
+aish_send "cd /tmp && touch aish-complete-one.txt aish-complete-two.txt aish-complete-three.txt"
+aish_enter
+aish_wait_prompt
+
+aish_send "cat aish-complete-t"
+send -- "\t"
+aish_expect "history\taish-complete-two.txt"
+aish_expect "history\taish-complete-three.txt"
+set old_timeout $timeout
+set timeout 1
+expect {
+    -ex "history\taish-complete-one.txt" { puts stderr "completion max did not limit candidates"; exit 5 }
+    timeout {}
+    eof { puts stderr "eof while checking completion limit"; exit 5 }
+}
+set timeout $old_timeout
+
+send -- "\u001b"
+aish_wait_prompt
+
+aish_quit
