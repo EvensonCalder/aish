@@ -15,9 +15,9 @@ set aish_home "$isolated_home/.aish"
 
 aish_spawn_without_aish_home
 
-aish_send "#mt home-template echo home-template-ok"
+aish_send "#mt echo home-template-ok"
 aish_enter
-aish_expect "template stored: home-template"
+set template_id [aish_expect_template_stored]
 aish_wait_prompt
 aish_quit
 
@@ -28,15 +28,15 @@ if {![file exists "$aish_home/templates/templates.jsonl"]} {
 
 aish_spawn_without_aish_home
 
-aish_send "#template show home-template"
+aish_send "#template show $template_id"
 aish_enter
-aish_expect "template: home-template"
+aish_expect "template: $template_id"
 aish_expect "echo home-template-ok"
 aish_wait_prompt
 
-aish_send "#template use home-template"
+aish_send "#template use $template_id"
 aish_enter
-aish_expect "template copied to draft: home-template"
+aish_expect "template copied to draft: $template_id"
 aish_expect "echo home-template-ok"
 
 aish_enter

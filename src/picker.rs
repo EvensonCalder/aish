@@ -62,9 +62,11 @@ pub fn combined_history_picker_candidates(
 
 pub fn template_picker_candidates(templates: &[TemplateEntry]) -> Vec<String> {
     let mut candidates = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     for template in templates.iter().rev() {
-        if !candidates.iter().any(|name| name == &template.name) {
-            candidates.push(template.name.clone());
+        let id = template.id();
+        if seen.insert(id.clone()) {
+            candidates.push(format!("{id}\t{}", template.body));
         }
     }
     candidates
@@ -495,25 +497,19 @@ mod tests {
     }
 
     #[test]
-    fn template_picker_candidates_return_newest_unique_names() {
+    fn template_picker_candidates_return_newest_unique_ids() {
         let templates = vec![
-            TemplateEntry {
-                name: "deploy".to_string(),
-                body: "old".to_string(),
-            },
-            TemplateEntry {
-                name: "logs".to_string(),
-                body: "tail".to_string(),
-            },
-            TemplateEntry {
-                name: "deploy".to_string(),
-                body: "new".to_string(),
-            },
+            TemplateEntry::new("old"),
+            TemplateEntry::new("tail"),
+            TemplateEntry::new("old"),
         ];
 
         assert_eq!(
             template_picker_candidates(&templates),
-            vec!["deploy", "logs"]
+            vec![
+                format!("{}\told", crate::templates::template_id("old")),
+                format!("{}\ttail", crate::templates::template_id("tail")),
+            ]
         );
     }
 

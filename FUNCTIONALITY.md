@@ -160,14 +160,15 @@ This document describes the behavior implemented in the current codebase. It is 
 
 ## Templates
 
-- `#mt <name> <body>` appends a template.
-- `#template list` prints stored template names.
-- `#template show <name>` prints the newest matching template body.
-- `#template use <name>` copies the newest matching template to a protected draft.
-- `#template use <name> key=value...` substitutes matching placeholders.
+- `#mt <body>` appends a body-first template and prints a stable `tpl-...` content-hash ID.
+- `#template find <query>` prints matching template IDs and bodies.
+- `#template list` is intentionally unsupported; bulk grep/redirection belongs on the JSONL store file.
+- `#template show <id>` prints the matching template body.
+- `#template use <id>` copies the matching template to a protected draft.
+- `#template use <id> key=value...` substitutes matching placeholders.
 - Quoted template values with spaces are supported.
-- `#template rm <name>` removes matching templates.
-- `#template replace <name> <body>` removes old matches and appends one replacement.
+- `#template rm <id>` removes matching templates.
+- `#template replace <id> <body>` removes old matches and appends one replacement with a new body-derived ID.
 - Placeholders support `{name}`, `{name:description}`, and `{name...}`.
 - Protected template drafts with unresolved placeholders cannot execute.
 - Backspace/Delete outside a placeholder removes the whole placeholder span; editing inside a placeholder expands the draft to plain text.

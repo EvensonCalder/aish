@@ -296,7 +296,7 @@ Status as of the latest full review:
   - [x] `#history`
   - [x] `#log`
   - [x] `#mt`
-  - [x] `#template list`
+  - [x] `#template find`
   - [x] `#template show`
   - [x] `#template use`
   - [x] `#template rm`
@@ -419,11 +419,13 @@ This is a future configurable enhancement. It must not replace the default faith
 
 ### Tasks
 
-- [x] Implement `#mt <name> <template>`.
+- [x] Implement body-first `#mt <template-body>`.
 - [x] Implement multi-line `#mt` continuation.
 - [x] Store templates in `templates/templates.jsonl`.
-- [x] Implement `#template list`.
-- [x] Implement `#template rm <name>`.
+- [x] Implement stable content-hash template IDs for exact operations.
+- [x] Implement `#template find <query>`.
+- [x] Keep `#template list` intentionally unsupported; users can inspect the JSONL store directly for grep/redirection workflows.
+- [x] Implement `#template rm <id>`.
 - [x] Parse placeholders:
   - [x] `{name}`
   - [x] `{name:description}`
@@ -614,6 +616,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
   - [ ] draft history
   - [ ] notes
   - [ ] templates
+- [ ] Encrypt template payload metadata and avoid plaintext template names, search indexes, and list indexes when encryption is enabled.
 - [ ] Do not persist plaintext search indexes when encrypted.
 - [ ] Decrypt asynchronously on startup.
 - [ ] Show `history is still unlocking...` when needed.
@@ -810,7 +813,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 - [x] Cover AI-mode command sequencing and read-only edit-copy behavior.
 - [x] Cover AI config persistence and diagnostic key-source redaction.
 - [x] Cover template creation/use/execution flow.
-- [x] Cover template list/show/replace/rm CRUD flow.
+- [x] Cover template find/show/replace/rm CRUD flow and intentional list rejection.
 - [x] Cover unresolved template placeholder execution blocking.
 - [x] Cover external editor roundtrip.
 - [x] Cover editor-returned line-leading `#` content bypassing Aish private command parsing.

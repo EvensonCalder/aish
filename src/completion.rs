@@ -183,12 +183,12 @@ pub fn complete_first_token_with_options(
 ) -> Vec<CompletionCandidate> {
     let mut candidates = Vec::new();
     let mut seen_templates = HashSet::new();
-    for template in templates {
-        if matches_completion_prefix(&template.name, prefix, options.ignore_spaces)
-            && seen_templates.insert(template.name.as_str())
+    for template in templates.iter().rev() {
+        if matches_completion_prefix(&template.body, prefix, options.ignore_spaces)
+            && seen_templates.insert(template.id())
         {
             candidates.push(CompletionCandidate {
-                display: template.name.clone(),
+                display: template.body.clone(),
                 replacement: template.body.clone(),
                 is_dir: false,
                 source: CompletionSource::Template,
@@ -241,17 +241,17 @@ pub fn complete_non_first_token_with_options(
     options: CompletionOptions,
 ) -> Vec<CompletionCandidate> {
     let mut candidates = Vec::new();
+    candidates.extend(complete_template_placeholders(
+        token,
+        templates,
+        options.ignore_spaces,
+    ));
     candidates.extend(complete_history_arguments(
         token,
         history_newest_first,
         options.ignore_spaces,
     ));
     candidates.extend(complete_path(token, cwd));
-    candidates.extend(complete_template_placeholders(
-        token,
-        templates,
-        options.ignore_spaces,
-    ));
     limit_candidates(candidates, options.max_results)
 }
 
@@ -271,6 +271,10 @@ pub fn complete_non_first_token_for_line_with_options(
         history_newest_first,
         options.ignore_spaces,
     );
+    let mut template_placeholders =
+        complete_template_placeholders(&token.text, templates, options.ignore_spaces);
+    template_placeholders.append(&mut candidates);
+    candidates = template_placeholders;
     candidates.extend(complete_history_arguments(
         &token.text,
         history_newest_first,
@@ -528,9 +532,6 @@ pub fn truncate_with_ellipsis(value: &str, width: usize) -> String {
 }
 
 fn anchored_candidate_display(token: &TokenContext, candidate: &CompletionCandidate) -> String {
-    if candidate.source == CompletionSource::Template {
-        return candidate.display.clone();
-    }
     if let Some(suffix) = candidate.replacement.strip_prefix(&token.text)
         && !suffix.is_empty()
     {
@@ -956,10 +957,7 @@ mod tests {
         let executable = bin.join("git-now");
         std::fs::write(&executable, "#!/bin/sh\n").unwrap();
         make_executable(&executable);
-        let templates = vec![TemplateEntry {
-            name: "git-save".to_string(),
-            body: "git add . && git commit".to_string(),
-        }];
+        let templates = vec![TemplateEntry::new("git add . && git commit")];
         let history = vec![HistoryEntry {
             t: 2,
             command: "git status".to_string(),
@@ -971,7 +969,7 @@ mod tests {
             complete_first_token("git", &templates, &history, &[bin]),
             [
                 CompletionCandidate {
-                    display: "git-save".to_string(),
+                    display: "git add . && git commit".to_string(),
                     replacement: "git add . && git commit".to_string(),
                     is_dir: false,
                     source: CompletionSource::Template,
@@ -995,14 +993,8 @@ mod tests {
     #[test]
     fn complete_first_token_deduplicates_each_source() {
         let templates = vec![
-            TemplateEntry {
-                name: "deploy".to_string(),
-                body: "old".to_string(),
-            },
-            TemplateEntry {
-                name: "deploy".to_string(),
-                body: "new".to_string(),
-            },
+            TemplateEntry::new("docker deploy"),
+            TemplateEntry::new("docker deploy"),
         ];
         let history = vec![
             HistoryEntry {
@@ -1023,8 +1015,8 @@ mod tests {
             complete_first_token("d", &templates, &history, &[]),
             [
                 CompletionCandidate {
-                    display: "deploy".to_string(),
-                    replacement: "old".to_string(),
+                    display: "docker deploy".to_string(),
+                    replacement: "docker deploy".to_string(),
                     is_dir: false,
                     source: CompletionSource::Template,
                 },
@@ -1040,10 +1032,7 @@ mod tests {
 
     #[test]
     fn complete_first_token_can_match_while_ignoring_spaces_and_limit_results() {
-        let templates = vec![TemplateEntry {
-            name: "git-save".to_string(),
-            body: "git add . && git commit".to_string(),
-        }];
+        let templates = vec![TemplateEntry::new("git add . && git commit")];
         let history = vec![
             HistoryEntry {
                 t: 2,
@@ -1153,25 +1142,22 @@ mod tests {
             },
         ];
 
-        let templates = vec![TemplateEntry {
-            name: "logs".to_string(),
-            body: "kubectl logs {pod_name}".to_string(),
-        }];
+        let templates = vec![TemplateEntry::new("kubectl logs {pod_name}")];
 
         assert_eq!(
             complete_non_first_token("po", Path::new("/"), &history, &templates),
             [
                 CompletionCandidate {
-                    display: "pods".to_string(),
-                    replacement: "pods".to_string(),
-                    is_dir: false,
-                    source: CompletionSource::History,
-                },
-                CompletionCandidate {
                     display: "pod_name".to_string(),
                     replacement: "pod_name".to_string(),
                     is_dir: false,
                     source: CompletionSource::TemplatePlaceholder,
+                },
+                CompletionCandidate {
+                    display: "pods".to_string(),
+                    replacement: "pods".to_string(),
+                    is_dir: false,
+                    source: CompletionSource::History,
                 }
             ]
         );
@@ -1185,10 +1171,7 @@ mod tests {
             exit_code: Some(0),
             source: crate::history::HistorySource::User,
         }];
-        let templates = vec![TemplateEntry {
-            name: "branch".to_string(),
-            body: "git checkout {feature_branch}".to_string(),
-        }];
+        let templates = vec![TemplateEntry::new("git checkout {featurebranch}")];
 
         assert_eq!(
             complete_non_first_token_with_options(
@@ -1205,7 +1188,7 @@ mod tests {
                 display: "featurebranch".to_string(),
                 replacement: "featurebranch".to_string(),
                 is_dir: false,
-                source: CompletionSource::History,
+                source: CompletionSource::TemplatePlaceholder,
             }]
         );
     }
@@ -1382,10 +1365,7 @@ mod tests {
             permissions.set_mode(0o755);
             std::fs::set_permissions(&executable, permissions).unwrap();
         }
-        let templates = vec![TemplateEntry {
-            name: "git-save".to_string(),
-            body: "git add . && git commit".to_string(),
-        }];
+        let templates = vec![TemplateEntry::new("git add . && git commit")];
         let history = vec![HistoryEntry {
             t: 1,
             command: "git checkout feature/test".to_string(),

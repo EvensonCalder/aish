@@ -8,8 +8,30 @@ use crate::history::{JsonlLineError, JsonlLoad, append_jsonl, load_jsonl, rewrit
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TemplateEntry {
-    pub name: String,
     pub body: String,
+}
+
+impl TemplateEntry {
+    pub fn new(body: impl Into<String>) -> Self {
+        Self { body: body.into() }
+    }
+
+    pub fn id(&self) -> String {
+        template_id(&self.body)
+    }
+}
+
+pub fn template_id(body: &str) -> String {
+    format!("tpl-{:016x}", fnv1a64(body.as_bytes()))
+}
+
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
 }
 
 pub fn append_template(path: &Path, entry: &TemplateEntry) -> Result<()> {
@@ -20,13 +42,13 @@ pub fn load_templates(path: &Path) -> Result<JsonlLoad<TemplateEntry>> {
     load_jsonl(path)
 }
 
-pub fn find_template_by_name(path: &Path, name: &str) -> Result<JsonlLoad<TemplateEntry>> {
+pub fn find_template_by_id(path: &Path, id: &str) -> Result<JsonlLoad<TemplateEntry>> {
     let mut loaded = load_templates(path)?;
     loaded.items = loaded
         .items
         .into_iter()
         .rev()
-        .find(|template| template.name == name)
+        .find(|template| template.id() == id)
         .into_iter()
         .collect();
     Ok(loaded)
@@ -39,13 +61,13 @@ pub struct TemplateRemoval {
     pub errors: Vec<JsonlLineError>,
 }
 
-pub fn remove_templates_by_name(path: &Path, name: &str) -> Result<TemplateRemoval> {
+pub fn remove_templates_by_id(path: &Path, id: &str) -> Result<TemplateRemoval> {
     let loaded = load_templates(path)?;
     let before = loaded.items.len();
     let remaining: Vec<_> = loaded
         .items
         .into_iter()
-        .filter(|template| template.name != name)
+        .filter(|template| template.id() != id)
         .collect();
     let removed = before - remaining.len();
     rewrite_jsonl(path, &remaining)?;
@@ -57,13 +79,17 @@ pub fn remove_templates_by_name(path: &Path, name: &str) -> Result<TemplateRemov
     })
 }
 
-pub fn replace_template(path: &Path, entry: TemplateEntry) -> Result<TemplateRemoval> {
+pub fn replace_template_by_id(
+    path: &Path,
+    existing_id: &str,
+    entry: TemplateEntry,
+) -> Result<TemplateRemoval> {
     let loaded = load_templates(path)?;
     let before = loaded.items.len();
     let mut remaining: Vec<_> = loaded
         .items
         .into_iter()
-        .filter(|template| template.name != entry.name)
+        .filter(|template| template.id() != existing_id)
         .collect();
     let removed = before - remaining.len();
     remaining.push(entry);
@@ -178,10 +204,7 @@ mod tests {
     fn template_entry_roundtrips_through_jsonl() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("templates/templates.jsonl");
-        let entry = TemplateEntry {
-            name: "deploy".to_string(),
-            body: "rsync -avz {from} {to}".to_string(),
-        };
+        let entry = TemplateEntry::new("rsync -avz {from} {to}");
 
         append_template(&path, &entry).unwrap();
         let loaded = load_templates(&path).unwrap();
@@ -191,82 +214,85 @@ mod tests {
     }
 
     #[test]
-    fn remove_templates_by_name_removes_all_matches_and_keeps_others() {
+    fn template_id_is_a_stable_body_hash() {
+        assert_eq!(
+            template_id("echo {something}"),
+            template_id("echo {something}")
+        );
+        assert_ne!(template_id("echo {something}"), template_id("echo other"));
+        assert!(template_id("echo {something}").starts_with("tpl-"));
+    }
+
+    #[test]
+    fn old_named_template_records_load_as_body_only_templates() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("templates/templates.jsonl");
-        for (name, body) in [
-            ("deploy", "one"),
-            ("logs", "tail -f {file}"),
-            ("deploy", "two"),
-        ] {
-            append_template(
-                &path,
-                &TemplateEntry {
-                    name: name.to_string(),
-                    body: body.to_string(),
-                },
-            )
-            .unwrap();
+        append_jsonl(
+            &path,
+            &serde_json::json!({
+                "name": "old-name",
+                "body": "echo old-body"
+            }),
+        )
+        .unwrap();
+
+        let loaded = load_templates(&path).unwrap();
+
+        assert_eq!(loaded.errors, []);
+        assert_eq!(loaded.items, [TemplateEntry::new("echo old-body")]);
+    }
+
+    #[test]
+    fn remove_templates_by_id_removes_all_matches_and_keeps_others() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("templates/templates.jsonl");
+        for body in ["one", "tail -f {file}", "one"] {
+            append_template(&path, &TemplateEntry::new(body)).unwrap();
         }
 
-        let removal = remove_templates_by_name(&path, "deploy").unwrap();
+        let id = template_id("one");
+        let removal = remove_templates_by_id(&path, &id).unwrap();
         let loaded = load_templates(&path).unwrap();
 
         assert_eq!(removal.removed, 2);
         assert_eq!(removal.errors, []);
         assert_eq!(removal.remaining.len(), 1);
         assert_eq!(loaded.items, removal.remaining);
-        assert_eq!(loaded.items[0].name, "logs");
+        assert_eq!(loaded.items[0].body, "tail -f {file}");
     }
 
     #[test]
-    fn find_template_by_name_returns_newest_match() {
+    fn find_template_by_id_returns_newest_match() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("templates/templates.jsonl");
-        for (name, body) in [("deploy", "old"), ("logs", "tail"), ("deploy", "new")] {
-            append_template(
-                &path,
-                &TemplateEntry {
-                    name: name.to_string(),
-                    body: body.to_string(),
-                },
-            )
-            .unwrap();
+        for body in ["old", "tail", "old"] {
+            append_template(&path, &TemplateEntry::new(body)).unwrap();
         }
 
-        let loaded = find_template_by_name(&path, "deploy").unwrap();
+        let loaded = find_template_by_id(&path, &template_id("old")).unwrap();
 
         assert_eq!(loaded.errors, []);
         assert_eq!(loaded.items.len(), 1);
-        assert_eq!(loaded.items[0].body, "new");
+        assert_eq!(loaded.items[0].body, "old");
     }
 
     #[test]
-    fn replace_template_removes_old_matches_and_appends_replacement() {
+    fn replace_template_by_id_removes_old_matches_and_appends_replacement() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("templates/templates.jsonl");
-        for (name, body) in [("deploy", "old"), ("logs", "tail"), ("deploy", "older")] {
-            append_template(
-                &path,
-                &TemplateEntry {
-                    name: name.to_string(),
-                    body: body.to_string(),
-                },
-            )
-            .unwrap();
+        for body in ["old", "tail", "old"] {
+            append_template(&path, &TemplateEntry::new(body)).unwrap();
         }
 
-        let replacement = TemplateEntry {
-            name: "deploy".to_string(),
-            body: "new".to_string(),
-        };
-        let removal = replace_template(&path, replacement.clone()).unwrap();
+        let replacement = TemplateEntry::new("new");
+        let removal =
+            replace_template_by_id(&path, &template_id("old"), replacement.clone()).unwrap();
         let loaded = load_templates(&path).unwrap();
 
         assert_eq!(removal.removed, 2);
         assert_eq!(removal.errors, []);
         assert_eq!(loaded.items.len(), 2);
-        assert_eq!(loaded.items[0].name, "logs");
+        assert_eq!(loaded.items[0].body, "tail");
         assert_eq!(loaded.items[1], replacement);
     }
 

@@ -25,9 +25,9 @@ aish_enter
 aish_expect "encrypt-placeholder-history"
 aish_wait_prompt
 
-aish_send "#mt encrypt-placeholder echo encrypt-template-ok"
+aish_send "#mt echo encrypt-template-ok"
 aish_enter
-aish_expect "template stored: encrypt-placeholder"
+aish_expect_template_stored
 aish_wait_prompt
 
 aish_send "#encrypt on"

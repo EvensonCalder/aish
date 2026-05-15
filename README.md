@@ -205,12 +205,12 @@ History, notes, and templates:
 
 ```text
 #history <count>
-#mt <name> <template>
-#template list
-#template show <name>
-#template use <name> [key=value ...]
-#template rm <name>
-#template replace <name> <template>
+#mt <template-body>
+#template find <query>
+#template show <id>
+#template use <id> [key=value ...]
+#template rm <id>
+#template replace <id> <template-body>
 ```
 
 Sync:
@@ -291,19 +291,22 @@ Multiline paste defaults to editor-review behavior. Aish shows a compact draft s
 
 ## Templates
 
-Templates are stored as JSONL under the Aish home directory.
+Templates are stored as JSONL under the Aish home directory. A template is body-first: users do not assign names. Aish prints a stable `tpl-...` content-hash ID when a template is stored or found, and that ID is used for exact `show`, `use`, `rm`, and `replace` operations.
 
 Create one:
 
 ```text
-#mt deploy rsync -avz {from} {user}@{host}:{to}
+#mt rsync -avz {from} {user}@{host}:{to}
 ```
 
-Use one:
+Find it, then use the printed ID:
 
 ```text
-#template use deploy from=dist user=deploy host=example.com to=/srv/app
+#template find rsync
+#template use tpl-0123456789abcdef from=dist user=deploy host=example.com to=/srv/app
 ```
+
+Aish intentionally does not provide a `#template list` command. Full inspection, grep, redirection, and history-oriented cleanup should happen against the template JSONL file in the Aish home directory.
 
 Placeholders:
 
@@ -445,7 +448,7 @@ cargo test
 
 Current active inventory:
 
-- 380 library unit tests.
+- 383 library unit tests.
 - 23 draft execution integration tests.
 - 1 first-run integration test.
 - 13 PTY integration tests, with bash/zsh active by default and fish-specific cases opt-in.

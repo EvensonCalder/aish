@@ -18,7 +18,7 @@ git diff --check
 
 Current test inventory:
 
-- 380 library unit tests.
+- 383 library unit tests.
 - 23 draft execution integration tests.
 - 1 first-run integration test.
 - 32 tmux screen-capture integration tests.
@@ -332,7 +332,7 @@ Implemented:
 - Context pseudo-pipe commands are not executed yet.
 - Unknown private commands are not sent to shell.
 - Unknown private commands suggest the nearest implemented command when there is a close match.
-- Minimal private commands: `#help`, `#status`, `#config`, `#doctor`, `#model`, `#base-url`, `#env-key`, `#key set`, `#key clear`, `#context`, `#completion`, `#log`, `#editor`, `#mt`, `#template list`, `#template rm`, `#encrypt`, `#set-remote`, `#push`, `#sync`, `#exit`, `#quit`, `#history <count>`.
+- Minimal private commands: `#help`, `#status`, `#config`, `#doctor`, `#model`, `#base-url`, `#env-key`, `#key set`, `#key clear`, `#context`, `#completion`, `#log`, `#editor`, `#mt`, `#template find`, `#template show`, `#template use`, `#template rm`, `#template replace`, `#encrypt`, `#set-remote`, `#push`, `#sync`, `#exit`, `#quit`, `#history <count>`.
 - `#help` prints private commands and the default keybinding map.
 - Help output distinguishes implemented keybindings from reserved keybindings.
 - `Esc` clears the draft and returns to draft mode.
@@ -387,8 +387,8 @@ Implemented:
 - Live inline ghost completion, configurable full/word `Tab` acceptance, and width-aware candidate row elision are implemented with Rust, expect, and tmux coverage.
 - Completion has pure current-token detection helpers that handle first-token classification, non-first-token classification, quoted whitespace, escaped whitespace, cursor-in-line contexts, path-like tokens, and UTF-8 cursor snapping.
 - Completion has a pure path completion helper that reads matching file and directory candidates, preserves directory prefixes, sorts candidates, marks directories with trailing `/`, preserves opening quotes in replacements, and handles missing directories as no matches.
-- Completion has a pure first-token helper that returns template candidates before newest-first history commands before PATH executables, with per-source deduplication.
-- Completion has a pure non-first-token helper that returns path candidates, history argument candidates, and template placeholder candidates in spec order with per-source deduplication.
+- Completion has a pure first-token helper that returns body-first template candidates before newest-first history commands before PATH executables, with per-source deduplication.
+- Completion has a pure non-first-token helper that returns template placeholder candidates before history arguments and path candidates, with per-source deduplication.
 - Completion helpers support ignore-spaces matching and panel max-result limiting; config defaults expose `completion.max_results = 5`, `completion.ignore_spaces = true`, `completion.template_first = true`, `completion.inline = true`, and `completion.tab_accept = "full"`.
 - Runtime state carries completion config and `#config`/`#status` report completion settings read-only.
 - Prompt cwd rendering abbreviates the user home directory as `~` and paths inside it as `~/...`.
@@ -402,7 +402,7 @@ Implemented:
 - File picker helpers collect sorted relative file/path candidates and can apply selected paths to draft with shell quoting.
 - `Ctrl-X Ctrl-F` launches the file picker action, and selected file picker values replace the current token while cancel leaves the draft unchanged.
 - `Ctrl-R` launches the history search action, scopes candidates by current mode, and selected commands replace the draft line without shell quoting.
-- `Ctrl-X Ctrl-T` launches the template picker action, scopes candidates to newest unique template names, and selected templates become protected template drafts.
+- `Ctrl-X Ctrl-T` launches the template picker action, scopes candidates to newest unique template IDs with body previews, and selected templates become protected template drafts.
 - `Ctrl-X Ctrl-B` launches the git branch picker action, lists branches from the current git repository, and selected branch names replace the current token with shell quoting.
 - `Ctrl-X Ctrl-V` launches the environment variable picker action, lists shell-compatible environment variable names, and selected names replace the current token as raw `$NAME` references.
 - Editor command resolution supports config, `$VISUAL`, `$EDITOR`, and PATH fallback candidates.
@@ -431,7 +431,7 @@ Implemented:
 - Editor roundtrip helper prepares a file, runs a fake editor, and reads successful edits back into draft while preserving the original draft on editor failure.
 - `Ctrl-X Ctrl-E` terminal handling resolves the editor, suspends raw mode when needed, runs the roundtrip, restores raw mode when needed, and reports success/failure.
 - `editor.execute_after_save = true` runs a successfully saved editor draft immediately with raw editor-draft semantics.
-- Template commands can create, list, remove, replace, show, and use JSONL-backed templates.
+- Template commands can create, find, remove, replace, show, and use JSONL-backed body-first templates. `#template list` is intentionally unsupported.
 - Template placeholders support `{name}`, `{name:description}`, and `{name...}` syntax.
 - Template use copies rendered content to a protected template draft and blocks execution while placeholders remain unresolved.
 - Template draft editing treats unresolved placeholders as spans: outside Backspace/Delete removes the whole placeholder, while editing inside expands the draft to plain editable text.
@@ -612,9 +612,9 @@ Tests:
 - `terminal::tests::ctrl_r_returns_history_search_action_without_editing_draft`
 - `terminal::tests::apply_history_picker_result_replaces_draft_without_shell_quoting`
 - `terminal::tests::apply_history_picker_result_reports_cancel_without_editing`
-- `picker::tests::template_picker_candidates_return_newest_unique_names`
-- `app::tests::template_picker_candidates_return_newest_unique_names`
-- `app::tests::replace_draft_from_template_picker_uses_newest_template_body`
+- `picker::tests::template_picker_candidates_return_newest_unique_ids`
+- `app::tests::template_picker_candidates_return_newest_unique_ids`
+- `app::tests::replace_draft_from_template_picker_uses_selected_template_id`
 - `terminal::tests::ctrl_x_prefix_resolves_template_picker_chord_to_launch_action`
 - `terminal::tests::apply_template_picker_result_copies_template_to_protected_draft`
 - `terminal::tests::apply_template_picker_result_reports_cancel_without_editing`
@@ -799,25 +799,30 @@ Status:
 Implemented:
 
 - `TemplateEntry` JSONL model.
-- `#mt <name> <body>` appends a template entry to `templates/templates.jsonl`.
-- `#template list` reads template entries and prints template names.
-- `#template show <name>` prints the newest matching template body without changing draft.
-- `#template rm <name>` removes all valid template entries matching a name.
-- `#template replace <name> <body>` removes existing matches and appends one replacement entry.
-- `#template use <name>` copies the newest matching template body into draft without executing it.
-- `#template use <name>` reports simple `{placeholder}` names found in the copied body.
-- `#template use <name>` supports `{name}`, `{name:description}`, and `{name...}` placeholders.
-- `#template use <name> key=value...` applies explicit placeholder substitutions before copying to draft.
-- `#template use <name> key="value with spaces"` and single-quoted variants are supported.
-- `#template use <name> key=value` reports unused keys that do not match any `{placeholder}`.
-- `#template use <name>` reports unresolved placeholders that remain after explicit substitution.
+- `#mt <body>` appends a body-first template entry to `templates/templates.jsonl`.
+- Template IDs are stable `tpl-...` content hashes derived from the template body.
+- Old `name/body` JSONL records are still readable as body-only templates.
+- `#template find <query>` prints matching template IDs and bodies.
+- `#template list` is intentionally unsupported because bulk grep/redirection should happen against the JSONL store.
+- `#template show <id>` prints the matching template body without changing draft.
+- `#template rm <id>` removes valid template entries matching that ID.
+- `#template replace <id> <body>` removes existing matches and appends one replacement entry with a new body-derived ID.
+- `#template use <id>` copies the matching template body into draft without executing it.
+- `#template use <id>` reports simple `{placeholder}` names found in the copied body.
+- `#template use <id>` supports `{name}`, `{name:description}`, and `{name...}` placeholders.
+- `#template use <id> key=value...` applies explicit placeholder substitutions before copying to draft.
+- `#template use <id> key="value with spaces"` and single-quoted variants are supported.
+- `#template use <id> key=value` reports unused keys that do not match any `{placeholder}`.
+- `#template use <id>` reports unresolved placeholders that remain after explicit substitution.
 - Template drafts with unresolved placeholders are not executed.
 - Placeholder and unused-key reports are emitted in sorted order for stable output.
 
 Tests:
 
 - `templates::tests::template_entry_roundtrips_through_jsonl`
-- `templates::tests::find_template_by_name_returns_newest_match`
+- `templates::tests::template_id_is_a_stable_body_hash`
+- `templates::tests::old_named_template_records_load_as_body_only_templates`
+- `templates::tests::find_template_by_id_returns_newest_match`
 - `templates::tests::template_placeholders_returns_unique_simple_names_in_order`
 - `templates::tests::template_placeholders_support_descriptions_and_variadic_markers`
 - `templates::tests::template_placeholder_spans_return_valid_byte_ranges`
@@ -825,10 +830,11 @@ Tests:
 - `templates::tests::apply_template_values_with_usage_reports_used_keys`
 - `templates::tests::apply_template_values_replaces_described_and_variadic_placeholders_by_name`
 - `app::tests::mt_command_persists_template_entry`
-- `app::tests::template_list_prints_stored_template_names`
+- `app::tests::template_list_is_intentionally_unsupported`
+- `app::tests::template_find_prints_matching_hash_ids`
 - `app::tests::template_show_prints_newest_matching_body`
-- `templates::tests::remove_templates_by_name_removes_all_matches_and_keeps_others`
-- `templates::tests::replace_template_removes_old_matches_and_appends_replacement`
+- `templates::tests::remove_templates_by_id_removes_all_matches_and_keeps_others`
+- `templates::tests::replace_template_by_id_removes_old_matches_and_appends_replacement`
 - `app::tests::template_rm_removes_matching_templates`
 - `app::tests::template_replace_rewrites_matching_templates`
 - `app::tests::template_use_copies_newest_matching_body_to_draft`

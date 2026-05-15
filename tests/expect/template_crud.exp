@@ -1,44 +1,50 @@
 #!/usr/bin/env expect
-# Template list/show/replace/rm should work end-to-end in a terminal session.
+# Template find/show/replace/rm should work end-to-end in a terminal session.
 
 set timeout 10
 source [file dirname [info script]]/_lib.exp
 
 aish_spawn
 
-aish_send "#mt deploy echo old-template"
+aish_send "#mt echo old-template"
 aish_enter
-aish_expect "template stored: deploy"
+set template_id [aish_expect_template_stored]
 aish_wait_prompt
 
 aish_send "#template list"
 aish_enter
-aish_expect "deploy"
+aish_expect "template listing is intentionally not supported"
 aish_wait_prompt
 
-aish_send "#template show deploy"
+aish_send "#template find old-template"
+aish_enter
+aish_expect "template $template_id"
+aish_expect "echo old-template"
+aish_wait_prompt
+
+aish_send "#template show $template_id"
 aish_enter
 aish_expect "echo old-template"
 aish_wait_prompt
 
-aish_send "#template replace deploy echo replaced-template"
+aish_send "#template replace $template_id echo replaced-template"
 aish_enter
-aish_expect "template replaced: deploy"
+set replaced_id [aish_expect_template_replaced]
 aish_wait_prompt
 
-aish_send "#template show deploy"
+aish_send "#template show $replaced_id"
 aish_enter
 aish_expect "echo replaced-template"
 aish_wait_prompt
 
-aish_send "#template rm deploy"
+aish_send "#template rm $replaced_id"
 aish_enter
-aish_expect "template removed: deploy"
+aish_expect "template removed: $replaced_id"
 aish_wait_prompt
 
-aish_send "#template list"
+aish_send "#template find replaced-template"
 aish_enter
-aish_expect "no templates"
+aish_expect "no templates matched: replaced-template"
 aish_wait_prompt
 
 aish_quit

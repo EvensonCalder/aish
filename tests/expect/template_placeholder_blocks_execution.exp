@@ -6,14 +6,14 @@ source [file dirname [info script]]/_lib.exp
 
 aish_spawn
 
-aish_send "#mt unresolved echo {message}"
+aish_send "#mt echo {message}"
 aish_enter
-aish_expect "template stored: unresolved"
+set template_id [aish_expect_template_stored]
 aish_wait_prompt
 
-aish_send "#template use unresolved"
+aish_send "#template use $template_id"
 aish_enter
-aish_expect "template copied to draft: unresolved"
+aish_expect "template copied to draft: $template_id"
 aish_expect "echo {message}"
 
 aish_enter

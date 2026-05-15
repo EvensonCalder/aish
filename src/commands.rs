@@ -260,21 +260,18 @@ mod tests {
 
     #[test]
     fn normalizes_mt_continuation_lines() {
-        let normalized = normalize_continuation_lines(&[
-            "#mt deploy \\",
-            "#mt   rsync -avz {from} \\",
-            "#mt   {user}@{host}:{to}",
-        ]);
+        let normalized =
+            normalize_continuation_lines(&["#mt rsync -avz {from} \\", "#mt   {user}@{host}:{to}"]);
 
         assert_eq!(
             normalized.as_deref(),
-            Some("#mt deploy rsync -avz {from} {user}@{host}:{to}")
+            Some("#mt rsync -avz {from} {user}@{host}:{to}")
         );
         assert_eq!(
             normalized.as_deref().map(parse_line),
             Some(ParsedLine::Private {
                 name: "mt",
-                args: "deploy rsync -avz {from} {user}@{host}:{to}"
+                args: "rsync -avz {from} {user}@{host}:{to}"
             })
         );
     }

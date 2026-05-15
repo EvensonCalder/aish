@@ -426,10 +426,14 @@ fn apply_template_picker_result(
         return Ok(());
     };
 
+    let id = selected
+        .split_whitespace()
+        .next()
+        .unwrap_or(selected.as_str());
     if state.replace_draft_from_template_picker(&selected)? {
-        writeln!(out, "template copied to draft: {selected}")?;
+        writeln!(out, "template copied to draft: {id}")?;
     } else {
-        writeln!(out, "template not found: {selected}")?;
+        writeln!(out, "template not found: {id}")?;
     }
     Ok(())
 }
@@ -1460,10 +1464,7 @@ mod tests {
         let template_path = temp.path().join("templates/templates.jsonl");
         crate::templates::append_template(
             &template_path,
-            &crate::templates::TemplateEntry {
-                name: "git-save".to_string(),
-                body: "git add . && git commit".to_string(),
-            },
+            &crate::templates::TemplateEntry::new("git add . && git commit"),
         )
         .unwrap();
         let mut state = AppState {
@@ -1476,7 +1477,7 @@ mod tests {
         write_completion_candidates(&state, &mut output).unwrap();
 
         let output = String::from_utf8(output).unwrap();
-        assert!(output.contains("template\tgit-save"));
+        assert!(output.contains("template\t add . && git commit"));
     }
 
     #[test]
@@ -1975,10 +1976,7 @@ mod tests {
         let template_path = temp.path().join("templates.jsonl");
         crate::templates::append_template(
             &template_path,
-            &crate::templates::TemplateEntry {
-                name: "deploy".to_string(),
-                body: "rsync {from} {to}".to_string(),
-            },
+            &crate::templates::TemplateEntry::new("rsync {from} {to}"),
         )
         .unwrap();
         let mut state = AppState {
@@ -1990,7 +1988,7 @@ mod tests {
         apply_template_picker_result(
             &mut state,
             PickerRunResult {
-                selected: Some("deploy".to_string()),
+                selected: Some(crate::templates::template_id("rsync {from} {to}")),
                 exit_code: Some(0),
             },
             &mut output,
@@ -2001,7 +1999,10 @@ mod tests {
         assert!(state.draft_from_template);
         assert_eq!(
             String::from_utf8(output).unwrap(),
-            "template copied to draft: deploy\n"
+            format!(
+                "template copied to draft: {}\n",
+                crate::templates::template_id("rsync {from} {to}")
+            )
         );
     }
 

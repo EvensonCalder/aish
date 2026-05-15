@@ -19,9 +19,9 @@ set ::env(PATH) "$bindir:$old_path"
 
 aish_spawn
 
-aish_send "#mt cancel-smoke echo should-not-copy"
+aish_send "#mt echo should-not-copy"
 aish_enter
-aish_expect "template stored: cancel-smoke"
+aish_expect_template_stored
 aish_wait_prompt
 
 aish_send "echo keep-after-template-picker-cancel"

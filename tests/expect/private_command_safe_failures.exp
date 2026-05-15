@@ -17,9 +17,9 @@ aish_enter
 aish_expect "usage: #log <count>"
 aish_wait_prompt
 
-aish_send "#mt deploy"
+aish_send "#mt"
 aish_enter
-aish_expect "usage: #mt <name> <body>"
+aish_expect "usage: #mt <template-body>"
 aish_wait_prompt
 
 aish_send "#template show missing"
@@ -29,7 +29,7 @@ aish_wait_prompt
 
 aish_send "#template rm"
 aish_enter
-aish_expect "usage: #template list | #template show <name> | #template use <name> | #template rm <name> | #template replace <name> <body>"
+aish_expect {usage: #template find <query> | #template show <id> | #template use <id> [key=value...] | #template rm <id> | #template replace <id> <body>}
 aish_wait_prompt
 
 aish_send "#context invalid option"

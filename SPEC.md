@@ -285,7 +285,7 @@ Private commands use `#<name>` with no required space after `#`:
 #encrypt on
 #history 20000
 #context 65536
-#mt rename mv {from} {to}
+#mt mv {from} {to}
 ```
 
 Unknown private commands should never be sent to the shell. Aish should show an error and possible suggestions.
@@ -366,8 +366,8 @@ AI prompt with context:
 Template creation:
 
 ```text
-#mt deploy \
-#mt   rsync -avz {from} {user}@{host}:{to}
+#mt rsync -avz {from} \
+#mt   {user}@{host}:{to}
 ```
 
 Internal parsing removes the repeated visual prefixes (`# ` or `#mt `) before parsing content.
@@ -651,24 +651,34 @@ Expected AI output:
 Only explicit `#mt` creates templates.
 
 ```text
-#mt <name> <template>
+#mt <template-body>
 ```
 
 Examples:
 
 ```text
-#mt rename mv {from} {to}
-#mt git-user git config --global user.name "{name}" && git config --global user.email "{email}"
+#mt mv {from} {to}
+#mt git config --global user.name "{name}" && git config --global user.email "{email}"
 ```
 
 Multi-line:
 
 ```text
-#mt deploy \
-#mt   rsync -avz {from} {user}@{host}:{to}
+#mt rsync -avz {from} \
+#mt   {user}@{host}:{to}
 ```
 
-AI may suggest template items, but Aish never auto-saves them.
+Aish prints a stable `tpl-...` content-hash ID for stored templates. Users use that ID for exact operations:
+
+```text
+#template find <query>
+#template show <id>
+#template use <id> [key=value ...]
+#template rm <id>
+#template replace <id> <template-body>
+```
+
+`#template list` is intentionally not supported. Bulk inspection, grep, redirection, and history-oriented cleanup should happen against the template JSONL file under the Aish home directory. AI may suggest template items, but Aish never auto-saves them.
 
 ### 9.2 Placeholder syntax
 
@@ -1025,6 +1035,7 @@ Commands:
 Behavior:
 
 - Encrypt regular history, AI history, draft history, notes, and templates.
+- Encrypt template payload metadata as well as bodies. User-facing template names are not part of the product model; template IDs are stable content-hash handles used for exact operations, and no plaintext template search/list index should be persisted when encryption is enabled.
 - Secrets are always stored encrypted.
 - When encryption is enabled, do not store plaintext search indexes.
 - Decrypt asynchronously on startup so the shell is usable before history/template unlock completes.
@@ -1170,9 +1181,12 @@ Initial command set:
 #history <count>
 #log <count>
 
-#mt <name> <template>
-#template list
-#template rm <name>
+#mt <template-body>
+#template find <query>
+#template show <id>
+#template use <id> [key=value ...]
+#template rm <id>
+#template replace <id> <template-body>
 
 #editor <command...>
 

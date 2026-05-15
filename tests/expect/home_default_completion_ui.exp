@@ -38,7 +38,7 @@ aish_wait_prompt
 
 aish_send "#mt home-complete-template echo should-not-run"
 aish_enter
-aish_expect "template stored: home-complete-template"
+aish_expect_template_stored
 aish_wait_prompt
 
 aish_send "echo home-completion-history"

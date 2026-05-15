@@ -72,6 +72,22 @@ proc aish_expect_re {pattern} {
     }
 }
 
+proc aish_expect_template_stored {} {
+    expect {
+        -re {template stored: (tpl-[0-9a-f]+)} { return $expect_out(1,string) }
+        timeout        { puts stderr "expected stored template id"; exit 3 }
+        eof            { puts stderr "eof while expecting stored template id"; exit 3 }
+    }
+}
+
+proc aish_expect_template_replaced {} {
+    expect {
+        -re {template replaced: tpl-[0-9a-f]+ -> (tpl-[0-9a-f]+)} { return $expect_out(1,string) }
+        timeout        { puts stderr "expected replaced template id"; exit 3 }
+        eof            { puts stderr "eof while expecting replaced template id"; exit 3 }
+    }
+}
+
 proc aish_send {text} {
     send -- $text
 }

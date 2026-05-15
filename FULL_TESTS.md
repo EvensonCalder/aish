@@ -264,13 +264,14 @@ Use a fresh isolated `AISH_HOME` when possible so history-based suggestions are 
 
 | ID | What To Do | Expected Behavior | Evidence |
 | --- | --- | --- | --- |
-| TPL-001 | Run `#mt greet echo hello {name}`. | Template is created. | Paste output. |
-| TPL-002 | Run `#template list`. | The template appears. | Paste output. |
-| TPL-003 | Run `#template show greet`. | Template content is shown. | Paste output. |
-| TPL-004 | Run `#template use greet name=world`. | The resolved command executes only after expected confirmation or submission path and prints `hello world`. | Paste output. |
-| TPL-005 | Run `#template use greet` without `name`. | Unresolved placeholder blocks execution. | Paste output. |
-| TPL-006 | Run `#template replace greet echo hi {name}`, then use it. | Replaced template is used. | Paste output. |
-| TPL-007 | Run `#template rm greet`. | Template is removed and no stale entry remains. | Paste output. |
+| TPL-001 | Run `#mt echo hello {name}`. | Template is created and Aish prints a stable `tpl-...` ID. | Paste output and record the ID. |
+| TPL-002 | Run `#template find hello`. | Matching templates are shown with their `tpl-...` IDs. | Paste output. |
+| TPL-003 | Run `#template list`. | Aish reports that listing is intentionally unsupported and points to `#template find <query>` or the JSONL store. | Paste output. |
+| TPL-004 | Run `#template show <id>` using the ID from TPL-001. | Template content is shown. | Paste output. |
+| TPL-005 | Run `#template use <id> name=world`. | The resolved command executes only after expected confirmation or submission path and prints `hello world`. | Paste output. |
+| TPL-006 | Run `#template use <id>` without `name`. | Unresolved placeholder blocks execution. | Paste output. |
+| TPL-007 | Run `#template replace <id> echo hi {name}`, then use the newly printed ID. | Replaced template is used and the replacement has a new body-derived ID. | Paste output. |
+| TPL-008 | Run `#template rm <id>`. | Template is removed and no stale entry remains. | Paste output. |
 | TPL-008 | Exit and relaunch with the same `AISH_HOME`, then list templates. | Template persistence matches the previous operations. | Paste output. |
 
 ## External Editor And Paste Review

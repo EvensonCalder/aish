@@ -30,9 +30,9 @@ set ::env(PATH) "$bindir:$old_path"
 
 aish_spawn_without_aish_home
 
-aish_send "#mt home-picker-template echo should-not-copy-home"
+aish_send "#mt echo should-not-copy-home"
 aish_enter
-aish_expect "template stored: home-picker-template"
+aish_expect_template_stored
 aish_wait_prompt
 
 aish_send "echo keep-home-after-template-picker-cancel"

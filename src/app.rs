@@ -50,9 +50,11 @@ use crate::sync::{
     log_sync_failure, maintain_managed_gitignore, startup_sync_decision,
     tracked_managed_files_warning,
 };
+#[cfg(test)]
+use crate::templates::template_id;
 use crate::templates::{
-    TemplateEntry, append_template, apply_template_values_with_usage, find_template_by_name,
-    load_templates, remove_templates_by_name, replace_template, template_placeholders,
+    TemplateEntry, append_template, apply_template_values_with_usage, find_template_by_id,
+    load_templates, remove_templates_by_id, replace_template_by_id, template_placeholders,
 };
 
 const OUTPUT_RING_CAPACITY: usize = 100;
@@ -445,11 +447,12 @@ impl AppState {
         Ok(template_picker_candidates(&loaded.items))
     }
 
-    pub fn replace_draft_from_template_picker(&mut self, name: &str) -> Result<bool> {
+    pub fn replace_draft_from_template_picker(&mut self, selected: &str) -> Result<bool> {
         let Some(path) = &self.template_store_path else {
             return Ok(false);
         };
-        let loaded = find_template_by_name(path, name)?;
+        let id = selected.split_whitespace().next().unwrap_or(selected);
+        let loaded = find_template_by_id(path, id)?;
         let Some(template) = loaded.items.first() else {
             return Ok(false);
         };
@@ -965,21 +968,17 @@ pub fn execute_draft(
                         return Ok(());
                     }
                     "mt" => {
-                        match parse_template_args(args) {
-                            Some((name, body)) => match &state.template_store_path {
+                        match parse_template_body(args) {
+                            Some(body) => match &state.template_store_path {
                                 Some(path) => {
-                                    append_template(
-                                        path,
-                                        &TemplateEntry {
-                                            name: name.to_string(),
-                                            body: body.to_string(),
-                                        },
-                                    )?;
-                                    writeln!(out, "template stored: {name}")?;
+                                    let entry = TemplateEntry::new(body);
+                                    let id = entry.id();
+                                    append_template(path, &entry)?;
+                                    writeln!(out, "template stored: {id}")?;
                                 }
                                 None => writeln!(out, "template storage is not configured")?,
                             },
-                            None => writeln!(out, "usage: #mt <name> <body>")?,
+                            None => writeln!(out, "usage: #mt <template-body>")?,
                         }
                         state.draft.clear();
                         state.mode = Mode::Draft;
@@ -988,33 +987,49 @@ pub fn execute_draft(
                     "template" => {
                         let mut keep_draft = false;
                         match args.split_whitespace().next() {
-                            Some("list") => match &state.template_store_path {
-                                Some(path) => {
-                                    let loaded = load_templates(path)?;
-                                    if loaded.items.is_empty() {
-                                        writeln!(out, "no templates stored")?;
-                                    } else {
-                                        for template in loaded.items {
-                                            writeln!(out, "{}", template.name)?;
+                            Some("list") => {
+                                writeln!(
+                                    out,
+                                    "template listing is intentionally not supported; use #template find <query> or inspect the template store file"
+                                )?;
+                            }
+                            Some("find") => match parse_template_find_query(args) {
+                                Some(query) => match &state.template_store_path {
+                                    Some(path) => {
+                                        let loaded = load_templates(path)?;
+                                        let mut matches = Vec::new();
+                                        for template in loaded.items.iter().rev() {
+                                            let id = template.id();
+                                            if id.contains(query) || template.body.contains(query) {
+                                                matches.push((id, template.body.as_str()));
+                                            }
+                                        }
+                                        if matches.is_empty() {
+                                            writeln!(out, "no templates matched: {query}")?;
+                                        } else {
+                                            for (id, body) in matches {
+                                                writeln!(out, "template {id}\t{body}")?;
+                                            }
+                                        }
+                                        if !loaded.errors.is_empty() {
+                                            writeln!(
+                                                out,
+                                                "skipped {} bad template line(s)",
+                                                loaded.errors.len()
+                                            )?;
                                         }
                                     }
-                                    if !loaded.errors.is_empty() {
-                                        writeln!(
-                                            out,
-                                            "skipped {} bad template line(s)",
-                                            loaded.errors.len()
-                                        )?;
-                                    }
-                                }
-                                None => writeln!(out, "template storage is not configured")?,
+                                    None => writeln!(out, "template storage is not configured")?,
+                                },
+                                None => writeln!(out, "{}", template_usage())?,
                             },
                             Some("rm") => match args.split_whitespace().nth(1) {
-                                Some(name) => match &state.template_store_path {
+                                Some(id) => match &state.template_store_path {
                                     Some(path) => {
-                                        let removal = remove_templates_by_name(path, name)?;
+                                        let removal = remove_templates_by_id(path, id)?;
                                         writeln!(
                                             out,
-                                            "template removed: {name} ({})",
+                                            "template removed: {id} ({})",
                                             removal.removed
                                         )?;
                                         if !removal.errors.is_empty() {
@@ -1030,18 +1045,14 @@ pub fn execute_draft(
                                 None => writeln!(out, "{}", template_usage())?,
                             },
                             Some("replace") => match parse_template_subcommand_args(args) {
-                                Some((name, body)) => match &state.template_store_path {
+                                Some((id, body)) => match &state.template_store_path {
                                     Some(path) => {
-                                        let removal = replace_template(
-                                            path,
-                                            TemplateEntry {
-                                                name: name.to_string(),
-                                                body: body.to_string(),
-                                            },
-                                        )?;
+                                        let entry = TemplateEntry::new(body);
+                                        let new_id = entry.id();
+                                        let removal = replace_template_by_id(path, id, entry)?;
                                         writeln!(
                                             out,
-                                            "template replaced: {name} (removed {})",
+                                            "template replaced: {id} -> {new_id} (removed {})",
                                             removal.removed
                                         )?;
                                         if !removal.errors.is_empty() {
@@ -1057,15 +1068,15 @@ pub fn execute_draft(
                                 None => writeln!(out, "{}", template_usage())?,
                             },
                             Some("show") => match args.split_whitespace().nth(1) {
-                                Some(name) => match &state.template_store_path {
+                                Some(id) => match &state.template_store_path {
                                     Some(path) => {
-                                        let loaded = find_template_by_name(path, name)?;
+                                        let loaded = find_template_by_id(path, id)?;
                                         match loaded.items.first() {
                                             Some(template) => {
-                                                writeln!(out, "template: {}", template.name)?;
+                                                writeln!(out, "template: {}", template.id())?;
                                                 writeln!(out, "{}", template.body)?;
                                             }
-                                            None => writeln!(out, "template not found: {name}")?,
+                                            None => writeln!(out, "template not found: {id}")?,
                                         }
                                         if !loaded.errors.is_empty() {
                                             writeln!(
@@ -1080,9 +1091,9 @@ pub fn execute_draft(
                                 None => writeln!(out, "{}", template_usage())?,
                             },
                             Some("use") => match args.split_whitespace().nth(1) {
-                                Some(name) => match &state.template_store_path {
+                                Some(id) => match &state.template_store_path {
                                     Some(path) => {
-                                        let loaded = find_template_by_name(path, name)?;
+                                        let loaded = find_template_by_id(path, id)?;
                                         match loaded.items.first() {
                                             Some(template) => {
                                                 let values = parse_template_values(args);
@@ -1095,7 +1106,11 @@ pub fn execute_draft(
                                                 state.draft_from_editor = false;
                                                 state.draft_from_template = true;
                                                 keep_draft = true;
-                                                writeln!(out, "template copied to draft: {name}")?;
+                                                writeln!(
+                                                    out,
+                                                    "template copied to draft: {}",
+                                                    template.id()
+                                                )?;
                                                 let placeholders =
                                                     template_placeholders(&template.body);
                                                 if !placeholders.is_empty() {
@@ -1131,7 +1146,7 @@ pub fn execute_draft(
                                                     )?;
                                                 }
                                             }
-                                            None => writeln!(out, "template not found: {name}")?,
+                                            None => writeln!(out, "template not found: {id}")?,
                                         }
                                         if !loaded.errors.is_empty() {
                                             writeln!(
@@ -2430,17 +2445,27 @@ fn parse_on_off(value: &str) -> Option<bool> {
     }
 }
 
-fn parse_template_args(args: &str) -> Option<(&str, &str)> {
+fn parse_template_body(args: &str) -> Option<&str> {
+    let body = args.trim();
+    (!body.is_empty()).then_some(body)
+}
+
+fn parse_template_find_query(args: &str) -> Option<&str> {
+    let query = args.trim_start().strip_prefix("find")?.trim_start();
+    (!query.is_empty()).then_some(query)
+}
+
+fn parse_template_id_and_body(args: &str) -> Option<(&str, &str)> {
     let args = args.trim();
     let split_at = args.find(char::is_whitespace)?;
-    let (name, body) = args.split_at(split_at);
+    let (id, body) = args.split_at(split_at);
     let body = body.trim_start();
-    (!name.is_empty() && !body.is_empty()).then_some((name, body))
+    (!id.is_empty() && !body.is_empty()).then_some((id, body))
 }
 
 fn parse_template_subcommand_args(args: &str) -> Option<(&str, &str)> {
     let rest = args.trim_start().strip_prefix("replace")?.trim_start();
-    parse_template_args(rest)
+    parse_template_id_and_body(rest)
 }
 
 fn parse_template_values(args: &str) -> HashMap<String, String> {
@@ -2502,7 +2527,7 @@ fn trim_matching_quotes(value: &str) -> &str {
 }
 
 fn template_usage() -> &'static str {
-    "usage: #template list | #template show <name> | #template use <name> | #template rm <name> | #template replace <name> <body>"
+    "usage: #template find <query> | #template show <id> | #template use <id> [key=value...] | #template rm <id> | #template replace <id> <body>"
 }
 
 fn completion_cwd(current_cwd: &Option<PathBuf>) -> PathBuf {
@@ -2730,10 +2755,7 @@ mod tests {
         let template_path = temp.path().join("templates/templates.jsonl");
         append_template(
             &template_path,
-            &TemplateEntry {
-                name: "git-save".to_string(),
-                body: "git add . && git commit".to_string(),
-            },
+            &TemplateEntry::new("git add . && git commit"),
         )
         .unwrap();
         let mut state = AppState {
@@ -2758,7 +2780,7 @@ mod tests {
         let candidates = state.completion_candidates_with_max_results(2).unwrap();
 
         assert_eq!(candidates.len(), 2);
-        assert_eq!(candidates[0].display, "git-save");
+        assert_eq!(candidates[0].display, "git add . && git commit");
         assert_eq!(
             candidates[0].source,
             crate::completion::CompletionSource::Template
@@ -2935,18 +2957,11 @@ mod tests {
     }
 
     #[test]
-    fn template_picker_candidates_return_newest_unique_names() {
+    fn template_picker_candidates_return_newest_unique_ids() {
         let temp = tempfile::tempdir().unwrap();
         let template_path = temp.path().join("templates.jsonl");
-        for (name, body) in [("deploy", "old"), ("logs", "tail"), ("deploy", "new")] {
-            append_template(
-                &template_path,
-                &TemplateEntry {
-                    name: name.to_string(),
-                    body: body.to_string(),
-                },
-            )
-            .unwrap();
+        for body in ["old", "tail", "old"] {
+            append_template(&template_path, &TemplateEntry::new(body)).unwrap();
         }
         let state = AppState {
             template_store_path: Some(template_path),
@@ -2955,23 +2970,19 @@ mod tests {
 
         assert_eq!(
             state.template_picker_candidates().unwrap(),
-            vec!["deploy", "logs"]
+            vec![
+                format!("{}\told", template_id("old")),
+                format!("{}\ttail", template_id("tail"))
+            ]
         );
     }
 
     #[test]
-    fn replace_draft_from_template_picker_uses_newest_template_body() {
+    fn replace_draft_from_template_picker_uses_selected_template_id() {
         let temp = tempfile::tempdir().unwrap();
         let template_path = temp.path().join("templates.jsonl");
-        for (name, body) in [("deploy", "old"), ("deploy", "rsync {from} {to}")] {
-            append_template(
-                &template_path,
-                &TemplateEntry {
-                    name: name.to_string(),
-                    body: body.to_string(),
-                },
-            )
-            .unwrap();
+        for body in ["old", "rsync {from} {to}"] {
+            append_template(&template_path, &TemplateEntry::new(body)).unwrap();
         }
         let mut state = AppState {
             template_store_path: Some(template_path),
@@ -2979,7 +2990,11 @@ mod tests {
             ..AppState::default()
         };
 
-        assert!(state.replace_draft_from_template_picker("deploy").unwrap());
+        assert!(
+            state
+                .replace_draft_from_template_picker(&template_id("rsync {from} {to}"))
+                .unwrap()
+        );
 
         assert_eq!(state.mode, Mode::Draft);
         assert_eq!(state.draft.as_str(), "rsync {from} {to}");
@@ -4125,7 +4140,7 @@ mod tests {
             template_store_path: Some(template_path.clone()),
             ..AppState::default()
         };
-        state.draft.insert_str("#mt deploy rsync {from} {to}");
+        state.draft.insert_str("#mt rsync {from} {to}");
         let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
         let mut output = Vec::new();
 
@@ -4138,37 +4153,21 @@ mod tests {
         .unwrap();
 
         let output = String::from_utf8(output).unwrap();
-        assert!(output.contains("template stored: deploy"));
+        let id = template_id("rsync {from} {to}");
+        assert!(output.contains(&format!("template stored: {id}")));
         assert_eq!(state.last_status, None);
         assert!(state.draft.is_empty());
 
         let loaded = load_templates(&template_path).unwrap();
         assert_eq!(loaded.errors, []);
         assert_eq!(loaded.items.len(), 1);
-        assert_eq!(loaded.items[0].name, "deploy");
         assert_eq!(loaded.items[0].body, "rsync {from} {to}");
     }
 
     #[test]
-    fn template_list_prints_stored_template_names() {
+    fn template_list_is_intentionally_unsupported() {
         let temp = tempfile::tempdir().unwrap();
         let template_path = temp.path().join("templates/templates.jsonl");
-        append_template(
-            &template_path,
-            &TemplateEntry {
-                name: "deploy".to_string(),
-                body: "rsync {from} {to}".to_string(),
-            },
-        )
-        .unwrap();
-        append_template(
-            &template_path,
-            &TemplateEntry {
-                name: "logs".to_string(),
-                body: "tail -f {file}".to_string(),
-            },
-        )
-        .unwrap();
         let mut state = AppState {
             template_store_path: Some(template_path),
             ..AppState::default()
@@ -4186,35 +4185,54 @@ mod tests {
         .unwrap();
 
         let output = String::from_utf8(output).unwrap();
-        assert!(output.contains("deploy"));
-        assert!(output.contains("logs"));
+        assert!(output.contains("template listing is intentionally not supported"));
         assert_eq!(state.last_status, None);
         assert!(state.draft.is_empty());
+    }
+
+    #[test]
+    fn template_find_prints_matching_hash_ids() {
+        let temp = tempfile::tempdir().unwrap();
+        let template_path = temp.path().join("templates/templates.jsonl");
+        append_template(&template_path, &TemplateEntry::new("rsync {from} {to}")).unwrap();
+        append_template(&template_path, &TemplateEntry::new("tail -f {file}")).unwrap();
+        let mut state = AppState {
+            template_store_path: Some(template_path),
+            ..AppState::default()
+        };
+        state.draft.insert_str("#template find rsync");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains(&format!(
+            "template {}\trsync {{from}} {{to}}",
+            template_id("rsync {from} {to}")
+        )));
+        assert!(!output.contains("tail -f"));
     }
 
     #[test]
     fn template_rm_removes_matching_templates() {
         let temp = tempfile::tempdir().unwrap();
         let template_path = temp.path().join("templates/templates.jsonl");
-        for (name, body) in [
-            ("deploy", "rsync {from} {to}"),
-            ("logs", "tail -f {file}"),
-            ("deploy", "kubectl apply -f {file}"),
-        ] {
-            append_template(
-                &template_path,
-                &TemplateEntry {
-                    name: name.to_string(),
-                    body: body.to_string(),
-                },
-            )
-            .unwrap();
+        for body in ["rsync {from} {to}", "tail -f {file}", "rsync {from} {to}"] {
+            append_template(&template_path, &TemplateEntry::new(body)).unwrap();
         }
         let mut state = AppState {
             template_store_path: Some(template_path.clone()),
             ..AppState::default()
         };
-        state.draft.insert_str("#template rm deploy");
+        let id = template_id("rsync {from} {to}");
+        state.draft.insert_str(&format!("#template rm {id}"));
         let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
         let mut output = Vec::new();
 
@@ -4227,41 +4245,32 @@ mod tests {
         .unwrap();
 
         let output = String::from_utf8(output).unwrap();
-        assert!(output.contains("template removed: deploy (2)"));
+        assert!(output.contains(&format!("template removed: {id} (2)")));
         assert_eq!(state.last_status, None);
         assert!(state.draft.is_empty());
 
         let loaded = load_templates(&template_path).unwrap();
         assert_eq!(loaded.errors, []);
         assert_eq!(loaded.items.len(), 1);
-        assert_eq!(loaded.items[0].name, "logs");
+        assert_eq!(loaded.items[0].body, "tail -f {file}");
     }
 
     #[test]
     fn template_replace_rewrites_matching_templates() {
         let temp = tempfile::tempdir().unwrap();
         let template_path = temp.path().join("templates/templates.jsonl");
-        for (name, body) in [
-            ("deploy", "old deploy"),
-            ("logs", "tail -f {file}"),
-            ("deploy", "older deploy"),
-        ] {
-            append_template(
-                &template_path,
-                &TemplateEntry {
-                    name: name.to_string(),
-                    body: body.to_string(),
-                },
-            )
-            .unwrap();
+        for body in ["old deploy", "tail -f {file}", "old deploy"] {
+            append_template(&template_path, &TemplateEntry::new(body)).unwrap();
         }
         let mut state = AppState {
             template_store_path: Some(template_path.clone()),
             ..AppState::default()
         };
+        let old_id = template_id("old deploy");
+        let new_id = template_id("new deploy body");
         state
             .draft
-            .insert_str("#template replace deploy new deploy body");
+            .insert_str(&format!("#template replace {old_id} new deploy body"));
         let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
         let mut output = Vec::new();
 
@@ -4274,15 +4283,16 @@ mod tests {
         .unwrap();
 
         let output = String::from_utf8(output).unwrap();
-        assert!(output.contains("template replaced: deploy (removed 2)"));
+        assert!(output.contains(&format!(
+            "template replaced: {old_id} -> {new_id} (removed 2)"
+        )));
         assert_eq!(state.last_status, None);
         assert!(state.draft.is_empty());
 
         let loaded = load_templates(&template_path).unwrap();
         assert_eq!(loaded.errors, []);
         assert_eq!(loaded.items.len(), 2);
-        assert_eq!(loaded.items[0].name, "logs");
-        assert_eq!(loaded.items[1].name, "deploy");
+        assert_eq!(loaded.items[0].body, "tail -f {file}");
         assert_eq!(loaded.items[1].body, "new deploy body");
     }
 
@@ -4290,27 +4300,21 @@ mod tests {
     fn template_use_copies_newest_matching_body_to_draft() {
         let temp = tempfile::tempdir().unwrap();
         let template_path = temp.path().join("templates/templates.jsonl");
-        for (name, body) in [
-            ("deploy", "old deploy"),
-            ("logs", "tail -f {file}"),
-            ("deploy", "rsync {from} {user}@{host}:{to} {from}"),
+        for body in [
+            "old deploy",
+            "tail -f {file}",
+            "rsync {from} {user}@{host}:{to} {from}",
         ] {
-            append_template(
-                &template_path,
-                &TemplateEntry {
-                    name: name.to_string(),
-                    body: body.to_string(),
-                },
-            )
-            .unwrap();
+            append_template(&template_path, &TemplateEntry::new(body)).unwrap();
         }
         let mut state = AppState {
             template_store_path: Some(template_path),
             ..AppState::default()
         };
-        state.draft.insert_str(
-            "#template use deploy from=src host=prod to=/srv/app zextra=ignored aextra=unused",
-        );
+        let id = template_id("rsync {from} {user}@{host}:{to} {from}");
+        state.draft.insert_str(&format!(
+            "#template use {id} from=src host=prod to=/srv/app zextra=ignored aextra=unused"
+        ));
         let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
         let mut output = Vec::new();
 
@@ -4323,7 +4327,7 @@ mod tests {
         .unwrap();
 
         let output = String::from_utf8(output).unwrap();
-        assert!(output.contains("template copied to draft: deploy"));
+        assert!(output.contains(&format!("template copied to draft: {id}")));
         assert!(output.contains("template placeholders: from, user, host, to"));
         assert!(output.contains("unresolved template placeholders: user"));
         assert!(output.contains("unused template values: aextra, zextra"));
@@ -4365,19 +4369,17 @@ mod tests {
         let template_path = temp.path().join("templates/templates.jsonl");
         append_template(
             &template_path,
-            &TemplateEntry {
-                name: "deploy".to_string(),
-                body: "echo {message} && cd {path}".to_string(),
-            },
+            &TemplateEntry::new("echo {message} && cd {path}"),
         )
         .unwrap();
+        let id = template_id("echo {message} && cd {path}");
         let mut state = AppState {
             template_store_path: Some(template_path),
             ..AppState::default()
         };
-        state
-            .draft
-            .insert_str("#template use deploy message=\"hello world\" path='/tmp/my dir'");
+        state.draft.insert_str(&format!(
+            "#template use {id} message=\"hello world\" path='/tmp/my dir'"
+        ));
         let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
         let mut output = Vec::new();
 
@@ -4390,7 +4392,7 @@ mod tests {
         .unwrap();
 
         let output = String::from_utf8(output).unwrap();
-        assert!(output.contains("template copied to draft: deploy"));
+        assert!(output.contains(&format!("template copied to draft: {id}")));
         assert_eq!(state.last_status, None);
         assert_eq!(state.mode, Mode::Draft);
         assert_eq!(state.draft.as_str(), "echo hello world && cd /tmp/my dir");
@@ -4402,19 +4404,17 @@ mod tests {
         let template_path = temp.path().join("templates/templates.jsonl");
         append_template(
             &template_path,
-            &TemplateEntry {
-                name: "commit".to_string(),
-                body: "git commit -m {message:commit message} -- {paths...}".to_string(),
-            },
+            &TemplateEntry::new("git commit -m {message:commit message} -- {paths...}"),
         )
         .unwrap();
+        let id = template_id("git commit -m {message:commit message} -- {paths...}");
         let mut state = AppState {
             template_store_path: Some(template_path),
             ..AppState::default()
         };
-        state
-            .draft
-            .insert_str("#template use commit message='ship it' paths='src tests'");
+        state.draft.insert_str(&format!(
+            "#template use {id} message='ship it' paths='src tests'"
+        ));
         let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
         let mut output = Vec::new();
 
@@ -4463,25 +4463,15 @@ mod tests {
     fn template_show_prints_newest_matching_body() {
         let temp = tempfile::tempdir().unwrap();
         let template_path = temp.path().join("templates/templates.jsonl");
-        for (name, body) in [
-            ("deploy", "old deploy"),
-            ("logs", "tail -f {file}"),
-            ("deploy", "new deploy"),
-        ] {
-            append_template(
-                &template_path,
-                &TemplateEntry {
-                    name: name.to_string(),
-                    body: body.to_string(),
-                },
-            )
-            .unwrap();
+        for body in ["old deploy", "tail -f {file}", "new deploy"] {
+            append_template(&template_path, &TemplateEntry::new(body)).unwrap();
         }
+        let id = template_id("new deploy");
         let mut state = AppState {
             template_store_path: Some(template_path),
             ..AppState::default()
         };
-        state.draft.insert_str("#template show deploy");
+        state.draft.insert_str(&format!("#template show {id}"));
         let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
         let mut output = Vec::new();
 
@@ -4494,9 +4484,8 @@ mod tests {
         .unwrap();
 
         let output = String::from_utf8(output).unwrap();
-        assert!(output.contains("template: deploy"));
+        assert!(output.contains(&format!("template: {id}")));
         assert!(output.contains("new deploy"));
-        assert!(!output.contains("old deploy"));
         assert_eq!(state.last_status, None);
         assert!(state.draft.is_empty());
     }
@@ -4505,11 +4494,12 @@ mod tests {
     fn template_commands_report_usage_for_invalid_input() {
         let usage = template_usage();
         for (line, expected) in [
-            ("#mt deploy", "usage: #mt <name> <body>"),
+            ("#mt", "usage: #mt <template-body>"),
             ("#template rm", usage),
             ("#template replace deploy", usage),
             ("#template show", usage),
             ("#template use", usage),
+            ("#template find", usage),
             ("#template", usage),
             ("#template unknown deploy", usage),
         ] {
