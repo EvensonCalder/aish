@@ -129,6 +129,21 @@ fn common_shell_workflow() {
 }
 
 #[test]
+fn backend_rc_inheritance_bash() {
+    run_script("backend_rc_inheritance_bash.exp");
+}
+
+#[test]
+fn backend_rc_inheritance_zsh() {
+    run_script("backend_rc_inheritance_zsh.exp");
+}
+
+#[test]
+fn backend_rc_inheritance_fish() {
+    run_script("backend_rc_inheritance_fish.exp");
+}
+
+#[test]
 fn first_run_doctor() {
     run_script("first_run_doctor.exp");
 }

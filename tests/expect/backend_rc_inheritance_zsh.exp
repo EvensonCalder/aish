@@ -1,0 +1,74 @@
+#!/usr/bin/env expect
+# A real Aish process should let zsh load .zshrc normally and preserve user
+# preexec/precmd hooks while hiding backend prompt noise.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set zsh ""
+foreach candidate {/bin/zsh /usr/bin/zsh /usr/local/bin/zsh /opt/homebrew/bin/zsh} {
+    if {[file exists $candidate]} {
+        set zsh $candidate
+        break
+    }
+}
+if {$zsh eq ""} {
+    puts "skipping zsh rc inheritance: zsh not found"
+    exit 0
+}
+
+proc write_executable {path body} {
+    set fh [open $path w]
+    puts -nonewline $fh $body
+    close $fh
+    file attributes $path -permissions 0755
+}
+
+proc expect_clean_output {command expected forbidden} {
+    aish_send $command
+    aish_enter
+    assert_no $forbidden $expected
+    aish_wait_prompt_without $forbidden
+}
+
+set home "/tmp/aish-expect-zsh-rc-[pid]-[clock clicks]"
+set bindir "$home/bin"
+file mkdir "$home/.aish"
+file mkdir $bindir
+
+write_executable "$bindir/from-aish-expect-zshrc-path" "#!/bin/sh\nprintf 'path-from-zshrc\\n'\n"
+
+set fh [open "$home/.aish/config.toml" w]
+puts $fh "\[shell\]"
+puts $fh "backend = \"$zsh\""
+close $fh
+
+set fh [open "$home/.zshrc" w]
+puts $fh {alias aish_expect_alias_from_zshrc='printf alias-from-zshrc\\n'}
+puts $fh {aish_expect_function_from_zshrc() { printf 'function-from-zshrc\n'; }}
+puts $fh {aish_expect_user_preexec() { export AISH_EXPECT_ZSH_PREEXEC="$1"; }}
+puts $fh {aish_expect_user_precmd() { export AISH_EXPECT_ZSH_PRECMD=ran; printf zsh-precmd-noise\\n; }}
+puts $fh {autoload -Uz add-zsh-hook}
+puts $fh {add-zsh-hook preexec aish_expect_user_preexec}
+puts $fh {add-zsh-hook precmd aish_expect_user_precmd}
+puts $fh {export AISH_EXPECT_ZSH_ENV=env-from-zshrc}
+puts $fh "export PATH=\"$bindir:\$PATH\""
+puts $fh {PROMPT='zshrc-prompt> '}
+close $fh
+
+set old_home $::env(HOME)
+set ::env(HOME) $home
+set ::env(AISH_HOME) "$home/.aish"
+
+aish_spawn
+
+expect_clean_output "aish_expect_alias_from_zshrc" "alias-from-zshrc" "zsh-precmd-noise"
+expect_clean_output "aish_expect_function_from_zshrc" "function-from-zshrc" "zsh-precmd-noise"
+expect_clean_output {printf 'env:%s\n' "$AISH_EXPECT_ZSH_ENV"} "env:env-from-zshrc" "zsh-precmd-noise"
+expect_clean_output "from-aish-expect-zshrc-path" "path-from-zshrc" "zsh-precmd-noise"
+expect_clean_output {printf 'hooks:%s|%s\n' "$AISH_EXPECT_ZSH_PRECMD" "$AISH_EXPECT_ZSH_PREEXEC"} "hooks:ran|printf" "zsh-precmd-noise"
+
+aish_quit
+
+set ::env(HOME) $old_home
+file delete -force $home

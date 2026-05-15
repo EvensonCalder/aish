@@ -1,0 +1,59 @@
+#!/usr/bin/env expect
+# A real Aish process should let bash load .bashrc normally, then inject Aish
+# integration without leaking backend prompt hook output.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+proc write_executable {path body} {
+    set fh [open $path w]
+    puts -nonewline $fh $body
+    close $fh
+    file attributes $path -permissions 0755
+}
+
+proc expect_clean_output {command expected forbidden} {
+    aish_send $command
+    aish_enter
+    assert_no $forbidden $expected
+    aish_wait_prompt_without $forbidden
+}
+
+set home "/tmp/aish-expect-bash-rc-[pid]-[clock clicks]"
+set bindir "$home/bin"
+file mkdir "$home/.aish"
+file mkdir $bindir
+
+write_executable "$bindir/from-aish-expect-bashrc-path" "#!/bin/sh\nprintf 'path-from-bashrc\\n'\n"
+
+set fh [open "$home/.aish/config.toml" w]
+puts $fh "\[shell\]"
+puts $fh {backend = "/bin/bash"}
+close $fh
+
+set fh [open "$home/.bashrc" w]
+puts $fh {[ -z "$PS1" ] && return}
+puts $fh {alias aish_expect_alias_from_rc='printf alias-from-bashrc\\n'}
+puts $fh {aish_expect_function_from_rc() { printf 'function-from-bashrc\n'; }}
+puts $fh {export AISH_EXPECT_BASH_ENV=env-from-bashrc}
+puts $fh "export PATH=\"$bindir:\$PATH\""
+puts $fh {PS1='bashrc-prompt> '}
+puts $fh {PROMPT_COMMAND='export AISH_EXPECT_BASH_PROMPT_COMMAND=ran; printf bash-prompt-noise\\n'}
+close $fh
+
+set old_home $::env(HOME)
+set ::env(HOME) $home
+set ::env(AISH_HOME) "$home/.aish"
+
+aish_spawn
+
+expect_clean_output "aish_expect_alias_from_rc" "alias-from-bashrc" "bash-prompt-noise"
+expect_clean_output "aish_expect_function_from_rc" "function-from-bashrc" "bash-prompt-noise"
+expect_clean_output {printf 'env:%s\n' "$AISH_EXPECT_BASH_ENV"} "env:env-from-bashrc" "bash-prompt-noise"
+expect_clean_output "from-aish-expect-bashrc-path" "path-from-bashrc" "bash-prompt-noise"
+expect_clean_output {printf 'prompt-command:%s\n' "$AISH_EXPECT_BASH_PROMPT_COMMAND"} "prompt-command:ran" "bash-prompt-noise"
+
+aish_quit
+
+set ::env(HOME) $old_home
+file delete -force $home

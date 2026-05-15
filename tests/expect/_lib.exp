@@ -57,6 +57,15 @@ proc aish_wait_prompt {} {
     }
 }
 
+proc aish_wait_prompt_without {forbidden} {
+    expect {
+        -ex $forbidden     { puts stderr "found forbidden before prompt: $forbidden"; exit 5 }
+        -re {> ([^\x1b]*)\x1b\[}     { set ::aish_last_draft $expect_out(1,string) }
+        timeout            { puts stderr "no prompt"; exit 2 }
+        eof                { puts stderr "eof before prompt"; exit 2 }
+    }
+}
+
 proc aish_expect_blank_prompt {} {
     if {![info exists ::aish_last_draft] || $::aish_last_draft eq ""} {
         return

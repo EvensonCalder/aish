@@ -706,6 +706,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
   - [x] command-start marker
   - [x] command-finish marker with exit code
   - [x] cwd reporting
+  - [x] preserve user `PROMPT_COMMAND` side effects while suppressing backend prompt output
 - [x] Zsh integration:
   - [x] `precmd`
   - [x] `preexec`
@@ -823,6 +824,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 - [x] Cover basic command execution and prompt return.
 - [x] Cover common shell workflows with redirection, pipes, quoting, exports, file tests, failures, and recovery.
 - [x] Cover backend-specific tmux common workflows for bash and zsh by default, with fish coverage kept opt-in through `AISH_TEST_FISH=1`.
+- [x] Cover real-binary fake `$HOME` rc/config inheritance for bash, zsh, and opt-in fish, including screen-level tmux regressions for prompt hook noise.
 - [x] Cover persistent backend cwd with `cd /tmp` followed by `pwd`.
 - [x] Cover empty `Tab` mode cycling through draft/history/AI prompts.
 - [x] Cover `#help`, unknown private commands, `#exit`, and empty `Ctrl-D` exit.

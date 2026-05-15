@@ -313,7 +313,7 @@ impl PtyBackend {
         let marker = next_marker();
         let start_command = start_marker_command(command);
         let marker_command = format!(
-            " __aish_status=$?; printf '\\n%s%s\\t%s\\n' '{marker}' \"$__aish_status\" \"$PWD\"; sh -c \"exit $__aish_status\"\n"
+            " __aish_status=$?; command -v __aish_run_prompt_command >/dev/null 2>&1 && __aish_run_prompt_command >/dev/null 2>&1; printf '\\n%s%s\\t%s\\n' '{marker}' \"$__aish_status\" \"$PWD\"; sh -c \"exit $__aish_status\"\n"
         );
         if !command.contains('\n') {
             self.write_raw(&start_command)?;
@@ -349,7 +349,7 @@ impl PtyBackend {
         let marker = next_marker();
         let start_command = start_marker_command(command);
         let marker_command = format!(
-            " __aish_status=$?; printf '\\n%s%s\\t%s\\n' '{marker}' \"$__aish_status\" \"$PWD\"; sh -c \"exit $__aish_status\"\n"
+            " __aish_status=$?; command -v __aish_run_prompt_command >/dev/null 2>&1 && __aish_run_prompt_command >/dev/null 2>&1; printf '\\n%s%s\\t%s\\n' '{marker}' \"$__aish_status\" \"$PWD\"; sh -c \"exit $__aish_status\"\n"
         );
         if !command.contains('\n') {
             self.write_raw(&start_command)?;
@@ -916,7 +916,7 @@ fn shell_launch(configured_shell: &str) -> ShellLaunch {
         "bash" => (
             vec!["-i".to_string()],
             format!(
-                " export HISTCONTROL=ignorespace${{HISTCONTROL:+:$HISTCONTROL}}; PROMPT_COMMAND=; trap - DEBUG 2>/dev/null || true; bind 'set enable-bracketed-paste off' 2>/dev/null || true; PS1=''; PS2=''; stty -echo; printf '\\n{READY_MARKER}\\t%s\\n' \"$PWD\"\n"
+                " export HISTCONTROL=ignorespace${{HISTCONTROL:+:$HISTCONTROL}}; __aish_prompt_command_set=0; __aish_prompt_command_is_array=0; __aish_prompt_command_string=; __aish_prompt_command_array=(); if declare -p PROMPT_COMMAND >/dev/null 2>&1; then __aish_prompt_command_set=1; case \"$(declare -p PROMPT_COMMAND 2>/dev/null)\" in declare\\ -a*|declare\\ -A*) __aish_prompt_command_is_array=1; __aish_prompt_command_array=(\"${{PROMPT_COMMAND[@]}}\");; *) __aish_prompt_command_string=$PROMPT_COMMAND;; esac; fi; PROMPT_COMMAND=; trap - DEBUG 2>/dev/null || true; __aish_run_prompt_command() {{ if [ \"$__aish_prompt_command_set\" = 1 ]; then if [ \"$__aish_prompt_command_is_array\" = 1 ]; then local __aish_pc; for __aish_pc in \"${{__aish_prompt_command_array[@]}}\"; do eval \"$__aish_pc\"; done; else eval \"$__aish_prompt_command_string\"; fi; fi; }}; bind 'set enable-bracketed-paste off' 2>/dev/null || true; PS1=''; PS2=''; stty -echo; __aish_run_prompt_command >/dev/null 2>&1; printf '\\n{READY_MARKER}\\t%s\\n' \"$PWD\"\n"
             ),
             ShellIntegration::MarkerCommand,
         ),
@@ -1486,9 +1486,10 @@ mod tests {
         assert_eq!(launch.args, ["-i"]);
         assert!(launch.init_command.contains(READY_MARKER));
         assert!(launch.init_command.contains("HISTCONTROL=ignorespace"));
+        assert!(launch.init_command.contains("enable-bracketed-paste off"));
+        assert!(launch.init_command.contains("__aish_run_prompt_command"));
         assert!(launch.init_command.contains("PROMPT_COMMAND="));
         assert!(launch.init_command.contains("trap - DEBUG"));
-        assert!(launch.init_command.contains("enable-bracketed-paste off"));
     }
 
     #[test]

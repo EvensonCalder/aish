@@ -106,7 +106,7 @@ fn bash_pty_backend_loads_user_bashrc_without_prompt_noise() {
              export AISH_RC_ENV=env-from-bashrc\n\
              export PATH=\"{}:$PATH\"\n\
              PS1='bashrc-prompt> '\n\
-             PROMPT_COMMAND='printf prompt-command-noise\\\\n'\n",
+             PROMPT_COMMAND='export AISH_BASH_PROMPT_COMMAND=ran; printf prompt-command-noise\\\\n'\n",
             bin_dir.display()
         ),
     )
@@ -126,6 +126,12 @@ fn bash_pty_backend_loads_user_bashrc_without_prompt_noise() {
     let path = backend
         .run_command("from-aish-rc-path", Duration::from_secs(5))
         .unwrap();
+    let prompt_command = backend
+        .run_command(
+            "printf '%s\\n' \"$AISH_BASH_PROMPT_COMMAND\"",
+            Duration::from_secs(5),
+        )
+        .unwrap();
 
     assert_eq!(alias.exit_code, 0);
     assert_eq!(alias.output.trim(), "alias-from-bashrc");
@@ -135,7 +141,9 @@ fn bash_pty_backend_loads_user_bashrc_without_prompt_noise() {
     assert_eq!(env.output.trim(), "env-from-bashrc");
     assert_eq!(path.exit_code, 0);
     assert_eq!(path.output.trim(), "path-from-bashrc");
-    for result in [&alias, &function, &env, &path] {
+    assert_eq!(prompt_command.exit_code, 0);
+    assert_eq!(prompt_command.output.trim(), "ran");
+    for result in [&alias, &function, &env, &path, &prompt_command] {
         assert!(!result.output.contains("bashrc-prompt"), "{result:?}");
         assert!(
             !result.output.contains("prompt-command-noise"),

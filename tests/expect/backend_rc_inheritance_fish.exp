@@ -1,0 +1,84 @@
+#!/usr/bin/env expect
+# Fish rc inheritance remains opt-in. When enabled, a real Aish process should
+# let fish load config.fish and then install Aish event/prompt integration.
+
+set timeout 12
+source [file dirname [info script]]/_lib.exp
+
+if {![info exists ::env(AISH_TEST_FISH)]} {
+    puts "skipping fish rc inheritance: set AISH_TEST_FISH=1 to opt in"
+    exit 0
+}
+
+set fish ""
+foreach candidate {/opt/homebrew/bin/fish /usr/local/bin/fish /usr/bin/fish /bin/fish} {
+    if {[file exists $candidate]} {
+        set fish $candidate
+        break
+    }
+}
+if {$fish eq ""} {
+    puts "skipping fish rc inheritance: fish not found"
+    exit 0
+}
+
+proc write_executable {path body} {
+    set fh [open $path w]
+    puts -nonewline $fh $body
+    close $fh
+    file attributes $path -permissions 0755
+}
+
+proc expect_clean_output {command expected forbidden} {
+    aish_send $command
+    aish_enter
+    assert_no $forbidden $expected
+    aish_wait_prompt_without $forbidden
+}
+
+set home "/tmp/aish-expect-fish-rc-[pid]-[clock clicks]"
+set bindir "$home/bin"
+set fish_config_dir "$home/.config/fish"
+file mkdir "$home/.aish"
+file mkdir $bindir
+file mkdir $fish_config_dir
+
+write_executable "$bindir/from-aish-expect-fish-config-path" "#!/bin/sh\nprintf 'path-from-fish-config\\n'\n"
+
+set fh [open "$home/.aish/config.toml" w]
+puts $fh "\[shell\]"
+puts $fh "backend = \"$fish\""
+close $fh
+
+set fh [open "$fish_config_dir/config.fish" w]
+puts $fh {function aish_expect_function_from_fish_config}
+puts $fh {    printf 'function-from-fish-config\n'}
+puts $fh {end}
+puts $fh {set -gx AISH_EXPECT_FISH_ENV env-from-fish-config}
+puts $fh "set -gx PATH $bindir \$PATH"
+puts $fh {function aish_expect_user_fish_preexec --on-event fish_preexec}
+puts $fh {    set -gx AISH_EXPECT_FISH_PREEXEC $argv[1]}
+puts $fh {end}
+puts $fh {function aish_expect_user_fish_postexec --on-event fish_postexec}
+puts $fh {    set -gx AISH_EXPECT_FISH_POSTEXEC ran}
+puts $fh {end}
+puts $fh {function fish_prompt}
+puts $fh {    printf 'fish-config-prompt> '}
+puts $fh {end}
+close $fh
+
+set old_home $::env(HOME)
+set ::env(HOME) $home
+set ::env(AISH_HOME) "$home/.aish"
+
+aish_spawn
+
+expect_clean_output "aish_expect_function_from_fish_config" "function-from-fish-config" "fish-config-prompt"
+expect_clean_output {printf 'env:%s\n' $AISH_EXPECT_FISH_ENV} "env:env-from-fish-config" "fish-config-prompt"
+expect_clean_output "from-aish-expect-fish-config-path" "path-from-fish-config" "fish-config-prompt"
+expect_clean_output {printf 'events:%s|%s\n' $AISH_EXPECT_FISH_POSTEXEC $AISH_EXPECT_FISH_PREEXEC} "events:ran|printf" "fish-config-prompt"
+
+aish_quit
+
+set ::env(HOME) $old_home
+file delete -force $home
