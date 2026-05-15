@@ -93,6 +93,9 @@ Status as of the latest full review:
   - [x] keyboard events
   - [x] paste events
   - [ ] PTY output events
+    - [x] Stream ordinary command output to the frontend while commands run instead of waiting for completion.
+    - [x] Preserve raw PTY display bytes, including carriage-return progress updates, while filtering Aish marker lines.
+    - [ ] Route all backend shells through one streaming display path; fish currently keeps its buffered repaint filter.
   - [ ] timer/background events
 - [x] Fix real-terminal backend output visibility regressions that old expect byte-stream tests missed.
 - [x] Add persistent `tmux`-driven end-to-end screen-capture scripts for real terminal verification.

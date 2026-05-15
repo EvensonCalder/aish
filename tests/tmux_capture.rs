@@ -49,6 +49,16 @@ fn tmux_output_visibility_matches_real_terminal_screen() {
 }
 
 #[test]
+fn tmux_carriage_return_progress_updates_in_place() {
+    let Some(captured) = run_tmux_script("carriage_return_progress.sh") else {
+        return;
+    };
+    assert_line_present(&captured, "progress 3/3");
+    assert_line_absent(&captured, "progress 1/3");
+    assert_line_absent(&captured, "progress 2/3");
+}
+
+#[test]
 fn tmux_common_shell_workflow_matches_bash_backend_real_terminal_screen() {
     if !Path::new("/bin/bash").exists() {
         eprintln!("skipping bash backend tmux workflow: /bin/bash not found");
@@ -517,6 +527,13 @@ fn assert_line_present(captured: &str, expected_line: &str) {
     assert!(
         captured.lines().any(|line| line == expected_line),
         "expected line {expected_line:?}; captured pane was {captured:?}"
+    );
+}
+
+fn assert_line_absent(captured: &str, unexpected_line: &str) {
+    assert!(
+        !captured.lines().any(|line| line == unexpected_line),
+        "unexpected line {unexpected_line:?}; captured pane was {captured:?}"
     );
 }
 
