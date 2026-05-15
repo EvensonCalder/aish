@@ -3,7 +3,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use std::{env, ffi::OsString};
 
-use aish::pty::PtyBackend;
+use aish::pty::{PtyBackend, PtyCommandEvent};
 
 static PTY_TEST_LOCK: Mutex<()> = Mutex::new(());
 
@@ -113,6 +113,47 @@ fn pty_backend_streams_output_before_command_completion() {
     assert!(displayed.contains("stream-second"), "{displayed:?}");
     assert!(!displayed.contains("__AISH_STATUS__"), "{displayed:?}");
     assert!(!displayed.contains("__AISH_START__"), "{displayed:?}");
+}
+
+#[test]
+fn pty_backend_command_events_include_output_poll_and_idle_ticks() {
+    let _guard = pty_test_guard();
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output_events = 0;
+    let mut poll_events = 0;
+    let mut idle_events = 0;
+    let mut displayed = Vec::new();
+
+    let result = backend
+        .run_command_with_event_callback(
+            "printf 'event-first\\n'; sleep 1; printf 'event-second\\n'",
+            Duration::from_secs(5),
+            |_, event| {
+                match event {
+                    PtyCommandEvent::Output(chunk) => {
+                        output_events += 1;
+                        displayed.extend_from_slice(chunk);
+                    }
+                    PtyCommandEvent::PollInput => {
+                        poll_events += 1;
+                    }
+                    PtyCommandEvent::Idle => {
+                        idle_events += 1;
+                    }
+                }
+                Ok(false)
+            },
+        )
+        .unwrap();
+
+    assert_eq!(result.exit_code, 0);
+    assert!(output_events > 0, "missing output events");
+    assert!(poll_events > 0, "missing input poll events");
+    assert!(idle_events > 0, "missing idle events");
+    let displayed = String::from_utf8(displayed).unwrap();
+    assert!(displayed.contains("event-first"), "{displayed:?}");
+    assert!(displayed.contains("event-second"), "{displayed:?}");
+    assert!(!displayed.contains("__AISH_STATUS__"), "{displayed:?}");
 }
 
 #[test]

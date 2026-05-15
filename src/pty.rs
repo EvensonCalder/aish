@@ -76,7 +76,14 @@ impl PtyReadTarget<'_> {
     }
 }
 
-enum PtyOutputEvent<'a> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PtyCommandEvent<'a> {
+    Output(&'a [u8]),
+    PollInput,
+    Idle,
+}
+
+enum PtyReadEvent<'a> {
     Chunk(&'a [u8]),
     Idle,
 }
@@ -262,27 +269,35 @@ impl PtyBackend {
         F: FnMut(&mut Self) -> Result<bool>,
         G: FnMut(&[u8]) -> Result<()>,
     {
+        self.run_command_with_event_callback(command, timeout, |backend, event| match event {
+            PtyCommandEvent::Output(chunk) => {
+                on_output(chunk)?;
+                Ok(false)
+            }
+            PtyCommandEvent::PollInput | PtyCommandEvent::Idle => on_wait(backend),
+        })
+    }
+
+    pub fn run_command_with_event_callback<F>(
+        &mut self,
+        command: &str,
+        timeout: Duration,
+        mut on_event: F,
+    ) -> Result<CommandResult>
+    where
+        F: FnMut(&mut Self, PtyCommandEvent<'_>) -> Result<bool>,
+    {
         if matches!(
             self.integration,
             ShellIntegration::ZshHooks | ShellIntegration::FishEvents
         ) {
             if self.integration == ShellIntegration::ZshHooks && command.contains('\n') {
-                return self.run_command_with_marker_streaming(
-                    command,
-                    timeout,
-                    &mut on_wait,
-                    &mut on_output,
-                );
+                return self.run_command_with_marker_events(command, timeout, &mut on_event);
             }
-            return self.run_command_with_shell_events_streaming(
-                command,
-                timeout,
-                &mut on_wait,
-                &mut on_output,
-            );
+            return self.run_command_with_shell_events_streaming(command, timeout, &mut on_event);
         }
 
-        self.run_command_with_marker_streaming(command, timeout, &mut on_wait, &mut on_output)
+        self.run_command_with_marker_events(command, timeout, &mut on_event)
     }
 
     fn run_command_with_marker<F>(
@@ -321,16 +336,14 @@ impl PtyBackend {
         })
     }
 
-    fn run_command_with_marker_streaming<F, G>(
+    fn run_command_with_marker_events<F>(
         &mut self,
         command: &str,
         timeout: Duration,
-        on_wait: &mut F,
-        on_output: &mut G,
+        on_event: &mut F,
     ) -> Result<CommandResult>
     where
-        F: FnMut(&mut Self) -> Result<bool>,
-        G: FnMut(&[u8]) -> Result<()>,
+        F: FnMut(&mut Self, PtyCommandEvent<'_>) -> Result<bool>,
     {
         let _ = self.drain_for(Duration::from_millis(25));
         let marker = next_marker();
@@ -347,13 +360,7 @@ impl PtyBackend {
         }
         self.write_raw(&marker_command)?;
 
-        let raw = self.read_until_marker_streaming(
-            &marker,
-            &marker_command,
-            timeout,
-            on_wait,
-            on_output,
-        )?;
+        let raw = self.read_until_marker_streaming(&marker, &marker_command, timeout, on_event)?;
         let (output, exit_code, cwd, started_command) = parse_marker_output(&raw, &marker)?;
         let command_text = command.trim_end_matches('\n').to_string();
         Ok(CommandResult {
@@ -379,7 +386,7 @@ impl PtyBackend {
             PtyReadTarget::Marker { marker },
             timeout,
             |backend, event| {
-                if let PtyOutputEvent::Idle = event
+                if let PtyReadEvent::Idle = event
                     && on_wait(backend)?
                 {
                     std::thread::sleep(Duration::from_millis(100));
@@ -391,35 +398,38 @@ impl PtyBackend {
         )
     }
 
-    fn read_until_marker_streaming<F, G>(
+    fn read_until_marker_streaming<F>(
         &mut self,
         marker: &str,
         recovery_marker_command: &str,
         timeout: Duration,
-        on_wait: &mut F,
-        on_output: &mut G,
+        on_event: &mut F,
     ) -> Result<String>
     where
-        F: FnMut(&mut Self) -> Result<bool>,
-        G: FnMut(&[u8]) -> Result<()>,
+        F: FnMut(&mut Self, PtyCommandEvent<'_>) -> Result<bool>,
     {
         let mut output_filter = PtyOutputFilter::marker(marker);
+        let mut marker_needs_reissue = false;
         self.read_pty_until(
             PtyReadTarget::Marker { marker },
             timeout,
             |backend, event| {
                 match event {
-                    PtyOutputEvent::Chunk(chunk) => {
+                    PtyReadEvent::Chunk(chunk) => {
                         let display = output_filter.push(chunk);
                         if !display.is_empty() {
-                            on_output(&display)?;
+                            marker_needs_reissue |=
+                                on_event(backend, PtyCommandEvent::Output(&display))?;
                         }
+                        marker_needs_reissue |= on_event(backend, PtyCommandEvent::PollInput)?;
                     }
-                    PtyOutputEvent::Idle => {
-                        if on_wait(backend)? {
+                    PtyReadEvent::Idle => {
+                        marker_needs_reissue |= on_event(backend, PtyCommandEvent::Idle)?;
+                        if marker_needs_reissue {
                             std::thread::sleep(Duration::from_millis(100));
                             backend.write_raw("\n")?;
                             backend.write_raw(recovery_marker_command)?;
+                            marker_needs_reissue = false;
                         }
                     }
                 }
@@ -435,7 +445,7 @@ impl PtyBackend {
         mut on_event: F,
     ) -> Result<String>
     where
-        F: FnMut(&mut Self, PtyOutputEvent<'_>) -> Result<()>,
+        F: FnMut(&mut Self, PtyReadEvent<'_>) -> Result<()>,
     {
         let deadline = Instant::now() + timeout;
         let mut data = Vec::new();
@@ -453,10 +463,10 @@ impl PtyBackend {
             match self.output.recv_timeout(remaining) {
                 Ok(chunk) => {
                     data.extend_from_slice(&chunk);
-                    on_event(self, PtyOutputEvent::Chunk(&chunk))?;
+                    on_event(self, PtyReadEvent::Chunk(&chunk))?;
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {
-                    on_event(self, PtyOutputEvent::Idle)?;
+                    on_event(self, PtyReadEvent::Idle)?;
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => bail!("backend shell PTY closed"),
             }
@@ -490,16 +500,14 @@ impl PtyBackend {
         })
     }
 
-    fn run_command_with_shell_events_streaming<F, G>(
+    fn run_command_with_shell_events_streaming<F>(
         &mut self,
         command: &str,
         timeout: Duration,
-        on_wait: &mut F,
-        on_output: &mut G,
+        on_event: &mut F,
     ) -> Result<CommandResult>
     where
-        F: FnMut(&mut Self) -> Result<bool>,
-        G: FnMut(&[u8]) -> Result<()>,
+        F: FnMut(&mut Self, PtyCommandEvent<'_>) -> Result<bool>,
     {
         let _ = self.drain_for(Duration::from_millis(25));
         self.write_raw(command)?;
@@ -507,7 +515,7 @@ impl PtyBackend {
             self.write_raw("\n")?;
         }
 
-        let raw = self.read_until_ready_streaming(timeout, on_wait, on_output)?;
+        let raw = self.read_until_ready_streaming(timeout, on_event)?;
         let parsed =
             parse_ready_status_output(&raw, self.integration == ShellIntegration::FishEvents)?;
         Ok(CommandResult {
@@ -524,35 +532,34 @@ impl PtyBackend {
         F: FnMut(&mut Self) -> Result<bool>,
     {
         self.read_pty_until(PtyReadTarget::Ready, timeout, |backend, event| {
-            if let PtyOutputEvent::Idle = event {
+            if let PtyReadEvent::Idle = event {
                 let _ = on_wait(backend)?;
             }
             Ok(())
         })
     }
 
-    fn read_until_ready_streaming<F, G>(
+    fn read_until_ready_streaming<F>(
         &mut self,
         timeout: Duration,
-        on_wait: &mut F,
-        on_output: &mut G,
+        on_event: &mut F,
     ) -> Result<String>
     where
-        F: FnMut(&mut Self) -> Result<bool>,
-        G: FnMut(&[u8]) -> Result<()>,
+        F: FnMut(&mut Self, PtyCommandEvent<'_>) -> Result<bool>,
     {
         let mut output_filter =
             PtyOutputFilter::shell_events(self.integration == ShellIntegration::FishEvents);
         self.read_pty_until(PtyReadTarget::Ready, timeout, |backend, event| {
             match event {
-                PtyOutputEvent::Chunk(chunk) => {
+                PtyReadEvent::Chunk(chunk) => {
                     let display = output_filter.push(chunk);
                     if !display.is_empty() {
-                        on_output(&display)?;
+                        let _ = on_event(backend, PtyCommandEvent::Output(&display))?;
                     }
+                    let _ = on_event(backend, PtyCommandEvent::PollInput)?;
                 }
-                PtyOutputEvent::Idle => {
-                    let _ = on_wait(backend)?;
+                PtyReadEvent::Idle => {
+                    let _ = on_event(backend, PtyCommandEvent::Idle)?;
                 }
             }
             Ok(())

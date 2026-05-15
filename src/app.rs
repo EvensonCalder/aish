@@ -42,7 +42,7 @@ use crate::picker::{
     combined_history_picker_candidates, regular_history_picker_candidates,
     template_picker_candidates,
 };
-use crate::pty::PtyBackend;
+use crate::pty::{PtyBackend, PtyCommandEvent};
 use crate::shell_integration::{is_interactive_passthrough_command, passthrough_key_bytes};
 use crate::sync::{
     GitCommandPlan, StartupSyncDecision, SyncFailureKind, SyncLock, SyncStepOutcome,
@@ -1413,16 +1413,9 @@ pub fn execute_draft(
         return Ok(());
     }
 
-    let result = backend.run_command_streaming_with_wait_callback(
-        &command,
-        timeout,
-        forward_terminal_input_to_backend,
-        |chunk| {
-            write_command_output_bytes(out, chunk)?;
-            out.flush()?;
-            Ok(())
-        },
-    )?;
+    let result = backend.run_command_with_event_callback(&command, timeout, |backend, event| {
+        handle_command_running_event(backend, out, event)
+    })?;
     record_completed_command(
         state,
         result.command.clone(),
@@ -1548,6 +1541,23 @@ fn forward_terminal_input_to_backend(backend: &mut PtyBackend) -> Result<bool> {
         }
     }
     Ok(marker_may_need_reissue)
+}
+
+fn handle_command_running_event(
+    backend: &mut PtyBackend,
+    out: &mut impl Write,
+    event: PtyCommandEvent<'_>,
+) -> Result<bool> {
+    match event {
+        PtyCommandEvent::Output(chunk) => {
+            write_command_output_bytes(out, chunk)?;
+            out.flush()?;
+            Ok(false)
+        }
+        PtyCommandEvent::PollInput | PtyCommandEvent::Idle => {
+            forward_terminal_input_to_backend(backend)
+        }
+    }
 }
 
 #[cfg(unix)]

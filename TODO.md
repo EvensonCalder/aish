@@ -94,6 +94,7 @@ Status as of the latest full review:
   - [x] paste events
   - [ ] PTY output events
     - [x] Centralize backend PTY reads around explicit output/idle events instead of duplicating per-marker loops.
+    - [x] Expose command-running PTY output, input-poll, and idle ticks through one event callback.
     - [x] Stream ordinary command output to the frontend while commands run instead of waiting for completion.
     - [x] Preserve raw PTY display bytes, including carriage-return progress updates, while filtering Aish marker lines.
     - [x] Route all backend shells through one streaming display path, including fish with stateful repaint filtering.
