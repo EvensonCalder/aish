@@ -54,6 +54,33 @@ enum ShellIntegration {
     FishEvents,
 }
 
+enum PtyReadTarget<'a> {
+    Marker { marker: &'a str },
+    Ready,
+}
+
+impl PtyReadTarget<'_> {
+    fn is_complete(&self, data: &[u8]) -> bool {
+        let current = String::from_utf8_lossy(data);
+        match self {
+            Self::Marker { marker } => marker_status_is_complete(&current, marker),
+            Self::Ready => parse_ready_cwd(&current).is_some(),
+        }
+    }
+
+    fn timeout_message(&self) -> &'static str {
+        match self {
+            Self::Marker { .. } => "timed out waiting for backend shell prompt marker",
+            Self::Ready => "timed out waiting for backend shell ready marker",
+        }
+    }
+}
+
+enum PtyOutputEvent<'a> {
+    Chunk(&'a [u8]),
+    Idle,
+}
+
 impl PtyBackend {
     pub fn spawn(configured_shell: &str) -> Result<Self> {
         let launch = shell_launch(configured_shell);
@@ -348,32 +375,20 @@ impl PtyBackend {
     where
         F: FnMut(&mut Self) -> Result<bool>,
     {
-        let deadline = Instant::now() + timeout;
-        let mut data = Vec::new();
-        loop {
-            let current = String::from_utf8_lossy(&data);
-            if marker_status_is_complete(&current, marker) {
-                return Ok(String::from_utf8_lossy(&data).into_owned());
-            }
-            let now = Instant::now();
-            if now >= deadline {
-                bail!("timed out waiting for backend shell prompt marker");
-            }
-            let remaining = deadline
-                .saturating_duration_since(now)
-                .min(Duration::from_millis(50));
-            match self.output.recv_timeout(remaining) {
-                Ok(chunk) => data.extend(chunk),
-                Err(mpsc::RecvTimeoutError::Timeout) => {
-                    if on_wait(self)? {
-                        std::thread::sleep(Duration::from_millis(100));
-                        self.write_raw("\n")?;
-                        self.write_raw(recovery_marker_command)?;
-                    }
+        self.read_pty_until(
+            PtyReadTarget::Marker { marker },
+            timeout,
+            |backend, event| {
+                if let PtyOutputEvent::Idle = event
+                    && on_wait(backend)?
+                {
+                    std::thread::sleep(Duration::from_millis(100));
+                    backend.write_raw("\n")?;
+                    backend.write_raw(recovery_marker_command)?;
                 }
-                Err(mpsc::RecvTimeoutError::Disconnected) => bail!("backend shell PTY closed"),
-            }
-        }
+                Ok(())
+            },
+        )
     }
 
     fn read_until_marker_streaming<F, G>(
@@ -388,35 +403,60 @@ impl PtyBackend {
         F: FnMut(&mut Self) -> Result<bool>,
         G: FnMut(&[u8]) -> Result<()>,
     {
+        let mut output_filter = PtyOutputFilter::marker(marker);
+        self.read_pty_until(
+            PtyReadTarget::Marker { marker },
+            timeout,
+            |backend, event| {
+                match event {
+                    PtyOutputEvent::Chunk(chunk) => {
+                        let display = output_filter.push(chunk);
+                        if !display.is_empty() {
+                            on_output(&display)?;
+                        }
+                    }
+                    PtyOutputEvent::Idle => {
+                        if on_wait(backend)? {
+                            std::thread::sleep(Duration::from_millis(100));
+                            backend.write_raw("\n")?;
+                            backend.write_raw(recovery_marker_command)?;
+                        }
+                    }
+                }
+                Ok(())
+            },
+        )
+    }
+
+    fn read_pty_until<F>(
+        &mut self,
+        target: PtyReadTarget<'_>,
+        timeout: Duration,
+        mut on_event: F,
+    ) -> Result<String>
+    where
+        F: FnMut(&mut Self, PtyOutputEvent<'_>) -> Result<()>,
+    {
         let deadline = Instant::now() + timeout;
         let mut data = Vec::new();
-        let mut output_filter = PtyOutputFilter::new(marker);
         loop {
-            let current = String::from_utf8_lossy(&data);
-            if marker_status_is_complete(&current, marker) {
+            if target.is_complete(&data) {
                 return Ok(String::from_utf8_lossy(&data).into_owned());
             }
             let now = Instant::now();
             if now >= deadline {
-                bail!("timed out waiting for backend shell prompt marker");
+                bail!(target.timeout_message());
             }
             let remaining = deadline
                 .saturating_duration_since(now)
                 .min(Duration::from_millis(50));
             match self.output.recv_timeout(remaining) {
                 Ok(chunk) => {
-                    data.extend(&chunk);
-                    let display = output_filter.push(&chunk);
-                    if !display.is_empty() {
-                        on_output(&display)?;
-                    }
+                    data.extend_from_slice(&chunk);
+                    on_event(self, PtyOutputEvent::Chunk(&chunk))?;
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {
-                    if on_wait(self)? {
-                        std::thread::sleep(Duration::from_millis(100));
-                        self.write_raw("\n")?;
-                        self.write_raw(recovery_marker_command)?;
-                    }
+                    on_event(self, PtyOutputEvent::Idle)?;
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => bail!("backend shell PTY closed"),
             }
@@ -461,14 +501,6 @@ impl PtyBackend {
         F: FnMut(&mut Self) -> Result<bool>,
         G: FnMut(&[u8]) -> Result<()>,
     {
-        if self.integration == ShellIntegration::FishEvents {
-            let result = self.run_command_with_shell_events(command, timeout, on_wait)?;
-            if !result.output.is_empty() {
-                on_output(result.output.as_bytes())?;
-            }
-            return Ok(result);
-        }
-
         let _ = self.drain_for(Duration::from_millis(25));
         self.write_raw(command)?;
         if !command.ends_with('\n') {
@@ -491,27 +523,12 @@ impl PtyBackend {
     where
         F: FnMut(&mut Self) -> Result<bool>,
     {
-        let deadline = Instant::now() + timeout;
-        let mut data = Vec::new();
-        loop {
-            if parse_ready_cwd(&String::from_utf8_lossy(&data)).is_some() {
-                return Ok(String::from_utf8_lossy(&data).into_owned());
+        self.read_pty_until(PtyReadTarget::Ready, timeout, |backend, event| {
+            if let PtyOutputEvent::Idle = event {
+                let _ = on_wait(backend)?;
             }
-            let now = Instant::now();
-            if now >= deadline {
-                bail!("timed out waiting for backend shell ready marker");
-            }
-            let remaining = deadline
-                .saturating_duration_since(now)
-                .min(Duration::from_millis(50));
-            match self.output.recv_timeout(remaining) {
-                Ok(chunk) => data.extend(chunk),
-                Err(mpsc::RecvTimeoutError::Timeout) => {
-                    let _ = on_wait(self)?;
-                }
-                Err(mpsc::RecvTimeoutError::Disconnected) => bail!("backend shell PTY closed"),
-            }
-        }
+            Ok(())
+        })
     }
 
     fn read_until_ready_streaming<F, G>(
@@ -524,34 +541,22 @@ impl PtyBackend {
         F: FnMut(&mut Self) -> Result<bool>,
         G: FnMut(&[u8]) -> Result<()>,
     {
-        let deadline = Instant::now() + timeout;
-        let mut data = Vec::new();
-        let mut output_filter = PtyOutputFilter::new("");
-        loop {
-            if parse_ready_cwd(&String::from_utf8_lossy(&data)).is_some() {
-                return Ok(String::from_utf8_lossy(&data).into_owned());
-            }
-            let now = Instant::now();
-            if now >= deadline {
-                bail!("timed out waiting for backend shell ready marker");
-            }
-            let remaining = deadline
-                .saturating_duration_since(now)
-                .min(Duration::from_millis(50));
-            match self.output.recv_timeout(remaining) {
-                Ok(chunk) => {
-                    data.extend(&chunk);
-                    let display = output_filter.push(&chunk);
+        let mut output_filter =
+            PtyOutputFilter::shell_events(self.integration == ShellIntegration::FishEvents);
+        self.read_pty_until(PtyReadTarget::Ready, timeout, |backend, event| {
+            match event {
+                PtyOutputEvent::Chunk(chunk) => {
+                    let display = output_filter.push(chunk);
                     if !display.is_empty() {
                         on_output(&display)?;
                     }
                 }
-                Err(mpsc::RecvTimeoutError::Timeout) => {
-                    let _ = on_wait(self)?;
+                PtyOutputEvent::Idle => {
+                    let _ = on_wait(backend)?;
                 }
-                Err(mpsc::RecvTimeoutError::Disconnected) => bail!("backend shell PTY closed"),
             }
-        }
+            Ok(())
+        })
     }
 
     fn drain_for(&mut self, duration: Duration) -> String {
@@ -643,14 +648,46 @@ struct PtyOutputFilter {
     marker: String,
     pending: Vec<u8>,
     deferred_separator: Vec<u8>,
+    fish: Option<FishOutputFilter>,
+}
+
+struct FishOutputFilter {
+    command_active: bool,
+    started_command: Option<String>,
+    held_segment: Option<FishHeldSegment>,
+}
+
+struct FishHeldSegment {
+    bytes: Vec<u8>,
+    visible: String,
+}
+
+enum InternalMarker {
+    Start(String),
+    Ready,
+    Status,
 }
 
 impl PtyOutputFilter {
-    fn new(marker: &str) -> Self {
+    fn marker(marker: &str) -> Self {
         Self {
             marker: marker.to_string(),
             pending: Vec::new(),
             deferred_separator: Vec::new(),
+            fish: None,
+        }
+    }
+
+    fn shell_events(filter_fish_repaint: bool) -> Self {
+        Self {
+            marker: String::new(),
+            pending: Vec::new(),
+            deferred_separator: Vec::new(),
+            fish: filter_fish_repaint.then_some(FishOutputFilter {
+                command_active: false,
+                started_command: None,
+                held_segment: None,
+            }),
         }
     }
 
@@ -665,17 +702,30 @@ impl PtyOutputFilter {
     }
 
     fn push_segment(&mut self, segment: Vec<u8>, output: &mut Vec<u8>) {
-        if self.is_internal_marker_segment(&segment) {
+        if let Some(marker) = self.internal_marker_segment(&segment) {
+            self.handle_internal_marker(marker, output);
+            return;
+        }
+        if self.fish.as_ref().is_some_and(|fish| !fish.command_active) {
             self.deferred_separator.clear();
             return;
         }
         if terminal_separator_only(&segment) {
-            if !self.deferred_separator.is_empty() {
-                output.extend_from_slice(&self.deferred_separator);
+            if self
+                .fish
+                .as_ref()
+                .is_some_and(|fish| fish.held_segment.is_some())
+            {
+                self.deferred_separator.extend_from_slice(&segment);
+            } else {
+                self.push_deferred_separator(output);
+                self.deferred_separator = segment;
             }
-            self.deferred_separator = segment;
             return;
         }
+        let Some(segment) = self.filter_fish_segment(segment, output) else {
+            return;
+        };
         if !self.deferred_separator.is_empty() {
             output.extend_from_slice(&self.deferred_separator);
             self.deferred_separator.clear();
@@ -683,15 +733,117 @@ impl PtyOutputFilter {
         output.extend_from_slice(&segment);
     }
 
-    fn is_internal_marker_segment(&self, segment: &[u8]) -> bool {
+    fn internal_marker_segment(&self, segment: &[u8]) -> Option<InternalMarker> {
         let text = String::from_utf8_lossy(segment);
         let cleaned = strip_terminal_control_sequences(&text);
         let line = cleaned
             .trim_matches(['\r', '\n'])
             .trim_start_matches([' ', '\t']);
-        line.starts_with(START_MARKER)
-            || line.starts_with(READY_MARKER)
-            || (!self.marker.is_empty() && line.starts_with(&self.marker))
+        if let Some(command) = line.strip_prefix(&format!("{START_MARKER}\t")) {
+            return Some(InternalMarker::Start(command.trim_end().to_string()));
+        }
+        if line.starts_with(START_MARKER) {
+            return Some(InternalMarker::Start(String::new()));
+        }
+        if line.starts_with(READY_MARKER) {
+            return Some(InternalMarker::Ready);
+        }
+        if !self.marker.is_empty() && line.starts_with(&self.marker) {
+            return Some(InternalMarker::Status);
+        }
+        None
+    }
+
+    fn handle_internal_marker(&mut self, marker: InternalMarker, output: &mut Vec<u8>) {
+        match marker {
+            InternalMarker::Start(command) => {
+                if let Some(fish) = &mut self.fish {
+                    fish.command_active = true;
+                    fish.started_command = Some(command);
+                    fish.held_segment = None;
+                }
+            }
+            InternalMarker::Ready => {
+                self.flush_fish_held_segment(output);
+                if let Some(fish) = &mut self.fish {
+                    fish.command_active = false;
+                    fish.held_segment = None;
+                }
+            }
+            InternalMarker::Status => {}
+        }
+        self.deferred_separator.clear();
+    }
+
+    fn filter_fish_segment(&mut self, segment: Vec<u8>, output: &mut Vec<u8>) -> Option<Vec<u8>> {
+        if self.fish.is_none() {
+            return Some(segment);
+        }
+
+        let text = String::from_utf8_lossy(&segment);
+        let has_repaint_control = contains_terminal_repaint_control(&text);
+        let visible = strip_terminal_control_sequences(&text).trim().to_string();
+
+        if visible.starts_with('\u{23ce}') || visible.is_empty() && has_repaint_control {
+            return None;
+        }
+
+        let started_command = self
+            .fish
+            .as_ref()
+            .and_then(|fish| fish.started_command.as_deref());
+        if let Some(command) = started_command
+            && is_fish_repaint_echo_fragment(&visible, command, has_repaint_control)
+        {
+            return None;
+        }
+
+        if let Some(held) = self.fish.as_mut().and_then(|fish| fish.held_segment.take()) {
+            if held.visible == visible && !has_repaint_control {
+                self.deferred_separator.clear();
+            } else {
+                output.extend_from_slice(&held.bytes);
+                self.push_deferred_separator(output);
+            }
+        }
+
+        if has_repaint_control && !visible.is_empty() {
+            if let Some(fish) = &mut self.fish {
+                fish.held_segment = Some(FishHeldSegment {
+                    bytes: segment,
+                    visible,
+                });
+            }
+            return None;
+        }
+
+        Some(segment)
+    }
+
+    fn flush_fish_held_segment(&mut self, output: &mut Vec<u8>) {
+        let held = self.fish.as_mut().and_then(|fish| fish.held_segment.take());
+        let Some(held) = held else {
+            return;
+        };
+        let started_command = self
+            .fish
+            .as_ref()
+            .and_then(|fish| fish.started_command.as_deref());
+        if let Some(command) = started_command
+            && is_fish_command_repaint_token(&held.visible, command)
+        {
+            self.deferred_separator.clear();
+            return;
+        }
+        output.extend_from_slice(&held.bytes);
+        self.push_deferred_separator(output);
+    }
+
+    fn push_deferred_separator(&mut self, output: &mut Vec<u8>) {
+        if !self.deferred_separator.is_empty() {
+            output.extend_from_slice(&self.deferred_separator);
+            self.deferred_separator.clear();
+        }
     }
 }
 
@@ -1039,6 +1191,22 @@ fn command_contains_repaint_token(command: &str, line: &str) -> bool {
     tokens.contains(&line)
 }
 
+fn is_fish_command_repaint_token(line: &str, command: &str) -> bool {
+    let line = line.trim_start_matches(['>', '=']).trim_start().trim_end();
+    if line.is_empty() || line == command || command.starts_with(line) {
+        return true;
+    }
+    let line = line.trim_matches(['\'', '"', ';']);
+    if line.is_empty() {
+        return true;
+    }
+    command
+        .split(|ch: char| ch.is_whitespace() || matches!(ch, ';' | '|' | '&' | '<' | '>'))
+        .map(|part| part.trim_matches(['\'', '"', ';']))
+        .filter(|part| !part.is_empty())
+        .any(|part| part == line)
+}
+
 fn shell_syntax_fragment(line: &str) -> bool {
     line.contains(['\'', '"', '\\', ';', '|', '&', '<', '>'])
 }
@@ -1047,6 +1215,59 @@ fn contains_terminal_control(text: &str) -> bool {
     text.as_bytes()
         .iter()
         .any(|byte| *byte == 0x1b || *byte < 0x20 && *byte != b'\t')
+}
+
+fn contains_terminal_repaint_control(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            0x1b => {
+                index += 1;
+                if index >= bytes.len() {
+                    return true;
+                }
+                match bytes[index] {
+                    b'[' => {
+                        index += 1;
+                        while index < bytes.len() {
+                            let byte = bytes[index];
+                            index += 1;
+                            if (0x40..=0x7e).contains(&byte) {
+                                if matches!(
+                                    byte,
+                                    b'A' | b'B'
+                                        | b'C'
+                                        | b'D'
+                                        | b'E'
+                                        | b'F'
+                                        | b'G'
+                                        | b'H'
+                                        | b'J'
+                                        | b'K'
+                                        | b'S'
+                                        | b'T'
+                                        | b'f'
+                                ) {
+                                    return true;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    b']' | b'P' | b'^' | b'_' => return true,
+                    b'(' | b')' | b'*' | b'+' => {
+                        index = (index + 2).min(bytes.len());
+                    }
+                    _ => return true,
+                }
+            }
+            0x08 => return true,
+            byte if byte < 0x20 && !matches!(byte, b'\t' | b'\r' | b'\n') => return true,
+            _ => index += 1,
+        }
+    }
+    false
 }
 
 fn strip_terminal_control_sequences(text: &str) -> String {
@@ -1339,7 +1560,7 @@ mod tests {
     #[test]
     fn output_filter_hides_marker_lines_and_their_separator() {
         let marker = "__AISH_STATUS__123__";
-        let mut filter = PtyOutputFilter::new(marker);
+        let mut filter = PtyOutputFilter::marker(marker);
 
         let output = filter.push(
             format!("\r\n{START_MARKER}\techo hi\r\nhi\r\n\r\n{marker}0\t/tmp\r\n").as_bytes(),
@@ -1350,7 +1571,7 @@ mod tests {
 
     #[test]
     fn output_filter_preserves_carriage_return_progress() {
-        let mut filter = PtyOutputFilter::new("__AISH_STATUS__123__");
+        let mut filter = PtyOutputFilter::marker("__AISH_STATUS__123__");
 
         let output = filter.push(b"Counting objects:  50%\rCounting objects: 100%\r\n");
 
@@ -1358,6 +1579,42 @@ mod tests {
             output,
             b"Counting objects:  50%\rCounting objects: 100%\r\n"
         );
+    }
+
+    #[test]
+    fn fish_output_filter_streams_only_command_output_between_markers() {
+        let mut filter = PtyOutputFilter::shell_events(true);
+        let raw = format!(
+            "prompt repaint\r\n{START_MARKER}\tprintf 'fish-ok\\n'\r\nfish-ok\r\n{READY_MARKER}\t0\t/tmp/aish\r\nnext prompt\r\n"
+        );
+
+        let output = filter.push(raw.as_bytes());
+
+        assert_eq!(String::from_utf8(output).unwrap(), "fish-ok\r\n");
+    }
+
+    #[test]
+    fn fish_output_filter_drops_cursor_repaint_duplicate_before_plain_output() {
+        let mut filter = PtyOutputFilter::shell_events(true);
+        let raw = format!(
+            "{START_MARKER}\tcat c/i | grep beta\r\n\x1b[50Cbeta\r\nbeta\r\n{READY_MARKER}\t0\t/tmp/aish\r\n"
+        );
+
+        let output = filter.push(raw.as_bytes());
+
+        assert_eq!(String::from_utf8(output).unwrap(), "beta\r\n");
+    }
+
+    #[test]
+    fn fish_output_filter_preserves_carriage_return_progress_inside_command() {
+        let mut filter = PtyOutputFilter::shell_events(true);
+        let raw = format!(
+            "{START_MARKER}\tprintf progress\r\nprogress 1\rprogress 2\r\n{READY_MARKER}\t0\t/tmp/aish\r\n"
+        );
+
+        let output = filter.push(raw.as_bytes());
+
+        assert_eq!(output, b"progress 1\rprogress 2\r\n");
     }
 
     #[test]

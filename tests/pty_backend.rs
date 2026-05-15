@@ -116,6 +116,55 @@ fn pty_backend_streams_output_before_command_completion() {
 }
 
 #[test]
+fn fish_pty_backend_streams_output_before_command_completion_when_available() {
+    let _guard = pty_test_guard();
+    if !fish_backend_tests_enabled() {
+        eprintln!("skipping fish PTY backend streaming test: set AISH_TEST_FISH=1 to opt in");
+        return;
+    }
+    let Some(fish) = find_shell(&[
+        "/opt/homebrew/bin/fish",
+        "/usr/local/bin/fish",
+        "/usr/bin/fish",
+        "/bin/fish",
+    ]) else {
+        return;
+    };
+
+    let mut backend = PtyBackend::spawn(fish).unwrap();
+    let started = Instant::now();
+    let mut first_chunk_at = None;
+    let mut displayed = Vec::new();
+
+    let result = backend
+        .run_command_streaming_with_wait_callback(
+            "printf 'fish-stream-first\\n'; sleep 2; printf 'fish-stream-second\\n'",
+            Duration::from_secs(5),
+            |_| Ok(false),
+            |chunk| {
+                if first_chunk_at.is_none() {
+                    first_chunk_at = Some(started.elapsed());
+                }
+                displayed.extend_from_slice(chunk);
+                Ok(())
+            },
+        )
+        .unwrap();
+
+    assert_eq!(result.exit_code, 0);
+    assert!(
+        first_chunk_at.unwrap() < Duration::from_millis(1500),
+        "first streamed fish chunk arrived after command completion: {first_chunk_at:?}"
+    );
+    let displayed = String::from_utf8(displayed).unwrap();
+    assert!(displayed.contains("fish-stream-first"), "{displayed:?}");
+    assert!(displayed.contains("fish-stream-second"), "{displayed:?}");
+    assert!(!displayed.contains("__AISH_READY__"), "{displayed:?}");
+    assert!(!displayed.contains("__AISH_START__"), "{displayed:?}");
+    assert!(!displayed.contains('\u{23ce}'), "{displayed:?}");
+}
+
+#[test]
 fn pty_backend_streaming_preserves_carriage_return_progress_for_display() {
     let _guard = pty_test_guard();
     let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
