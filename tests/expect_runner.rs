@@ -389,6 +389,11 @@ fn home_default_draft_persists() {
 }
 
 #[test]
+fn draft_down_starts_new_draft() {
+    run_script("draft_down_starts_new_draft.exp");
+}
+
+#[test]
 fn template_use_executes() {
     run_script("template_use_executes.exp");
 }

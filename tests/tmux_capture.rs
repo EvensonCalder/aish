@@ -256,6 +256,18 @@ fn tmux_escape_clears_draft_and_shell_recovers() {
 }
 
 #[test]
+fn tmux_down_saves_draft_and_starts_new_draft() {
+    let Some(captured) = run_tmux_script("draft_down_new_draft.sh") else {
+        return;
+    };
+    assert_adjacent_output(
+        &captured,
+        "echo after-down-new-draft",
+        "after-down-new-draft",
+    );
+}
+
+#[test]
 fn tmux_ctrl_d_exits_session_without_leftover_pane() {
     let Some(captured) = run_tmux_script("ctrl_d_exits.sh") else {
         return;

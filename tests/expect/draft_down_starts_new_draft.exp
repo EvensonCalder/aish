@@ -1,0 +1,38 @@
+#!/usr/bin/env expect
+# Down in a non-empty draft should save the current draft and clear the prompt
+# for a new draft.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set home [aish_new_home]
+set ::env(AISH_HOME) $home
+
+aish_spawn
+
+aish_send "echo saved-draft-by-down"
+send -- "\033\[B"
+
+aish_send "echo after-new-draft"
+aish_enter
+aish_expect "after-new-draft"
+aish_wait_prompt
+
+set draft_path "$home/history/draft.jsonl"
+if {![file exists $draft_path]} {
+    puts stderr "draft history was not created"
+    exit 5
+}
+set fh [open $draft_path r]
+set draft_json [read $fh]
+close $fh
+if {[string first "echo saved-draft-by-down" $draft_json] < 0} {
+    puts stderr "draft history did not contain saved draft: $draft_json"
+    exit 5
+}
+if {[string first "echo saved-draft-by-downecho after-new-draft" $draft_json] >= 0} {
+    puts stderr "new command was appended to stale draft: $draft_json"
+    exit 5
+}
+
+aish_quit

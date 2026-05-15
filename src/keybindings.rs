@@ -68,7 +68,7 @@ pub const DEFAULT_KEYBINDINGS: &[KeyBinding] = &[
     },
     KeyBinding {
         key: "Up / Down",
-        action: "browse history or AI selections",
+        action: "browse history or AI selections; Down starts a new saved draft from non-empty draft mode",
         implemented: true,
     },
     KeyBinding {

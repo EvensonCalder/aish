@@ -44,6 +44,7 @@ pub enum KeyAction {
     ConfirmContext(bool),
     CompleteOrShow,
     AcceptCompletion,
+    NewDraft,
     ForwardToBackend(String),
 }
 
@@ -199,6 +200,10 @@ fn handle_key(
         }
         KeyAction::AcceptCompletion => {
             accept_first_completion(state)?;
+        }
+        KeyAction::NewDraft => {
+            save_draft_if_configured(state)?;
+            state.clear_draft_for_new_draft();
         }
         KeyAction::Submit => {
             if had_completion_ui {
@@ -644,6 +649,16 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
         (_, KeyCode::Down) if state.mode == crate::modes::Mode::Ai => {
             state.move_ai_selection_next();
             KeyAction::Continue
+        }
+        (_, KeyCode::Down) => {
+            if state.mode == crate::modes::Mode::Draft
+                && !is_editor_draft
+                && !state.draft.is_empty()
+            {
+                KeyAction::NewDraft
+            } else {
+                KeyAction::Continue
+            }
         }
         (_, KeyCode::Left) => {
             if !is_read_only_mode && !is_editor_draft {
@@ -1122,6 +1137,10 @@ mod tests {
         KeyEvent::new(KeyCode::Char(ch), KeyModifiers::ALT)
     }
 
+    fn fixed_clock() -> i64 {
+        42
+    }
+
     #[test]
     fn printable_keys_edit_draft_at_cursor() {
         let mut state = AppState::default();
@@ -1185,6 +1204,41 @@ mod tests {
 
         assert_eq!(state.mode, Mode::Draft);
         assert_eq!(state.draft.as_str(), "git");
+    }
+
+    #[test]
+    fn down_on_non_empty_draft_saves_and_starts_new_draft() {
+        let temp = tempfile::tempdir().unwrap();
+        let draft_path = temp.path().join("draft.jsonl");
+        let mut state = AppState {
+            draft_history_path: Some(draft_path.clone()),
+            clock: fixed_clock,
+            ..AppState::default()
+        };
+        state.draft.insert_str("echo saved-draft");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        assert!(
+            !handle_key(
+                key(KeyCode::Down),
+                &mut state,
+                &mut backend,
+                &mut output,
+                Duration::from_secs(5),
+            )
+            .unwrap()
+        );
+
+        assert_eq!(state.mode, Mode::Draft);
+        assert!(state.draft.is_empty());
+        assert!(!state.draft_from_editor);
+        assert!(!state.draft_from_template);
+        let loaded = crate::history::load_jsonl::<crate::history::DraftEntry>(&draft_path).unwrap();
+        assert_eq!(loaded.errors, []);
+        assert_eq!(loaded.items.len(), 1);
+        assert_eq!(loaded.items[0].t, fixed_clock());
+        assert_eq!(loaded.items[0].text, "echo saved-draft");
     }
 
     #[test]

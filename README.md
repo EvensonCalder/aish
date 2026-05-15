@@ -95,6 +95,7 @@ Core keys:
 - Empty `Tab`: cycle `>` / `$` / `%` modes.
 - Non-empty `Tab`: accept the current inline completion, or directly accept the first candidate when inline completion is disabled.
 - `Right` at end of line: accept completion using the configured accept mode.
+- `Down` in a non-empty ordinary draft: save the current draft and clear the prompt for a new draft.
 - `Ctrl-C`: clear the draft, cancel continuation, or reject pending context confirmation.
 - `Ctrl-D` on an empty draft: exit.
 - `Ctrl-L`: clear the screen.

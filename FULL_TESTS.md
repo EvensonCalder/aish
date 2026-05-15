@@ -204,6 +204,7 @@ Run this section once with bash and once with zsh. Run fish as opt-in compatibil
 | EDIT-007 | Type a draft and press `Esc`. | Draft clears and Aish returns to draft mode. | Describe result. |
 | EDIT-008 | Press `Ctrl-D` on an empty draft. | Aish exits cleanly and terminal state is restored. | Shell prompt returns. |
 | EDIT-009 | Press `Ctrl-X` followed by an unsupported key. | Chord cancels without corrupting the draft or terminal. | Describe result. |
+| EDIT-010 | Type a draft, press `Down`, then type and execute a different command. | The first draft is saved but not executed; the prompt starts a clean new draft for the second command. | Paste output and draft JSONL evidence. |
 
 ## Modes And History
 

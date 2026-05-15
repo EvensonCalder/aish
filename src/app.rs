@@ -305,6 +305,15 @@ impl AppState {
         }
     }
 
+    pub fn clear_draft_for_new_draft(&mut self) {
+        self.draft.clear();
+        self.continuation_prompt = None;
+        self.draft_from_editor = false;
+        self.draft_from_template = false;
+        self.mode = Mode::Draft;
+        self.clear_completion_ui();
+    }
+
     pub fn prepare_editor_session(
         &mut self,
         temp_root: &std::path::Path,
