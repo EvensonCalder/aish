@@ -480,6 +480,8 @@ Status: implemented for v0.1.0 terminal draft completion. Candidate ranking, can
 - `g s` can match `git status` when ignore-space matching is enabled.
 - Path-like tokens use path completion.
 - Template candidates appear before history candidates.
+- Structural template matches suppress lower-priority generic placeholder/history/path fallbacks for the same completion query.
+- Structural template matches use newest stored templates first.
 - Template placeholders can be accepted from the typed placeholder name without requiring braces.
 - Ghost suggestion never modifies buffer without explicit accept.
 

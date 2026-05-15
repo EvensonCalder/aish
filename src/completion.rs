@@ -264,20 +264,24 @@ pub fn complete_non_first_token_for_line_with_options(
     options: CompletionOptions,
 ) -> Vec<CompletionCandidate> {
     let token = current_token_context(line, cursor);
-    let mut candidates = complete_structural_templates_for_line(
+    let structural_template_candidates = complete_structural_templates_for_line(
         line,
         cursor,
         &token,
         templates,
         options.ignore_spaces,
     );
-    candidates.extend(complete_structural_history_for_line(
+    if !structural_template_candidates.is_empty() {
+        return limit_candidates(structural_template_candidates, options.max_results);
+    }
+
+    let mut candidates = complete_structural_history_for_line(
         line,
         cursor,
         &token,
         history_newest_first,
         options.ignore_spaces,
-    ));
+    );
     candidates.extend(complete_template_placeholders(
         &token.text,
         templates,
@@ -601,7 +605,7 @@ fn anchored_candidate_display(token: &TokenContext, candidate: &CompletionCandid
     {
         return suffix.to_string();
     }
-    candidate.display.clone()
+    candidate.replacement.clone()
 }
 
 fn accepted_replacement(
@@ -681,6 +685,9 @@ fn template_word_completion<'a>(
     }
     let placeholder_name = template_word_placeholder_name(template_word)?;
     if token.is_empty() || matches_completion_prefix(placeholder_name, token, ignore_spaces) {
+        return Some(template_word);
+    }
+    if token.starts_with('{') {
         return Some(template_word);
     }
     None
@@ -1403,6 +1410,47 @@ mod tests {
     }
 
     #[test]
+    fn complete_non_first_token_for_line_prefers_structural_template_position() {
+        let history = vec![HistoryEntry {
+            t: 1,
+            command: "echo {a} {something}".to_string(),
+            exit_code: Some(0),
+            source: crate::history::HistorySource::User,
+        }];
+        let templates = vec![
+            TemplateEntry::new("echo {a} {older}"),
+            TemplateEntry::new("echo {a} {b} {c}"),
+        ];
+
+        let candidates = complete_non_first_token_for_line_with_options(
+            "echo {a} {something}",
+            "echo {a} {something}".len(),
+            Path::new("/"),
+            &history,
+            &templates,
+            CompletionOptions::default(),
+        );
+
+        assert_eq!(
+            candidates,
+            [
+                CompletionCandidate {
+                    display: "echo {a} {b} {c}".to_string(),
+                    replacement: "{b} {c}".to_string(),
+                    is_dir: false,
+                    source: CompletionSource::Template,
+                },
+                CompletionCandidate {
+                    display: "echo {a} {older}".to_string(),
+                    replacement: "{older}".to_string(),
+                    is_dir: false,
+                    source: CompletionSource::Template,
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn complete_non_first_token_for_line_keeps_whole_history_suffix() {
         let history = vec![HistoryEntry {
             t: 1,
@@ -1512,6 +1560,21 @@ mod tests {
         let rows = render_completion_candidates_for_width(&candidates, &token, 80);
 
         assert_eq!(rows, ["history\t status --short"]);
+    }
+
+    #[test]
+    fn render_completion_candidates_for_width_shows_replacement_for_non_suffix_candidates() {
+        let token = current_token_context("echo {a} {something}", "echo {a} {something}".len());
+        let candidates = vec![CompletionCandidate {
+            display: "echo {a} {b} {c}".to_string(),
+            replacement: "{b} {c}".to_string(),
+            is_dir: false,
+            source: CompletionSource::Template,
+        }];
+
+        let rows = render_completion_candidates_for_width(&candidates, &token, 80);
+
+        assert_eq!(rows, ["template\t{b} {c}"]);
     }
 
     #[test]

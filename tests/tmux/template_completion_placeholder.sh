@@ -26,10 +26,36 @@ tmux send-keys -t "$SESSION" Enter
 sleep 1
 BLOCK_CAPTURE="$(tmux capture-pane -p -S - -t "$SESSION")"
 
+tmux send-keys -t "$SESSION" C-c
+sleep 1
+
+tmux send-keys -t "$SESSION" '#mt echo {a} {older}' Enter
+sleep 1
+tmux send-keys -t "$SESSION" '#mt echo {a} {b} {c}' Enter
+sleep 1
+
+tmux send-keys -t "$SESSION" 'echo {a} {something}'
+sleep 1
+STRUCTURAL_PANEL_CAPTURE="$(tmux capture-pane -p -t "$SESSION")"
+
+tmux send-keys -t "$SESSION" Tab
+sleep 1
+STRUCTURAL_ACCEPT_CAPTURE="$(tmux capture-pane -p -t "$SESSION")"
+
+tmux send-keys -t "$SESSION" Enter
+sleep 1
+STRUCTURAL_BLOCK_CAPTURE="$(tmux capture-pane -p -S - -t "$SESSION")"
+
 printf '%s\n' "$PANEL_CAPTURE"
 printf '%s\n' "$ACCEPT_CAPTURE"
 printf '%s\n' "$BLOCK_CAPTURE"
+printf '%s\n' "$STRUCTURAL_PANEL_CAPTURE"
+printf '%s\n' "$STRUCTURAL_ACCEPT_CAPTURE"
+printf '%s\n' "$STRUCTURAL_BLOCK_CAPTURE"
 
 printf '%s\n' "$PANEL_CAPTURE" | rg -q '\{something\}'
 printf '%s\n' "$ACCEPT_CAPTURE" | rg -q 'echo \{something\}'
 printf '%s\n' "$BLOCK_CAPTURE" | rg -q '^cannot execute unresolved template placeholders: something$'
+printf '%s\n' "$STRUCTURAL_PANEL_CAPTURE" | rg -q 'template[[:space:]]+\{b\} \{c\}'
+printf '%s\n' "$STRUCTURAL_ACCEPT_CAPTURE" | rg -q 'echo \{a\} \{b\} \{c\}'
+printf '%s\n' "$STRUCTURAL_BLOCK_CAPTURE" | rg -q '^cannot execute unresolved template placeholders: a, b, c$'

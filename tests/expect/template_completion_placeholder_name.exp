@@ -24,4 +24,26 @@ aish_expect "echo {something}"
 aish_send "\x03"
 aish_wait_prompt
 
+aish_send "#mt echo {a} {older}"
+aish_enter
+aish_expect_template_stored
+aish_wait_prompt
+
+aish_send "#mt echo {a} {b} {c}"
+aish_enter
+aish_expect_template_stored
+aish_wait_prompt
+
+aish_send "echo {a} {something}"
+aish_expect "template\t{b} {c}"
+aish_send "\t"
+aish_expect "> echo {a} {b} {c}"
+
+aish_enter
+aish_expect "cannot execute unresolved template placeholders: a, b, c"
+aish_expect "echo {a} {b} {c}"
+
+aish_send "\x03"
+aish_wait_prompt
+
 aish_quit

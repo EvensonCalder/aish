@@ -135,6 +135,7 @@ Completion sources:
 
 - First token: templates, regular history, then PATH executables.
 - Non-first token: structural template matches, structural history suffixes, template placeholders, history arguments, and filesystem paths.
+- Template completions use newest stored templates first.
 - Paths preserve directory prefixes and mark directories with `/`.
 - Matching ignores spaces by default.
 

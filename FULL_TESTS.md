@@ -274,6 +274,7 @@ Use a fresh isolated `AISH_HOME` when possible so history-based suggestions are 
 | TPL-008 | Run `#template rm <id>`. | Template is removed and no stale entry remains. | Paste output. |
 | TPL-009 | Exit and relaunch with the same `AISH_HOME`, then inspect templates with `#template find <query>` or the JSONL store. | Template persistence matches the previous operations. | Paste output. |
 | TPL-010 | Run `#mt echo {something}`, type `echo something`, then accept completion. | Aish completes to `echo {something}` even though braces were not typed, and unresolved placeholder execution is blocked until edited. | Paste output. |
+| TPL-011 | Store `#mt echo {a} {older}`, then store `#mt echo {a} {b} {c}`. Type `echo {a} {something}` and accept completion. | Newer structural template completion wins and accepts `echo {a} {b} {c}`; generic placeholder/history fallbacks do not override it. | Paste output. |
 
 ## External Editor And Paste Review
 

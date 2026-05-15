@@ -734,6 +734,8 @@ Current token is not the first token:
 For non-first-token completion:
 
 - Structural template candidates are shown before structural history candidates.
+- Structural template candidates are ordered newest template first.
+- When a structural template candidate exists, lower-priority generic placeholder, history-argument, and path fallbacks should not be mixed into that completion result set.
 - Template placeholders can be matched by typing the placeholder name without braces; accepting the candidate inserts the raw `{placeholder}` form.
 - History argument candidates are shown before file/path candidates after structural and placeholder candidates.
 - History argument candidates are ordered newest to oldest.
