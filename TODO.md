@@ -458,6 +458,8 @@ Status: implemented for v0.1.0 terminal draft completion. Candidate ranking, can
   - [x] history commands
   - [x] PATH executables
 - [x] Implement non-first-token completion helper:
+  - [x] structural template matches
+  - [x] structural history suffixes
   - [x] paths
   - [x] history arguments
   - [x] template placeholders
@@ -478,6 +480,7 @@ Status: implemented for v0.1.0 terminal draft completion. Candidate ranking, can
 - `g s` can match `git status` when ignore-space matching is enabled.
 - Path-like tokens use path completion.
 - Template candidates appear before history candidates.
+- Template placeholders can be accepted from the typed placeholder name without requiring braces.
 - Ghost suggestion never modifies buffer without explicit accept.
 
 ---
@@ -1068,6 +1071,7 @@ Status: implemented. Inline completion is enabled by default and refreshes while
 - [x] Config default, roundtrip, normalization, and invalid-value tests for `completion.inline` and `completion.tab_accept`.
 - [x] Private-command tests proving `#completion inline on|off` and `#completion tab-accept full|word` persist, report, and reject invalid input without changing config.
 - [x] Pure completion tests for computing an inline suffix from history, templates, executables, paths, and non-first-token arguments.
+- [x] Pure and terminal tests for structural template completion where typing a placeholder name without braces accepts the raw `{placeholder}` form.
 - [x] Pure acceptance tests for full-suggestion and word-boundary acceptance, including quoted arguments and candidates with spaces.
 - [x] Terminal rendering tests proving the inline ghost is display-only, refreshes while typing, uses subdued styling, does not move the real cursor, and does not mutate draft text.
 - [x] Terminal state tests proving stale inline suggestions clear after editing, cursor movement, mode changes, command execution, and no-match completion.

@@ -272,7 +272,8 @@ Use a fresh isolated `AISH_HOME` when possible so history-based suggestions are 
 | TPL-006 | Run `#template use <id>` without `name`. | Unresolved placeholder blocks execution. | Paste output. |
 | TPL-007 | Run `#template replace <id> echo hi {name}`, then use the newly printed ID. | Replaced template is used and the replacement has a new body-derived ID. | Paste output. |
 | TPL-008 | Run `#template rm <id>`. | Template is removed and no stale entry remains. | Paste output. |
-| TPL-008 | Exit and relaunch with the same `AISH_HOME`, then list templates. | Template persistence matches the previous operations. | Paste output. |
+| TPL-009 | Exit and relaunch with the same `AISH_HOME`, then inspect templates with `#template find <query>` or the JSONL store. | Template persistence matches the previous operations. | Paste output. |
+| TPL-010 | Run `#mt echo {something}`, type `echo something`, then accept completion. | Aish completes to `echo {something}` even though braces were not typed, and unresolved placeholder execution is blocked until edited. | Paste output. |
 
 ## External Editor And Paste Review
 

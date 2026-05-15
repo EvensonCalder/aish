@@ -724,14 +724,18 @@ Current token is the first token:
   executables from PATH
 
 Current token is not the first token:
+  structural template candidates
+  structural history candidates
+  template placeholder candidates
   history argument candidates
   file/path candidates
-  template placeholder candidates
 ```
 
 For non-first-token completion:
 
-- History argument candidates are shown before file/path candidates.
+- Structural template candidates are shown before structural history candidates.
+- Template placeholders can be matched by typing the placeholder name without braces; accepting the candidate inserts the raw `{placeholder}` form.
+- History argument candidates are shown before file/path candidates after structural and placeholder candidates.
 - History argument candidates are ordered newest to oldest.
 - File/path candidates must accurately represent the underlying filesystem entry.
 - Regular files must not be presented as directories.
@@ -754,6 +758,7 @@ For command completion:
 - If the user presses `Tab` and there are no candidates, Aish displays `no completions` below the prompt and redraws the current draft.
 - The inline ghost suggestion is display-only. It must not modify the draft buffer, cursor position, history, or persisted draft until the user explicitly accepts it.
 - Pressing `Tab` with an inline ghost suggestion accepts the inline suggestion, not an arbitrary first row from the below-prompt panel. In normal typing flows this means the first `Tab` accepts the already-visible inline suggestion.
+- Some valid ranked candidates, such as replacing `something` with the template placeholder `{something}`, cannot be rendered as an unambiguous suffix. In that case Aish may show the candidate in the live below-prompt panel; pressing `Tab` accepts the first ranked candidate rather than requiring the user to type braces manually.
 - If inline suggestions are disabled, non-empty `Tab` accepts the first ranked candidate directly, preserving the legacy behavior.
 - `completion.tab_accept = "full"` accepts the complete selected suggestion.
 - `completion.tab_accept = "word"` accepts only through the next whitespace boundary in the untyped suffix. If no whitespace boundary remains, it accepts the full suffix.

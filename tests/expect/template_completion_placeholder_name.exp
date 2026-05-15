@@ -1,0 +1,27 @@
+#!/usr/bin/env expect
+# Template completion should match placeholder names without requiring braces,
+# then accept the raw placeholder as a protected template draft.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "#mt echo {something}"
+aish_enter
+aish_expect_template_stored
+aish_wait_prompt
+
+aish_send "echo something"
+aish_expect "{something}"
+aish_send "\t"
+aish_expect "> echo {something}"
+
+aish_enter
+aish_expect "cannot execute unresolved template placeholders: something"
+aish_expect "echo {something}"
+
+aish_send "\x03"
+aish_wait_prompt
+
+aish_quit

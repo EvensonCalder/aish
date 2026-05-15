@@ -196,6 +196,17 @@ fn tmux_completion_right_accepts_first_and_executes() {
 }
 
 #[test]
+fn tmux_template_completion_accepts_placeholder_name_as_protected_draft() {
+    let Some(captured) = run_tmux_script("template_completion_placeholder.sh") else {
+        return;
+    };
+    assert_line_present(
+        &captured,
+        "cannot execute unresolved template placeholders: something",
+    );
+}
+
+#[test]
 fn tmux_ctrl_c_cancels_continuation_and_shell_recovers() {
     let Some(captured) = run_tmux_script("continuation_cancel.sh") else {
         return;

@@ -819,10 +819,20 @@ pub fn complete_or_show_candidates_for_width(state: &mut AppState, width: usize)
             refresh_live_completion_ui_for_width(state, width)?;
             return Ok(());
         }
+        let had_panel_without_inline =
+            state.completion_inline.is_none() && !state.completion_panel.is_empty();
         let candidates = state.completion_candidates()?;
         if candidates.is_empty() {
             state.completion_inline = None;
             state.completion_panel = vec!["no completions".to_string()];
+            return Ok(());
+        }
+        if had_panel_without_inline && state.completion_panel != ["no completions"] {
+            let Some(candidate) = candidates.into_iter().next() else {
+                return Ok(());
+            };
+            accept_completion_candidate(state, candidate)?;
+            refresh_live_completion_ui_for_width(state, width)?;
             return Ok(());
         }
         set_completion_ui_from_candidates(state, candidates, width);
@@ -1081,7 +1091,11 @@ fn accept_completion_candidate(
         state.completion_config.tab_accept,
     );
     if state.draft.replace(accepted.line, accepted.cursor) {
-        state.draft_from_template = false;
+        state.draft_from_template = matches!(
+            candidate.source,
+            crate::completion::CompletionSource::Template
+                | crate::completion::CompletionSource::TemplatePlaceholder
+        );
         state.clear_completion_ui();
         Ok(true)
     } else {
@@ -1568,6 +1582,60 @@ mod tests {
 
         assert_eq!(state.draft.as_str(), "git status");
         assert!(state.completion_inline.is_none());
+    }
+
+    #[test]
+    fn live_template_placeholder_name_completion_accepts_raw_placeholder() {
+        let temp = tempfile::tempdir().unwrap();
+        let template_path = temp.path().join("templates.jsonl");
+        crate::templates::append_template(
+            &template_path,
+            &crate::templates::TemplateEntry::new("echo {something}"),
+        )
+        .unwrap();
+        let mut state = AppState {
+            template_store_path: Some(template_path),
+            ..AppState::default()
+        };
+        state.draft.insert_str("echo something");
+
+        refresh_live_completion_ui_for_width(&mut state, 80).unwrap();
+
+        assert!(state.completion_inline.is_none());
+        assert!(
+            state
+                .completion_panel
+                .iter()
+                .any(|row| row.contains("{something}"))
+        );
+
+        complete_or_show_candidates_for_width(&mut state, 80).unwrap();
+
+        assert_eq!(state.draft.as_str(), "echo {something}");
+        assert!(state.draft_from_template);
+        assert!(state.completion_inline.is_none());
+        assert!(state.completion_panel.is_empty());
+    }
+
+    #[test]
+    fn right_accepts_structural_template_completion_as_protected_template_draft() {
+        let temp = tempfile::tempdir().unwrap();
+        let template_path = temp.path().join("templates.jsonl");
+        crate::templates::append_template(
+            &template_path,
+            &crate::templates::TemplateEntry::new("echo {something}"),
+        )
+        .unwrap();
+        let mut state = AppState {
+            template_store_path: Some(template_path),
+            ..AppState::default()
+        };
+        state.draft.insert_str("echo something");
+
+        assert!(accept_first_completion(&mut state).unwrap());
+
+        assert_eq!(state.draft.as_str(), "echo {something}");
+        assert!(state.draft_from_template);
     }
 
     #[test]

@@ -264,30 +264,93 @@ pub fn complete_non_first_token_for_line_with_options(
     options: CompletionOptions,
 ) -> Vec<CompletionCandidate> {
     let token = current_token_context(line, cursor);
-    let mut candidates = complete_structural_history_for_line(
+    let mut candidates = complete_structural_templates_for_line(
+        line,
+        cursor,
+        &token,
+        templates,
+        options.ignore_spaces,
+    );
+    candidates.extend(complete_structural_history_for_line(
         line,
         cursor,
         &token,
         history_newest_first,
         options.ignore_spaces,
-    );
-    let mut template_placeholders =
-        complete_template_placeholders(&token.text, templates, options.ignore_spaces);
-    template_placeholders.append(&mut candidates);
-    candidates = template_placeholders;
+    ));
+    candidates.extend(complete_template_placeholders(
+        &token.text,
+        templates,
+        options.ignore_spaces,
+    ));
     candidates.extend(complete_history_arguments(
         &token.text,
         history_newest_first,
         options.ignore_spaces,
     ));
     candidates.extend(complete_path(&token.text, cwd));
-    candidates.extend(complete_template_placeholders(
-        &token.text,
-        templates,
-        options.ignore_spaces,
-    ));
     dedupe_completion_candidates(&mut candidates);
     limit_candidates(candidates, options.max_results)
+}
+
+fn complete_structural_templates_for_line(
+    line: &str,
+    cursor: usize,
+    token: &TokenContext,
+    templates: &[TemplateEntry],
+    ignore_spaces: bool,
+) -> Vec<CompletionCandidate> {
+    if cursor != line.len() {
+        return Vec::new();
+    }
+    let words_before_cursor = split_shell_like_words(&line[..cursor]);
+    if words_before_cursor.is_empty() {
+        return Vec::new();
+    }
+    let current_word_index = if token.text.is_empty() {
+        words_before_cursor.len()
+    } else {
+        words_before_cursor.len().saturating_sub(1)
+    };
+    let previous_words = &words_before_cursor[..current_word_index.min(words_before_cursor.len())];
+    let mut seen = HashSet::new();
+    let mut candidates = Vec::new();
+
+    for template in templates.iter().rev() {
+        let template_words = split_shell_like_words(&template.body);
+        if template_words.len() <= current_word_index {
+            continue;
+        }
+        if !previous_words
+            .iter()
+            .zip(template_words.iter())
+            .all(|(typed, template)| template_word_matches_typed_word(template, typed))
+        {
+            continue;
+        }
+
+        let template_word = &template_words[current_word_index];
+        let rest = &template_words[current_word_index + 1..];
+        let replacement = match template_word_completion(template_word, &token.text, ignore_spaces)
+        {
+            Some(replacement) => join_words_with_first(replacement, rest),
+            None if !rest.is_empty() && template_word_is_placeholder(template_word) => {
+                join_words_with_first(token.text.as_str(), rest)
+            }
+            None => continue,
+        };
+
+        if replacement == token.text || !seen.insert(replacement.clone()) {
+            continue;
+        }
+        candidates.push(CompletionCandidate {
+            display: template.body.clone(),
+            replacement,
+            is_dir: false,
+            source: CompletionSource::Template,
+        });
+    }
+    candidates
 }
 
 fn complete_structural_history_for_line(
@@ -399,13 +462,14 @@ fn complete_template_placeholders(
     let mut seen = HashSet::new();
     let mut candidates = Vec::new();
     for template in templates {
-        for placeholder in crate::templates::template_placeholders(&template.body) {
-            if matches_completion_prefix(&placeholder, prefix, ignore_spaces)
-                && seen.insert(placeholder.clone())
+        for placeholder in template_placeholder_words(&template.body) {
+            if (matches_completion_prefix(&placeholder.raw, prefix, ignore_spaces)
+                || matches_completion_prefix(&placeholder.name, prefix, ignore_spaces))
+                && seen.insert(placeholder.raw.clone())
             {
                 candidates.push(CompletionCandidate {
-                    display: placeholder.clone(),
-                    replacement: placeholder,
+                    display: placeholder.raw.clone(),
+                    replacement: placeholder.raw,
                     is_dir: false,
                     source: CompletionSource::TemplatePlaceholder,
                 });
@@ -585,6 +649,68 @@ fn completion_candidate_label(candidate: &CompletionCandidate) -> &'static str {
         CompletionSource::Path if candidate.is_dir => "dir",
         _ => completion_source_label(candidate.source),
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TemplatePlaceholderWord {
+    raw: String,
+    name: String,
+}
+
+fn template_placeholder_words(body: &str) -> Vec<TemplatePlaceholderWord> {
+    split_shell_like_words(body)
+        .into_iter()
+        .filter_map(|word| {
+            let name = template_word_placeholder_name(&word)?.to_string();
+            Some(TemplatePlaceholderWord { raw: word, name })
+        })
+        .collect()
+}
+
+fn template_word_matches_typed_word(template_word: &str, typed_word: &str) -> bool {
+    template_word == typed_word || template_word_is_placeholder(template_word)
+}
+
+fn template_word_completion<'a>(
+    template_word: &'a str,
+    token: &str,
+    ignore_spaces: bool,
+) -> Option<&'a str> {
+    if matches_completion_prefix(template_word, token, ignore_spaces) {
+        return Some(template_word);
+    }
+    let placeholder_name = template_word_placeholder_name(template_word)?;
+    if token.is_empty() || matches_completion_prefix(placeholder_name, token, ignore_spaces) {
+        return Some(template_word);
+    }
+    None
+}
+
+fn template_word_is_placeholder(word: &str) -> bool {
+    template_word_placeholder_name(word).is_some()
+}
+
+fn template_word_placeholder_name(word: &str) -> Option<&str> {
+    let candidate = word.strip_prefix('{')?.strip_suffix('}')?;
+    let name = candidate
+        .strip_suffix("...")
+        .or_else(|| candidate.split_once(':').map(|(name, _)| name))
+        .unwrap_or(candidate);
+    is_placeholder_name(name).then_some(name)
+}
+
+fn is_placeholder_name(candidate: &str) -> bool {
+    !candidate.is_empty()
+        && candidate
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+}
+
+fn join_words_with_first(first: &str, rest: &[String]) -> String {
+    if rest.is_empty() {
+        return first.to_string();
+    }
+    format!("{} {}", first, join_words(rest))
 }
 
 fn remove_spaces(value: &str) -> String {
@@ -1148,8 +1274,8 @@ mod tests {
             complete_non_first_token("po", Path::new("/"), &history, &templates),
             [
                 CompletionCandidate {
-                    display: "pod_name".to_string(),
-                    replacement: "pod_name".to_string(),
+                    display: "{pod_name}".to_string(),
+                    replacement: "{pod_name}".to_string(),
                     is_dir: false,
                     source: CompletionSource::TemplatePlaceholder,
                 },
@@ -1185,8 +1311,8 @@ mod tests {
                 },
             ),
             [CompletionCandidate {
-                display: "featurebranch".to_string(),
-                replacement: "featurebranch".to_string(),
+                display: "{featurebranch}".to_string(),
+                replacement: "{featurebranch}".to_string(),
                 is_dir: false,
                 source: CompletionSource::TemplatePlaceholder,
             }]
@@ -1218,6 +1344,60 @@ mod tests {
                 replacement: "200 file".to_string(),
                 is_dir: false,
                 source: CompletionSource::History,
+            })
+        );
+    }
+
+    #[test]
+    fn complete_non_first_token_for_line_matches_template_placeholder_name_without_braces() {
+        let templates = vec![TemplateEntry::new("echo {something}")];
+
+        let candidates = complete_non_first_token_for_line_with_options(
+            "echo something",
+            "echo something".len(),
+            Path::new("/"),
+            &[],
+            &templates,
+            CompletionOptions::default(),
+        );
+
+        assert_eq!(
+            candidates.first(),
+            Some(&CompletionCandidate {
+                display: "echo {something}".to_string(),
+                replacement: "{something}".to_string(),
+                is_dir: false,
+                source: CompletionSource::Template,
+            })
+        );
+    }
+
+    #[test]
+    fn complete_non_first_token_for_line_treats_template_as_whole_command_shape() {
+        let history = vec![HistoryEntry {
+            t: 1,
+            command: "command add 100 other".to_string(),
+            exit_code: Some(0),
+            source: crate::history::HistorySource::User,
+        }];
+        let templates = vec![TemplateEntry::new("command add {amount} file")];
+
+        let candidates = complete_non_first_token_for_line_with_options(
+            "command add 200",
+            "command add 200".len(),
+            Path::new("/"),
+            &history,
+            &templates,
+            CompletionOptions::default(),
+        );
+
+        assert_eq!(
+            candidates.first(),
+            Some(&CompletionCandidate {
+                display: "command add {amount} file".to_string(),
+                replacement: "200 file".to_string(),
+                is_dir: false,
+                source: CompletionSource::Template,
             })
         );
     }

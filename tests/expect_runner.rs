@@ -294,6 +294,11 @@ fn completion_first_token_source_order() {
 }
 
 #[test]
+fn template_completion_placeholder_name() {
+    run_script("template_completion_placeholder_name.exp");
+}
+
+#[test]
 fn home_default_completion_ui() {
     run_script("home_default_completion_ui.exp");
 }

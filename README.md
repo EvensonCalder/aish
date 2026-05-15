@@ -134,7 +134,7 @@ Important rules:
 Completion sources:
 
 - First token: templates, regular history, then PATH executables.
-- Non-first token: history arguments, template placeholders, and filesystem paths.
+- Non-first token: structural template matches, structural history suffixes, template placeholders, history arguments, and filesystem paths.
 - Paths preserve directory prefixes and mark directories with `/`.
 - Matching ignores spaces by default.
 
@@ -315,6 +315,8 @@ Placeholders:
 - `{name...}`: variadic value.
 
 Unresolved placeholders block execution, so a template cannot accidentally run with `{message}` or similar still present.
+
+Completion treats placeholders structurally. For example, after storing `#mt echo {something}`, typing `echo something` can complete to `echo {something}` even though the user did not type the braces. The accepted draft remains a protected template draft, so it cannot execute until the placeholder is replaced.
 
 ## Pickers
 
