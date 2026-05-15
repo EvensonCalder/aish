@@ -105,6 +105,7 @@ Behavior:
 - Executed commands are appended to regular history after execution.
 - Up/down navigation may show both draft entries and regular history entries.
 - In a non-empty ordinary draft, `Down` saves the current draft and clears the prompt for a new draft.
+- In an empty ordinary draft, `Up` restores the latest saved draft when draft persistence is enabled.
 - If draft content is empty, `Tab` switches modes.
 - If draft content is non-empty, `Tab` opens or accepts completion according to completion configuration.
 
@@ -512,6 +513,7 @@ Current new-draft behavior:
 - `Down` in a non-empty ordinary draft saves the current draft when draft persistence is enabled.
 - After saving succeeds, Aish clears the prompt and stays in draft mode.
 - If saving fails, Aish must leave the current draft intact.
+- `Up` in an empty ordinary draft restores the latest saved draft from the loaded draft history.
 
 Draft persistence:
 

@@ -14,13 +14,21 @@ sleep 5
 tmux send-keys -t "$SESSION" 'echo saved-draft-by-down'
 tmux send-keys -t "$SESSION" Down
 sleep 1
+tmux send-keys -t "$SESSION" Up
+sleep 1
+RESTORE_CAPTURE="$(tmux capture-pane -p -t "$SESSION")"
+
+tmux send-keys -t "$SESSION" C-c
+sleep 1
 
 tmux send-keys -t "$SESSION" 'echo after-down-new-draft' Enter
 sleep 2
 
 CAPTURE="$(tmux capture-pane -p -S - -t "$SESSION")"
+printf '%s\n' "$RESTORE_CAPTURE"
 printf '%s\n' "$CAPTURE"
 
+printf '%s\n' "$RESTORE_CAPTURE" | rg -q 'echo saved-draft-by-down'
 printf '%s\n' "$CAPTURE" | rg -q '^after-down-new-draft$'
 if printf '%s\n' "$CAPTURE" | rg -q 'saved-draft-by-downecho after-down-new-draft'; then
     printf '%s\n' "new command was appended to stale draft" >&2

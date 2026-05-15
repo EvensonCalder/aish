@@ -12,6 +12,10 @@ aish_spawn
 
 aish_send "echo saved-draft-by-down"
 send -- "\033\[B"
+send -- "\033\[A"
+aish_expect "> echo saved-draft-by-down"
+aish_send "\x03"
+aish_wait_prompt
 
 aish_send "echo after-new-draft"
 aish_enter

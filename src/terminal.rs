@@ -12,7 +12,7 @@ use crossterm::terminal::{
 
 use crate::app::{
     AppState, InlineCompletion, answer_context_confirmation, execute_draft,
-    save_draft_if_configured,
+    save_draft_and_update_state_if_configured, save_draft_if_configured,
 };
 use crate::completion::{
     CompletionCandidate, accept_completion_with_mode, current_token_context,
@@ -202,7 +202,7 @@ fn handle_key(
             accept_first_completion(state)?;
         }
         KeyAction::NewDraft => {
-            save_draft_if_configured(state)?;
+            save_draft_and_update_state_if_configured(state)?;
             state.clear_draft_for_new_draft();
         }
         KeyAction::Submit => {
@@ -644,6 +644,10 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
         }
         (_, KeyCode::Up) if state.mode == crate::modes::Mode::Ai => {
             state.move_ai_selection_previous();
+            KeyAction::Continue
+        }
+        (_, KeyCode::Up) if state.mode == crate::modes::Mode::Draft => {
+            state.restore_latest_saved_draft();
             KeyAction::Continue
         }
         (_, KeyCode::Down) if state.mode == crate::modes::Mode::Ai => {
@@ -1239,6 +1243,31 @@ mod tests {
         assert_eq!(loaded.items.len(), 1);
         assert_eq!(loaded.items[0].t, fixed_clock());
         assert_eq!(loaded.items[0].text, "echo saved-draft");
+        assert_eq!(state.draft_history, loaded.items);
+    }
+
+    #[test]
+    fn up_on_empty_draft_restores_latest_saved_draft() {
+        let mut state = AppState {
+            draft_history: vec![
+                crate::history::DraftEntry {
+                    t: 1,
+                    text: "echo older-draft".to_string(),
+                },
+                crate::history::DraftEntry {
+                    t: 2,
+                    text: "echo newest-draft".to_string(),
+                },
+            ],
+            ..AppState::default()
+        };
+
+        apply_key_to_state(key(KeyCode::Up), &mut state);
+
+        assert_eq!(state.mode, Mode::Draft);
+        assert_eq!(state.draft.as_str(), "echo newest-draft");
+        assert!(!state.draft_from_editor);
+        assert!(!state.draft_from_template);
     }
 
     #[test]

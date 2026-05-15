@@ -117,6 +117,7 @@ pub struct AppState {
     pub secret_key_path: Option<PathBuf>,
     pub config_path: Option<PathBuf>,
     pub draft_persist: bool,
+    pub draft_history: Vec<DraftEntry>,
     pub regular_history: Vec<HistoryEntry>,
     pub selected_history_index: Option<usize>,
     pub ai_sessions: Vec<AiSession>,
@@ -167,6 +168,7 @@ impl Default for AppState {
             secret_key_path: None,
             config_path: None,
             draft_persist: true,
+            draft_history: Vec::new(),
             regular_history: Vec::new(),
             selected_history_index: None,
             ai_sessions: Vec::new(),
@@ -312,6 +314,26 @@ impl AppState {
         self.draft_from_template = false;
         self.mode = Mode::Draft;
         self.clear_completion_ui();
+    }
+
+    pub fn restore_latest_saved_draft(&mut self) -> bool {
+        if !self.draft_persist || !self.draft.is_empty() || self.draft_from_editor {
+            return false;
+        }
+        let Some(entry) = self
+            .draft_history
+            .iter()
+            .rev()
+            .find(|entry| !entry.text.is_empty())
+        else {
+            return false;
+        };
+        self.draft = InputBuffer::from(entry.text.clone());
+        self.draft_from_editor = false;
+        self.draft_from_template = false;
+        self.mode = Mode::Draft;
+        self.clear_completion_ui();
+        true
     }
 
     pub fn prepare_editor_session(
@@ -753,6 +775,7 @@ pub fn run() -> Result<()> {
         secret_key_path: Some(layout.secrets.join("key.json.gpg")),
         config_path: Some(layout.config),
         draft_persist: config.draft.persist,
+        draft_history: store.drafts,
         regular_history: store.regular,
         ai_sessions: store.ai_sessions,
         ai_command_indices: store.ai_command_indices,
@@ -2619,6 +2642,23 @@ pub fn save_draft_if_configured(state: &AppState) -> Result<bool> {
             text: state.draft.as_str().to_string(),
         },
     )?;
+    Ok(true)
+}
+
+pub fn save_draft_and_update_state_if_configured(state: &mut AppState) -> Result<bool> {
+    if !state.draft_persist || state.draft.is_empty() {
+        return Ok(false);
+    }
+    let entry = DraftEntry {
+        t: (state.clock)(),
+        text: state.draft.as_str().to_string(),
+    };
+    let Some(path) = &state.draft_history_path else {
+        return Ok(false);
+    };
+
+    append_jsonl(path, &entry)?;
+    state.draft_history.push(entry);
     Ok(true)
 }
 

@@ -171,6 +171,7 @@ Status as of the latest full review:
 - [x] Implement interactive continuation drafts for unfinished quotes and trailing backslash continuations.
 - [x] Keep continuation redraw stable in raw terminal mode and suppress backend secondary prompts from displayed command output.
 - [x] Implement `Down` in a non-empty ordinary draft as save-current-draft and start-new-draft.
+- [x] Implement `Up` in an empty ordinary draft as restore-latest-saved-draft.
 - [x] Implement command submission from draft to PTY.
 
 ### Acceptance criteria
@@ -178,7 +179,7 @@ Status as of the latest full review:
 - User can edit text in the middle of a command.
 - Token movement works.
 - `Enter` sends the exact draft buffer to backend shell.
-- `Down` can save an unfinished ordinary draft and clear the prompt for a new draft without executing it.
+- `Down` can save an unfinished ordinary draft and clear the prompt for a new draft without executing it; `Up` can restore that saved draft.
 - Multi-line draft returned from external editor can be submitted.
 
 ---
