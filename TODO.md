@@ -92,6 +92,7 @@ Status as of the latest full review:
 - [ ] Implement central event loop:
   - [x] keyboard events
   - [x] paste events
+  - [x] explicit frontend event source for keyboard, paste, resize, ignored terminal events, and tick wakeups
   - [ ] PTY output events
     - [x] Centralize backend PTY reads around explicit output/idle events instead of duplicating per-marker loops.
     - [x] Expose command-running PTY output, input-poll, and idle ticks through one event callback.
@@ -99,6 +100,8 @@ Status as of the latest full review:
     - [x] Preserve raw PTY display bytes, including carriage-return progress updates, while filtering Aish marker lines.
     - [x] Route all backend shells through one streaming display path, including fish with stateful repaint filtering.
   - [ ] timer/background events
+    - [x] Add a no-op frontend tick event so future timers have a stable event-loop hook.
+    - [ ] Attach real background work to tick events.
 - [x] Fix real-terminal backend output visibility regressions that old expect byte-stream tests missed.
 - [x] Add persistent `tmux`-driven end-to-end screen-capture scripts for real terminal verification.
 - [x] Add redraw function for prompt/input line.

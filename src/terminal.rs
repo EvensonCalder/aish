@@ -28,6 +28,8 @@ use crate::pty::{PtyBackend, pty_size};
 use crate::shell_integration::passthrough_key_bytes;
 use crate::templates::template_placeholder_spans;
 
+const FRONTEND_TICK_INTERVAL: Duration = Duration::from_millis(50);
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KeyAction {
     Continue,
@@ -47,6 +49,15 @@ pub enum KeyAction {
     PreviousDraft,
     NextDraft,
     ForwardToBackend(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TerminalEvent {
+    Key(KeyEvent),
+    Paste(String),
+    Resize(u16, u16),
+    Tick,
+    Ignore,
 }
 
 pub struct TerminalGuard;
@@ -108,6 +119,22 @@ pub fn install_panic_cleanup() {
     }));
 }
 
+fn read_frontend_event(tick_interval: Duration) -> Result<TerminalEvent> {
+    if !event::poll(tick_interval)? {
+        return Ok(TerminalEvent::Tick);
+    }
+    Ok(terminal_event_from_crossterm(event::read()?))
+}
+
+fn terminal_event_from_crossterm(event: Event) -> TerminalEvent {
+    match event {
+        Event::Key(key) => TerminalEvent::Key(key),
+        Event::Paste(text) => TerminalEvent::Paste(text),
+        Event::Resize(cols, rows) => TerminalEvent::Resize(cols, rows),
+        _ => TerminalEvent::Ignore,
+    }
+}
+
 pub fn run(
     state: &mut AppState,
     backend: &mut PtyBackend,
@@ -121,12 +148,14 @@ pub fn run(
     redraw(state, out)?;
 
     loop {
-        match event::read()? {
-            Event::Key(key) if handle_key(key, state, backend, out, command_timeout)? => {
-                let _ = save_draft_if_configured(state)?;
-                break;
+        match read_frontend_event(FRONTEND_TICK_INTERVAL)? {
+            TerminalEvent::Key(key) => {
+                if handle_key(key, state, backend, out, command_timeout)? {
+                    let _ = save_draft_if_configured(state)?;
+                    break;
+                }
             }
-            Event::Paste(text) => {
+            TerminalEvent::Paste(text) => {
                 if apply_paste_to_state(&text, state) == PasteAction::Submit {
                     let mut display_out = CrLfWriter::new(out);
                     execute_draft(state, backend, &mut display_out, command_timeout)?;
@@ -137,11 +166,11 @@ pub fn run(
                 refresh_live_completion_ui(state)?;
                 redraw(state, out)?;
             }
-            Event::Resize(cols, rows) => {
+            TerminalEvent::Resize(cols, rows) => {
                 backend.resize(pty_size(cols, rows))?;
                 redraw(state, out)?;
             }
-            _ => {}
+            TerminalEvent::Tick | TerminalEvent::Ignore => {}
         }
     }
 
@@ -1176,6 +1205,26 @@ mod tests {
 
     fn alt_key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::ALT)
+    }
+
+    #[test]
+    fn terminal_event_source_maps_crossterm_events() {
+        assert_eq!(
+            terminal_event_from_crossterm(Event::Key(key(KeyCode::Char('x')))),
+            TerminalEvent::Key(key(KeyCode::Char('x')))
+        );
+        assert_eq!(
+            terminal_event_from_crossterm(Event::Paste("echo ok".to_string())),
+            TerminalEvent::Paste("echo ok".to_string())
+        );
+        assert_eq!(
+            terminal_event_from_crossterm(Event::Resize(100, 30)),
+            TerminalEvent::Resize(100, 30)
+        );
+        assert_eq!(
+            terminal_event_from_crossterm(Event::FocusGained),
+            TerminalEvent::Ignore
+        );
     }
 
     fn fixed_clock() -> i64 {
