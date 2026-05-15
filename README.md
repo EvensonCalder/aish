@@ -259,6 +259,8 @@ Recognized note lines are stored as notes rather than reaching the shell:
 
 Aish never silently edits or executes AI output. AI results are parsed into browsable items and shown in `%` mode. You execute one selected command at a time with `Enter`.
 
+For generic requests, Aish asks the AI provider to use brace placeholders instead of literals. For example, a generic "echo something" request should prefer a reusable shape like `echo {message}` over `echo "something"`.
+
 Context pseudo-pipe prompts use this form:
 
 ```text
@@ -456,7 +458,7 @@ cargo test
 Current active inventory:
 
 - 400 library unit tests.
-- 25 draft execution integration tests.
+- 26 draft execution integration tests.
 - 1 first-run integration test.
 - 13 PTY integration tests, with bash/zsh active by default and fish-specific cases opt-in.
 - 109 expect-driven end-to-end interactive scenarios.

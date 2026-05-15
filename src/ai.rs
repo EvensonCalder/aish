@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use crate::config::AiConfig;
 use crate::history::{AiItem, AiItemKind};
 
-pub const AI_SYSTEM_PROMPT: &str = "You generate shell command candidates for Aish. Return final JSON only. Do not include reasoning, markdown, or prose. The JSON must match {\"items\":[{\"kind\":\"command\",\"text\":\"...\"}]} or template items with kind=\"template\", name, and text. Do not include secrets or unrelated commands.";
+pub const AI_SYSTEM_PROMPT: &str = "You generate shell command candidates for Aish. Return final JSON only. Do not include reasoning, markdown, or prose. The JSON must match {\"items\":[{\"kind\":\"command\",\"text\":\"...\"}]} or template items with kind=\"template\", name, and text. Answer only the current user request; do not repeat unrelated examples or previous commands. For concrete values, emit a concrete command. For generic words such as something, message, file, path, pattern, name, or value, use explicit brace placeholders in the command text, for example echo {message}, instead of treating those words as literal arguments. Use template items for reusable command shapes. Do not include secrets or unrelated commands.";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChatMessage {
@@ -213,6 +213,18 @@ mod tests {
                 .as_str()
                 .unwrap()
                 .contains("final JSON only")
+        );
+        assert!(
+            body["messages"][0]["content"]
+                .as_str()
+                .unwrap()
+                .contains("echo {message}")
+        );
+        assert!(
+            body["messages"][0]["content"]
+                .as_str()
+                .unwrap()
+                .contains("do not repeat unrelated examples")
         );
         assert_eq!(body["messages"][1]["content"], "list files");
     }

@@ -631,6 +631,7 @@ Rules:
 - `kind = "template"` means a suggested template candidate, not automatically saved.
 - Template suggestions are not persisted unless the user explicitly creates a template with `#mt`.
 - Placeholders use `{name}` or `{name:description}`.
+- Generic filler words such as `something`, `file`, `path`, `pattern`, `name`, or `value` should become brace placeholders in generated command text instead of literal shell arguments.
 - Commands containing unresolved placeholders must not execute until replaced.
 
 Example user prompt:

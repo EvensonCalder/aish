@@ -131,6 +131,7 @@ pub struct AppState {
     pub paste_config: PasteConfig,
     pub completion_config: CompletionConfig,
     pub ai_config: AiConfig,
+    pub ai_requester: fn(&AiConfig, &str) -> Result<Vec<AiItem>>,
     pub context_config: ContextConfig,
     pub sync_config: SyncConfig,
     pub pending_context: Option<PendingContextPrompt>,
@@ -184,6 +185,7 @@ impl Default for AppState {
             paste_config: PasteConfig::default(),
             completion_config: CompletionConfig::default(),
             ai_config: AiConfig::default(),
+            ai_requester: request_ai_items,
             context_config: ContextConfig::default(),
             sync_config: SyncConfig::default(),
             pending_context: None,
@@ -327,13 +329,17 @@ impl AppState {
     }
 
     pub fn clear_draft_for_new_draft(&mut self) {
+        self.clear_draft_preserving_mode();
+        self.mode = Mode::Draft;
+    }
+
+    pub fn clear_draft_preserving_mode(&mut self) {
         self.draft.clear();
         self.continuation_prompt = None;
         self.draft_from_editor = false;
         self.draft_from_ai_editor = false;
         self.draft_from_template = false;
         self.selected_draft_index = None;
-        self.mode = Mode::Draft;
         self.clear_completion_ui();
     }
 
@@ -986,7 +992,7 @@ pub fn execute_draft(
             }
             _ => unreachable!("AI editor drafts are submitted as AI prompts"),
         }
-        state.clear_draft_for_new_draft();
+        state.clear_draft_preserving_mode();
         return Ok(());
     }
     if state.draft_from_template {
@@ -1377,12 +1383,12 @@ pub fn execute_draft(
             }
             ParsedLine::AiPrompt(prompt) => {
                 submit_ai_prompt(state, prompt, out)?;
-                state.clear_draft_for_new_draft();
+                state.clear_draft_preserving_mode();
                 return Ok(());
             }
             ParsedLine::AiPromptWithContext { prompt, command } => {
                 submit_ai_prompt_with_context(state, prompt, command, out, timeout)?;
-                state.clear_draft_for_new_draft();
+                state.clear_draft_preserving_mode();
                 return Ok(());
             }
         }
@@ -1638,7 +1644,7 @@ pub fn answer_context_confirmation(
 }
 
 fn submit_ai_prompt(state: &mut AppState, prompt: &str, out: &mut impl Write) -> Result<()> {
-    match request_ai_items(&state.ai_config, prompt) {
+    match (state.ai_requester)(&state.ai_config, prompt) {
         Ok(items) => {
             let item_count = items.len();
             let model = state.ai_config.model.clone();
@@ -1647,11 +1653,7 @@ fn submit_ai_prompt(state: &mut AppState, prompt: &str, out: &mut impl Write) ->
                     EventLevel::Info,
                     &format!("AI generated {item_count} item(s)"),
                 )?;
-                writeln!(
-                    out,
-                    "AI items generated: {}",
-                    state.ai_command_indices.len()
-                )?;
+                writeln!(out, "AI items generated: {}", item_count)?;
             } else {
                 state.append_event(EventLevel::Warn, "AI response contained no command items")?;
                 writeln!(out, "AI response contained no command items")?;

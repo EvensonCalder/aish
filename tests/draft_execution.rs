@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use aish::app::{AppState, execute_draft};
 use aish::commands::NoteTag;
+use aish::config::AiConfig;
 use aish::editor::prepare_editor_file;
 use aish::history::{
     AiCommandIndex, AiItem, AiItemKind, AiSession, HistoryEntry, HistorySource, NoteEntry,
@@ -680,6 +681,66 @@ fn execute_ai_editor_draft_submits_as_ai_prompt_not_shell_text() {
     assert!(state.draft.is_empty());
     assert!(!state.draft_from_editor);
     assert!(!state.draft_from_ai_editor);
+}
+
+fn fake_echo_message_ai_items(_: &AiConfig, prompt: &str) -> anyhow::Result<Vec<AiItem>> {
+    assert_eq!(prompt, "how to echo something?");
+    Ok(vec![AiItem {
+        kind: AiItemKind::Command,
+        text: "echo {message}".to_string(),
+        name: None,
+    }])
+}
+
+#[test]
+fn execute_ai_prompt_switches_to_new_ai_session_and_reports_new_item_count() {
+    let _guard = pty_execution_guard();
+    let mut state = AppState {
+        ai_requester: fake_echo_message_ai_items,
+        ai_sessions: vec![AiSession {
+            id: "old".to_string(),
+            t: 1,
+            prompt: "old".to_string(),
+            ctx: false,
+            model: "test-model".to_string(),
+            items: vec![AiItem {
+                kind: AiItemKind::Command,
+                text: "echo hello".to_string(),
+                name: None,
+            }],
+        }],
+        ai_command_indices: vec![AiCommandIndex {
+            session_index: 0,
+            item_index: 0,
+        }],
+        selected_ai_index: Some(0),
+        clock: fixed_clock,
+        ..AppState::default()
+    };
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    state.draft.insert_str("# how to echo something?");
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(
+        output.contains("AI items generated: 1"),
+        "output was {output:?}"
+    );
+    assert_eq!(state.mode, Mode::Ai);
+    assert!(state.draft.is_empty());
+    assert_eq!(state.ai_sessions.len(), 2);
+    assert_eq!(state.ai_command_indices.len(), 2);
+    assert_eq!(state.selected_ai_index, Some(1));
+    assert_eq!(state.selected_ai_command(), Some("echo {message}"));
 }
 
 #[test]
