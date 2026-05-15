@@ -1,83 +1,260 @@
 # Aish
 
-Aish is an AI-assisted terminal wrapper. The name means **Aish Is not a SHell**: your real shell still executes commands and owns shell semantics, while Aish provides a safer prompt, history/AI browsing modes, templates, completion, editor review, and context-aware AI plumbing around it.
+**Aish Is not a SHell.** Aish is a smart command-input layer on top of a real shell running inside a PTY.
+
+Aish does not try to replace Bash, Zsh, or Fish. The backend shell still owns command execution, shell syntax, aliases, functions, job control, environment state, and process behavior. Aish owns the interactive input experience around that shell: editable drafts, history and AI browsing modes, live inline completion, templates, safe context collection, editor review, pickers, logging, and conservative sync.
+
+## Current Status
+
+Aish is a usable `0.1` terminal wrapper with extensive unit, expect, PTY, and tmux screen-capture coverage.
+
+Implemented and covered:
+
+- Persistent PTY backend shell with cwd/state preservation.
+- Draft, history, and AI browsing modes.
+- Readline-style draft editing.
+- Shell continuation drafts for unfinished quotes and trailing backslashes.
+- Live inline completion with below-prompt hints.
+- External editor and multiline paste review.
+- History, notes, templates, and event log storage.
+- Safe AI request plumbing and context pseudo-pipe flow.
+- `fzf`-based history, file, template, git branch, and environment pickers.
+- Allowlisted foreground passthrough for interactive and stdin-oriented commands.
+- Conservative Git sync configuration and manual push flow.
+- Real-terminal regression coverage through `tmux`.
+
+Explicitly incomplete:
+
+- GPG-backed key storage and encrypted history/templates are not implemented yet.
+- `#key set` and `#encrypt on|off` are safe placeholders; `#key clear` can remove an existing key file.
+- Configurable key rebinding is not implemented yet.
+- Fish support is opt-in until behavior is validated across macOS and representative Linux distributions.
+- Full automatic passthrough for arbitrary interactive programs remains future work; Aish currently uses an allowlist and tested stdin-command handling.
 
 ## Quickstart
 
-Build and run the debug binary:
+Build and run:
 
 ```sh
 cargo build
 ./target/debug/aish
 ```
 
-On first run, Aish creates an Aish home directory, defaulting to `~/.aish`. For isolated testing or demos, set `AISH_HOME`:
+For an isolated demo or test run:
 
 ```sh
 AISH_HOME=/tmp/aish-demo ./target/debug/aish
 ```
 
-The prompt starts in draft mode with `>`. Type a shell command and press `Enter`; the backend shell keeps state, so `cd /tmp` affects later commands.
+On first run, Aish creates an Aish home directory. By default this is `~/.aish`; `AISH_HOME` overrides it and must be an absolute path.
+
+Type a normal shell command and press `Enter`:
+
+```sh
+cd /tmp
+pwd
+```
+
+The backend shell is persistent, so `cd`, `export`, sourced files, aliases, and functions affect later commands like they would in a normal shell.
+
+## Mental Model
+
+```text
+keyboard / terminal
+        |
+        v
+  Aish prompt editor
+        |
+        | raw command text
+        v
+ persistent PTY shell
+        |
+        v
+ real programs and shell semantics
+```
+
+Ordinary input is sent to the backend shell unchanged. Line-leading `#` at the Aish prompt is reserved for Aish commands and AI prompts. Editor-submitted content is raw shell input and intentionally bypasses Aish private-command parsing.
 
 ## Modes
 
-- `>` draft mode: edit and submit commands.
-- `$` history mode: browse regular command history.
-- `%` AI mode: browse generated AI command items.
+Aish has three primary modes:
 
-Press empty `Tab` to cycle modes. Editing a read-only history or AI item copies it back to draft mode first.
+| Prompt | Mode | Purpose |
+| --- | --- | --- |
+| `>` | Draft | Edit and submit new shell commands. |
+| `$` | History | Browse regular command history read-only. |
+| `%` | AI | Browse AI-generated command items read-only. |
+
+Empty `Tab` cycles modes. Editing a read-only history or AI item copies it back into draft mode first. `Enter` executes the current draft or selected read-only item.
 
 ## Keybindings
 
-- `Enter`: submit the draft or selected read-only item.
-- `Tab` on an empty draft: cycle `>` / `$` / `%` modes.
-- `Tab` on a non-empty draft: show inline completion guidance, then accept the inline suggestion on the next `Tab`; when inline completion is disabled, accept the first ranked candidate directly.
-- `Right` at the end of a non-empty draft: accept completion using the configured completion accept mode.
-- `Ctrl-C`: clear the current draft or cancel pending continuation/context confirmation.
+Core keys:
+
+- `Enter`: submit the current draft or selected read-only item.
+- Empty `Tab`: cycle `>` / `$` / `%` modes.
+- Non-empty `Tab`: accept the current inline completion, or directly accept the first candidate when inline completion is disabled.
+- `Right` at end of line: accept completion using the configured accept mode.
+- `Ctrl-C`: clear the draft, cancel continuation, or reject pending context confirmation.
 - `Ctrl-D` on an empty draft: exit.
-- `Ctrl-L`: clear screen.
-- `Ctrl-A`, `Ctrl-E`, `Ctrl-U`, `Ctrl-K`, `Ctrl-W`, `Alt-B`, `Alt-F`, arrows: readline-style editing/navigation.
+- `Ctrl-L`: clear the screen.
+- `Esc`: clear the draft and return to draft mode.
+
+Editing keys:
+
+- `Left` / `Right`: move by character.
+- `Ctrl-A` / `Ctrl-E`: move to start/end.
+- `Alt-B` / `Alt-F` or `Alt-Left` / `Alt-Right`: move by word.
+- `Backspace` / `Delete`: delete around the cursor.
+- `Ctrl-U` / `Ctrl-K`: delete to start/end.
+- `Ctrl-W`: delete previous word.
+
+Tools:
+
+- `Ctrl-R`: history search through external `fzf`.
 - `Ctrl-X Ctrl-E`: open the configured external editor.
-- `Ctrl-R`: launch history search through external `fzf`.
 - `Ctrl-X Ctrl-F`: file picker through external `fzf`.
 - `Ctrl-X Ctrl-T`: template picker through external `fzf`.
 - `Ctrl-X Ctrl-B`: git branch picker through external `fzf`.
 - `Ctrl-X Ctrl-V`: environment variable picker through external `fzf`.
 
+## Completion
+
+Inline completion is enabled by default and refreshes while you type. The best candidate appears as dim ghost text on the active prompt line. Remaining candidates can appear below the prompt as informational hints.
+
+Important rules:
+
+- The inline suggestion is display-only until accepted.
+- The below-prompt panel is advisory and never decides what `Tab` accepts.
+- `completion.max_results` controls only the number of below-prompt rows.
+- The panel skips the current inline candidate and shows remaining suffixes where possible.
+- Candidate rows are width-aware and elide with `...` instead of wrapping.
+- If `completion.inline=false`, non-empty `Tab` preserves the legacy behavior and accepts the first ranked candidate directly.
+
+Completion sources:
+
+- First token: templates, regular history, then PATH executables.
+- Non-first token: history arguments, template placeholders, and filesystem paths.
+- Paths preserve directory prefixes and mark directories with `/`.
+- Matching ignores spaces by default.
+
+Configuration:
+
+```toml
+[completion]
+max_results = 5
+ignore_spaces = true
+template_first = true
+inline = true
+tab_accept = "full" # "full" or "word"
+```
+
+Commands:
+
+```text
+#completion
+#completion max 8
+#completion inline on
+#completion inline off
+#completion tab-accept full
+#completion tab-accept word
+```
+
+`tab_accept = "word"` accepts only through the next whitespace boundary in the untyped suffix. This is useful for long history completions such as `kubectl apply -f deployment.yaml`.
+
 ## Private Commands
 
-Line-leading `#` input is handled by Aish and is not accidentally sent to the backend shell.
+Line-leading `#` is handled by Aish and is not accidentally sent to the backend shell.
 
-Implemented commands include:
+Diagnostics and status:
 
-- `#help`: list private commands and keybindings.
-- `#status`: print runtime status, AI config source, completion/context config, and diagnostics.
-- `#doctor`: print setup diagnostics for shell, PTY, editor, `fzf`, AI config, and storage paths.
-- `#config`: print config paths and runtime config values.
-- `#model <name>`: set AI model.
-- `#base-url <url>`: set and normalize chat-completions base URL.
-- `#env-key <NAME>`: configure the API key environment variable name.
-- `#context on|off|confirm on|confirm off|<bytes>`: configure context capture.
-- `#completion max <count>`: configure the below-prompt completion row limit.
-- `#completion inline on|off`: enable or disable inline completion guidance.
-- `#completion tab-accept full|word`: choose whether `Tab` accepts the full suggestion or only the next shell word.
-- `#log <count>`: print recent event log entries.
-- `#history <count>`: trim combined regular and AI command history.
-- `#mt <name> <body>`: store a template.
-- `#template list|show|use|rm|replace ...`: manage templates.
-- `#exit` / `#quit`: exit Aish.
+```text
+#help
+#status
+#doctor
+#config
+#log <count>
+```
 
-Recognized note commands are stored as notes instead of reaching the shell:
+AI configuration:
 
-- `# TODO: ...`
-- `# NOTE: ...`
-- `# FIXME: ...`
-- `# HACK: ...`
-- `# XXX: ...`
+```text
+#model <name>
+#base-url <url>
+#env-key <ENV_NAME>
+```
 
-## AI Safety
+Completion:
 
-Aish never auto-executes AI output. AI responses are parsed as JSON items, shown in `%` mode, and executed only when you explicitly press `Enter` on a selected command item.
+```text
+#completion
+#completion max <count>
+#completion inline on|off
+#completion tab-accept full|word
+```
+
+Context:
+
+```text
+#context on|off
+#context confirm on|off
+#context <max-bytes>
+```
+
+History, notes, and templates:
+
+```text
+#history <count>
+#mt <name> <template>
+#template list
+#template show <name>
+#template use <name> [key=value ...]
+#template rm <name>
+#template replace <name> <template>
+```
+
+Sync:
+
+```text
+#set-remote <git-url>
+#push
+#sync <cron-expression>
+#sync off
+#sync ai on|off
+#sync history on|off
+#sync templates on|off
+#sync drafts on|off
+```
+
+Encryption placeholders:
+
+```text
+#key set
+#key clear
+#encrypt on
+#encrypt off
+```
+
+Exit:
+
+```text
+#exit
+#quit
+```
+
+Recognized note lines are stored as notes rather than reaching the shell:
+
+```text
+# TODO: ...
+# NOTE: ...
+# FIXME: ...
+# HACK: ...
+# XXX: ...
+```
+
+## AI And Context
+
+Aish never silently edits or executes AI output. AI results are parsed into browsable items and shown in `%` mode. You execute one selected command at a time with `Enter`.
 
 Context pseudo-pipe prompts use this form:
 
@@ -85,66 +262,208 @@ Context pseudo-pipe prompts use this form:
 # explain this < command producing context
 ```
 
-Context commands are confirmed by default, dangerous patterns are blocked or require confirmation, captured context is byte-limited, truncation is disclosed, and common token-shaped secrets are redacted before context is added to the AI request prompt.
+Context safety rules:
+
+- Context collection is enabled by default.
+- Context commands require confirmation by default.
+- `#context confirm off` allows safe context commands to run immediately.
+- Dangerous command patterns still require confirmation or are blocked.
+- Captured context is byte-limited.
+- Truncation is disclosed.
+- Common token-shaped secrets are redacted before the AI request prompt is built.
+
+AI requests use a chat-completions-compatible endpoint. Configure the model, base URL, and key environment variable with the commands above or in `config.toml`.
 
 ## Editor And Paste Review
 
-`Ctrl-X Ctrl-E` opens the configured editor (`editor.command`, `$VISUAL`, `$EDITOR`, `nvim`, `vim`, then `vi`). Saved editor content returns as an opaque editor draft and is not executed until you press `Enter`.
+`Ctrl-X Ctrl-E` opens the configured editor. Resolution order:
 
-Multi-line paste defaults to editor-review behavior. Aish shows an editor draft summary with `review before Enter`; pasted commands are not silently executed unless configured otherwise.
+1. `editor.command` from config.
+2. `$VISUAL`.
+3. `$EDITOR`.
+4. `nvim`.
+5. `vim`.
+6. `vi`.
 
-Editor-returned content intentionally bypasses Aish private-command parsing. This means a leading `#` line from the editor is submitted as raw shell content when you explicitly run the editor draft.
+Saved editor content returns as an opaque editor draft. It is not executed until you press `Enter`.
+
+Multiline paste defaults to editor-review behavior. Aish shows a compact draft summary instead of rendering the full pasted content inline. This prevents accidental execution and keeps the prompt usable. Editor-returned content is submitted as raw shell input when explicitly executed, even if it contains line-leading `#`.
 
 ## Templates
 
-Templates are stored as JSONL entries under the Aish home. Placeholders use `{name}`, `{name:description}`, and `{name...}` syntax.
+Templates are stored as JSONL under the Aish home directory.
 
-Unresolved template placeholders block execution, so `echo {message}` from a template cannot run until the placeholder is resolved or edited into plain draft text.
+Create one:
 
-## Completion And Pickers
+```text
+#mt deploy rsync -avz {from} {user}@{host}:{to}
+```
 
-Completion works directly in draft mode. Template completions rank before history and executable candidates for first-token completion. Non-first-token completion can use history arguments, template placeholders, and filesystem paths. Inline completion is enabled by default; the below-prompt panel is informational and limited by `completion.max_results`.
+Use one:
 
-Picker features use external `fzf`; Aish does not implement an internal picker UI.
+```text
+#template use deploy from=dist user=deploy host=example.com to=/srv/app
+```
 
-## Encryption And Sync Status
+Placeholders:
 
-GPG-backed key storage and encrypted history/templates are not implemented yet. Current `#key set` and `#encrypt` commands are safe placeholders except that `#encrypt on` warns about existing plaintext in git history. `#key clear` removes an existing encrypted key file if present.
+- `{name}`: required value.
+- `{name:description}`: required value with human-readable description.
+- `{name...}`: variadic value.
 
-Git sync configuration and manual sync are implemented conservatively. `#set-remote`, `#sync off`, `#sync <expr>`, and `#sync ai|history|templates|drafts on|off` persist sync configuration without creating scheduler files. `#push` runs a conservative local git flow for configured remotes: pull with rebase, add managed enabled paths, commit if needed, and push. Aish does not auto-resolve conflicts, does not rewrite history, and does not run `git rm --cached` automatically.
+Unresolved placeholders block execution, so a template cannot accidentally run with `{message}` or similar still present.
 
-## Shell Integration Notes
+## Pickers
 
-Aish starts a backend shell on a PTY. Bash and zsh are actively covered. Aish uses markers to detect command completion and cwd, filters internal marker output, and keeps Aish marker commands out of shell history where supported.
+Aish uses external `fzf` for picker UIs. If `fzf` is missing or a picker is cancelled, Aish reports that clearly and preserves the draft.
 
-Shell continuation uses shell-native syntax checks where possible. Incomplete quote input such as `echo "` or `echo '` becomes an Aish continuation draft with shell-style prompts. Odd trailing backslashes are treated as continuations to match interactive shell behavior.
+Picker surfaces:
 
-Fish integration is experimental and kept out of the default verification matrix until it is validated across macOS and representative Linux distributions; set `AISH_TEST_FISH=1` to run the opt-in fish PTY/tmux tests. Allowlisted interactive commands such as `less`, `vim`, `nvim`, `ssh`, `top`, `fzf`, and `tmux` can use foreground passthrough. Full automatic passthrough for arbitrary alternate-screen programs remains future work.
+- `Ctrl-R`: history search.
+- `Ctrl-X Ctrl-F`: file picker.
+- `Ctrl-X Ctrl-T`: template picker.
+- `Ctrl-X Ctrl-B`: git branch picker.
+- `Ctrl-X Ctrl-V`: environment variable picker.
+
+## Shell Backends
+
+Default backend selection:
+
+1. `shell.backend` from config when set to a concrete shell path.
+2. `$SHELL` when `shell.backend = "auto"`.
+3. `/bin/bash` fallback.
+
+Config:
+
+```toml
+[shell]
+backend = "auto"
+```
+
+Bash and zsh are the default compatibility baseline and are covered by default PTY/tmux tests. Fish support exists but remains opt-in while cross-platform behavior is validated:
+
+```sh
+AISH_TEST_FISH=1 cargo test --test pty_backend -- --nocapture
+AISH_TEST_FISH=1 cargo test --test tmux_capture tmux_common_shell_workflow_matches_fish_backend_real_terminal_screen -- --nocapture
+```
+
+Aish uses shell markers to detect command completion and cwd, filters those markers from user-visible output, and avoids polluting shell history with Aish-owned marker commands where supported.
+
+## Interactive And Stdin Passthrough
+
+Aish foregrounds allowlisted interactive commands so they can own the terminal until they return. This includes common shells, editors, pagers, SSH-like tools, REPLs, database CLIs, `tmux`/`screen`, `gpg`/`pinentry`, and similar programs.
+
+Common stdin-oriented commands such as `cat`, `grep`, `sed`, `awk`, `sort`, `uniq`, `wc`, `tee`, `base64`, and `openssl` are also foregrounded when they are not wrapped in shell control syntax. This prevents commands that wait for stdin from wedging the Aish prompt.
+
+Full automatic detection for every possible alternate-screen or job-control program remains future work.
+
+## Sync
+
+Sync is deliberately conservative.
+
+Implemented:
+
+- Persist remote and sync category config.
+- Persist supported startup sync schedules.
+- Run `#push` against a configured Git remote.
+- Pull with rebase before pushing.
+- Add only managed enabled paths.
+- Commit only when there is something to commit.
+- Abort on conflict-like failures.
+- Log sync failures without leaking secret-like values.
+
+Aish does not:
+
+- Auto-resolve conflicts.
+- Rewrite history.
+- Run `git rm --cached` automatically.
+- Create scheduler files.
+- Remove user-managed files.
+
+## Encryption Status
+
+Encryption is intentionally not overclaimed.
+
+Current behavior:
+
+- `#key set` reports that key storage is not implemented yet.
+- `#key clear` removes an existing encrypted key file if present.
+- `#encrypt on|off` are safe placeholders and do not migrate storage.
+- `#encrypt on` warns conservatively about plaintext that may already exist in Git history.
+
+Future encryption work needs a tested GPG boundary, fake-GPG or isolated-key integration tests, encrypted history/template writes, locked-history behavior, and a terminal-safe unlock/pinentry flow before it can be considered complete.
+
+## Files And Storage
+
+Default layout under `~/.aish`:
+
+```text
+config.toml
+history/
+  regular.jsonl
+  ai.jsonl
+  draft.jsonl
+  notes.jsonl
+templates/
+  templates.jsonl
+logs/
+  events.jsonl
+secrets/
+cache/
+.gitignore
+```
+
+Use `#doctor`, `#status`, and `#config` to inspect the active paths and runtime settings.
 
 ## Testing
 
-Run the main verification set before committing:
+Main verification for feature changes:
 
 ```sh
 cargo fmt --check
 cargo test --lib
-cargo test --test draft_execution
-cargo test --test pty_backend
-cargo test --test expect_runner
-cargo test --test first_run
+cargo test --test draft_execution -- --nocapture
+cargo test --test first_run -- --nocapture
+cargo test --test pty_backend -- --nocapture
+cargo test --test expect_runner -- --test-threads=1 --nocapture
+cargo test --test tmux_capture -- --test-threads=1 --nocapture
 cargo clippy --all-targets -- -D warnings
 git diff --check
 cargo build
 ```
 
-Expect tests launch the built `aish` binary in real terminal sessions with isolated `AISH_HOME` directories.
+Shorter all-Rust pass:
+
+```sh
+cargo test
+```
+
+Current active inventory:
+
+- 380 library unit tests.
+- 23 draft execution integration tests.
+- 1 first-run integration test.
+- 13 PTY integration tests, with bash/zsh active by default and fish-specific cases opt-in.
+- 106 expect-driven end-to-end interactive scenarios.
+- 32 tmux screen-capture integration tests.
+
+Expect and tmux tests launch real terminal sessions with isolated Aish homes. They should be serialized because concurrent real-terminal sessions can create false prompt and scheduler failures.
 
 ## Troubleshooting
 
-Run:
+Run diagnostics:
 
 ```text
 #doctor
+#status
+#log 20
 ```
 
-Use `#status` for current runtime status and `#log <count>` for recent event-log entries. These diagnostics redact common token-shaped secrets and report key source without printing the key itself.
+Useful environment overrides:
+
+```sh
+AISH_HOME=/tmp/aish-debug ./target/debug/aish
+NO_COLOR=1 ./target/debug/aish
+```
+
+If a command appears to wait for stdin or take over the terminal incorrectly, test it in a normal shell and then in Aish. Aish should foreground common interactive and stdin-oriented commands; new real-world failures should get a tmux regression test.
