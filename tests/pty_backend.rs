@@ -1,3 +1,4 @@
+use std::fs;
 use std::path::Path;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -78,6 +79,70 @@ fn bash_pty_backend_suppresses_readline_prompt_protocol_noise() {
     assert!(!result.output.contains("\x1b[?2004"));
     assert!(!result.output.starts_with('\n'));
     assert!(!result.output.ends_with("\n\n"));
+}
+
+#[test]
+fn bash_pty_backend_loads_user_bashrc_without_prompt_noise() {
+    let _guard = pty_test_guard();
+    let home = tempfile::tempdir().unwrap();
+    let bin_dir = home.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    fs::write(
+        bin_dir.join("from-aish-rc-path"),
+        "#!/bin/sh\nprintf 'path-from-bashrc\\n'\n",
+    )
+    .unwrap();
+    std::process::Command::new("chmod")
+        .arg("+x")
+        .arg(bin_dir.join("from-aish-rc-path"))
+        .status()
+        .unwrap();
+    fs::write(
+        home.path().join(".bashrc"),
+        format!(
+            "[ -z \"$PS1\" ] && return\n\
+             alias aish_alias_from_rc='printf alias-from-bashrc\\\\n'\n\
+             aish_function_from_rc() {{ printf 'function-from-bashrc\\n'; }}\n\
+             export AISH_RC_ENV=env-from-bashrc\n\
+             export PATH=\"{}:$PATH\"\n\
+             PS1='bashrc-prompt> '\n\
+             PROMPT_COMMAND='printf prompt-command-noise\\\\n'\n",
+            bin_dir.display()
+        ),
+    )
+    .unwrap();
+    let _home_guard = EnvVarGuard::set("HOME", home.path().as_os_str());
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+
+    let alias = backend
+        .run_command("aish_alias_from_rc", Duration::from_secs(5))
+        .unwrap();
+    let function = backend
+        .run_command("aish_function_from_rc", Duration::from_secs(5))
+        .unwrap();
+    let env = backend
+        .run_command("printf '%s\\n' \"$AISH_RC_ENV\"", Duration::from_secs(5))
+        .unwrap();
+    let path = backend
+        .run_command("from-aish-rc-path", Duration::from_secs(5))
+        .unwrap();
+
+    assert_eq!(alias.exit_code, 0);
+    assert_eq!(alias.output.trim(), "alias-from-bashrc");
+    assert_eq!(function.exit_code, 0);
+    assert_eq!(function.output.trim(), "function-from-bashrc");
+    assert_eq!(env.exit_code, 0);
+    assert_eq!(env.output.trim(), "env-from-bashrc");
+    assert_eq!(path.exit_code, 0);
+    assert_eq!(path.output.trim(), "path-from-bashrc");
+    for result in [&alias, &function, &env, &path] {
+        assert!(!result.output.contains("bashrc-prompt"), "{result:?}");
+        assert!(
+            !result.output.contains("prompt-command-noise"),
+            "{result:?}"
+        );
+        assert!(!result.output.contains("__AISH_STATUS__"), "{result:?}");
+    }
 }
 
 #[test]
@@ -440,6 +505,84 @@ fn zsh_pty_backend_keeps_user_commands_but_not_aish_internal_markers_in_history(
 }
 
 #[test]
+fn zsh_pty_backend_loads_user_zshrc_when_available() {
+    let _guard = pty_test_guard();
+    let Some(zsh) = find_shell(&["/bin/zsh", "/usr/bin/zsh", "/usr/local/bin/zsh"]) else {
+        return;
+    };
+
+    let home = tempfile::tempdir().unwrap();
+    let bin_dir = home.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    fs::write(
+        bin_dir.join("from-aish-zshrc-path"),
+        "#!/bin/sh\nprintf 'path-from-zshrc\\n'\n",
+    )
+    .unwrap();
+    std::process::Command::new("chmod")
+        .arg("+x")
+        .arg(bin_dir.join("from-aish-zshrc-path"))
+        .status()
+        .unwrap();
+    fs::write(
+        home.path().join(".zshrc"),
+        format!(
+            "alias aish_alias_from_zshrc='printf alias-from-zshrc\\\\n'\n\
+             aish_function_from_zshrc() {{ printf 'function-from-zshrc\\n'; }}\n\
+             function aish_user_preexec() {{ export AISH_ZSH_USER_PREEXEC=\"$1\"; }}\n\
+             function aish_user_precmd() {{ export AISH_ZSH_USER_PRECMD=ran; }}\n\
+             autoload -Uz add-zsh-hook\n\
+             add-zsh-hook preexec aish_user_preexec\n\
+             add-zsh-hook precmd aish_user_precmd\n\
+             export AISH_ZSH_RC_ENV=env-from-zshrc\n\
+             export PATH=\"{}:$PATH\"\n\
+             PROMPT='zshrc-prompt> '\n",
+            bin_dir.display()
+        ),
+    )
+    .unwrap();
+    let _home_guard = EnvVarGuard::set("HOME", home.path().as_os_str());
+    let mut backend = PtyBackend::spawn(zsh).unwrap();
+
+    let alias = backend
+        .run_command("aish_alias_from_zshrc", Duration::from_secs(5))
+        .unwrap();
+    let function = backend
+        .run_command("aish_function_from_zshrc", Duration::from_secs(5))
+        .unwrap();
+    let env = backend
+        .run_command(
+            "printf '%s\\n' \"$AISH_ZSH_RC_ENV\"",
+            Duration::from_secs(5),
+        )
+        .unwrap();
+    let path = backend
+        .run_command("from-aish-zshrc-path", Duration::from_secs(5))
+        .unwrap();
+    let hooks = backend
+        .run_command(
+            "printf '%s|%s\\n' \"$AISH_ZSH_USER_PRECMD\" \"$AISH_ZSH_USER_PREEXEC\"",
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+    assert_eq!(alias.exit_code, 0);
+    assert_eq!(alias.output.trim(), "alias-from-zshrc");
+    assert_eq!(function.exit_code, 0);
+    assert_eq!(function.output.trim(), "function-from-zshrc");
+    assert_eq!(env.exit_code, 0);
+    assert_eq!(env.output.trim(), "env-from-zshrc");
+    assert_eq!(path.exit_code, 0);
+    assert_eq!(path.output.trim(), "path-from-zshrc");
+    assert_eq!(hooks.exit_code, 0);
+    assert!(hooks.output.trim().starts_with("ran|printf "), "{hooks:?}");
+    for result in [&alias, &function, &env, &path, &hooks] {
+        assert!(!result.output.contains("zshrc-prompt"), "{result:?}");
+        assert!(!result.output.contains("__AISH_READY__"), "{result:?}");
+    }
+}
+
+#[test]
 fn fish_pty_backend_runs_commands_and_reports_cwd_when_available() {
     let _guard = pty_test_guard();
     if !fish_backend_tests_enabled() {
@@ -534,6 +677,94 @@ fn fish_pty_backend_preserves_output_that_matches_command_tokens_when_available(
         .unwrap();
     assert_eq!(echo.exit_code, 0);
     assert_eq!(echo.output.trim(), "after-failure", "{echo:?}");
+}
+
+#[test]
+fn fish_pty_backend_loads_user_config_when_available() {
+    let _guard = pty_test_guard();
+    if !fish_backend_tests_enabled() {
+        eprintln!("skipping fish PTY backend config test: set AISH_TEST_FISH=1 to opt in");
+        return;
+    }
+    let Some(fish) = find_shell(&[
+        "/opt/homebrew/bin/fish",
+        "/usr/local/bin/fish",
+        "/usr/bin/fish",
+        "/bin/fish",
+    ]) else {
+        return;
+    };
+
+    let home = tempfile::tempdir().unwrap();
+    let bin_dir = home.path().join("bin");
+    let fish_config_dir = home.path().join(".config/fish");
+    fs::create_dir_all(&bin_dir).unwrap();
+    fs::create_dir_all(&fish_config_dir).unwrap();
+    fs::write(
+        bin_dir.join("from-aish-fish-config-path"),
+        "#!/bin/sh\nprintf 'path-from-fish-config\\n'\n",
+    )
+    .unwrap();
+    std::process::Command::new("chmod")
+        .arg("+x")
+        .arg(bin_dir.join("from-aish-fish-config-path"))
+        .status()
+        .unwrap();
+    fs::write(
+        fish_config_dir.join("config.fish"),
+        format!(
+            "function aish_function_from_fish_config\n\
+                 printf 'function-from-fish-config\\n'\n\
+             end\n\
+             set -gx AISH_FISH_RC_ENV env-from-fish-config\n\
+             set -gx PATH {} $PATH\n\
+             function aish_user_fish_preexec --on-event fish_preexec\n\
+                 set -gx AISH_FISH_USER_PREEXEC $argv[1]\n\
+             end\n\
+             function aish_user_fish_postexec --on-event fish_postexec\n\
+                 set -gx AISH_FISH_USER_POSTEXEC ran\n\
+             end\n\
+             function fish_prompt\n\
+                 printf 'fish-config-prompt> '\n\
+             end\n",
+            bin_dir.display()
+        ),
+    )
+    .unwrap();
+    let _home_guard = EnvVarGuard::set("HOME", home.path().as_os_str());
+    let mut backend = PtyBackend::spawn(fish).unwrap();
+
+    let function = backend
+        .run_command("aish_function_from_fish_config", Duration::from_secs(5))
+        .unwrap();
+    let env = backend
+        .run_command("printf '%s\\n' $AISH_FISH_RC_ENV", Duration::from_secs(5))
+        .unwrap();
+    let path = backend
+        .run_command("from-aish-fish-config-path", Duration::from_secs(5))
+        .unwrap();
+    let events = backend
+        .run_command(
+            "printf '%s|%s\\n' $AISH_FISH_USER_POSTEXEC $AISH_FISH_USER_PREEXEC",
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+    assert_eq!(function.exit_code, 0);
+    assert_eq!(function.output.trim(), "function-from-fish-config");
+    assert_eq!(env.exit_code, 0);
+    assert_eq!(env.output.trim(), "env-from-fish-config");
+    assert_eq!(path.exit_code, 0);
+    assert_eq!(path.output.trim(), "path-from-fish-config");
+    assert_eq!(events.exit_code, 0);
+    assert!(
+        events.output.trim().starts_with("ran|printf "),
+        "{events:?}"
+    );
+    for result in [&function, &env, &path, &events] {
+        assert!(!result.output.contains("fish-config-prompt"), "{result:?}");
+        assert!(!result.output.contains("__AISH_READY__"), "{result:?}");
+    }
 }
 
 fn find_shell(candidates: &[&'static str]) -> Option<&'static str> {

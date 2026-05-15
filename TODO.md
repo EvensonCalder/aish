@@ -62,6 +62,7 @@ Status as of the latest full review:
   - [x] configured shell if set
   - [x] `$SHELL` if present
   - [x] `/bin/bash` fallback
+  - [x] normal interactive shell rc/config so aliases, functions, PATH edits, and exported variables are available
 - [x] Create PTY pair.
 - [x] Spawn shell on PTY slave.
 - [x] Read PTY master output asynchronously.

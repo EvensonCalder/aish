@@ -656,6 +656,7 @@ struct PtyOutputFilter {
     pending: Vec<u8>,
     deferred_separator: Vec<u8>,
     fish: Option<FishOutputFilter>,
+    command_complete: bool,
 }
 
 struct FishOutputFilter {
@@ -682,6 +683,7 @@ impl PtyOutputFilter {
             pending: Vec::new(),
             deferred_separator: Vec::new(),
             fish: None,
+            command_complete: false,
         }
     }
 
@@ -695,6 +697,7 @@ impl PtyOutputFilter {
                 started_command: None,
                 held_segment: None,
             }),
+            command_complete: false,
         }
     }
 
@@ -709,6 +712,10 @@ impl PtyOutputFilter {
     }
 
     fn push_segment(&mut self, segment: Vec<u8>, output: &mut Vec<u8>) {
+        if self.command_complete {
+            self.deferred_separator.clear();
+            return;
+        }
         if let Some(marker) = self.internal_marker_segment(&segment) {
             self.handle_internal_marker(marker, output);
             return;
@@ -776,8 +783,11 @@ impl PtyOutputFilter {
                     fish.command_active = false;
                     fish.held_segment = None;
                 }
+                self.command_complete = true;
             }
-            InternalMarker::Status => {}
+            InternalMarker::Status => {
+                self.command_complete = true;
+            }
         }
         self.deferred_separator.clear();
     }
@@ -904,20 +914,20 @@ fn shell_launch(configured_shell: &str) -> ShellLaunch {
 
     let (args, init_command, integration) = match shell_name {
         "bash" => (
-            vec!["--noprofile".to_string(), "--norc".to_string()],
+            vec!["-i".to_string()],
             format!(
-                "export HISTCONTROL=ignorespace${{HISTCONTROL:+:$HISTCONTROL}}; bind 'set enable-bracketed-paste off' 2>/dev/null || true; PS1=''; PS2=''; stty -echo; printf '\\n{READY_MARKER}\\t%s\\n' \"$PWD\"\n"
+                " export HISTCONTROL=ignorespace${{HISTCONTROL:+:$HISTCONTROL}}; PROMPT_COMMAND=; trap - DEBUG 2>/dev/null || true; bind 'set enable-bracketed-paste off' 2>/dev/null || true; PS1=''; PS2=''; stty -echo; printf '\\n{READY_MARKER}\\t%s\\n' \"$PWD\"\n"
             ),
             ShellIntegration::MarkerCommand,
         ),
         "zsh" => (
             vec![
-                "-f".to_string(),
+                "-i".to_string(),
                 "-o".to_string(),
                 "histignorespace".to_string(),
             ],
             format!(
-                " stty -echo; unsetopt zle prompt_cr prompt_sp; PROMPT=''; RPROMPT=''; PROMPT2=''; preexec() {{ printf '\\n{START_MARKER}\\t%s\\n' \"$1\"; }}; precmd() {{ printf '\\n{READY_MARKER}\\t%s\\t%s\\n' \"$?\" \"$PWD\"; }}; precmd\n"
+                " setopt histignorespace; stty -echo; unsetopt zle prompt_cr prompt_sp; PROMPT=''; RPROMPT=''; PROMPT2=''; function __aish_preexec() {{ printf '\\n{START_MARKER}\\t%s\\n' \"$1\"; }}; function __aish_precmd() {{ printf '\\n{READY_MARKER}\\t%s\\t%s\\n' \"$?\" \"$PWD\"; }}; autoload -Uz add-zsh-hook; add-zsh-hook -d preexec __aish_preexec 2>/dev/null || true; add-zsh-hook -d precmd __aish_precmd 2>/dev/null || true; add-zsh-hook preexec __aish_preexec; add-zsh-hook precmd __aish_precmd; preexec_functions=(__aish_preexec ${{preexec_functions:#__aish_preexec}}); precmd_functions=(__aish_precmd ${{precmd_functions:#__aish_precmd}}); __aish_precmd\n"
             ),
             ShellIntegration::ZshHooks,
         ),
@@ -944,7 +954,7 @@ fn shell_launch(configured_shell: &str) -> ShellLaunch {
 }
 
 fn fish_launch_args(program: &str) -> Vec<String> {
-    let mut args = vec!["--no-config".to_string()];
+    let mut args = Vec::new();
     if fish_supports_features(program, "no-query-term,no-mark-prompt") {
         args.push("--features".to_string());
         args.push("no-query-term,no-mark-prompt".to_string());
@@ -970,9 +980,6 @@ fn shell_command_builder(launch: &ShellLaunch) -> CommandBuilder {
     if let Ok(cwd) = env::current_dir() {
         command.cwd(cwd);
     }
-    command.env("PS1", "");
-    command.env("PROMPT", "");
-    command.env("RPROMPT", "");
     command.env("BASH_SILENCE_DEPRECATION_WARNING", "1");
     command
 }
@@ -1031,57 +1038,69 @@ fn strip_marker_separator(output: &str) -> &str {
 
 fn parse_ready_cwd(raw: &str) -> Option<String> {
     let prefix = format!("{READY_MARKER}\t");
-    normalize_pty_newlines(raw)
-        .lines()
+    let normalized = normalize_pty_newlines(raw);
+    complete_normalized_lines(&normalized)
+        .into_iter()
         .find_map(|line| {
             let cleaned = strip_terminal_control_sequences(line);
             cleaned
                 .trim_start()
                 .strip_prefix(&prefix)
-                .map(str::to_string)
+                .and_then(parse_ready_marker_fields)
         })
-        .and_then(|rest| {
-            let mut parts = rest.split('\t');
-            let first = parts.next()?;
-            Some(
-                strip_terminal_control_sequences(parts.next().unwrap_or(first))
-                    .trim_end()
-                    .to_string(),
-            )
-        })
-        .filter(|cwd| !cwd.is_empty())
+        .map(|fields| fields.cwd)
 }
 
 fn parse_ready_status_output(raw: &str, strip_terminal_repaint: bool) -> Result<HookCommandResult> {
     let raw = normalize_pty_newlines(raw);
-    let mut ready_line = None;
-    let mut started_command = None;
-    let mut output_lines = Vec::new();
+    let mut ready = None;
+    let mut current_started_command = None;
+    let mut saw_start_marker = false;
+    let mut pre_start_output_lines = Vec::new();
+    let mut command_output_lines = Vec::new();
 
-    for line in raw.lines() {
+    for line in complete_normalized_lines(&raw) {
         let cleaned_marker_line = strip_terminal_control_sequences(line);
         let marker_line = cleaned_marker_line.trim_start();
         if let Some(command) = marker_line.strip_prefix(&format!("{START_MARKER}\t")) {
-            started_command = Some(command.to_string());
+            current_started_command = Some(command.to_string());
+            saw_start_marker = true;
+            command_output_lines.clear();
             continue;
         }
         if let Some(rest) = marker_line.strip_prefix(&format!("{READY_MARKER}\t")) {
-            ready_line = Some(rest.to_string());
+            if let Some(fields) = parse_ready_marker_fields(rest)
+                && let Some(status) = fields.status
+            {
+                let output_lines = if saw_start_marker {
+                    command_output_lines.clone()
+                } else {
+                    pre_start_output_lines.clone()
+                };
+                ready = Some(ReadyStatusSnapshot {
+                    status,
+                    cwd: fields.cwd,
+                    output_lines,
+                    started_command: current_started_command.clone(),
+                });
+            }
             continue;
         }
-        output_lines.push(line.to_string());
+        if saw_start_marker {
+            command_output_lines.push(line.to_string());
+        } else {
+            pre_start_output_lines.push(line.to_string());
+        }
     }
 
-    let ready = ready_line.context("backend shell output did not contain ready marker")?;
-    let (status, cwd) = ready
-        .split_once('\t')
-        .context("backend shell ready marker did not include cwd")?;
-    let status = strip_terminal_control_sequences(status);
-    let cwd = strip_terminal_control_sequences(cwd).trim_end().to_string();
-    let exit_code = status
+    let ready = ready.context("backend shell output did not contain ready marker")?;
+    let mut output_lines = ready.output_lines;
+    let exit_code = ready
+        .status
         .trim()
         .parse::<i32>()
         .context("invalid shell exit status in ready marker")?;
+    let started_command = ready.started_command;
     if strip_terminal_repaint {
         output_lines = clean_fish_repaint_lines(output_lines, started_command.as_deref());
     }
@@ -1100,9 +1119,43 @@ fn parse_ready_status_output(raw: &str, strip_terminal_repaint: bool) -> Result<
     Ok(HookCommandResult {
         output,
         exit_code,
-        cwd,
+        cwd: ready.cwd,
         started_command,
     })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ReadyMarkerFields {
+    status: Option<String>,
+    cwd: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ReadyStatusSnapshot {
+    status: String,
+    cwd: String,
+    output_lines: Vec<String>,
+    started_command: Option<String>,
+}
+
+fn parse_ready_marker_fields(rest: &str) -> Option<ReadyMarkerFields> {
+    let mut parts = rest.splitn(2, '\t');
+    let first = strip_terminal_control_sequences(parts.next()?);
+    if let Some(cwd) = parts.next() {
+        let status = first.trim().to_string();
+        if status.parse::<i32>().is_err() {
+            return None;
+        }
+        let cwd = strip_terminal_control_sequences(cwd).trim_end().to_string();
+        return (!cwd.is_empty()).then_some(ReadyMarkerFields {
+            status: Some(status),
+            cwd,
+        });
+    }
+
+    let cwd = first.trim_end().to_string();
+    (!cwd.is_empty() && cwd.parse::<i32>().is_err())
+        .then_some(ReadyMarkerFields { status: None, cwd })
 }
 
 fn clean_fish_repaint_lines(
@@ -1189,7 +1242,7 @@ fn command_contains_repaint_token(command: &str, line: &str) -> bool {
         .map(|part| part.trim_matches(['\'', '"']))
         .filter(|part| !part.is_empty())
         .collect();
-    if !line.contains(['\'', '"', '\\', ';', '|', '&', '<', '>']) {
+    if !line.contains(['\'', '"', '\\', '$', ';', '|', '&', '<', '>']) {
         return tokens
             .iter()
             .position(|part| *part == line)
@@ -1215,7 +1268,7 @@ fn is_fish_command_repaint_token(line: &str, command: &str) -> bool {
 }
 
 fn shell_syntax_fragment(line: &str) -> bool {
-    line.contains(['\'', '"', '\\', ';', '|', '&', '<', '>'])
+    line.contains(['\'', '"', '\\', '$', ';', '|', '&', '<', '>'])
 }
 
 fn contains_terminal_control(text: &str) -> bool {
@@ -1378,6 +1431,14 @@ fn normalize_pty_newlines(text: &str) -> String {
     text.replace("\r\n", "\n").replace('\r', "\n")
 }
 
+fn complete_normalized_lines(normalized: &str) -> Vec<&str> {
+    let mut lines: Vec<&str> = normalized.lines().collect();
+    if !normalized.ends_with('\n') {
+        lines.pop();
+    }
+    lines
+}
+
 fn clean_marker_echo(output: &str, marker: &str) -> String {
     output
         .split_inclusive('\n')
@@ -1422,9 +1483,11 @@ mod tests {
     fn bash_launch_uses_clean_startup_flags() {
         let launch = shell_launch("/bin/bash");
         assert_eq!(launch.program, "/bin/bash");
-        assert_eq!(launch.args, ["--noprofile", "--norc"]);
+        assert_eq!(launch.args, ["-i"]);
         assert!(launch.init_command.contains(READY_MARKER));
         assert!(launch.init_command.contains("HISTCONTROL=ignorespace"));
+        assert!(launch.init_command.contains("PROMPT_COMMAND="));
+        assert!(launch.init_command.contains("trap - DEBUG"));
         assert!(launch.init_command.contains("enable-bracketed-paste off"));
     }
 
@@ -1432,28 +1495,26 @@ mod tests {
     fn non_bash_launch_does_not_receive_bash_only_flags() {
         let launch = shell_launch("/bin/zsh");
         assert_eq!(launch.program, "/bin/zsh");
-        assert_eq!(launch.args, ["-f", "-o", "histignorespace"]);
+        assert_eq!(launch.args, ["-i", "-o", "histignorespace"]);
         assert!(launch.init_command.contains("unsetopt zle"));
-        assert!(launch.init_command.contains("preexec()"));
-        assert!(launch.init_command.contains("precmd()"));
+        assert!(launch.init_command.contains("add-zsh-hook"));
+        assert!(launch.init_command.contains("__aish_preexec"));
+        assert!(launch.init_command.contains("__aish_precmd"));
     }
 
     #[test]
-    fn fish_launch_uses_event_functions_without_user_config() {
+    fn fish_launch_uses_event_functions_after_user_config() {
         let launch = shell_launch("/usr/bin/fish");
 
         assert_eq!(launch.program, "/usr/bin/fish");
-        assert_eq!(launch.args.first().map(String::as_str), Some("--no-config"));
-        if launch.args.len() > 1 {
-            assert_eq!(
-                launch.args,
-                ["--no-config", "--features", "no-query-term,no-mark-prompt"]
-            );
+        if !launch.args.is_empty() {
+            assert_eq!(launch.args, ["--features", "no-query-term,no-mark-prompt"]);
         }
         assert_eq!(launch.integration, ShellIntegration::FishEvents);
         assert!(launch.init_command.contains("--on-event fish_preexec"));
         assert!(launch.init_command.contains("function fish_prompt"));
         assert!(!launch.args.contains(&"--noprofile".to_string()));
+        assert!(!launch.args.contains(&"--no-config".to_string()));
     }
 
     #[test]
@@ -1506,6 +1567,19 @@ mod tests {
     fn parser_reads_ready_marker_cwd_when_status_is_present() {
         let raw = format!("noise\r\n{READY_MARKER}\t0\t/tmp/aish\r\n");
         assert_eq!(parse_ready_cwd(&raw).as_deref(), Some("/tmp/aish"));
+    }
+
+    #[test]
+    fn parser_waits_for_complete_ready_marker_line() {
+        let status_only = format!("{READY_MARKER}\t0");
+        let partial_cwd = format!("{READY_MARKER}\t0\t/tmp/aish");
+
+        assert_eq!(parse_ready_cwd(&status_only), None);
+        assert_eq!(parse_ready_cwd(&partial_cwd), None);
+        assert_eq!(
+            parse_ready_cwd(&format!("{partial_cwd}\n")).as_deref(),
+            Some("/tmp/aish")
+        );
     }
 
     #[test]
@@ -1577,6 +1651,17 @@ mod tests {
     }
 
     #[test]
+    fn output_filter_suppresses_prompt_noise_after_status_marker() {
+        let marker = "__AISH_STATUS__123__";
+        let mut filter = PtyOutputFilter::marker(marker);
+
+        let output =
+            filter.push(format!("hi\r\n{marker}0\t/tmp\r\nprompt-command-noise\r\n").as_bytes());
+
+        assert_eq!(String::from_utf8(output).unwrap(), "hi\r\n");
+    }
+
+    #[test]
     fn output_filter_preserves_carriage_return_progress() {
         let mut filter = PtyOutputFilter::marker("__AISH_STATUS__123__");
 
@@ -1626,7 +1711,7 @@ mod tests {
 
     #[test]
     fn parse_ready_status_output_reads_status_cwd_and_filters_hook_lines() {
-        let raw = format!("hello\n{START_MARKER}\techo hello\n{READY_MARKER}\t7\t/tmp/aish\n");
+        let raw = format!("{START_MARKER}\techo hello\nhello\n{READY_MARKER}\t7\t/tmp/aish\n");
 
         assert_eq!(
             parse_ready_status_output(&raw, false).unwrap(),
@@ -1642,12 +1727,31 @@ mod tests {
     #[test]
     fn parse_ready_status_output_preserves_user_output_line_breaks() {
         let raw = format!(
-            "first\nsecond\n{START_MARKER}\tprintf first\\nsecond\\n\n{READY_MARKER}\t0\t/tmp/aish\n"
+            "{START_MARKER}\tprintf first\\nsecond\\n\nfirst\nsecond\n{READY_MARKER}\t0\t/tmp/aish\n"
         );
 
         let parsed = parse_ready_status_output(&raw, false).unwrap();
 
         assert_eq!(parsed.output, "first\nsecond\n");
+    }
+
+    #[test]
+    fn parse_ready_status_output_ignores_prompt_noise_around_command_markers() {
+        let raw = format!(
+            "old prompt\n\
+             {READY_MARKER}\t0\n\
+             {START_MARKER}\tprintf hi\n\
+             hi\n\
+             {READY_MARKER}\t0\t/tmp/aish\n\
+             user precmd noise\n\
+             prompt> \n"
+        );
+
+        let parsed = parse_ready_status_output(&raw, false).unwrap();
+
+        assert_eq!(parsed.output, "hi\n");
+        assert_eq!(parsed.cwd, "/tmp/aish");
+        assert_eq!(parsed.started_command.as_deref(), Some("printf hi"));
     }
 
     #[test]
@@ -1706,6 +1810,20 @@ mod tests {
         let parsed = parse_ready_status_output(&raw, true).unwrap();
 
         assert_eq!(parsed.output, "file-exists\n");
+    }
+
+    #[test]
+    fn fish_repaint_filter_removes_variable_command_fragments() {
+        let raw = format!(
+            "{START_MARKER}\tprintf '%s\\n' $AISH_FISH_RC_ENV\n\
+             $AISH_FISH_RC_ENV\n\
+             env-from-fish-config\n\
+             {READY_MARKER}\t0\t/tmp/aish\n"
+        );
+
+        let parsed = parse_ready_status_output(&raw, true).unwrap();
+
+        assert_eq!(parsed.output, "env-from-fish-config\n");
     }
 
     #[test]
