@@ -2102,6 +2102,35 @@ mod tests {
     }
 
     #[test]
+    fn submit_after_completion_panel_keeps_output_adjacent_to_command_line() {
+        let mut state = AppState::default();
+        state.draft.insert_str("echo hello");
+        state.completion_panel = vec![
+            "exec\techo".to_string(),
+            "exec\techoctl".to_string(),
+            "exec\techoed".to_string(),
+        ];
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        redraw(&mut state, &mut output).unwrap();
+        handle_key(
+            key(KeyCode::Enter),
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let rendered = String::from_utf8(output).unwrap();
+        let screen = TestScreen::from_output(&rendered);
+        assert_eq!(screen.line(0), "> echo hello");
+        assert_eq!(screen.line(1), "hello");
+        assert_eq!(screen.line(2), "> ");
+    }
+
+    #[test]
     fn pending_context_confirmation_keys_return_confirmation_actions() {
         let mut state = AppState {
             pending_context: Some(crate::app::PendingContextPrompt {
@@ -2641,14 +2670,28 @@ mod tests {
             }
             let params: String = chars[start..i].iter().collect();
             match chars[i] {
+                'A' => {
+                    let amount = csi_amount(&params);
+                    self.row = self.row.saturating_sub(amount);
+                }
+                'B' => {
+                    self.row += csi_amount(&params);
+                    self.ensure_row();
+                }
+                'F' => {
+                    let amount = csi_amount(&params);
+                    self.row = self.row.saturating_sub(amount);
+                    self.col = 0;
+                }
                 'H' => {
                     self.row = 0;
                     self.col = 0;
                 }
-                'J' if params == "2" || params == "3" => {
-                    self.rows = vec![Vec::new(); 8];
-                    self.row = 0;
-                    self.col = 0;
+                'J' => {
+                    self.clear_for_j(&params);
+                }
+                'K' => {
+                    self.clear_for_k(&params);
                 }
                 'G' => {
                     self.col = params.parse::<usize>().unwrap_or(1).saturating_sub(1);
@@ -2673,6 +2716,45 @@ mod tests {
             }
         }
 
+        fn clear_for_j(&mut self, params: &str) {
+            match params {
+                "" | "0" => {
+                    self.clear_for_k("0");
+                    for row in self.row + 1..self.rows.len() {
+                        self.rows[row].clear();
+                    }
+                }
+                "1" => {
+                    for row in 0..self.row {
+                        self.rows[row].clear();
+                    }
+                    self.clear_for_k("1");
+                }
+                "2" | "3" => {
+                    self.rows = vec![Vec::new(); 8];
+                    self.row = 0;
+                    self.col = 0;
+                }
+                _ => {}
+            }
+        }
+
+        fn clear_for_k(&mut self, params: &str) {
+            self.ensure_row();
+            let line = &mut self.rows[self.row];
+            match params {
+                "" | "0" => line.truncate(self.col.min(line.len())),
+                "1" => {
+                    let end = self.col.saturating_add(1).min(line.len());
+                    for ch in line.iter_mut().take(end) {
+                        *ch = ' ';
+                    }
+                }
+                "2" => line.clear(),
+                _ => {}
+            }
+        }
+
         fn line(&self, row: usize) -> String {
             self.rows
                 .get(row)
@@ -2690,6 +2772,10 @@ mod tests {
                 .map(|line| line.iter().collect::<String>())
                 .collect()
         }
+    }
+
+    fn csi_amount(params: &str) -> usize {
+        params.parse::<usize>().unwrap_or(1).max(1)
     }
 
     #[test]

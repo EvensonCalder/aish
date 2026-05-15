@@ -52,6 +52,7 @@ fn pty_backend_runs_commands_and_preserves_shell_state() {
     assert!(!first_pwd.output.trim().is_empty());
     assert_eq!(backend.initial_cwd(), Some(first_pwd.output.trim()));
     assert!(!first_pwd.output.contains("__AISH_STATUS__"));
+    assert!(!first_pwd.output.contains("\x1b[?2004"));
 
     let cd = backend
         .run_command("cd /tmp", Duration::from_secs(5))
@@ -61,6 +62,22 @@ fn pty_backend_runs_commands_and_preserves_shell_state() {
     let second_pwd = backend.run_command("pwd", Duration::from_secs(5)).unwrap();
     assert_eq!(second_pwd.exit_code, 0);
     assert_eq!(second_pwd.output.trim(), "/tmp");
+}
+
+#[test]
+fn bash_pty_backend_suppresses_readline_prompt_protocol_noise() {
+    let _guard = pty_test_guard();
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+
+    let result = backend
+        .run_command("printf 'bash-visible\\n'", Duration::from_secs(5))
+        .unwrap();
+
+    assert_eq!(result.exit_code, 0);
+    assert_eq!(result.output, "bash-visible\n");
+    assert!(!result.output.contains("\x1b[?2004"));
+    assert!(!result.output.starts_with('\n'));
+    assert!(!result.output.ends_with("\n\n"));
 }
 
 #[test]

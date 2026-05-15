@@ -466,7 +466,7 @@ fn shell_launch(configured_shell: &str) -> ShellLaunch {
         "bash" => (
             vec!["--noprofile".to_string(), "--norc".to_string()],
             format!(
-                "export HISTCONTROL=ignorespace${{HISTCONTROL:+:$HISTCONTROL}}; PS1=''; PS2=''; stty -echo; printf '\\n{READY_MARKER}\\t%s\\n' \"$PWD\"\n"
+                "export HISTCONTROL=ignorespace${{HISTCONTROL:+:$HISTCONTROL}}; bind 'set enable-bracketed-paste off' 2>/dev/null || true; PS1=''; PS2=''; stty -echo; printf '\\n{READY_MARKER}\\t%s\\n' \"$PWD\"\n"
             ),
             ShellIntegration::MarkerCommand,
         ),
@@ -916,6 +916,7 @@ mod tests {
         assert_eq!(launch.args, ["--noprofile", "--norc"]);
         assert!(launch.init_command.contains(READY_MARKER));
         assert!(launch.init_command.contains("HISTCONTROL=ignorespace"));
+        assert!(launch.init_command.contains("enable-bracketed-paste off"));
     }
 
     #[test]
