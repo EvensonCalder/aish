@@ -102,7 +102,7 @@ Behavior:
 - New input happens here.
 - Editing happens here.
 - Executing a draft sends its content to the backend shell unchanged.
-- Ordinary executed drafts remain visible after execution and are appended to regular history.
+- Ordinary executed drafts are appended to regular history, then the active prompt returns to a new blank draft.
 - Up/down navigation browses saved draft entries only; regular history is browsed in history mode.
 - `Up` from a blank draft restores the newest saved draft when draft persistence is enabled.
 - `Up` / `Down` move older/newer through saved drafts.
@@ -518,7 +518,7 @@ Draft browsing behavior:
 - `Down` from a non-empty new draft saves the current draft when draft persistence is enabled, then clears the prompt.
 - Navigating away from an edited saved draft stores the edited text as a new draft entry instead of mutating the old entry.
 - If saving fails, Aish must leave the current draft intact.
-- Pressing `Enter` on an ordinary draft executes a copy of the draft, appends that copy to regular history, and keeps the draft entry available.
+- Pressing `Enter` on an ordinary draft executes a copy of the draft, appends that copy to regular history, and returns the active prompt to a new blank draft. The saved draft entry remains available through draft history when draft persistence is enabled.
 
 Draft persistence:
 

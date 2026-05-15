@@ -1371,19 +1371,18 @@ fn record_completed_command(
     }
     state.last_status = Some(exit_code);
     state.continuation_prompt = None;
-    let keep_draft = !executing_ai && !state.draft_from_editor;
-    if !keep_draft {
+    if executing_ai {
         state.draft.clear();
         state.selected_draft_index = None;
+        state.draft_from_editor = false;
+        state.draft_from_template = false;
+    } else {
+        state.clear_draft_for_new_draft();
     }
-    state.draft_from_editor = false;
-    state.draft_from_template = false;
     if executing_ai && exit_code == 0 {
         state.advance_after_ai_success();
     } else if executing_ai {
         state.mode = Mode::Ai;
-    } else {
-        state.mode = Mode::Draft;
     }
     Ok(())
 }

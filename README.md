@@ -91,7 +91,7 @@ Empty `Tab` cycles modes. Editing a read-only history or AI item copies it back 
 
 Core keys:
 
-- `Enter`: submit the current draft or selected read-only item. Ordinary drafts stay visible after execution and are copied into regular history.
+- `Enter`: submit the current draft or selected read-only item. Executed commands are copied into regular history, and the active prompt returns to a new blank draft. Saved drafts remain browsable with `Up` / `Down`.
 - Empty `Tab`: cycle `>` / `$` / `%` modes.
 - Non-empty `Tab`: accept the current inline completion, or directly accept the first candidate when inline completion is disabled.
 - `Right` at end of line: accept completion using the configured accept mode.
@@ -453,12 +453,12 @@ cargo test
 
 Current active inventory:
 
-- 383 library unit tests.
-- 23 draft execution integration tests.
+- 395 library unit tests.
+- 24 draft execution integration tests.
 - 1 first-run integration test.
 - 13 PTY integration tests, with bash/zsh active by default and fish-specific cases opt-in.
-- 106 expect-driven end-to-end interactive scenarios.
-- 32 tmux screen-capture integration tests.
+- 108 expect-driven end-to-end interactive scenarios.
+- 34 tmux screen-capture integration tests.
 
 Expect and tmux tests launch real terminal sessions with isolated Aish homes. They should be serialized because concurrent real-terminal sessions can create false prompt and scheduler failures.
 

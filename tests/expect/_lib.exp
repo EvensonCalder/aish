@@ -57,6 +57,14 @@ proc aish_wait_prompt {} {
     }
 }
 
+proc aish_expect_blank_prompt {} {
+    if {![info exists ::aish_last_draft] || $::aish_last_draft eq ""} {
+        return
+    }
+    puts stderr "expected blank draft prompt, got: $::aish_last_draft"
+    exit 6
+}
+
 proc aish_expect {needle} {
     expect {
         -ex $needle    {}

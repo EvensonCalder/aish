@@ -172,7 +172,7 @@ Status as of the latest full review:
 - [x] Keep continuation redraw stable in raw terminal mode and suppress backend secondary prompts from displayed command output.
 - [x] Implement saved draft browsing with `Up` / `Down`.
 - [x] Implement `Down` from a non-empty new draft as save-current-draft and open-blank-draft.
-- [x] Keep ordinary drafts visible after `Enter` while copying executed commands into regular history.
+- [x] Return to a new blank active draft after `Enter` while copying executed commands into regular history and keeping saved drafts browsable.
 - [x] Implement command submission from draft to PTY.
 
 ### Acceptance criteria
@@ -181,7 +181,7 @@ Status as of the latest full review:
 - Token movement works.
 - `Enter` sends the exact draft buffer to backend shell.
 - `Down` can save an unfinished ordinary draft and clear the prompt for a new draft without executing it; `Up` / `Down` can browse multiple saved drafts.
-- `Enter` executes a copy of an ordinary draft without deleting the draft.
+- `Enter` executes a copy of an ordinary draft, appends it to regular history, and returns the active prompt to a new blank draft while preserving saved draft history.
 - Multi-line draft returned from external editor can be submitted.
 
 ---

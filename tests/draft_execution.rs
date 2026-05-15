@@ -24,7 +24,7 @@ fn pty_execution_guard() -> MutexGuard<'static, ()> {
 }
 
 #[test]
-fn execute_draft_sends_command_to_backend_and_preserves_draft() {
+fn execute_draft_sends_command_to_backend_and_opens_blank_draft() {
     let _guard = pty_execution_guard();
     let mut state = AppState::default();
     let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
@@ -43,7 +43,10 @@ fn execute_draft_sends_command_to_backend_and_preserves_draft() {
     assert!(String::from_utf8(output).unwrap().contains("hello draft"));
     assert_eq!(state.last_status, Some(0));
     assert_eq!(state.mode, Mode::Draft);
-    assert_eq!(state.draft.as_str(), "printf 'hello draft\\n'");
+    assert!(state.draft.is_empty());
+    assert_eq!(state.selected_draft_index, None);
+    assert_eq!(state.draft_history.len(), 1);
+    assert_eq!(state.draft_history[0].text, "printf 'hello draft\\n'");
     assert_eq!(state.output_ring.len(), 1);
     assert_eq!(state.output_ring[0].command, "printf 'hello draft\\n'");
     assert!(state.output_ring[0].output.contains("hello draft"));
@@ -70,7 +73,10 @@ fn execute_draft_records_failed_status_and_returns_to_draft() {
     let _output = String::from_utf8(output).unwrap();
     assert_eq!(state.last_status, Some(1));
     assert_eq!(state.mode, Mode::Draft);
-    assert_eq!(state.draft.as_str(), "false");
+    assert!(state.draft.is_empty());
+    assert_eq!(state.selected_draft_index, None);
+    assert_eq!(state.draft_history.len(), 1);
+    assert_eq!(state.draft_history[0].text, "false");
 }
 
 #[test]
@@ -96,10 +102,8 @@ fn execute_draft_updates_current_cwd_from_backend_shell() {
     assert_eq!(state.last_status, Some(0));
     assert_eq!(state.current_cwd.as_deref(), Some(temp.path()));
     assert_eq!(state.mode, Mode::Draft);
-    assert_eq!(
-        state.draft.as_str(),
-        format!("cd {}", temp.path().display())
-    );
+    assert!(state.draft.is_empty());
+    assert_eq!(state.selected_draft_index, None);
 }
 
 #[test]
@@ -173,7 +177,8 @@ fn execute_draft_runs_completed_multiline_quote_after_continuation() {
     assert!(String::from_utf8(output).unwrap().contains("123"));
     assert_eq!(state.last_status, Some(0));
     assert_eq!(state.mode, Mode::Draft);
-    assert_eq!(state.draft.as_str(), "echo \"\n123\n\"");
+    assert!(state.draft.is_empty());
+    assert_eq!(state.selected_draft_index, None);
     assert!(state.continuation_prompt.is_none());
 }
 
@@ -197,7 +202,8 @@ fn execute_draft_sends_multiline_buffer_exactly_to_backend() {
     assert!(String::from_utf8(output).unwrap().contains("one\ntwo"));
     assert_eq!(state.last_status, Some(0));
     assert_eq!(state.mode, Mode::Draft);
-    assert_eq!(state.draft.as_str(), "printf 'one\\n'\nprintf 'two\\n'");
+    assert!(state.draft.is_empty());
+    assert_eq!(state.selected_draft_index, None);
 }
 
 #[test]
@@ -230,7 +236,10 @@ fn execute_draft_preserves_backslash_continuation_and_history() {
     assert_eq!(loaded.errors, []);
     assert_eq!(loaded.items.len(), 1);
     assert_eq!(loaded.items[0].command, command);
-    assert_eq!(state.draft.as_str(), command);
+    assert!(state.draft.is_empty());
+    assert_eq!(state.selected_draft_index, None);
+    assert_eq!(state.draft_history.len(), 1);
+    assert_eq!(state.draft_history[0].text, command);
 }
 
 #[test]
@@ -633,7 +642,8 @@ fn execute_history_selection_runs_selected_command() {
 
     assert!(String::from_utf8(output).unwrap().contains("from history"));
     assert_eq!(state.mode, Mode::Draft);
-    assert_eq!(state.draft.as_str(), "printf 'from history\\n'");
+    assert!(state.draft.is_empty());
+    assert_eq!(state.selected_draft_index, None);
     assert_eq!(state.last_status, Some(0));
 
     let loaded = load_jsonl::<HistoryEntry>(&history_path).unwrap();
@@ -641,6 +651,33 @@ fn execute_history_selection_runs_selected_command() {
     assert_eq!(loaded.items.len(), 1);
     assert_eq!(loaded.items[0].command, "printf 'from history\\n'");
     assert_eq!(state.regular_history.len(), 2);
+}
+
+#[test]
+fn executed_draft_can_be_restored_from_draft_history_after_blank_prompt() {
+    let _guard = pty_execution_guard();
+    let mut state = AppState::default();
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    state.draft.insert_str("printf 'recoverable draft\\n'");
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    assert!(state.draft.is_empty());
+    assert_eq!(state.selected_draft_index, None);
+
+    state.move_draft_selection_older().unwrap();
+
+    assert_eq!(state.mode, Mode::Draft);
+    assert_eq!(state.draft.as_str(), "printf 'recoverable draft\\n'");
+    assert_eq!(state.selected_draft_index, Some(0));
 }
 
 fn ai_state(

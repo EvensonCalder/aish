@@ -11,6 +11,7 @@ aish_send "echo history-expect-ok"
 aish_enter
 aish_expect "history-expect-ok"
 aish_wait_prompt
+aish_expect_blank_prompt
 
 aish_send "\t"
 aish_expect "\$ "
@@ -19,5 +20,6 @@ aish_expect "echo history-expect-ok"
 aish_enter
 aish_expect "history-expect-ok"
 aish_wait_prompt
+aish_expect_blank_prompt
 
 aish_quit

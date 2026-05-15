@@ -32,3 +32,8 @@ if [ "$count" -lt 2 ]; then
     printf 'expected history command output at least twice, got %s\n' "$count" >&2
     exit 1
 fi
+LAST_NON_EMPTY="$(printf '%s\n' "$CAPTURE" | awk 'NF { line=$0 } END { print line }')"
+if ! printf '%s\n' "$LAST_NON_EMPTY" | rg -q '> *$'; then
+    printf 'expected blank draft prompt after history execution, got: %s\n' "$LAST_NON_EMPTY" >&2
+    exit 1
+fi

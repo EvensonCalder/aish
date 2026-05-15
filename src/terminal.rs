@@ -2008,7 +2008,7 @@ mod tests {
         let prompt_row = screen
             .rows
             .iter()
-            .position(|row| row.iter().collect::<String>() == "> echo hello")
+            .position(|row| row.iter().collect::<String>() == "> ")
             .expect("redrawn prompt row");
         assert!(prompt_row > 0, "screen was {:?}", screen.lines());
         assert_eq!(screen.line(prompt_row - 1), "hello");
@@ -2502,7 +2502,7 @@ mod tests {
 
         let rendered = String::from_utf8(output).unwrap();
         let screen = TestScreen::from_output(&rendered);
-        assert_eq!(screen.line(0), "> printf '\\033[H\\033[2J'");
+        assert_eq!(screen.line(0), "> ");
         assert_eq!(screen.first_non_empty_line(), Some(0));
     }
 
