@@ -102,10 +102,12 @@ Behavior:
 - New input happens here.
 - Editing happens here.
 - Executing a draft sends its content to the backend shell unchanged.
-- Executed commands are appended to regular history after execution.
-- Up/down navigation may show both draft entries and regular history entries.
-- In a non-empty ordinary draft, `Down` saves the current draft and clears the prompt for a new draft.
-- In an empty ordinary draft, `Up` restores the latest saved draft when draft persistence is enabled.
+- Ordinary executed drafts remain visible after execution and are appended to regular history.
+- Up/down navigation browses saved draft entries only; regular history is browsed in history mode.
+- `Up` from a blank draft restores the newest saved draft when draft persistence is enabled.
+- `Up` / `Down` move older/newer through saved drafts.
+- `Down` from the newest saved draft opens a blank draft.
+- `Down` from a non-empty new draft saves the current draft and opens a blank draft without executing it.
 - If draft content is empty, `Tab` switches modes.
 - If draft content is non-empty, `Tab` opens or accepts completion according to completion configuration.
 
@@ -506,14 +508,17 @@ Regular history and AI history are read-only browsing sources.
 
 ### 7.3 Draft behavior
 
-Draft mode can show draft entries and regular history during up/down navigation.
+Draft mode is a writable draft history. Draft entries are separate from regular executed command history.
 
-Current new-draft behavior:
+Draft browsing behavior:
 
-- `Down` in a non-empty ordinary draft saves the current draft when draft persistence is enabled.
-- After saving succeeds, Aish clears the prompt and stays in draft mode.
+- `Up` from a blank draft restores the newest saved draft from the loaded draft history.
+- `Up` / `Down` move older/newer through saved drafts.
+- `Down` from the newest saved draft clears the prompt and stays in draft mode.
+- `Down` from a non-empty new draft saves the current draft when draft persistence is enabled, then clears the prompt.
+- Navigating away from an edited saved draft stores the edited text as a new draft entry instead of mutating the old entry.
 - If saving fails, Aish must leave the current draft intact.
-- `Up` in an empty ordinary draft restores the latest saved draft from the loaded draft history.
+- Pressing `Enter` on an ordinary draft executes a copy of the draft, appends that copy to regular history, and keeps the draft entry available.
 
 Draft persistence:
 

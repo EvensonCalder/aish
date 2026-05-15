@@ -3,7 +3,7 @@
 # Sourced by every scenario. Provides:
 #   - aish_spawn   : spawn the debug aish binary in an isolated AISH_HOME
 #   - aish_expect  : require that a literal substring appears soon
-#   - aish_send    : send literal text to aish
+#   - aish_send    : send text to aish, clearing a preserved draft prompt first
 #   - aish_enter   : send Enter
 #   - aish_quit    : send `exit` + Enter and wait for eof
 #   - assert_no    : fail if a forbidden substring appears in recent buffer
@@ -18,6 +18,7 @@ set ::env(TERM) "xterm-256color"
 set ::env(GIT_CONFIG_COUNT) "1"
 set ::env(GIT_CONFIG_KEY_0) "commit.gpgsign"
 set ::env(GIT_CONFIG_VALUE_0) "false"
+set ::aish_last_draft ""
 
 # Pick an isolated AISH_HOME per spawn so concurrent runs do not collide.
 proc aish_new_home {} {
@@ -46,11 +47,11 @@ proc aish_spawn_without_aish_home {} {
     aish_wait_prompt
 }
 
-# Wait for the draft prompt line, allowing optional restored draft text before
-# the ANSI cursor-positioning codes.
+# Wait for the draft prompt, allowing optional restored or multi-line draft
+# text before the ANSI cursor-positioning codes.
 proc aish_wait_prompt {} {
     expect {
-        -re {> [^\r\n]*\x1b\[}     {}
+        -re {> ([^\x1b]*)\x1b\[}     { set ::aish_last_draft $expect_out(1,string) }
         timeout            { puts stderr "no prompt"; exit 2 }
         eof                { puts stderr "eof before prompt"; exit 2 }
     }
@@ -89,14 +90,25 @@ proc aish_expect_template_replaced {} {
 }
 
 proc aish_send {text} {
+    if {[info exists ::aish_last_draft] && $::aish_last_draft ne ""} {
+        send -- "\x03"
+        aish_wait_prompt
+    }
     send -- $text
+    set ::aish_last_draft ""
 }
 
 proc aish_enter {} {
     send -- "\r"
 }
 
+proc aish_clear_draft {} {
+    send -- "\x03"
+    aish_wait_prompt
+}
+
 proc aish_quit {} {
+    aish_clear_draft
     send -- "exit\r"
     expect {
         eof            {}

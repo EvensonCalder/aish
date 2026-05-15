@@ -14,6 +14,8 @@ sleep 5
 
 tmux send-keys -t "$SESSION" "cd $WORK_DIR" Enter
 sleep 2
+tmux send-keys -t "$SESSION" C-c
+sleep 1
 tmux send-keys -t "$SESSION" 'cat right-t'
 tmux send-keys -t "$SESSION" Right
 sleep 1

@@ -23,17 +23,25 @@ tmux send-keys -t "$SESSION" 'aish-stdin-blocker' Enter
 sleep 1
 tmux send-keys -t "$SESSION" C-d
 sleep 2
+tmux send-keys -t "$SESSION" C-c
+sleep 1
 tmux send-keys -t "$SESSION" 'echo after-stdin-blocker' Enter
 sleep 2
 
 if command -v gpg >/dev/null 2>&1; then
+    tmux send-keys -t "$SESSION" C-c
+    sleep 1
     tmux send-keys -t "$SESSION" 'gpg' Enter
     sleep 1
     tmux send-keys -t "$SESSION" C-c
     sleep 2
+    tmux send-keys -t "$SESSION" C-c
+    sleep 1
     tmux send-keys -t "$SESSION" 'echo after-gpg' Enter
     sleep 2
 else
+    tmux send-keys -t "$SESSION" C-c
+    sleep 1
     tmux send-keys -t "$SESSION" 'echo after-gpg' Enter
     sleep 2
 fi

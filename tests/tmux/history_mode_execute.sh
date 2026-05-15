@@ -12,6 +12,8 @@ sleep 5
 
 tmux send-keys -t "$SESSION" 'echo history-tmux-ok' Enter
 sleep 2
+tmux send-keys -t "$SESSION" C-c
+sleep 1
 tmux send-keys -t "$SESSION" Tab
 sleep 1
 HISTORY_CAPTURE="$(tmux capture-pane -p -t "$SESSION")"

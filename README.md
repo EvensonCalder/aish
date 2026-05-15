@@ -91,12 +91,12 @@ Empty `Tab` cycles modes. Editing a read-only history or AI item copies it back 
 
 Core keys:
 
-- `Enter`: submit the current draft or selected read-only item.
+- `Enter`: submit the current draft or selected read-only item. Ordinary drafts stay visible after execution and are copied into regular history.
 - Empty `Tab`: cycle `>` / `$` / `%` modes.
 - Non-empty `Tab`: accept the current inline completion, or directly accept the first candidate when inline completion is disabled.
 - `Right` at end of line: accept completion using the configured accept mode.
-- `Down` in a non-empty ordinary draft: save the current draft and clear the prompt for a new draft.
-- `Up` in an empty ordinary draft: restore the latest saved draft.
+- `Up` / `Down` in draft mode: browse saved drafts. `Up` from a blank draft restores the newest saved draft; `Down` from the newest saved draft opens a blank draft.
+- `Down` from a non-empty new draft: save the current draft and open a blank draft without executing it.
 - `Ctrl-C`: clear the draft, cancel continuation, or reject pending context confirmation.
 - `Ctrl-D` on an empty draft: exit.
 - `Ctrl-L`: clear the screen.

@@ -21,6 +21,8 @@ tmux send-keys -t "$SESSION" "print('python-tmux-ok')" Enter
 sleep 1
 tmux send-keys -t "$SESSION" C-d
 sleep 2
+tmux send-keys -t "$SESSION" C-c
+sleep 1
 tmux send-keys -t "$SESSION" 'echo after-python-repl' Enter
 sleep 2
 

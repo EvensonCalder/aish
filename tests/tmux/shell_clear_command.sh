@@ -12,6 +12,8 @@ sleep 5
 
 tmux send-keys -t "$SESSION" 'echo before-shell-clear' Enter
 sleep 1
+tmux send-keys -t "$SESSION" C-c
+sleep 1
 tmux send-keys -t "$SESSION" 'clear' Enter
 sleep 2
 

@@ -18,6 +18,8 @@ sleep 5
 
 tmux send-keys -t "$SESSION" "cd $WORK_DIR" Enter
 sleep 1
+tmux send-keys -t "$SESSION" C-c
+sleep 1
 
 tmux send-keys -t "$SESSION" 'cat unique-tar'
 sleep 1
@@ -27,6 +29,8 @@ sleep 1
 tmux send-keys -t "$SESSION" Enter
 sleep 2
 
+tmux send-keys -t "$SESSION" C-c
+sleep 1
 tmux send-keys -t "$SESSION" '#completion max 1' Enter
 sleep 1
 tmux send-keys -t "$SESSION" 'cat alpha-'
@@ -50,11 +54,15 @@ sleep 1
 tmux send-keys -t "$SESSION" Enter
 sleep 2
 
+tmux send-keys -t "$SESSION" C-c
+sleep 1
 tmux send-keys -t "$SESSION" '#completion inline on' Enter
 sleep 1
 tmux send-keys -t "$SESSION" '#completion tab-accept word' Enter
 sleep 1
 tmux send-keys -t "$SESSION" 'echo tmuxword-one tmuxword-two' Enter
+sleep 1
+tmux send-keys -t "$SESSION" C-c
 sleep 1
 tmux send-keys -t "$SESSION" 'echo tmux'
 sleep 1
@@ -64,6 +72,8 @@ sleep 1
 tmux send-keys -t "$SESSION" Enter
 sleep 2
 
+tmux send-keys -t "$SESSION" C-c
+sleep 1
 tmux send-keys -t "$SESSION" '#completion tab-accept full' Enter
 sleep 1
 tmux send-keys -t "$SESSION" 'cat src/m'
@@ -75,6 +85,8 @@ sleep 2
 WIDE_CAPTURE="$(tmux capture-pane -p -S - -t "$SESSION")"
 
 tmux resize-window -t "$SESSION" -x 44 -y 30
+sleep 1
+tmux send-keys -t "$SESSION" C-c
 sleep 1
 tmux send-keys -t "$SESSION" 'cat very-long-aish'
 sleep 1

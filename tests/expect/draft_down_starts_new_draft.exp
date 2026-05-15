@@ -1,6 +1,6 @@
 #!/usr/bin/env expect
-# Down in a non-empty draft should save the current draft and clear the prompt
-# for a new draft.
+# Draft Up/Down should browse saved drafts like a draft history. Down on the
+# newest draft should open a blank draft for new input.
 
 set timeout 10
 source [file dirname [info script]]/_lib.exp
@@ -10,11 +10,21 @@ set ::env(AISH_HOME) $home
 
 aish_spawn
 
-aish_send "echo saved-draft-by-down"
+aish_send "echo first-saved-draft-by-down"
 send -- "\033\[B"
+aish_wait_prompt
+
+aish_send "echo second-saved-draft-by-down"
+send -- "\033\[B"
+aish_wait_prompt
+
 send -- "\033\[A"
-aish_expect "> echo saved-draft-by-down"
-aish_send "\x03"
+aish_expect "> echo second-saved-draft-by-down"
+send -- "\033\[A"
+aish_expect "> echo first-saved-draft-by-down"
+send -- "\033\[B"
+aish_expect "> echo second-saved-draft-by-down"
+send -- "\033\[B"
 aish_wait_prompt
 
 aish_send "echo after-new-draft"
@@ -30,11 +40,15 @@ if {![file exists $draft_path]} {
 set fh [open $draft_path r]
 set draft_json [read $fh]
 close $fh
-if {[string first "echo saved-draft-by-down" $draft_json] < 0} {
-    puts stderr "draft history did not contain saved draft: $draft_json"
+if {[string first "echo first-saved-draft-by-down" $draft_json] < 0} {
+    puts stderr "draft history did not contain first saved draft: $draft_json"
     exit 5
 }
-if {[string first "echo saved-draft-by-downecho after-new-draft" $draft_json] >= 0} {
+if {[string first "echo second-saved-draft-by-down" $draft_json] < 0} {
+    puts stderr "draft history did not contain second saved draft: $draft_json"
+    exit 5
+}
+if {[string first "echo second-saved-draft-by-downecho after-new-draft" $draft_json] >= 0} {
     puts stderr "new command was appended to stale draft: $draft_json"
     exit 5
 }

@@ -31,6 +31,8 @@ tmux send-keys -t "$SESSION_ONE" "#template use $TEMPLATE_ID" Enter
 sleep 1
 tmux send-keys -t "$SESSION_ONE" Enter
 sleep 2
+tmux send-keys -t "$SESSION_ONE" C-c
+sleep 1
 tmux send-keys -t "$SESSION_ONE" '#mt echo {message}' Enter
 sleep 1
 UNRESOLVED_ID="$(tmux capture-pane -p -S - -t "$SESSION_ONE" | awk '/^template stored: tpl-/ { id=$3 } END { print id }')"
@@ -48,6 +50,8 @@ test -n "$REPLACED_ID"
 tmux send-keys -t "$SESSION_ONE" "#template show $REPLACED_ID" Enter
 sleep 1
 tmux send-keys -t "$SESSION_ONE" 'echo default-history-tmux' Enter
+sleep 1
+tmux send-keys -t "$SESSION_ONE" C-c
 sleep 1
 tmux send-keys -t "$SESSION_ONE" C-x C-e
 sleep 2
@@ -78,6 +82,8 @@ sleep 2
 
 tmux new-session -d -x 120 -y 35 -s "$SESSION_TWO" "env HOME='$HOME_DIR' EDITOR='$EDITOR_SCRIPT' '$AISH_BIN'"
 sleep 5
+tmux send-keys -t "$SESSION_TWO" C-c
+sleep 1
 tmux send-keys -t "$SESSION_TWO" '#template find replaced-template' Enter
 sleep 1
 tmux send-keys -t "$SESSION_TWO" Tab

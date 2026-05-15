@@ -19,6 +19,8 @@ tmux send-keys -t "$SESSION" 'less README.md' Enter
 sleep 2
 tmux send-keys -t "$SESSION" q
 sleep 2
+tmux send-keys -t "$SESSION" C-c
+sleep 1
 tmux send-keys -t "$SESSION" 'echo after-less' Enter
 sleep 2
 

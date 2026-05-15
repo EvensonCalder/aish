@@ -16,6 +16,8 @@ tmux send-keys -t "$SESSION" b
 tmux send-keys -t "$SESSION" Enter
 sleep 1
 
+tmux send-keys -t "$SESSION" C-c
+sleep 1
 tmux send-keys -t "$SESSION" 'echo end'
 tmux send-keys -t "$SESSION" C-a
 tmux send-keys -t "$SESSION" "printf 'ctrl-a:' && "
@@ -24,12 +26,16 @@ tmux send-keys -t "$SESSION" -- '-tail'
 tmux send-keys -t "$SESSION" Enter
 sleep 1
 
+tmux send-keys -t "$SESSION" C-c
+sleep 1
 tmux send-keys -t "$SESSION" 'echo alpha gamma'
 tmux send-keys -t "$SESSION" M-b
 tmux send-keys -t "$SESSION" 'beta-'
 tmux send-keys -t "$SESSION" Enter
 sleep 1
 
+tmux send-keys -t "$SESSION" C-c
+sleep 1
 tmux send-keys -t "$SESSION" 'echo one three'
 tmux send-keys -t "$SESSION" C-a
 tmux send-keys -t "$SESSION" M-f
@@ -38,18 +44,24 @@ tmux send-keys -t "$SESSION" 'two '
 tmux send-keys -t "$SESSION" Enter
 sleep 1
 
+tmux send-keys -t "$SESSION" C-c
+sleep 1
 tmux send-keys -t "$SESSION" 'echo delete bad'
 tmux send-keys -t "$SESSION" C-w
 tmux send-keys -t "$SESSION" good
 tmux send-keys -t "$SESSION" Enter
 sleep 1
 
+tmux send-keys -t "$SESSION" C-c
+sleep 1
 tmux send-keys -t "$SESSION" garbage
 tmux send-keys -t "$SESSION" C-u
 tmux send-keys -t "$SESSION" 'echo ctrl-u-ok'
 tmux send-keys -t "$SESSION" Enter
 sleep 1
 
+tmux send-keys -t "$SESSION" C-c
+sleep 1
 tmux send-keys -t "$SESSION" 'echo ctrl-k-ok bad'
 tmux send-keys -t "$SESSION" Left Left Left
 tmux send-keys -t "$SESSION" C-k
@@ -62,6 +74,8 @@ sleep 1
 tmux send-keys -t "$SESSION" 'echo after-escape-edit' Enter
 sleep 1
 
+tmux send-keys -t "$SESSION" C-c
+sleep 1
 tmux send-keys -t "$SESSION" C-x C-g
 sleep 1
 tmux send-keys -t "$SESSION" 'echo ctrlx-ok' Enter

@@ -16,6 +16,8 @@ sleep 5
 
 tmux send-keys -t "$SESSION" 'echo picker-history-source' Enter
 sleep 1
+tmux send-keys -t "$SESSION" C-c
+sleep 1
 tmux send-keys -t "$SESSION" 'echo keep-after-picker-cancel'
 tmux send-keys -t "$SESSION" C-r
 sleep 2

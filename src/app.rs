@@ -118,6 +118,7 @@ pub struct AppState {
     pub config_path: Option<PathBuf>,
     pub draft_persist: bool,
     pub draft_history: Vec<DraftEntry>,
+    pub selected_draft_index: Option<usize>,
     pub regular_history: Vec<HistoryEntry>,
     pub selected_history_index: Option<usize>,
     pub ai_sessions: Vec<AiSession>,
@@ -169,6 +170,7 @@ impl Default for AppState {
             config_path: None,
             draft_persist: true,
             draft_history: Vec::new(),
+            selected_draft_index: None,
             regular_history: Vec::new(),
             selected_history_index: None,
             ai_sessions: Vec::new(),
@@ -250,6 +252,7 @@ impl AppState {
             return false;
         };
         self.draft = InputBuffer::from(command);
+        self.selected_draft_index = None;
         self.draft_from_editor = false;
         self.draft_from_template = false;
         self.mode = Mode::Draft;
@@ -293,6 +296,7 @@ impl AppState {
             return false;
         };
         self.draft = InputBuffer::from(command);
+        self.selected_draft_index = None;
         self.draft_from_editor = false;
         self.draft_from_template = false;
         self.mode = Mode::Draft;
@@ -312,28 +316,77 @@ impl AppState {
         self.continuation_prompt = None;
         self.draft_from_editor = false;
         self.draft_from_template = false;
+        self.selected_draft_index = None;
         self.mode = Mode::Draft;
         self.clear_completion_ui();
     }
 
-    pub fn restore_latest_saved_draft(&mut self) -> bool {
-        if !self.draft_persist || !self.draft.is_empty() || self.draft_from_editor {
-            return false;
+    pub fn save_current_draft_if_needed(&mut self) -> Result<bool> {
+        if !self.draft_persist || self.draft.is_empty() {
+            return Ok(false);
         }
-        let Some(entry) = self
-            .draft_history
-            .iter()
-            .rev()
-            .find(|entry| !entry.text.is_empty())
-        else {
-            return false;
+        let text = self.draft.as_str().to_string();
+        if self
+            .selected_draft_index
+            .and_then(|index| self.draft_history.get(index))
+            .is_some_and(|entry| entry.text == text)
+        {
+            return Ok(false);
+        }
+
+        let entry = DraftEntry {
+            t: (self.clock)(),
+            text,
+        };
+        if let Some(path) = &self.draft_history_path {
+            append_jsonl(path, &entry)?;
+        }
+        self.draft_history.push(entry);
+        self.selected_draft_index = self.draft_history.len().checked_sub(1);
+        Ok(true)
+    }
+
+    pub fn move_draft_selection_older(&mut self) -> Result<bool> {
+        if !self.draft_persist || self.draft_from_editor {
+            return Ok(false);
+        }
+        self.save_current_draft_if_needed()?;
+        let Some(target) = (match self.selected_draft_index {
+            Some(index) if index > 0 => Some(index - 1),
+            Some(index) => Some(index),
+            None => self.draft_history.len().checked_sub(1),
+        }) else {
+            return Ok(false);
+        };
+        self.copy_saved_draft_to_current(target)
+    }
+
+    pub fn move_draft_selection_newer(&mut self) -> Result<bool> {
+        if !self.draft_persist || self.draft_from_editor {
+            return Ok(false);
+        }
+        self.save_current_draft_if_needed()?;
+        let Some(index) = self.selected_draft_index else {
+            return Ok(false);
+        };
+        if index + 1 < self.draft_history.len() {
+            return self.copy_saved_draft_to_current(index + 1);
+        }
+        self.clear_draft_for_new_draft();
+        Ok(true)
+    }
+
+    fn copy_saved_draft_to_current(&mut self, index: usize) -> Result<bool> {
+        let Some(entry) = self.draft_history.get(index) else {
+            return Ok(false);
         };
         self.draft = InputBuffer::from(entry.text.clone());
+        self.selected_draft_index = Some(index);
         self.draft_from_editor = false;
         self.draft_from_template = false;
         self.mode = Mode::Draft;
         self.clear_completion_ui();
-        true
+        Ok(true)
     }
 
     pub fn prepare_editor_session(
@@ -351,6 +404,7 @@ impl AppState {
     ) -> Result<()> {
         let content = normalize_editor_draft_content(&read_editor_file(session)?);
         self.draft = InputBuffer::from(content);
+        self.selected_draft_index = None;
         self.draft_from_editor = !self.draft.is_empty();
         self.draft_from_template = false;
         self.mode = Mode::Draft;
@@ -373,6 +427,7 @@ impl AppState {
     pub fn replace_draft_from_editor_text(&mut self, content: impl Into<String>) {
         let content = normalize_editor_draft_content(&content.into());
         self.draft = InputBuffer::from(content);
+        self.selected_draft_index = None;
         self.draft_from_editor = !self.draft.is_empty();
         self.draft_from_template = false;
         self.mode = Mode::Draft;
@@ -465,6 +520,7 @@ impl AppState {
 
     pub fn replace_draft_from_history_picker(&mut self, command: impl Into<String>) {
         self.draft = InputBuffer::from(command.into());
+        self.selected_draft_index = None;
         self.draft_from_editor = false;
         self.draft_from_template = false;
         self.mode = Mode::Draft;
@@ -488,6 +544,7 @@ impl AppState {
             return Ok(false);
         };
         self.draft = InputBuffer::from(template.body.clone());
+        self.selected_draft_index = None;
         self.draft_from_editor = false;
         self.draft_from_template = true;
         self.mode = Mode::Draft;
@@ -762,7 +819,10 @@ pub fn run() -> Result<()> {
     let (layout, config) = config::init_default_layout(config::runtime_aish_dir()?)?;
     let store = HistoryStore::load(&layout)?;
     let mut backend = PtyBackend::spawn(&config.shell.backend)?;
-    let restored_draft = latest_persisted_draft(&store, config.draft.persist);
+    let restored_draft_index = latest_persisted_draft_index(&store, config.draft.persist);
+    let restored_draft = restored_draft_index
+        .and_then(|index| store.drafts.get(index))
+        .map(|entry| entry.text.clone());
     let mut state = AppState {
         current_cwd: backend.initial_cwd().map(PathBuf::from),
         backend_shell: Some(backend.shell_program().to_string()),
@@ -776,6 +836,7 @@ pub fn run() -> Result<()> {
         config_path: Some(layout.config),
         draft_persist: config.draft.persist,
         draft_history: store.drafts,
+        selected_draft_index: restored_draft_index,
         regular_history: store.regular,
         ai_sessions: store.ai_sessions,
         ai_command_indices: store.ai_command_indices,
@@ -801,12 +862,22 @@ pub fn run() -> Result<()> {
     )
 }
 
+#[cfg(test)]
 fn latest_persisted_draft(store: &HistoryStore, persist_enabled: bool) -> Option<String> {
-    persist_enabled
-        .then(|| store.drafts.last())
-        .flatten()
+    latest_persisted_draft_index(store, persist_enabled)
+        .and_then(|index| store.drafts.get(index))
         .map(|entry| entry.text.clone())
-        .filter(|text| !text.is_empty())
+}
+
+fn latest_persisted_draft_index(store: &HistoryStore, persist_enabled: bool) -> Option<usize> {
+    persist_enabled
+        .then(|| {
+            store
+                .drafts
+                .iter()
+                .rposition(|entry| !entry.text.is_empty())
+        })
+        .flatten()
 }
 
 pub fn execute_draft(
@@ -852,8 +923,7 @@ pub fn execute_draft(
             ParsedLine::Ordinary(_) => {}
             ParsedLine::EmptyPrivate => {
                 writeln!(out, "empty Aish command")?;
-                state.draft.clear();
-                state.mode = Mode::Draft;
+                state.clear_draft_for_new_draft();
                 return Ok(());
             }
             ParsedLine::Note { tag, text } => {
@@ -867,16 +937,14 @@ pub fn execute_draft(
                     )?;
                 }
                 writeln!(out, "note stored")?;
-                state.draft.clear();
-                state.mode = Mode::Draft;
+                state.clear_draft_for_new_draft();
                 return Ok(());
             }
             ParsedLine::Private { name, args } => {
                 match name {
                     "exit" | "quit" => {
                         state.exit_requested = true;
-                        state.draft.clear();
-                        state.mode = Mode::Draft;
+                        state.clear_draft_for_new_draft();
                         return Ok(());
                     }
                     "help" => {
@@ -898,44 +966,37 @@ pub fn execute_draft(
                             };
                             writeln!(out, "{} [{}] - {}", binding.key, status, binding.action)?;
                         }
-                        state.draft.clear();
-                        state.mode = Mode::Draft;
+                        state.clear_draft_for_new_draft();
                         return Ok(());
                     }
                     "status" => {
                         write_status_report(state, out)?;
-                        state.draft.clear();
-                        state.mode = Mode::Draft;
+                        state.clear_draft_for_new_draft();
                         return Ok(());
                     }
                     "config" => {
                         write_config_report(state, out)?;
-                        state.draft.clear();
-                        state.mode = Mode::Draft;
+                        state.clear_draft_for_new_draft();
                         return Ok(());
                     }
                     "doctor" => {
                         write_doctor_report(state, out)?;
-                        state.draft.clear();
-                        state.mode = Mode::Draft;
+                        state.clear_draft_for_new_draft();
                         return Ok(());
                     }
                     "model" => {
                         update_ai_config_field(state, out, "model", args)?;
-                        state.draft.clear();
-                        state.mode = Mode::Draft;
+                        state.clear_draft_for_new_draft();
                         return Ok(());
                     }
                     "base-url" => {
                         update_ai_config_field(state, out, "base-url", args)?;
-                        state.draft.clear();
-                        state.mode = Mode::Draft;
+                        state.clear_draft_for_new_draft();
                         return Ok(());
                     }
                     "env-key" => {
                         update_ai_config_field(state, out, "env-key", args)?;
-                        state.draft.clear();
-                        state.mode = Mode::Draft;
+                        state.clear_draft_for_new_draft();
                         return Ok(());
                     }
                     "key" => {
@@ -946,32 +1007,27 @@ pub fn execute_draft(
                             Some("clear") => clear_stored_key(state, out)?,
                             _ => writeln!(out, "usage: #key set | #key clear")?,
                         }
-                        state.draft.clear();
-                        state.mode = Mode::Draft;
+                        state.clear_draft_for_new_draft();
                         return Ok(());
                     }
                     "context" => {
                         update_context_config(state, out, args)?;
-                        state.draft.clear();
-                        state.mode = Mode::Draft;
+                        state.clear_draft_for_new_draft();
                         return Ok(());
                     }
                     "completion" => {
                         update_completion_config(state, out, args)?;
-                        state.draft.clear();
-                        state.mode = Mode::Draft;
+                        state.clear_draft_for_new_draft();
                         return Ok(());
                     }
                     "log" => {
                         show_event_log(state, out, args)?;
-                        state.draft.clear();
-                        state.mode = Mode::Draft;
+                        state.clear_draft_for_new_draft();
                         return Ok(());
                     }
                     "editor" => {
                         write_editor_report(state, out)?;
-                        state.draft.clear();
-                        state.mode = Mode::Draft;
+                        state.clear_draft_for_new_draft();
                         return Ok(());
                     }
                     "history" => {
@@ -995,8 +1051,7 @@ pub fn execute_draft(
                             (Ok(_), _, _) => writeln!(out, "history storage is not configured")?,
                             (Err(_), _, _) => writeln!(out, "usage: #history <count>")?,
                         }
-                        state.draft.clear();
-                        state.mode = Mode::Draft;
+                        state.clear_draft_for_new_draft();
                         return Ok(());
                     }
                     "mt" => {
@@ -1012,8 +1067,7 @@ pub fn execute_draft(
                             },
                             None => writeln!(out, "usage: #mt <template-body>")?,
                         }
-                        state.draft.clear();
-                        state.mode = Mode::Draft;
+                        state.clear_draft_for_new_draft();
                         return Ok(());
                     }
                     "template" => {
@@ -1195,9 +1249,11 @@ pub fn execute_draft(
                             _ => writeln!(out, "{}", template_usage())?,
                         }
                         if !keep_draft {
-                            state.draft.clear();
+                            state.clear_draft_for_new_draft();
+                        } else {
+                            state.selected_draft_index = None;
+                            state.mode = Mode::Draft;
                         }
-                        state.mode = Mode::Draft;
                         return Ok(());
                     }
                     "encrypt" => {
@@ -1205,26 +1261,22 @@ pub fn execute_draft(
                             writeln!(out, "{}", plaintext_git_history_warning())?;
                         }
                         writeln!(out, "encryption is not implemented yet; no data changed")?;
-                        state.draft.clear();
-                        state.mode = Mode::Draft;
+                        state.clear_draft_for_new_draft();
                         return Ok(());
                     }
                     "set-remote" => {
                         set_sync_remote(state, out, args)?;
-                        state.draft.clear();
-                        state.mode = Mode::Draft;
+                        state.clear_draft_for_new_draft();
                         return Ok(());
                     }
                     "push" => {
                         run_manual_sync_push(state, out)?;
-                        state.draft.clear();
-                        state.mode = Mode::Draft;
+                        state.clear_draft_for_new_draft();
                         return Ok(());
                     }
                     "sync" => {
                         set_sync_schedule(state, out, args)?;
-                        state.draft.clear();
-                        state.mode = Mode::Draft;
+                        state.clear_draft_for_new_draft();
                         return Ok(());
                     }
                     _ => {}
@@ -1236,18 +1288,17 @@ pub fn execute_draft(
                     )?,
                     None => writeln!(out, "Aish command not implemented yet: #{name}")?,
                 }
-                state.draft.clear();
-                state.mode = Mode::Draft;
+                state.clear_draft_for_new_draft();
                 return Ok(());
             }
             ParsedLine::AiPrompt(prompt) => {
                 submit_ai_prompt(state, prompt, out)?;
-                state.draft.clear();
+                state.clear_draft_for_new_draft();
                 return Ok(());
             }
             ParsedLine::AiPromptWithContext { prompt, command } => {
                 submit_ai_prompt_with_context(state, prompt, command, out, timeout)?;
-                state.draft.clear();
+                state.clear_draft_for_new_draft();
                 return Ok(());
             }
         }
@@ -1261,6 +1312,7 @@ pub fn execute_draft(
             state.mode = Mode::Draft;
             return Ok(());
         }
+        state.save_current_draft_if_needed()?;
     }
 
     state.mode = Mode::CommandRunning;
@@ -1319,7 +1371,11 @@ fn record_completed_command(
     }
     state.last_status = Some(exit_code);
     state.continuation_prompt = None;
-    state.draft.clear();
+    let keep_draft = !executing_ai && !state.draft_from_editor;
+    if !keep_draft {
+        state.draft.clear();
+        state.selected_draft_index = None;
+    }
     state.draft_from_editor = false;
     state.draft_from_template = false;
     if executing_ai && exit_code == 0 {
@@ -2645,23 +2701,6 @@ pub fn save_draft_if_configured(state: &AppState) -> Result<bool> {
     Ok(true)
 }
 
-pub fn save_draft_and_update_state_if_configured(state: &mut AppState) -> Result<bool> {
-    if !state.draft_persist || state.draft.is_empty() {
-        return Ok(false);
-    }
-    let entry = DraftEntry {
-        t: (state.clock)(),
-        text: state.draft.as_str().to_string(),
-    };
-    let Some(path) = &state.draft_history_path else {
-        return Ok(false);
-    };
-
-    append_jsonl(path, &entry)?;
-    state.draft_history.push(entry);
-    Ok(true)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2994,6 +3033,7 @@ mod tests {
             mode: Mode::History,
             draft_from_editor: true,
             draft_from_template: true,
+            selected_draft_index: Some(0),
             ..AppState::default()
         };
 
@@ -3001,6 +3041,7 @@ mod tests {
 
         assert_eq!(state.mode, Mode::Draft);
         assert_eq!(state.draft.as_str(), "git commit -m 'hello world'");
+        assert_eq!(state.selected_draft_index, None);
         assert!(!state.draft_from_editor);
         assert!(!state.draft_from_template);
     }
@@ -3036,6 +3077,7 @@ mod tests {
         let mut state = AppState {
             template_store_path: Some(template_path),
             draft_from_editor: true,
+            selected_draft_index: Some(0),
             ..AppState::default()
         };
 
@@ -3047,6 +3089,7 @@ mod tests {
 
         assert_eq!(state.mode, Mode::Draft);
         assert_eq!(state.draft.as_str(), "rsync {from} {to}");
+        assert_eq!(state.selected_draft_index, None);
         assert!(state.draft_from_template);
         assert!(!state.draft_from_editor);
     }
@@ -3270,6 +3313,7 @@ mod tests {
                 source: HistorySource::User,
             }],
             selected_history_index: Some(0),
+            selected_draft_index: Some(0),
             ..AppState::default()
         };
 
@@ -3277,6 +3321,7 @@ mod tests {
 
         assert_eq!(state.mode, Mode::Draft);
         assert_eq!(state.draft.as_str(), "git status");
+        assert_eq!(state.selected_draft_index, None);
         assert_eq!(state.draft.cursor(), "git status".len());
     }
 
@@ -3351,6 +3396,7 @@ mod tests {
                 item_index: 0,
             }],
             selected_ai_index: Some(0),
+            selected_draft_index: Some(0),
             ..AppState::default()
         };
 
@@ -3358,6 +3404,7 @@ mod tests {
 
         assert_eq!(state.mode, Mode::Draft);
         assert_eq!(state.draft.as_str(), "git status");
+        assert_eq!(state.selected_draft_index, None);
         assert_eq!(state.draft.cursor(), "git status".len());
     }
 

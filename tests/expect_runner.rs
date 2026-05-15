@@ -389,7 +389,7 @@ fn home_default_draft_persists() {
 }
 
 #[test]
-fn draft_down_starts_new_draft() {
+fn draft_up_down_browses_saved_drafts() {
     run_script("draft_down_starts_new_draft.exp");
 }
 

@@ -47,25 +47,23 @@ esac
 tmux new-session -d -x 120 -y 40 -s "$SESSION" "env HOME='$HOME_DIR' AISH_HOME='$HOME_DIR/.aish' '$AISH_BIN'"
 sleep "$START_DELAY"
 
-tmux send-keys -t "$SESSION" "cd $WORK_DIR" Enter
-sleep "$STEP_DELAY"
-tmux send-keys -t "$SESSION" "$CREATE_COMMAND" Enter
-sleep "$STEP_DELAY"
-tmux send-keys -t "$SESSION" 'cat c/i | grep beta' Enter
-sleep "$STEP_DELAY"
-tmux send-keys -t "$SESSION" "printf 'quoted:%s\\n' 'value with spaces'" Enter
-sleep "$STEP_DELAY"
-tmux send-keys -t "$SESSION" "$ENV_COMMAND" Enter
-sleep "$STEP_DELAY"
-tmux send-keys -t "$SESSION" 'printenv AISH_COMMON_VALUE' Enter
-sleep "$STEP_DELAY"
-tmux send-keys -t "$SESSION" "$TEST_COMMAND" Enter
-sleep "$STEP_DELAY"
-tmux send-keys -t "$SESSION" "$BACKEND_COMMAND" Enter
-sleep "$STEP_DELAY"
-tmux send-keys -t "$SESSION" 'false' Enter
-sleep "$STEP_DELAY"
-tmux send-keys -t "$SESSION" 'echo after-failure' Enter
+send_command() {
+    tmux send-keys -t "$SESSION" C-c
+    sleep "$STEP_DELAY"
+    tmux send-keys -t "$SESSION" "$1" Enter
+    sleep "$STEP_DELAY"
+}
+
+send_command "cd $WORK_DIR"
+send_command "$CREATE_COMMAND"
+send_command 'cat c/i | grep beta'
+send_command "printf 'quoted:%s\\n' 'value with spaces'"
+send_command "$ENV_COMMAND"
+send_command 'printenv AISH_COMMON_VALUE'
+send_command "$TEST_COMMAND"
+send_command "$BACKEND_COMMAND"
+send_command 'false'
+send_command 'echo after-failure'
 sleep 2
 
 CAPTURE="$(tmux capture-pane -p -S - -t "$SESSION")"

@@ -256,7 +256,7 @@ fn tmux_escape_clears_draft_and_shell_recovers() {
 }
 
 #[test]
-fn tmux_down_saves_draft_and_starts_new_draft() {
+fn tmux_draft_up_down_browses_saved_drafts() {
     let Some(captured) = run_tmux_script("draft_down_new_draft.sh") else {
         return;
     };

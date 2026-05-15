@@ -12,11 +12,15 @@ sleep 5
 
 tmux send-keys -t "$SESSION" 'echo before-mode-redraw' Enter
 sleep 2
-tmux send-keys -t "$SESSION" Tab
+tmux send-keys -t "$SESSION" C-c
 sleep 1
 tmux send-keys -t "$SESSION" Tab
 sleep 1
 tmux send-keys -t "$SESSION" Tab
+sleep 1
+tmux send-keys -t "$SESSION" Tab
+sleep 1
+tmux send-keys -t "$SESSION" C-c
 sleep 1
 tmux send-keys -t "$SESSION" 'echo after-mode-redraw' Enter
 sleep 2

@@ -12,7 +12,7 @@ use crossterm::terminal::{
 
 use crate::app::{
     AppState, InlineCompletion, answer_context_confirmation, execute_draft,
-    save_draft_and_update_state_if_configured, save_draft_if_configured,
+    save_draft_if_configured,
 };
 use crate::completion::{
     CompletionCandidate, accept_completion_with_mode, current_token_context,
@@ -44,7 +44,8 @@ pub enum KeyAction {
     ConfirmContext(bool),
     CompleteOrShow,
     AcceptCompletion,
-    NewDraft,
+    PreviousDraft,
+    NextDraft,
     ForwardToBackend(String),
 }
 
@@ -201,9 +202,11 @@ fn handle_key(
         KeyAction::AcceptCompletion => {
             accept_first_completion(state)?;
         }
-        KeyAction::NewDraft => {
-            save_draft_and_update_state_if_configured(state)?;
-            state.clear_draft_for_new_draft();
+        KeyAction::PreviousDraft => {
+            state.move_draft_selection_older()?;
+        }
+        KeyAction::NextDraft => {
+            state.move_draft_selection_newer()?;
         }
         KeyAction::Submit => {
             if had_completion_ui {
@@ -580,14 +583,13 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
             if !delete_template_placeholder_after_cursor(state) {
                 state.draft.delete();
             }
+            if state.draft.is_empty() {
+                state.selected_draft_index = None;
+            }
             KeyAction::Continue
         }
         (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
-            state.draft.clear();
-            state.continuation_prompt = None;
-            state.draft_from_editor = false;
-            state.draft_from_template = false;
-            state.mode = crate::modes::Mode::Draft;
+            state.clear_draft_for_new_draft();
             KeyAction::Continue
         }
         (KeyModifiers::CONTROL, KeyCode::Char('l')) => KeyAction::ClearScreen,
@@ -646,20 +648,14 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
             state.move_ai_selection_previous();
             KeyAction::Continue
         }
-        (_, KeyCode::Up) if state.mode == crate::modes::Mode::Draft => {
-            state.restore_latest_saved_draft();
-            KeyAction::Continue
-        }
+        (_, KeyCode::Up) if state.mode == crate::modes::Mode::Draft => KeyAction::PreviousDraft,
         (_, KeyCode::Down) if state.mode == crate::modes::Mode::Ai => {
             state.move_ai_selection_next();
             KeyAction::Continue
         }
         (_, KeyCode::Down) => {
-            if state.mode == crate::modes::Mode::Draft
-                && !is_editor_draft
-                && !state.draft.is_empty()
-            {
-                KeyAction::NewDraft
+            if state.mode == crate::modes::Mode::Draft && !is_editor_draft {
+                KeyAction::NextDraft
             } else {
                 KeyAction::Continue
             }
@@ -693,6 +689,7 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
                 state.draft.backspace();
             }
             if state.draft.is_empty() {
+                state.selected_draft_index = None;
                 state.draft_from_editor = false;
                 state.draft_from_template = false;
             }
@@ -705,17 +702,14 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
                 state.draft.delete();
             }
             if state.draft.is_empty() {
+                state.selected_draft_index = None;
                 state.draft_from_editor = false;
                 state.draft_from_template = false;
             }
             KeyAction::Continue
         }
         (_, KeyCode::Esc) => {
-            state.draft.clear();
-            state.continuation_prompt = None;
-            state.draft_from_editor = false;
-            state.draft_from_template = false;
-            state.mode = crate::modes::Mode::Draft;
+            state.clear_draft_for_new_draft();
             KeyAction::Continue
         }
         (_, KeyCode::Tab) => {
@@ -1211,7 +1205,7 @@ mod tests {
     }
 
     #[test]
-    fn down_on_non_empty_draft_saves_and_starts_new_draft() {
+    fn down_on_non_empty_new_draft_saves_and_opens_blank_draft() {
         let temp = tempfile::tempdir().unwrap();
         let draft_path = temp.path().join("draft.jsonl");
         let mut state = AppState {
@@ -1238,6 +1232,7 @@ mod tests {
         assert!(state.draft.is_empty());
         assert!(!state.draft_from_editor);
         assert!(!state.draft_from_template);
+        assert_eq!(state.selected_draft_index, None);
         let loaded = crate::history::load_jsonl::<crate::history::DraftEntry>(&draft_path).unwrap();
         assert_eq!(loaded.errors, []);
         assert_eq!(loaded.items.len(), 1);
@@ -1247,7 +1242,7 @@ mod tests {
     }
 
     #[test]
-    fn up_on_empty_draft_restores_latest_saved_draft() {
+    fn up_on_blank_draft_restores_newest_saved_draft() {
         let mut state = AppState {
             draft_history: vec![
                 crate::history::DraftEntry {
@@ -1261,13 +1256,148 @@ mod tests {
             ],
             ..AppState::default()
         };
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
 
-        apply_key_to_state(key(KeyCode::Up), &mut state);
+        handle_key(
+            key(KeyCode::Up),
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
 
         assert_eq!(state.mode, Mode::Draft);
         assert_eq!(state.draft.as_str(), "echo newest-draft");
+        assert_eq!(state.selected_draft_index, Some(1));
         assert!(!state.draft_from_editor);
         assert!(!state.draft_from_template);
+    }
+
+    #[test]
+    fn up_and_down_browse_multiple_saved_drafts() {
+        let mut state = AppState {
+            draft_history: vec![
+                crate::history::DraftEntry {
+                    t: 1,
+                    text: "echo first-draft".to_string(),
+                },
+                crate::history::DraftEntry {
+                    t: 2,
+                    text: "echo second-draft".to_string(),
+                },
+                crate::history::DraftEntry {
+                    t: 3,
+                    text: "echo third-draft".to_string(),
+                },
+            ],
+            ..AppState::default()
+        };
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        for (key_code, expected_draft, expected_index) in [
+            (KeyCode::Up, "echo third-draft", Some(2)),
+            (KeyCode::Up, "echo second-draft", Some(1)),
+            (KeyCode::Up, "echo first-draft", Some(0)),
+            (KeyCode::Up, "echo first-draft", Some(0)),
+            (KeyCode::Down, "echo second-draft", Some(1)),
+            (KeyCode::Down, "echo third-draft", Some(2)),
+        ] {
+            handle_key(
+                key(key_code),
+                &mut state,
+                &mut backend,
+                &mut output,
+                Duration::from_secs(5),
+            )
+            .unwrap();
+            assert_eq!(state.draft.as_str(), expected_draft);
+            assert_eq!(state.selected_draft_index, expected_index);
+        }
+
+        handle_key(
+            key(KeyCode::Down),
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        assert!(state.draft.is_empty());
+        assert_eq!(state.selected_draft_index, None);
+    }
+
+    #[test]
+    fn draft_navigation_is_disabled_when_draft_persistence_is_disabled() {
+        let mut state = AppState {
+            draft_persist: false,
+            draft_history: vec![crate::history::DraftEntry {
+                t: 1,
+                text: "echo saved-draft".to_string(),
+            }],
+            ..AppState::default()
+        };
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        handle_key(
+            key(KeyCode::Up),
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        assert!(state.draft.is_empty());
+        assert_eq!(state.selected_draft_index, None);
+    }
+
+    #[test]
+    fn editing_saved_draft_then_navigating_newer_saves_as_new_draft() {
+        let temp = tempfile::tempdir().unwrap();
+        let draft_path = temp.path().join("draft.jsonl");
+        let mut state = AppState {
+            draft_history_path: Some(draft_path.clone()),
+            draft_history: vec![
+                crate::history::DraftEntry {
+                    t: 1,
+                    text: "echo older-draft".to_string(),
+                },
+                crate::history::DraftEntry {
+                    t: 2,
+                    text: "echo newer-draft".to_string(),
+                },
+            ],
+            selected_draft_index: Some(0),
+            clock: fixed_clock,
+            ..AppState::default()
+        };
+        state.draft.insert_str("echo older-draft edited");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        handle_key(
+            key(KeyCode::Down),
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        assert!(state.draft.is_empty());
+        assert_eq!(state.selected_draft_index, None);
+        assert_eq!(state.draft_history.len(), 3);
+        assert_eq!(state.draft_history[2].t, fixed_clock());
+        assert_eq!(state.draft_history[2].text, "echo older-draft edited");
+        let loaded = crate::history::load_jsonl::<crate::history::DraftEntry>(&draft_path).unwrap();
+        assert_eq!(loaded.errors, []);
+        assert_eq!(loaded.items.len(), 1);
+        assert_eq!(loaded.items[0].text, "echo older-draft edited");
     }
 
     #[test]
@@ -1524,12 +1654,16 @@ mod tests {
 
     #[test]
     fn ctrl_c_clears_multiline_draft_and_returns_to_empty_prompt() {
-        let mut state = AppState::default();
+        let mut state = AppState {
+            selected_draft_index: Some(0),
+            ..AppState::default()
+        };
         state.draft.insert_str("echo \"\n123");
 
         apply_key_to_state(ctrl('c'), &mut state);
 
         assert!(state.draft.is_empty());
+        assert_eq!(state.selected_draft_index, None);
         assert_eq!(state.mode, crate::modes::Mode::Draft);
         assert_eq!(state.render_prompt_line(), "> ");
     }
@@ -1874,7 +2008,7 @@ mod tests {
         let prompt_row = screen
             .rows
             .iter()
-            .position(|row| row.iter().collect::<String>() == "> ")
+            .position(|row| row.iter().collect::<String>() == "> echo hello")
             .expect("redrawn prompt row");
         assert!(prompt_row > 0, "screen was {:?}", screen.lines());
         assert_eq!(screen.line(prompt_row - 1), "hello");
@@ -1924,6 +2058,7 @@ mod tests {
                 source: crate::history::HistorySource::User,
             }],
             selected_history_index: Some(0),
+            selected_draft_index: Some(0),
             ..AppState::default()
         };
         state.draft.insert_str("partial");
@@ -1935,6 +2070,7 @@ mod tests {
 
         assert_eq!(state.mode, Mode::Draft);
         assert!(state.draft.is_empty());
+        assert_eq!(state.selected_draft_index, None);
         assert_eq!(state.selected_history_index, Some(0));
     }
 
@@ -2366,7 +2502,7 @@ mod tests {
 
         let rendered = String::from_utf8(output).unwrap();
         let screen = TestScreen::from_output(&rendered);
-        assert_eq!(screen.line(0), "> ");
+        assert_eq!(screen.line(0), "> printf '\\033[H\\033[2J'");
         assert_eq!(screen.first_non_empty_line(), Some(0));
     }
 

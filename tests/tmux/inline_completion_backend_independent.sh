@@ -17,7 +17,11 @@ sleep 5
 
 tmux send-keys -t "$SESSION" "cd $WORK_DIR" Enter
 sleep 1
+tmux send-keys -t "$SESSION" C-c
+sleep 1
 tmux send-keys -t "$SESSION" 'echo inline-history seeded' Enter
+sleep 1
+tmux send-keys -t "$SESSION" C-c
 sleep 1
 tmux send-keys -t "$SESSION" '#completion tab-accept word' Enter
 sleep 1

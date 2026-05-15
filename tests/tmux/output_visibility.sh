@@ -13,8 +13,12 @@ sleep 5
 
 tmux send-keys -t "$SESSION" 'whoami' Enter
 sleep 2
+tmux send-keys -t "$SESSION" C-c
+sleep 1
 tmux send-keys -t "$SESSION" 'whoami' Enter
 sleep 2
+tmux send-keys -t "$SESSION" C-c
+sleep 1
 tmux send-keys -t "$SESSION" 'echo 123' Enter
 sleep 2
 
