@@ -417,6 +417,11 @@ Use `#doctor`, `#status`, and `#config` to inspect the active paths and runtime 
 
 ## Testing
 
+Distributed tester documentation:
+
+- `FULL_TESTS.md`: complete functional checklist for automated, tmux, and human real-world validation.
+- `TESTING_MANUAL.md`: step-by-step guide for humans or AI assistants guiding a tester through platform setup, build, tests, and report writing.
+
 Main verification for feature changes:
 
 ```sh
