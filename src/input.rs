@@ -147,6 +147,39 @@ impl InputBuffer {
         true
     }
 
+    pub fn delete_next_word(&mut self) -> bool {
+        if self.cursor == self.text.len() {
+            return false;
+        }
+
+        let start = self.cursor;
+        while self.cursor < self.text.len() {
+            let next = self.next_boundary().expect("cursor is not at end");
+            if !self.text[self.cursor..next]
+                .chars()
+                .all(char::is_whitespace)
+            {
+                break;
+            }
+            self.cursor = next;
+        }
+        while self.cursor < self.text.len() {
+            let next = self.next_boundary().expect("cursor is not at end");
+            if self.text[self.cursor..next]
+                .chars()
+                .all(char::is_whitespace)
+            {
+                break;
+            }
+            self.cursor = next;
+        }
+
+        let end = self.cursor;
+        self.text.drain(start..end);
+        self.cursor = start;
+        true
+    }
+
     pub fn move_previous_word(&mut self) -> bool {
         if self.cursor == 0 {
             return false;
@@ -251,6 +284,13 @@ mod tests {
         buffer.move_previous_word();
         buffer.delete_to_end();
         assert_eq!(buffer.as_str(), "cargo test ");
+
+        let mut buffer = InputBuffer::from("cargo test --all");
+        buffer.move_start();
+        assert!(buffer.delete_next_word());
+        assert_eq!(buffer.as_str(), " test --all");
+        assert!(buffer.delete_next_word());
+        assert_eq!(buffer.as_str(), " --all");
     }
 
     #[test]

@@ -164,6 +164,8 @@ Status as of the latest full review:
   - [x] `Backspace`
   - [x] `Delete`
   - [x] `Ctrl-W`
+  - [x] `Alt-Backspace`
+  - [x] `Alt-D/Alt-Delete`
   - [x] `Ctrl-U`
   - [x] `Ctrl-K`
 - [x] Implement redraw with cursor placement.
@@ -203,6 +205,8 @@ Status as of the latest full review:
   - [x] `Ctrl-U`
   - [x] `Ctrl-K`
   - [x] `Ctrl-W`
+  - [x] `Alt-Backspace`
+  - [x] `Alt-D/Alt-Delete`
   - [x] `Alt-B`
   - [x] `Alt-F`
   - [x] `Alt-Left`

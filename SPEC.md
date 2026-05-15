@@ -893,6 +893,9 @@ Ctrl-E        end of line
 Ctrl-U        delete to beginning of line
 Ctrl-K        delete to end of line
 Ctrl-W        delete previous word/token
+Alt-Backspace delete previous word/token
+Alt-D         delete next word/token
+Alt-Delete    delete next word/token
 Alt-B         previous word/token
 Alt-F         next word/token
 Alt-Left      previous token

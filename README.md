@@ -109,7 +109,8 @@ Editing keys:
 - `Alt-B` / `Alt-F` or `Alt-Left` / `Alt-Right`: move by word.
 - `Backspace` / `Delete`: delete around the cursor.
 - `Ctrl-U` / `Ctrl-K`: delete to start/end.
-- `Ctrl-W`: delete previous word.
+- `Ctrl-W` / `Alt-Backspace`: delete previous word.
+- `Alt-D` / `Alt-Delete`: delete next word.
 
 Tools:
 
@@ -461,7 +462,7 @@ cargo test
 
 Current active inventory:
 
-- 402 library unit tests.
+- 403 library unit tests.
 - 26 draft execution integration tests.
 - 1 first-run integration test.
 - 13 PTY integration tests, with bash/zsh active by default and fish-specific cases opt-in.

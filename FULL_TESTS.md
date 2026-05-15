@@ -202,10 +202,11 @@ Run this section once with bash and once with zsh. Run fish as opt-in compatibil
 | EDIT-004 | Type text, use `Ctrl-U`. | Text before cursor is cleared and prompt remains usable. | Describe result. |
 | EDIT-005 | Type text, use `Ctrl-K`. | Text after cursor is cleared and prompt remains usable. | Describe result. |
 | EDIT-006 | Use `Alt-B` and `Alt-F` or `Alt-Left` and `Alt-Right` across words. | Word movement is predictable and does not corrupt the line. | Describe result. |
-| EDIT-007 | Type a draft and press `Esc`. | Draft clears and Aish returns to draft mode. | Describe result. |
-| EDIT-008 | Press `Ctrl-D` on an empty draft. | Aish exits cleanly and terminal state is restored. | Shell prompt returns. |
-| EDIT-009 | Press `Ctrl-X` followed by an unsupported key. | Chord cancels without corrupting the draft or terminal. | Describe result. |
-| EDIT-010 | Type `echo first-draft`, press `Down`, type `echo second-draft`, press `Down`, then use `Up`, `Up`, `Down`, `Down`. Type and execute `echo after-draft`. | `Up` / `Down` browse second, first, second, then a blank draft. The final command does not append to stale draft text, and both saved drafts appear in draft JSONL. | Paste output and draft JSONL evidence. |
+| EDIT-007 | Type `echo drop keep`, move to `drop`, press `Alt-Delete`, and execute. | The next word is removed and the command prints `keep`. | Paste output. |
+| EDIT-008 | Type a draft and press `Esc`. | Draft clears and Aish returns to draft mode. | Describe result. |
+| EDIT-009 | Press `Ctrl-D` on an empty draft. | Aish exits cleanly and terminal state is restored. | Shell prompt returns. |
+| EDIT-010 | Press `Ctrl-X` followed by an unsupported key. | Chord cancels without corrupting the draft or terminal. | Describe result. |
+| EDIT-011 | Type `echo first-draft`, press `Down`, type `echo second-draft`, press `Down`, then use `Up`, `Up`, `Down`, `Down`. Type and execute `echo after-draft`. | `Up` / `Down` browse second, first, second, then a blank draft. The final command does not append to stale draft text, and both saved drafts appear in draft JSONL. | Paste output and draft JSONL evidence. |
 
 ## Modes And History
 

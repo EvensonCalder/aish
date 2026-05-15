@@ -702,18 +702,33 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
         (_, KeyCode::Backspace | KeyCode::Delete | KeyCode::Char(_)) if is_editor_draft => {
             KeyAction::Continue
         }
+        (modifiers, KeyCode::Backspace) if modifiers.contains(KeyModifiers::ALT) => {
+            state.copy_read_only_selection_to_draft();
+            if !delete_template_placeholder_before_cursor(state) {
+                expand_template_draft_if_inside_placeholder(state);
+                state.draft.delete_previous_word();
+            }
+            clear_draft_metadata_if_empty(state);
+            KeyAction::Continue
+        }
+        (modifiers, KeyCode::Delete | KeyCode::Char('d'))
+            if modifiers.contains(KeyModifiers::ALT) =>
+        {
+            state.copy_read_only_selection_to_draft();
+            if !delete_template_placeholder_after_cursor(state) {
+                expand_template_draft_if_inside_placeholder(state);
+                state.draft.delete_next_word();
+            }
+            clear_draft_metadata_if_empty(state);
+            KeyAction::Continue
+        }
         (_, KeyCode::Backspace) => {
             state.copy_read_only_selection_to_draft();
             if !delete_template_placeholder_before_cursor(state) {
                 expand_template_draft_if_inside_placeholder(state);
                 state.draft.backspace();
             }
-            if state.draft.is_empty() {
-                state.selected_draft_index = None;
-                state.draft_from_editor = false;
-                state.draft_from_ai_editor = false;
-                state.draft_from_template = false;
-            }
+            clear_draft_metadata_if_empty(state);
             KeyAction::Continue
         }
         (_, KeyCode::Delete) => {
@@ -722,12 +737,7 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
                 expand_template_draft_if_inside_placeholder(state);
                 state.draft.delete();
             }
-            if state.draft.is_empty() {
-                state.selected_draft_index = None;
-                state.draft_from_editor = false;
-                state.draft_from_ai_editor = false;
-                state.draft_from_template = false;
-            }
+            clear_draft_metadata_if_empty(state);
             KeyAction::Continue
         }
         (_, KeyCode::Esc) => {
@@ -755,6 +765,15 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
             KeyAction::Continue
         }
         _ => KeyAction::Continue,
+    }
+}
+
+fn clear_draft_metadata_if_empty(state: &mut AppState) {
+    if state.draft.is_empty() {
+        state.selected_draft_index = None;
+        state.draft_from_editor = false;
+        state.draft_from_ai_editor = false;
+        state.draft_from_template = false;
     }
 }
 
@@ -1155,6 +1174,10 @@ mod tests {
         KeyEvent::new(KeyCode::Char(ch), KeyModifiers::ALT)
     }
 
+    fn alt_key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::ALT)
+    }
+
     fn fixed_clock() -> i64 {
         42
     }
@@ -1201,6 +1224,25 @@ mod tests {
         assert_eq!(state.draft.cursor(), 11);
         apply_key_to_state(alt('b'), &mut state);
         assert_eq!(state.draft.cursor(), 4);
+    }
+
+    #[test]
+    fn alt_word_deletion_removes_words_around_cursor() {
+        let mut state = AppState::default();
+        state.draft.insert_str("cargo test --all");
+
+        apply_key_to_state(ctrl('a'), &mut state);
+        apply_key_to_state(alt_key(KeyCode::Delete), &mut state);
+        assert_eq!(state.draft.as_str(), " test --all");
+        assert_eq!(state.draft.cursor(), 0);
+
+        apply_key_to_state(alt('d'), &mut state);
+        assert_eq!(state.draft.as_str(), " --all");
+        assert_eq!(state.draft.cursor(), 0);
+
+        apply_key_to_state(ctrl('e'), &mut state);
+        apply_key_to_state(alt_key(KeyCode::Backspace), &mut state);
+        assert_eq!(state.draft.as_str(), " ");
     }
 
     #[test]

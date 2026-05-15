@@ -47,6 +47,16 @@ pub const DEFAULT_KEYBINDINGS: &[KeyBinding] = &[
         implemented: true,
     },
     KeyBinding {
+        key: "Alt-Backspace",
+        action: "delete previous word",
+        implemented: true,
+    },
+    KeyBinding {
+        key: "Alt-D / Alt-Delete",
+        action: "delete next word",
+        implemented: true,
+    },
+    KeyBinding {
         key: "Alt-B / Alt-Left",
         action: "move previous word",
         implemented: true,
@@ -132,6 +142,8 @@ mod tests {
             "Ctrl-U",
             "Ctrl-K",
             "Ctrl-W",
+            "Alt-Backspace",
+            "Alt-D / Alt-Delete",
             "Alt-B / Alt-Left",
             "Alt-F / Alt-Right",
             "Tab",

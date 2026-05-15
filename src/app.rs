@@ -5446,7 +5446,7 @@ mod tests {
         assert!(output.contains("context.enabled=true"));
         assert!(output.contains("completion.max_results=5"));
         assert!(output.contains("completion.match_threshold_percent=50"));
-        assert!(output.contains("keybindings=20"));
+        assert!(output.contains("keybindings=22"));
         assert!(state.draft.is_empty());
     }
 

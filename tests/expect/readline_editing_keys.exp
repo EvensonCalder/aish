@@ -39,4 +39,13 @@ aish_enter
 aish_expect "keep"
 aish_wait_prompt
 
+# Alt-Delete deletes the next word.
+aish_send "echo drop keep"
+aish_send "\x01"
+aish_send "\x1bf"
+aish_send "\x1b\[3;3~"
+aish_enter
+aish_expect "keep"
+aish_wait_prompt
+
 aish_quit
