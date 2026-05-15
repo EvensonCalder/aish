@@ -617,7 +617,7 @@ fn accepted_replacement(
         CompletionTabAccept::Full => candidate.replacement.clone(),
         CompletionTabAccept::Word => {
             let Some(suffix) = candidate.replacement.strip_prefix(&token.text) else {
-                return candidate.replacement.clone();
+                return accepted_word_suffix(&candidate.replacement).to_string();
             };
             format!("{}{}", token.text, accepted_word_suffix(suffix))
         }
@@ -1721,6 +1721,26 @@ mod tests {
             AcceptedCompletion {
                 line: "cat Cargo.toml".to_string(),
                 cursor: "cat Cargo.toml".len(),
+            }
+        );
+    }
+
+    #[test]
+    fn accept_completion_word_mode_stops_at_next_word_for_non_prefix_replacement() {
+        let line = "echo {a} {something}";
+        let token = current_token_context(line, line.len());
+        let candidate = CompletionCandidate {
+            display: "echo {a} {b} {c}".to_string(),
+            replacement: "{b} {c}".to_string(),
+            is_dir: false,
+            source: CompletionSource::Template,
+        };
+
+        assert_eq!(
+            accept_completion_with_mode(line, &token, &candidate, CompletionTabAccept::Word),
+            AcceptedCompletion {
+                line: "echo {a} {b}".to_string(),
+                cursor: "echo {a} {b}".len(),
             }
         );
     }
