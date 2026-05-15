@@ -200,7 +200,8 @@ fn execute_draft_sends_multiline_buffer_exactly_to_backend() {
     )
     .unwrap();
 
-    assert!(String::from_utf8(output).unwrap().contains("one\ntwo"));
+    assert!(String::from_utf8(output).unwrap().contains("one\r\ntwo"));
+    assert_eq!(state.output_ring.back().unwrap().output, "one\ntwo\n");
     assert_eq!(state.last_status, Some(0));
     assert_eq!(state.mode, Mode::Draft);
     assert!(state.draft.is_empty());

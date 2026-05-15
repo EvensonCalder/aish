@@ -81,6 +81,77 @@ fn bash_pty_backend_suppresses_readline_prompt_protocol_noise() {
 }
 
 #[test]
+fn pty_backend_streams_output_before_command_completion() {
+    let _guard = pty_test_guard();
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let started = Instant::now();
+    let mut first_chunk_at = None;
+    let mut displayed = Vec::new();
+
+    let result = backend
+        .run_command_streaming_with_wait_callback(
+            "printf 'stream-first\\n'; sleep 2; printf 'stream-second\\n'",
+            Duration::from_secs(5),
+            |_| Ok(false),
+            |chunk| {
+                if first_chunk_at.is_none() {
+                    first_chunk_at = Some(started.elapsed());
+                }
+                displayed.extend_from_slice(chunk);
+                Ok(())
+            },
+        )
+        .unwrap();
+
+    assert_eq!(result.exit_code, 0);
+    assert!(
+        first_chunk_at.unwrap() < Duration::from_millis(1500),
+        "first streamed chunk arrived after command completion: {first_chunk_at:?}"
+    );
+    let displayed = String::from_utf8(displayed).unwrap();
+    assert!(displayed.contains("stream-first"), "{displayed:?}");
+    assert!(displayed.contains("stream-second"), "{displayed:?}");
+    assert!(!displayed.contains("__AISH_STATUS__"), "{displayed:?}");
+    assert!(!displayed.contains("__AISH_START__"), "{displayed:?}");
+}
+
+#[test]
+fn pty_backend_streaming_preserves_carriage_return_progress_for_display() {
+    let _guard = pty_test_guard();
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut displayed = Vec::new();
+
+    let result = backend
+        .run_command_streaming_with_wait_callback(
+            "printf 'progress 1\\rprogress 2\\rfinal\\n'",
+            Duration::from_secs(5),
+            |_| Ok(false),
+            |chunk| {
+                displayed.extend_from_slice(chunk);
+                Ok(())
+            },
+        )
+        .unwrap();
+
+    assert_eq!(result.exit_code, 0);
+    assert!(
+        displayed.windows(2).any(|window| window == b"1\r")
+            || displayed.windows(2).any(|window| window == b"2\r"),
+        "displayed output did not preserve carriage returns: {displayed:?}"
+    );
+    let displayed_text = String::from_utf8(displayed).unwrap();
+    assert!(displayed_text.contains("final"), "{displayed_text:?}");
+    assert!(
+        !displayed_text.contains("__AISH_STATUS__"),
+        "{displayed_text:?}"
+    );
+    assert!(
+        !displayed_text.contains("__AISH_START__"),
+        "{displayed_text:?}"
+    );
+}
+
+#[test]
 fn pty_backend_resizes_visible_columns_for_child_commands() {
     let _guard = pty_test_guard();
     let mut backend = PtyBackend::spawn("/bin/bash").unwrap();

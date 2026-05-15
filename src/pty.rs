@@ -224,6 +224,40 @@ impl PtyBackend {
         self.run_command_with_marker(command, timeout, &mut on_wait)
     }
 
+    pub fn run_command_streaming_with_wait_callback<F, G>(
+        &mut self,
+        command: &str,
+        timeout: Duration,
+        mut on_wait: F,
+        mut on_output: G,
+    ) -> Result<CommandResult>
+    where
+        F: FnMut(&mut Self) -> Result<bool>,
+        G: FnMut(&[u8]) -> Result<()>,
+    {
+        if matches!(
+            self.integration,
+            ShellIntegration::ZshHooks | ShellIntegration::FishEvents
+        ) {
+            if self.integration == ShellIntegration::ZshHooks && command.contains('\n') {
+                return self.run_command_with_marker_streaming(
+                    command,
+                    timeout,
+                    &mut on_wait,
+                    &mut on_output,
+                );
+            }
+            return self.run_command_with_shell_events_streaming(
+                command,
+                timeout,
+                &mut on_wait,
+                &mut on_output,
+            );
+        }
+
+        self.run_command_with_marker_streaming(command, timeout, &mut on_wait, &mut on_output)
+    }
+
     fn run_command_with_marker<F>(
         &mut self,
         command: &str,
@@ -249,6 +283,50 @@ impl PtyBackend {
         self.write_raw(&marker_command)?;
 
         let raw = self.read_until_marker(&marker, &marker_command, timeout, on_wait)?;
+        let (output, exit_code, cwd, started_command) = parse_marker_output(&raw, &marker)?;
+        let command_text = command.trim_end_matches('\n').to_string();
+        Ok(CommandResult {
+            command: command_text.clone(),
+            started_command: started_command.or(Some(command_text)),
+            output,
+            exit_code,
+            cwd,
+        })
+    }
+
+    fn run_command_with_marker_streaming<F, G>(
+        &mut self,
+        command: &str,
+        timeout: Duration,
+        on_wait: &mut F,
+        on_output: &mut G,
+    ) -> Result<CommandResult>
+    where
+        F: FnMut(&mut Self) -> Result<bool>,
+        G: FnMut(&[u8]) -> Result<()>,
+    {
+        let _ = self.drain_for(Duration::from_millis(25));
+        let marker = next_marker();
+        let start_command = start_marker_command(command);
+        let marker_command = format!(
+            " __aish_status=$?; printf '\\n%s%s\\t%s\\n' '{marker}' \"$__aish_status\" \"$PWD\"; sh -c \"exit $__aish_status\"\n"
+        );
+        if !command.contains('\n') {
+            self.write_raw(&start_command)?;
+        }
+        self.write_raw(command)?;
+        if !command.ends_with('\n') {
+            self.write_raw("\n")?;
+        }
+        self.write_raw(&marker_command)?;
+
+        let raw = self.read_until_marker_streaming(
+            &marker,
+            &marker_command,
+            timeout,
+            on_wait,
+            on_output,
+        )?;
         let (output, exit_code, cwd, started_command) = parse_marker_output(&raw, &marker)?;
         let command_text = command.trim_end_matches('\n').to_string();
         Ok(CommandResult {
@@ -298,6 +376,53 @@ impl PtyBackend {
         }
     }
 
+    fn read_until_marker_streaming<F, G>(
+        &mut self,
+        marker: &str,
+        recovery_marker_command: &str,
+        timeout: Duration,
+        on_wait: &mut F,
+        on_output: &mut G,
+    ) -> Result<String>
+    where
+        F: FnMut(&mut Self) -> Result<bool>,
+        G: FnMut(&[u8]) -> Result<()>,
+    {
+        let deadline = Instant::now() + timeout;
+        let mut data = Vec::new();
+        let mut output_filter = PtyOutputFilter::new(marker);
+        loop {
+            let current = String::from_utf8_lossy(&data);
+            if marker_status_is_complete(&current, marker) {
+                return Ok(String::from_utf8_lossy(&data).into_owned());
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                bail!("timed out waiting for backend shell prompt marker");
+            }
+            let remaining = deadline
+                .saturating_duration_since(now)
+                .min(Duration::from_millis(50));
+            match self.output.recv_timeout(remaining) {
+                Ok(chunk) => {
+                    data.extend(&chunk);
+                    let display = output_filter.push(&chunk);
+                    if !display.is_empty() {
+                        on_output(&display)?;
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if on_wait(self)? {
+                        std::thread::sleep(Duration::from_millis(100));
+                        self.write_raw("\n")?;
+                        self.write_raw(recovery_marker_command)?;
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => bail!("backend shell PTY closed"),
+            }
+        }
+    }
+
     fn run_command_with_shell_events<F>(
         &mut self,
         command: &str,
@@ -314,6 +439,43 @@ impl PtyBackend {
         }
 
         let raw = self.read_until_ready(timeout, on_wait)?;
+        let parsed =
+            parse_ready_status_output(&raw, self.integration == ShellIntegration::FishEvents)?;
+        Ok(CommandResult {
+            command: command.trim_end_matches('\n').to_string(),
+            started_command: parsed.started_command,
+            output: parsed.output,
+            exit_code: parsed.exit_code,
+            cwd: Some(parsed.cwd),
+        })
+    }
+
+    fn run_command_with_shell_events_streaming<F, G>(
+        &mut self,
+        command: &str,
+        timeout: Duration,
+        on_wait: &mut F,
+        on_output: &mut G,
+    ) -> Result<CommandResult>
+    where
+        F: FnMut(&mut Self) -> Result<bool>,
+        G: FnMut(&[u8]) -> Result<()>,
+    {
+        if self.integration == ShellIntegration::FishEvents {
+            let result = self.run_command_with_shell_events(command, timeout, on_wait)?;
+            if !result.output.is_empty() {
+                on_output(result.output.as_bytes())?;
+            }
+            return Ok(result);
+        }
+
+        let _ = self.drain_for(Duration::from_millis(25));
+        self.write_raw(command)?;
+        if !command.ends_with('\n') {
+            self.write_raw("\n")?;
+        }
+
+        let raw = self.read_until_ready_streaming(timeout, on_wait, on_output)?;
         let parsed =
             parse_ready_status_output(&raw, self.integration == ShellIntegration::FishEvents)?;
         Ok(CommandResult {
@@ -344,6 +506,46 @@ impl PtyBackend {
                 .min(Duration::from_millis(50));
             match self.output.recv_timeout(remaining) {
                 Ok(chunk) => data.extend(chunk),
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    let _ = on_wait(self)?;
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => bail!("backend shell PTY closed"),
+            }
+        }
+    }
+
+    fn read_until_ready_streaming<F, G>(
+        &mut self,
+        timeout: Duration,
+        on_wait: &mut F,
+        on_output: &mut G,
+    ) -> Result<String>
+    where
+        F: FnMut(&mut Self) -> Result<bool>,
+        G: FnMut(&[u8]) -> Result<()>,
+    {
+        let deadline = Instant::now() + timeout;
+        let mut data = Vec::new();
+        let mut output_filter = PtyOutputFilter::new("");
+        loop {
+            if parse_ready_cwd(&String::from_utf8_lossy(&data)).is_some() {
+                return Ok(String::from_utf8_lossy(&data).into_owned());
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                bail!("timed out waiting for backend shell ready marker");
+            }
+            let remaining = deadline
+                .saturating_duration_since(now)
+                .min(Duration::from_millis(50));
+            match self.output.recv_timeout(remaining) {
+                Ok(chunk) => {
+                    data.extend(&chunk);
+                    let display = output_filter.push(&chunk);
+                    if !display.is_empty() {
+                        on_output(&display)?;
+                    }
+                }
                 Err(mpsc::RecvTimeoutError::Timeout) => {
                     let _ = on_wait(self)?;
                 }
@@ -435,6 +637,85 @@ fn start_marker_command(command: &str) -> String {
 
 fn shell_single_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+struct PtyOutputFilter {
+    marker: String,
+    pending: Vec<u8>,
+    deferred_separator: Vec<u8>,
+}
+
+impl PtyOutputFilter {
+    fn new(marker: &str) -> Self {
+        Self {
+            marker: marker.to_string(),
+            pending: Vec::new(),
+            deferred_separator: Vec::new(),
+        }
+    }
+
+    fn push(&mut self, chunk: &[u8]) -> Vec<u8> {
+        self.pending.extend_from_slice(chunk);
+        let mut output = Vec::new();
+        while let Some(end) = next_terminal_line_end(&self.pending) {
+            let segment: Vec<u8> = self.pending.drain(..end).collect();
+            self.push_segment(segment, &mut output);
+        }
+        output
+    }
+
+    fn push_segment(&mut self, segment: Vec<u8>, output: &mut Vec<u8>) {
+        if self.is_internal_marker_segment(&segment) {
+            self.deferred_separator.clear();
+            return;
+        }
+        if terminal_separator_only(&segment) {
+            if !self.deferred_separator.is_empty() {
+                output.extend_from_slice(&self.deferred_separator);
+            }
+            self.deferred_separator = segment;
+            return;
+        }
+        if !self.deferred_separator.is_empty() {
+            output.extend_from_slice(&self.deferred_separator);
+            self.deferred_separator.clear();
+        }
+        output.extend_from_slice(&segment);
+    }
+
+    fn is_internal_marker_segment(&self, segment: &[u8]) -> bool {
+        let text = String::from_utf8_lossy(segment);
+        let cleaned = strip_terminal_control_sequences(&text);
+        let line = cleaned
+            .trim_matches(['\r', '\n'])
+            .trim_start_matches([' ', '\t']);
+        line.starts_with(START_MARKER)
+            || line.starts_with(READY_MARKER)
+            || (!self.marker.is_empty() && line.starts_with(&self.marker))
+    }
+}
+
+fn next_terminal_line_end(bytes: &[u8]) -> Option<usize> {
+    for (index, byte) in bytes.iter().enumerate() {
+        match *byte {
+            b'\n' => return Some(index + 1),
+            b'\r' => {
+                if index + 1 >= bytes.len() {
+                    return None;
+                }
+                if bytes[index + 1] == b'\n' {
+                    return Some(index + 2);
+                }
+                return Some(index + 1);
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn terminal_separator_only(segment: &[u8]) -> bool {
+    segment.iter().all(|byte| matches!(*byte, b'\r' | b'\n'))
 }
 
 pub fn resolve_shell(configured_shell: &str) -> String {
@@ -1053,6 +1334,30 @@ mod tests {
         );
 
         assert_eq!(output, "echoed\nvisible");
+    }
+
+    #[test]
+    fn output_filter_hides_marker_lines_and_their_separator() {
+        let marker = "__AISH_STATUS__123__";
+        let mut filter = PtyOutputFilter::new(marker);
+
+        let output = filter.push(
+            format!("\r\n{START_MARKER}\techo hi\r\nhi\r\n\r\n{marker}0\t/tmp\r\n").as_bytes(),
+        );
+
+        assert_eq!(String::from_utf8(output).unwrap(), "hi\r\n");
+    }
+
+    #[test]
+    fn output_filter_preserves_carriage_return_progress() {
+        let mut filter = PtyOutputFilter::new("__AISH_STATUS__123__");
+
+        let output = filter.push(b"Counting objects:  50%\rCounting objects: 100%\r\n");
+
+        assert_eq!(
+            output,
+            b"Counting objects:  50%\rCounting objects: 100%\r\n"
+        );
     }
 
     #[test]

@@ -1413,14 +1413,16 @@ pub fn execute_draft(
         return Ok(());
     }
 
-    let result = backend.run_command_with_wait_callback(
+    let result = backend.run_command_streaming_with_wait_callback(
         &command,
         timeout,
         forward_terminal_input_to_backend,
+        |chunk| {
+            write_command_output_bytes(out, chunk)?;
+            out.flush()?;
+            Ok(())
+        },
     )?;
-    if !result.output.is_empty() {
-        write_command_output(out, &result.output)?;
-    }
     record_completed_command(
         state,
         result.command.clone(),
@@ -1604,15 +1606,24 @@ fn foreground_shell_args(shell: &str, command: &str) -> Vec<String> {
     }
 }
 
+#[cfg(test)]
 fn write_command_output(out: &mut impl Write, output: &str) -> Result<()> {
+    write_command_output_bytes(out, output.as_bytes())
+}
+
+fn write_command_output_bytes(out: &mut impl Write, output: &[u8]) -> Result<()> {
     // PTY output is already terminal protocol. Adding display framing here can
     // corrupt commands like `clear`: ESC[H ESC[2J followed by an Aish-added LF
     // moves the prompt to row 1, leaving a blank first row.
-    write!(out, "{output}")?;
-    if output_clears_visible_screen(output) {
+    out.write_all(output)?;
+    if output_clears_visible_screen_bytes(output) {
         write!(out, "\x1b[H")?;
     }
     Ok(())
+}
+
+fn output_clears_visible_screen_bytes(output: &[u8]) -> bool {
+    output_clears_visible_screen(&String::from_utf8_lossy(output))
 }
 
 fn output_clears_visible_screen(output: &str) -> bool {
