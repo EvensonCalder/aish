@@ -131,6 +131,7 @@ Important rules:
 - `completion.max_results` controls only the number of below-prompt rows.
 - The panel skips the current inline candidate and shows remaining suffixes where possible.
 - Candidate rows are width-aware and elide with `...` instead of wrapping.
+- Candidates below the configured match threshold are hidden; empty tokens and zero-position matches stay quiet.
 - If `completion.inline=false`, non-empty `Tab` preserves the legacy behavior and accepts the first ranked candidate directly.
 
 Completion sources:
@@ -139,7 +140,7 @@ Completion sources:
 - Non-first token: structural template matches, structural history suffixes, template placeholders, history arguments, and filesystem paths.
 - Template completions use newest stored templates first.
 - Paths preserve directory prefixes and mark directories with `/`.
-- Matching ignores spaces by default.
+- Matching ignores spaces by default, and partial matches must exceed `completion.match_threshold_percent`.
 
 Configuration:
 
@@ -150,6 +151,7 @@ ignore_spaces = true
 template_first = true
 inline = true
 tab_accept = "full" # "full" or "word"
+match_threshold_percent = 50
 ```
 
 Commands:
@@ -161,6 +163,7 @@ Commands:
 #completion inline off
 #completion tab-accept full
 #completion tab-accept word
+#completion match-threshold 50
 ```
 
 `tab_accept = "word"` accepts only through the next whitespace boundary in the untyped suffix. This is useful for long history completions such as `kubectl apply -f deployment.yaml`.
@@ -194,6 +197,7 @@ Completion:
 #completion max <count>
 #completion inline on|off
 #completion tab-accept full|word
+#completion match-threshold <0-100>
 ```
 
 Context:
@@ -457,7 +461,7 @@ cargo test
 
 Current active inventory:
 
-- 400 library unit tests.
+- 402 library unit tests.
 - 26 draft execution integration tests.
 - 1 first-run integration test.
 - 13 PTY integration tests, with bash/zsh active by default and fish-specific cases opt-in.

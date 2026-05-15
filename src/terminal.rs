@@ -833,7 +833,6 @@ pub fn redraw(state: &mut AppState, out: &mut impl Write) -> Result<()> {
 pub fn write_completion_candidates(state: &AppState, out: &mut impl Write) -> Result<()> {
     let candidates = state.completion_panel_candidates()?;
     if candidates.is_empty() {
-        writeln!(out, "no completions")?;
         return Ok(());
     }
     let token = current_token_context(state.draft.as_str(), state.draft.cursor());
@@ -859,11 +858,10 @@ pub fn complete_or_show_candidates_for_width(state: &mut AppState, width: usize)
             state.completion_inline.is_none() && !state.completion_panel.is_empty();
         let candidates = state.completion_candidates()?;
         if candidates.is_empty() {
-            state.completion_inline = None;
-            state.completion_panel = vec!["no completions".to_string()];
+            state.clear_completion_ui();
             return Ok(());
         }
-        if had_panel_without_inline && state.completion_panel != ["no completions"] {
+        if had_panel_without_inline {
             let Some(candidate) = candidates.into_iter().next() else {
                 return Ok(());
             };
@@ -877,7 +875,6 @@ pub fn complete_or_show_candidates_for_width(state: &mut AppState, width: usize)
 
     state.clear_completion_ui();
     let Some(candidate) = state.completion_candidates()?.into_iter().next() else {
-        state.completion_panel = vec!["no completions".to_string()];
         return Ok(());
     };
     accept_completion_candidate(state, candidate)?;
@@ -1461,6 +1458,31 @@ mod tests {
 
         assert_eq!(state.draft.as_str(), "cat si");
         assert_eq!(state.completion_inline.as_ref().unwrap().suffix, "ngle.txt");
+        assert!(state.completion_panel.is_empty());
+    }
+
+    #[test]
+    fn no_match_completion_leaves_completion_ui_empty() {
+        let mut state = AppState {
+            regular_history: vec![crate::history::HistoryEntry {
+                t: 1,
+                command: "git status".to_string(),
+                exit_code: Some(0),
+                source: crate::history::HistorySource::User,
+            }],
+            ..AppState::default()
+        };
+        state.draft.insert_str("zzzzzz-no-match");
+
+        refresh_live_completion_ui_for_width(&mut state, 80).unwrap();
+
+        assert!(state.completion_inline.is_none());
+        assert!(state.completion_panel.is_empty());
+
+        complete_or_show_candidates(&mut state).unwrap();
+
+        assert_eq!(state.draft.as_str(), "zzzzzz-no-match");
+        assert!(state.completion_inline.is_none());
         assert!(state.completion_panel.is_empty());
     }
 

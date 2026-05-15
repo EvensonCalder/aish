@@ -176,13 +176,13 @@ fn tmux_shell_clear_command_redraws_prompt_on_first_line() {
 }
 
 #[test]
-fn tmux_completion_no_matches_panel_remains_usable() {
+fn tmux_completion_no_matches_remains_quiet_and_usable() {
     let Some(captured) = run_tmux_script("completion_no_matches.sh") else {
         return;
     };
     assert!(
-        captured.contains("no completions"),
-        "captured pane history did not show no-completions panel: {captured:?}"
+        !captured.contains("no completions"),
+        "captured pane history unexpectedly showed no-completions panel: {captured:?}"
     );
     assert_adjacent_output(&captured, "echo after-completion", "after-completion");
 }

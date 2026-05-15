@@ -1052,18 +1052,21 @@ enum AiItemKind {
 ## Phase 28: Inline completion UX
 
 Status: implemented. Inline completion is enabled by default and refreshes while the user types, `completion.max_results` controls only the below-prompt panel row count, and bash/zsh real-terminal coverage proves completion behavior is owned by Aish rather than the backend shell. Fish backend coverage remains opt-in with `AISH_TEST_FISH=1` until cross-platform behavior is validated across macOS and Linux distributions.
+Update: completion now also uses configurable match-threshold filtering. `completion.match_threshold_percent` defaults to `50`, empty tokens stay quiet, and zero-position matches are not displayed.
 
 ### Tasks
 
 - [x] Add completion config fields:
   - [x] `completion.inline = true` by default.
   - [x] `completion.tab_accept = "full"` by default.
+  - [x] `completion.match_threshold_percent = 50` by default.
   - [x] Valid `completion.tab_accept` values are `"full"` and `"word"`.
 - [x] Normalize invalid or empty completion config values without silently accepting unsupported modes.
 - [x] Persist and report inline completion settings through `#completion`, `#config`, and `#status`.
 - [x] Add private commands:
   - [x] `#completion inline on|off`
   - [x] `#completion tab-accept full|word`
+  - [x] `#completion match-threshold <0-100>`
 - [x] Split completion candidate discovery from panel row limiting so `completion.max_results` controls only below-prompt row count.
 - [x] Track the current inline suggestion separately from the draft buffer, cursor, history, persisted draft, and below-prompt panel state.
 - [x] Render the highest-ranked completion candidate as an inline ghost suffix in dim or light text while the user types when inline completion is enabled.

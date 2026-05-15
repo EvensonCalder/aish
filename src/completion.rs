@@ -10,6 +10,7 @@ use crate::templates::TemplateEntry;
 pub struct CompletionOptions {
     pub max_results: usize,
     pub ignore_spaces: bool,
+    pub match_threshold_percent: usize,
 }
 
 impl Default for CompletionOptions {
@@ -17,6 +18,7 @@ impl Default for CompletionOptions {
         Self {
             max_results: 5,
             ignore_spaces: true,
+            match_threshold_percent: 50,
         }
     }
 }
@@ -170,6 +172,7 @@ pub fn complete_first_token(
         CompletionOptions {
             max_results: usize::MAX,
             ignore_spaces: false,
+            match_threshold_percent: 50,
         },
     )
 }
@@ -181,11 +184,18 @@ pub fn complete_first_token_with_options(
     path_dirs: &[PathBuf],
     options: CompletionOptions,
 ) -> Vec<CompletionCandidate> {
+    if prefix.is_empty() {
+        return Vec::new();
+    }
     let mut candidates = Vec::new();
     let mut seen_templates = HashSet::new();
     for template in templates.iter().rev() {
-        if matches_completion_prefix(&template.body, prefix, options.ignore_spaces)
-            && seen_templates.insert(template.id())
+        if matches_completion_prefix_with_threshold(
+            &template.body,
+            prefix,
+            options.ignore_spaces,
+            options.match_threshold_percent,
+        ) && seen_templates.insert(template.id())
         {
             candidates.push(CompletionCandidate {
                 display: template.body.clone(),
@@ -198,8 +208,12 @@ pub fn complete_first_token_with_options(
 
     let mut seen_history = HashSet::new();
     for entry in history_newest_first {
-        if matches_completion_prefix(&entry.command, prefix, options.ignore_spaces)
-            && seen_history.insert(entry.command.as_str())
+        if matches_completion_prefix_with_threshold(
+            &entry.command,
+            prefix,
+            options.ignore_spaces,
+            options.match_threshold_percent,
+        ) && seen_history.insert(entry.command.as_str())
         {
             candidates.push(CompletionCandidate {
                 display: entry.command.clone(),
@@ -229,6 +243,7 @@ pub fn complete_non_first_token(
         CompletionOptions {
             max_results: usize::MAX,
             ignore_spaces: false,
+            match_threshold_percent: 50,
         },
     )
 }
@@ -240,16 +255,21 @@ pub fn complete_non_first_token_with_options(
     templates: &[TemplateEntry],
     options: CompletionOptions,
 ) -> Vec<CompletionCandidate> {
+    if token.is_empty() {
+        return Vec::new();
+    }
     let mut candidates = Vec::new();
     candidates.extend(complete_template_placeholders(
         token,
         templates,
         options.ignore_spaces,
+        options.match_threshold_percent,
     ));
     candidates.extend(complete_history_arguments(
         token,
         history_newest_first,
         options.ignore_spaces,
+        options.match_threshold_percent,
     ));
     candidates.extend(complete_path(token, cwd));
     limit_candidates(candidates, options.max_results)
@@ -264,12 +284,16 @@ pub fn complete_non_first_token_for_line_with_options(
     options: CompletionOptions,
 ) -> Vec<CompletionCandidate> {
     let token = current_token_context(line, cursor);
+    if token.text.is_empty() {
+        return Vec::new();
+    }
     let structural_template_candidates = complete_structural_templates_for_line(
         line,
         cursor,
         &token,
         templates,
         options.ignore_spaces,
+        options.match_threshold_percent,
     );
     if !structural_template_candidates.is_empty() {
         return limit_candidates(structural_template_candidates, options.max_results);
@@ -281,16 +305,19 @@ pub fn complete_non_first_token_for_line_with_options(
         &token,
         history_newest_first,
         options.ignore_spaces,
+        options.match_threshold_percent,
     );
     candidates.extend(complete_template_placeholders(
         &token.text,
         templates,
         options.ignore_spaces,
+        options.match_threshold_percent,
     ));
     candidates.extend(complete_history_arguments(
         &token.text,
         history_newest_first,
         options.ignore_spaces,
+        options.match_threshold_percent,
     ));
     candidates.extend(complete_path(&token.text, cwd));
     dedupe_completion_candidates(&mut candidates);
@@ -303,6 +330,7 @@ fn complete_structural_templates_for_line(
     token: &TokenContext,
     templates: &[TemplateEntry],
     ignore_spaces: bool,
+    match_threshold_percent: usize,
 ) -> Vec<CompletionCandidate> {
     if cursor != line.len() {
         return Vec::new();
@@ -335,8 +363,12 @@ fn complete_structural_templates_for_line(
 
         let template_word = &template_words[current_word_index];
         let rest = &template_words[current_word_index + 1..];
-        let replacement = match template_word_completion(template_word, &token.text, ignore_spaces)
-        {
+        let replacement = match template_word_completion(
+            template_word,
+            &token.text,
+            ignore_spaces,
+            match_threshold_percent,
+        ) {
             Some(replacement) => join_words_with_first(replacement, rest),
             None if !rest.is_empty() && template_word_is_placeholder(template_word) => {
                 join_words_with_first(token.text.as_str(), rest)
@@ -363,6 +395,7 @@ fn complete_structural_history_for_line(
     token: &TokenContext,
     history_newest_first: &[HistoryEntry],
     ignore_spaces: bool,
+    match_threshold_percent: usize,
 ) -> Vec<CompletionCandidate> {
     if cursor != line.len() {
         return Vec::new();
@@ -393,19 +426,13 @@ fn complete_structural_history_for_line(
             continue;
         }
 
-        let replacement = if token.text.is_empty()
-            || matches_completion_prefix(
-                &history_words[current_word_index],
-                &token.text,
-                ignore_spaces,
-            ) {
+        let replacement = if matches_completion_prefix_with_threshold(
+            &history_words[current_word_index],
+            &token.text,
+            ignore_spaces,
+            match_threshold_percent,
+        ) {
             join_words(&history_words[current_word_index..])
-        } else if history_words.len() > current_word_index + 1 {
-            format!(
-                "{} {}",
-                token.text,
-                join_words(&history_words[current_word_index + 1..])
-            )
         } else {
             continue;
         };
@@ -427,13 +454,18 @@ fn complete_history_arguments(
     prefix: &str,
     history_newest_first: &[HistoryEntry],
     ignore_spaces: bool,
+    match_threshold_percent: usize,
 ) -> Vec<CompletionCandidate> {
     let mut seen = HashSet::new();
     let mut candidates = Vec::new();
     for entry in history_newest_first {
         for argument in command_arguments(&entry.command) {
-            if matches_completion_prefix(argument, prefix, ignore_spaces)
-                && seen.insert(argument.to_string())
+            if matches_completion_prefix_with_threshold(
+                argument,
+                prefix,
+                ignore_spaces,
+                match_threshold_percent,
+            ) && seen.insert(argument.to_string())
             {
                 candidates.push(CompletionCandidate {
                     display: argument.to_string(),
@@ -462,14 +494,23 @@ fn complete_template_placeholders(
     prefix: &str,
     templates: &[TemplateEntry],
     ignore_spaces: bool,
+    match_threshold_percent: usize,
 ) -> Vec<CompletionCandidate> {
     let mut seen = HashSet::new();
     let mut candidates = Vec::new();
     for template in templates {
         for placeholder in template_placeholder_words(&template.body) {
-            if (matches_completion_prefix(&placeholder.raw, prefix, ignore_spaces)
-                || matches_completion_prefix(&placeholder.name, prefix, ignore_spaces))
-                && seen.insert(placeholder.raw.clone())
+            if (matches_completion_prefix_with_threshold(
+                &placeholder.raw,
+                prefix,
+                ignore_spaces,
+                match_threshold_percent,
+            ) || matches_completion_prefix_with_threshold(
+                &placeholder.name,
+                prefix,
+                ignore_spaces,
+                match_threshold_percent,
+            )) && seen.insert(placeholder.raw.clone())
             {
                 candidates.push(CompletionCandidate {
                     display: placeholder.raw.clone(),
@@ -484,25 +525,77 @@ fn complete_template_placeholders(
 }
 
 pub fn matches_completion_prefix(candidate: &str, prefix: &str, ignore_spaces: bool) -> bool {
+    matches_completion_prefix_with_threshold(candidate, prefix, ignore_spaces, 50)
+}
+
+pub fn matches_completion_prefix_with_threshold(
+    candidate: &str,
+    prefix: &str,
+    ignore_spaces: bool,
+    match_threshold_percent: usize,
+) -> bool {
+    if prefix.is_empty() {
+        return false;
+    }
+    let threshold = match_threshold_percent.min(100);
     if !ignore_spaces {
-        return candidate.starts_with(prefix);
+        return match_coverage_percent(candidate, prefix)
+            .is_some_and(|percent| completion_percent_passes(percent, threshold));
     }
 
     let compact_prefix = remove_spaces(prefix);
-    if remove_spaces(candidate).starts_with(&compact_prefix) {
+    let compact_candidate = remove_spaces(candidate);
+    if compact_candidate.starts_with(&compact_prefix) {
+        return true;
+    }
+    if let Some(percent) = match_coverage_percent(&compact_candidate, &compact_prefix)
+        && completion_percent_passes(percent, threshold)
+    {
         return true;
     }
 
     let mut candidate_words = candidate.split_whitespace();
+    let mut matched = 0;
+    let mut typed = 0;
     for prefix_part in prefix.split_whitespace() {
         let Some(candidate_word) = candidate_words.next() else {
             return false;
         };
-        if !candidate_word.starts_with(prefix_part) {
+        let part_matched = common_prefix_char_count(candidate_word, prefix_part);
+        if part_matched == 0 {
             return false;
         }
+        matched += part_matched;
+        typed += prefix_part.chars().count();
     }
-    !compact_prefix.is_empty() || prefix.is_empty()
+    completion_percent_passes(percent(matched, typed), threshold)
+}
+
+fn match_coverage_percent(candidate: &str, prefix: &str) -> Option<usize> {
+    let typed = prefix.chars().count();
+    if typed == 0 {
+        return None;
+    }
+    let matched = common_prefix_char_count(candidate, prefix);
+    (matched > 0).then_some(percent(matched, typed))
+}
+
+fn common_prefix_char_count(left: &str, right: &str) -> usize {
+    left.chars()
+        .zip(right.chars())
+        .take_while(|(left, right)| left == right)
+        .count()
+}
+
+fn percent(numerator: usize, denominator: usize) -> usize {
+    if denominator == 0 {
+        return 0;
+    }
+    numerator * 100 / denominator
+}
+
+fn completion_percent_passes(percent: usize, threshold: usize) -> bool {
+    percent == 100 || percent > threshold
 }
 
 pub fn limit_candidates(
@@ -679,12 +772,23 @@ fn template_word_completion<'a>(
     template_word: &'a str,
     token: &str,
     ignore_spaces: bool,
+    match_threshold_percent: usize,
 ) -> Option<&'a str> {
-    if matches_completion_prefix(template_word, token, ignore_spaces) {
+    if matches_completion_prefix_with_threshold(
+        template_word,
+        token,
+        ignore_spaces,
+        match_threshold_percent,
+    ) {
         return Some(template_word);
     }
     let placeholder_name = template_word_placeholder_name(template_word)?;
-    if token.is_empty() || matches_completion_prefix(placeholder_name, token, ignore_spaces) {
+    if matches_completion_prefix_with_threshold(
+        placeholder_name,
+        token,
+        ignore_spaces,
+        match_threshold_percent,
+    ) {
         return Some(template_word);
     }
     if token.starts_with('{') {
@@ -1190,6 +1294,7 @@ mod tests {
                 CompletionOptions {
                     max_results: 2,
                     ignore_spaces: true,
+                    match_threshold_percent: 50,
                 },
             ),
             [
@@ -1315,6 +1420,7 @@ mod tests {
                 CompletionOptions {
                     max_results: 1,
                     ignore_spaces: true,
+                    match_threshold_percent: 50,
                 },
             ),
             [CompletionCandidate {
@@ -1327,7 +1433,7 @@ mod tests {
     }
 
     #[test]
-    fn complete_non_first_token_for_line_uses_structural_history_context() {
+    fn complete_non_first_token_for_line_requires_current_history_token_match() {
         let history = vec![HistoryEntry {
             t: 1,
             command: "command add 100 file".to_string(),
@@ -1344,15 +1450,48 @@ mod tests {
             CompletionOptions::default(),
         );
 
+        assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn completion_match_threshold_filters_weak_partial_matches() {
+        let history = vec![HistoryEntry {
+            t: 1,
+            command: "git status --short".to_string(),
+            exit_code: Some(0),
+            source: crate::history::HistorySource::User,
+        }];
+
+        let default_threshold_candidates = complete_non_first_token_for_line_with_options(
+            "git stx",
+            "git stx".len(),
+            Path::new("/"),
+            &history,
+            &[],
+            CompletionOptions::default(),
+        );
         assert_eq!(
-            candidates.first(),
+            default_threshold_candidates.first(),
             Some(&CompletionCandidate {
-                display: "200 file".to_string(),
-                replacement: "200 file".to_string(),
+                display: "status --short".to_string(),
+                replacement: "status --short".to_string(),
                 is_dir: false,
                 source: CompletionSource::History,
             })
         );
+
+        let strict_threshold_candidates = complete_non_first_token_for_line_with_options(
+            "git stx",
+            "git stx".len(),
+            Path::new("/"),
+            &history,
+            &[],
+            CompletionOptions {
+                match_threshold_percent: 80,
+                ..CompletionOptions::default()
+            },
+        );
+        assert!(strict_threshold_candidates.is_empty());
     }
 
     #[test]
@@ -1483,6 +1622,30 @@ mod tests {
     fn matches_completion_prefix_can_ignore_spaces() {
         assert!(matches_completion_prefix("git status", "g s", true));
         assert!(!matches_completion_prefix("git status", "g s", false));
+        assert!(!matches_completion_prefix_with_threshold(
+            "git status",
+            "",
+            true,
+            0
+        ));
+        assert!(!matches_completion_prefix_with_threshold(
+            "git status",
+            "g x",
+            true,
+            50
+        ));
+        assert!(!matches_completion_prefix_with_threshold(
+            "git status",
+            "gs",
+            true,
+            50
+        ));
+        assert!(matches_completion_prefix_with_threshold(
+            "git status",
+            "gs",
+            true,
+            49
+        ));
     }
 
     #[test]

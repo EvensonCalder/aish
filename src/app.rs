@@ -526,6 +526,7 @@ impl AppState {
         let options = CompletionOptions {
             max_results,
             ignore_spaces: self.completion_config.ignore_spaces,
+            match_threshold_percent: self.completion_config.match_threshold_percent,
         };
 
         if token.is_first_token && !token.path_like {
@@ -1863,6 +1864,11 @@ fn write_status_report(state: &AppState, out: &mut impl Write) -> Result<()> {
         "completion.tab_accept={}",
         state.completion_config.tab_accept.as_str()
     )?;
+    writeln!(
+        out,
+        "completion.match_threshold_percent={}",
+        state.completion_config.match_threshold_percent
+    )?;
     writeln!(out, "keybindings={}", default_keybindings().len())?;
     Ok(())
 }
@@ -1951,6 +1957,11 @@ fn write_config_report(state: &AppState, out: &mut impl Write) -> Result<()> {
         out,
         "completion.tab_accept={}",
         state.completion_config.tab_accept.as_str()
+    )?;
+    writeln!(
+        out,
+        "completion.match_threshold_percent={}",
+        state.completion_config.match_threshold_percent
     )?;
     writeln!(out, "ai.model={}", config_value(&state.ai_config.model))?;
     writeln!(
@@ -2560,9 +2571,23 @@ fn update_completion_config(state: &mut AppState, out: &mut impl Write, args: &s
                 Ok(())
             })
         }
+        (Some("match-threshold"), Some(value), None) => {
+            let Ok(percent) = value.parse::<usize>() else {
+                writeln!(out, "usage: #completion match-threshold <0-100>")?;
+                return Ok(());
+            };
+            if percent > 100 {
+                writeln!(out, "completion match threshold must be between 0 and 100")?;
+                return Ok(());
+            }
+            set_completion_config(state, out, |config| {
+                config.completion.match_threshold_percent = percent;
+                Ok(())
+            })
+        }
         _ => writeln!(
             out,
-            "usage: #completion max <count>|inline on|off|tab-accept full|word"
+            "usage: #completion max <count>|inline on|off|tab-accept full|word|match-threshold <0-100>"
         )
         .map_err(Into::into),
     }
@@ -2600,6 +2625,11 @@ fn write_completion_config(out: &mut impl Write, config: &CompletionConfig) -> R
     writeln!(out, "completion.template_first={}", config.template_first)?;
     writeln!(out, "completion.inline={}", config.inline)?;
     writeln!(out, "completion.tab_accept={}", config.tab_accept.as_str())?;
+    writeln!(
+        out,
+        "completion.match_threshold_percent={}",
+        config.match_threshold_percent
+    )?;
     Ok(())
 }
 
@@ -2962,6 +2992,7 @@ mod tests {
                 template_first: true,
                 inline: true,
                 tab_accept: CompletionTabAccept::Full,
+                match_threshold_percent: 50,
             },
             ..AppState::default()
         };
@@ -4359,6 +4390,10 @@ mod tests {
             ("#completion inline off", "completion.inline=false"),
             ("#completion tab-accept word", "completion.tab_accept=word"),
             (
+                "#completion match-threshold 80",
+                "completion.match_threshold_percent=80",
+            ),
+            (
                 "#completion max 0",
                 "completion max results must be greater than 0",
             ),
@@ -4370,6 +4405,14 @@ mod tests {
             (
                 "#completion tab-accept line",
                 "usage: #completion tab-accept full|word",
+            ),
+            (
+                "#completion match-threshold 101",
+                "completion match threshold must be between 0 and 100",
+            ),
+            (
+                "#completion match-threshold nope",
+                "usage: #completion match-threshold <0-100>",
             ),
         ] {
             state.draft.insert_str(line);
@@ -4396,10 +4439,12 @@ mod tests {
             state.completion_config.tab_accept,
             CompletionTabAccept::Word
         );
+        assert_eq!(state.completion_config.match_threshold_percent, 80);
         let loaded = config::load_config(&config_path).unwrap().completion;
         assert_eq!(loaded.max_results, 2);
         assert!(!loaded.inline);
         assert_eq!(loaded.tab_accept, CompletionTabAccept::Word);
+        assert_eq!(loaded.match_threshold_percent, 80);
     }
 
     #[test]
@@ -5158,6 +5203,7 @@ mod tests {
                 template_first: true,
                 inline: false,
                 tab_accept: CompletionTabAccept::Word,
+                match_threshold_percent: 75,
             },
             ai_config: AiConfig {
                 model: "gpt-test".to_string(),
@@ -5198,6 +5244,7 @@ mod tests {
         assert!(output.contains("completion.template_first=true"));
         assert!(output.contains("completion.inline=false"));
         assert!(output.contains("completion.tab_accept=word"));
+        assert!(output.contains("completion.match_threshold_percent=75"));
         assert!(output.contains("ai.model=gpt-test"));
         assert!(output.contains("ai.base_url=https://example.invalid/v1"));
         assert!(output.contains("ai.env_key=OPENAI_API_KEY"));
@@ -5398,6 +5445,7 @@ mod tests {
         assert!(output.contains("sync.enabled=false"));
         assert!(output.contains("context.enabled=true"));
         assert!(output.contains("completion.max_results=5"));
+        assert!(output.contains("completion.match_threshold_percent=50"));
         assert!(output.contains("keybindings=20"));
         assert!(state.draft.is_empty());
     }

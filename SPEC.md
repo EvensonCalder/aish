@@ -774,13 +774,15 @@ For command completion:
 - History candidates are ordered newest to oldest.
 - Matching ignores spaces when configured.
 - The below-prompt panel displays at most `completion.max_results` candidates.
+- Empty tokens and candidates with zero matching positions are not displayed.
+- Partial matches must exceed `completion.match_threshold_percent`; the default threshold is `50`.
 
 ### 10.3 Live inline completion and Tab behavior
 
 - Empty draft `Tab` switches modes.
 - When inline suggestions are enabled, non-empty draft edits compute completion candidates for the current token and show the best candidate as an inline ghost suggestion in dim text on the active prompt line without requiring `Tab`.
 - Live inline completion also renders remaining candidates as below-prompt hints when they fit the configured display rules.
-- If the user presses `Tab` and there are no candidates, Aish displays `no completions` below the prompt and redraws the current draft.
+- If the user presses `Tab` and there are no candidates, Aish leaves the completion UI empty and redraws the current draft unchanged.
 - The inline ghost suggestion is display-only. It must not modify the draft buffer, cursor position, history, or persisted draft until the user explicitly accepts it.
 - Pressing `Tab` with an inline ghost suggestion accepts the inline suggestion, not an arbitrary first row from the below-prompt panel. In normal typing flows this means the first `Tab` accepts the already-visible inline suggestion.
 - Some valid ranked candidates, such as replacing `something` with the template placeholder `{something}`, cannot be rendered as an unambiguous suffix. In that case Aish may show the candidate in the live below-prompt panel; pressing `Tab` accepts the first ranked candidate rather than requiring the user to type braces manually.
@@ -819,6 +821,7 @@ ignore_spaces = true
 template_first = true
 inline = true
 tab_accept = "full" # "full" or "word"
+match_threshold_percent = 50
 ```
 
 Command:
@@ -992,6 +995,7 @@ ignore_spaces = true
 template_first = true
 inline = true
 tab_accept = "full" # "full" or "word"
+match_threshold_percent = 50
 
 [editor]
 command = ["nvim"]
@@ -1207,6 +1211,7 @@ Initial command set:
 #completion max <count>
 #completion inline on|off
 #completion tab-accept full|word
+#completion match-threshold <0-100>
 
 #history <count>
 #log <count>

@@ -22,5 +22,8 @@ CAPTURE="$(tmux capture-pane -p -t "$SESSION")"
 printf '%s\n' "$PANEL_CAPTURE"
 printf '%s\n' "$CAPTURE"
 
-printf '%s\n' "$PANEL_CAPTURE" | rg -q 'no completions'
+if printf '%s\n' "$PANEL_CAPTURE" | rg -q 'no completions'; then
+    printf '%s\n' "unexpected no-completions panel" >&2
+    exit 1
+fi
 printf '%s\n' "$CAPTURE" | rg -q '^after-completion$'

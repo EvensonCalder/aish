@@ -231,12 +231,13 @@ Use a fresh isolated `AISH_HOME` when possible so history-based suggestions are 
 | COMP-005 | Run `#completion inline off`, type a prefix with candidates, then press `Tab`. | With inline disabled, `Tab` accepts the first ranked candidate directly. | Paste output. |
 | COMP-006 | Run `#completion inline on`. | Live inline suggestions return. | Describe result. |
 | COMP-007 | Run `#completion max 2`, create at least four matching history commands, then type the shared prefix. | Below-prompt hint rows are limited to two; inline suggestion is not counted as a row. | Screenshot or describe. |
-| COMP-008 | Type a prefix that has no matches and press `Tab`. | A clear no-match state appears and prompt remains usable. | Describe result. |
+| COMP-008 | Type a prefix that has no matches and press `Tab`. | No completion rows or inline ghost appear, the draft stays unchanged, and the prompt remains usable. | Describe result. |
 | COMP-009 | Create files with spaces, then use path completion. | Suggested and accepted paths are shell-safe for the backend. | Paste command/output. |
 | COMP-010 | In a narrow terminal, type a long prefix with long suggestions. | Below-prompt rows remain one line and elide with `...` instead of wrapping. | Screenshot. |
 | COMP-011 | Move cursor to the middle of a draft and trigger completion. | Completion does not corrupt text before or after the cursor. | Paste final command/output. |
 | COMP-012 | Verify bash and zsh completion behavior using the same history. | User-visible completion is Aish-owned and backend independent. | Record backend results. |
-| COMP-013 | If fish is tested, repeat a basic completion workflow. | Fish matches bash/zsh behavior or the difference is recorded. | Record result. |
+| COMP-013 | Run `#completion match-threshold 80`, type a weak partial match, then run `#completion match-threshold 30` and repeat. | The stricter threshold hides weak candidates; the lower threshold allows them. | Paste output or screenshots. |
+| COMP-014 | If fish is tested, repeat a basic completion workflow. | Fish matches bash/zsh behavior or the difference is recorded. | Record result. |
 
 ## Continuation Input
 

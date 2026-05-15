@@ -69,6 +69,7 @@ pub struct CompletionConfig {
     pub template_first: bool,
     pub inline: bool,
     pub tab_accept: CompletionTabAccept,
+    pub match_threshold_percent: usize,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
@@ -195,6 +196,7 @@ impl Default for CompletionConfig {
             template_first: true,
             inline: true,
             tab_accept: CompletionTabAccept::Full,
+            match_threshold_percent: 50,
         }
     }
 }
@@ -363,6 +365,10 @@ pub fn normalize_config(config: &mut Config) {
     if config.completion.max_results == 0 {
         config.completion.max_results = CompletionConfig::default().max_results;
     }
+    if config.completion.match_threshold_percent > 100 {
+        config.completion.match_threshold_percent =
+            CompletionConfig::default().match_threshold_percent;
+    }
     config.ai.model = config.ai.model.trim().to_string();
     config.ai.base_url = config.ai.base_url.trim().to_string();
     config.ai.env_key = config.ai.env_key.trim().to_string();
@@ -398,6 +404,7 @@ mod tests {
         assert!(config.completion.template_first);
         assert!(config.completion.inline);
         assert_eq!(config.completion.tab_accept, CompletionTabAccept::Full);
+        assert_eq!(config.completion.match_threshold_percent, 50);
         assert_eq!(config.ai, AiConfig::default());
         assert_eq!(config.context, ContextConfig::default());
         assert_eq!(config.sync, SyncConfig::default());
@@ -433,6 +440,7 @@ mod tests {
                 template_first: true,
                 inline: true,
                 tab_accept: CompletionTabAccept::Full,
+                match_threshold_percent: 101,
             },
             ai: AiConfig {
                 model: "  gpt-test  ".to_string(),
@@ -469,6 +477,7 @@ mod tests {
             confirm: false,
             max_bytes: 65_536,
         };
+        expected.completion.match_threshold_percent = 50;
         expected.sync = SyncConfig {
             remote: "git@example.invalid:aish.git".to_string(),
             enabled: true,

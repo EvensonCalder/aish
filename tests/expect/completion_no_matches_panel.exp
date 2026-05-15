@@ -1,6 +1,6 @@
 #!/usr/bin/env expect
-# When draft completion finds no candidates, Aish should show the explicit
-# "no completions" panel instead of silently doing nothing.
+# When draft completion finds no candidates, Aish should keep the prompt quiet
+# and leave the draft unchanged.
 
 set timeout 10
 source [file dirname [info script]]/_lib.exp
@@ -9,9 +9,9 @@ aish_spawn
 
 aish_send "zzzzzz-no-match"
 send -- "\t"
-aish_expect "no completions"
 
 send -- "\u001b"
-aish_wait_prompt
+send -- "echo after-completion\r"
+assert_no "no completions" "after-completion"
 
 aish_quit

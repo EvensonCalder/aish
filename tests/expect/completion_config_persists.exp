@@ -16,6 +16,7 @@ aish_enter
 aish_expect "completion.max_results=5"
 aish_expect "completion.inline=true"
 aish_expect "completion.tab_accept=full"
+aish_expect "completion.match_threshold_percent=50"
 aish_wait_prompt
 
 aish_send "#completion max 2"
@@ -43,11 +44,17 @@ aish_enter
 aish_expect "completion.tab_accept=full"
 aish_wait_prompt
 
+aish_send "#completion match-threshold 80"
+aish_enter
+aish_expect "completion.match_threshold_percent=80"
+aish_wait_prompt
+
 aish_send "#config"
 aish_enter
 aish_expect "completion.max_results=2"
 aish_expect "completion.inline=true"
 aish_expect "completion.tab_accept=full"
+aish_expect "completion.match_threshold_percent=80"
 aish_wait_prompt
 
 aish_send "#completion max 0"
@@ -58,6 +65,7 @@ aish_wait_prompt
 aish_send "#config"
 aish_enter
 aish_expect "completion.max_results=2"
+aish_expect "completion.match_threshold_percent=80"
 aish_wait_prompt
 
 aish_send "cd $work"
