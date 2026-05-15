@@ -10,7 +10,7 @@ trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; rm -rf "$HOME_DIR
 
 mkdir -p "$HOME_DIR"
 printf 'must remain\n' > "$DANGEROUS_MARKER"
-tmux new-session -d -x 120 -y 60 -s "$SESSION" "env HOME='$HOME_DIR' AISH_HOME='$HOME_DIR/.aish' AISH_TMUX_CONTEXT_KEY='test-key' '$AISH_BIN'"
+tmux new-session -d -x 120 -y 60 -s "$SESSION" "env HOME='$HOME_DIR' AISH_HOME='$HOME_DIR/.aish' AISH_TMUX_CONTEXT_KEY='test-key' GIT_CONFIG_COUNT=3 GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false GIT_CONFIG_KEY_1=user.name GIT_CONFIG_VALUE_1='Aish Tmux' GIT_CONFIG_KEY_2=user.email GIT_CONFIG_VALUE_2=aish@example.invalid '$AISH_BIN'"
 sleep 5
 
 tmux send-keys -t "$SESSION" '#model tmux-model' Enter

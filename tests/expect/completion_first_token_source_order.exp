@@ -10,31 +10,31 @@ source [file dirname [info script]]/_lib.exp
 set bindir "/tmp/aish-completion-path-[pid]-[clock clicks]"
 file delete -force $bindir
 file mkdir $bindir
-set fh [open "$bindir/fooexec" w]
+set fh [open "$bindir/aishexpectuniq-exec" w]
 puts $fh "#!/bin/sh\nexit 0"
 close $fh
-file attributes "$bindir/fooexec" -permissions 0755
+file attributes "$bindir/aishexpectuniq-exec" -permissions 0755
 
 set old_path $::env(PATH)
 set ::env(PATH) "$bindir:$old_path"
 
 aish_spawn
 
-aish_send "foohistory"
+aish_send "aishexpectuniq-history"
 aish_enter
 aish_wait_prompt
 
-aish_send "#mt foo-template-command"
+aish_send "#mt aishexpectuniq-template-command"
 aish_enter
 aish_expect_template_stored
 aish_wait_prompt
 
-aish_send "foo"
+aish_send "aishexpectuniq"
 send -- "\t"
 
 aish_expect "-template-command"
-aish_expect "history\thistory"
-aish_expect "exec\texec"
+aish_expect "history\t-history"
+aish_expect "exec\t-exec"
 
 send -- "\u001b"
 aish_wait_prompt

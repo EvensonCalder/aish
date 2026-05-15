@@ -8,38 +8,41 @@ WORK_DIR="/tmp/aw-$$"
 trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; rm -rf "$HOME_DIR" "$WORK_DIR"' EXIT INT TERM
 
 mkdir -p "$HOME_DIR/.aish" "$WORK_DIR"
-if [ "${AISH_BACKEND_SHELL:-}" ]; then
-    printf '[shell]\nbackend = "%s"\n' "$AISH_BACKEND_SHELL" > "$HOME_DIR/.aish/config.toml"
-fi
+{
+    if [ "${AISH_BACKEND_SHELL:-}" ]; then
+        printf '[shell]\nbackend = "%s"\n' "$AISH_BACKEND_SHELL"
+    fi
+    printf '[completion]\ninline = false\n'
+} > "$HOME_DIR/.aish/config.toml"
 
 START_DELAY=5
 STEP_DELAY=1
 
 case "${AISH_BACKEND_KIND:-posix}" in
     bash)
-        CREATE_COMMAND="mkdir -p c; printf 'alpha\\nbeta\\n' > c/i"
+        CREATE_COMMAND="mkdir -p c && echo beta-output > c/i"
         ENV_COMMAND='export AISH_COMMON_VALUE=visible'
-        TEST_COMMAND='test -f c/i && echo file-exists'
+        TEST_COMMAND='test -f c/i && echo file exists'
         BACKEND_COMMAND='printf '\''backend:bash:%s\n'\'' "$BASH_VERSION"'
         ;;
     zsh)
-        CREATE_COMMAND="mkdir -p c; printf 'alpha\\nbeta\\n' > c/i"
+        CREATE_COMMAND="mkdir -p c && echo beta-output > c/i"
         ENV_COMMAND='export AISH_COMMON_VALUE=visible'
-        TEST_COMMAND='test -f c/i && echo file-exists'
+        TEST_COMMAND='test -f c/i && echo file exists'
         BACKEND_COMMAND='printf '\''backend:zsh:%s\n'\'' "$ZSH_VERSION"'
         ;;
     fish)
         START_DELAY=7
         STEP_DELAY=2
-        CREATE_COMMAND="mkdir -p c; printf 'alpha\\nbeta\\n' > c/i"
+        CREATE_COMMAND="mkdir -p c && echo beta-output > c/i"
         ENV_COMMAND='set -gx AISH_COMMON_VALUE visible'
-        TEST_COMMAND='test -f c/i; and echo file-exists'
+        TEST_COMMAND='test -f c/i && echo file exists'
         BACKEND_COMMAND='printf '\''backend:fish:%s\n'\'' "$version"'
         ;;
     *)
-        CREATE_COMMAND="mkdir -p c; printf 'alpha\\nbeta\\n' > c/i"
+        CREATE_COMMAND="mkdir -p c && echo beta-output > c/i"
         ENV_COMMAND='export AISH_COMMON_VALUE=visible'
-        TEST_COMMAND='test -f c/i && echo file-exists'
+        TEST_COMMAND='test -f c/i && echo file exists'
         BACKEND_COMMAND='printf '\''backend:posix\n'\'''
         ;;
 esac
@@ -63,15 +66,15 @@ send_command 'printenv AISH_COMMON_VALUE'
 send_command "$TEST_COMMAND"
 send_command "$BACKEND_COMMAND"
 send_command 'false'
-send_command 'echo after-failure'
+send_command "printf 'after:%s\n' failure"
 sleep 2
 
 CAPTURE="$(tmux capture-pane -p -S - -t "$SESSION")"
 printf '%s\n' "$CAPTURE"
 
-printf '%s\n' "$CAPTURE" | rg -q '^beta$'
+printf '%s\n' "$CAPTURE" | rg -q '^beta-output$'
 printf '%s\n' "$CAPTURE" | rg -q '^quoted:value with spaces$'
 printf '%s\n' "$CAPTURE" | rg -q '^visible$'
-printf '%s\n' "$CAPTURE" | rg -q '^file-exists$'
+printf '%s\n' "$CAPTURE" | rg -q '^file exists$'
 printf '%s\n' "$CAPTURE" | rg -q '^backend:'
-printf '%s\n' "$CAPTURE" | rg -q '^after-failure$'
+printf '%s\n' "$CAPTURE" | rg -q '^after:failure$'

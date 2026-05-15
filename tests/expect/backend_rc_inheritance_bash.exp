@@ -29,6 +29,8 @@ write_executable "$bindir/from-aish-expect-bashrc-path" "#!/bin/sh\nprintf 'path
 set fh [open "$home/.aish/config.toml" w]
 puts $fh "\[shell\]"
 puts $fh {backend = "/bin/bash"}
+puts $fh "\[completion\]"
+puts $fh {inline = false}
 close $fh
 
 set fh [open "$home/.bashrc" w]

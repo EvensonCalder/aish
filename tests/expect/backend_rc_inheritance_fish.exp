@@ -48,6 +48,8 @@ write_executable "$bindir/from-aish-expect-fish-config-path" "#!/bin/sh\nprintf 
 set fh [open "$home/.aish/config.toml" w]
 puts $fh "\[shell\]"
 puts $fh "backend = \"$fish\""
+puts $fh "\[completion\]"
+puts $fh {inline = false}
 close $fh
 
 set fh [open "$fish_config_dir/config.fish" w]

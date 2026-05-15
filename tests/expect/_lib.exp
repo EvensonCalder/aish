@@ -1,7 +1,7 @@
 # Shared helpers for Aish expect tests.
 #
 # Sourced by every scenario. Provides:
-#   - aish_spawn   : spawn the debug aish binary in an isolated AISH_HOME
+#   - aish_spawn   : spawn the debug aish binary in an isolated HOME/AISH_HOME
 #   - aish_expect  : require that a literal substring appears soon
 #   - aish_send    : send text to aish, clearing a preserved draft prompt first
 #   - aish_enter   : send Enter
@@ -13,18 +13,24 @@
 log_user 0
 set ::env(NO_COLOR) "1"
 set ::env(TERM) "xterm-256color"
-# Expect scenarios create temporary git repositories; do not let a user's global
-# commit signing config make those local commits depend on GPG or pinentry.
-set ::env(GIT_CONFIG_COUNT) "1"
+# Expect scenarios create temporary git repositories; keep commits independent
+# from a user's global git identity/signing configuration.
+set ::env(GIT_CONFIG_COUNT) "3"
 set ::env(GIT_CONFIG_KEY_0) "commit.gpgsign"
 set ::env(GIT_CONFIG_VALUE_0) "false"
+set ::env(GIT_CONFIG_KEY_1) "user.name"
+set ::env(GIT_CONFIG_VALUE_1) "Aish Expect"
+set ::env(GIT_CONFIG_KEY_2) "user.email"
+set ::env(GIT_CONFIG_VALUE_2) "aish@example.invalid"
 set ::aish_last_draft ""
 
-# Pick an isolated AISH_HOME per spawn so concurrent runs do not collide.
+# Pick an isolated HOME/AISH_HOME per spawn so tests do not inherit the user's
+# shell rc files and concurrent runs do not collide.
 proc aish_new_home {} {
     set tmp "/tmp/aish-expect-[pid]-[clock clicks]"
     file mkdir $tmp
     set ::env(AISH_HOME) $tmp
+    set ::env(HOME) $tmp
     return $tmp
 }
 
@@ -47,9 +53,9 @@ proc aish_spawn_without_aish_home {} {
     aish_wait_prompt
 }
 
-# Wait for the draft prompt, allowing optional editor or multi-line draft text
+# Wait for any draft prompt, allowing optional editor or multi-line draft text
 # before the ANSI cursor-positioning codes.
-proc aish_wait_prompt {} {
+proc aish_wait_any_prompt {} {
     expect {
         -re {> ([^\x1b]*)\x1b\[}     { set ::aish_last_draft $expect_out(1,string) }
         timeout            { puts stderr "no prompt"; exit 2 }
@@ -57,12 +63,29 @@ proc aish_wait_prompt {} {
     }
 }
 
+# Wait for the blank final prompt. Live completion redraws can render transient
+# non-empty prompt drafts while tests are typing; those must not be mistaken for
+# command completion.
+proc aish_wait_prompt {} {
+    while {1} {
+        aish_wait_any_prompt
+        if {![info exists ::aish_last_draft] || $::aish_last_draft eq ""} {
+            return
+        }
+    }
+}
+
 proc aish_wait_prompt_without {forbidden} {
-    expect {
-        -ex $forbidden     { puts stderr "found forbidden before prompt: $forbidden"; exit 5 }
-        -re {> ([^\x1b]*)\x1b\[}     { set ::aish_last_draft $expect_out(1,string) }
-        timeout            { puts stderr "no prompt"; exit 2 }
-        eof                { puts stderr "eof before prompt"; exit 2 }
+    while {1} {
+        expect {
+            -ex $forbidden     { puts stderr "found forbidden before prompt: $forbidden"; exit 5 }
+            -re {> ([^\x1b]*)\x1b\[}     { set ::aish_last_draft $expect_out(1,string) }
+            timeout            { puts stderr "no prompt"; exit 2 }
+            eof                { puts stderr "eof before prompt"; exit 2 }
+        }
+        if {![info exists ::aish_last_draft] || $::aish_last_draft eq ""} {
+            return
+        }
     }
 }
 

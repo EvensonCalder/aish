@@ -9,18 +9,24 @@ HOME_DIR="/tmp/aish-tmux-rc-home-$$"
 trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; rm -rf "$HOME_DIR"' EXIT INT TERM
 
 mkdir -p "$HOME_DIR/.aish" "$HOME_DIR/bin"
-printf '[shell]\nbackend = "%s"\n' "$AISH_BACKEND_SHELL" > "$HOME_DIR/.aish/config.toml"
+{
+    printf '[shell]\nbackend = "%s"\n' "$AISH_BACKEND_SHELL"
+    printf '[completion]\ninline = false\n'
+} > "$HOME_DIR/.aish/config.toml"
 
 write_executable() {
     path="$1"
-    body="$2"
-    printf '%s' "$body" > "$path"
+    command="$2"
+    {
+        printf '%s\n' '#!/bin/sh'
+        printf '%s\n' "$command"
+    } > "$path"
     chmod +x "$path"
 }
 
 case "$AISH_BACKEND_KIND" in
     bash)
-        write_executable "$HOME_DIR/bin/from-aish-tmux-bashrc-path" "#!/bin/sh\nprintf 'path-from-bashrc\n'\n"
+        write_executable "$HOME_DIR/bin/from-aish-tmux-bashrc-path" "printf 'path-from-bashrc\n'"
         {
             printf '%s\n' '[ -z "$PS1" ] && return'
             printf '%s\n' "alias aish_tmux_alias_from_rc='printf alias-from-bashrc\\\\n'"
@@ -40,7 +46,7 @@ printf "prompt-command:%s\n" "$AISH_TMUX_BASH_PROMPT_COMMAND"
         FORBIDDEN='bash-prompt-noise|bashrc-prompt|__AISH_STATUS__|__AISH_READY__'
         ;;
     zsh)
-        write_executable "$HOME_DIR/bin/from-aish-tmux-zshrc-path" "#!/bin/sh\nprintf 'path-from-zshrc\n'\n"
+        write_executable "$HOME_DIR/bin/from-aish-tmux-zshrc-path" "printf 'path-from-zshrc\n'"
         {
             printf '%s\n' "alias aish_tmux_alias_from_zshrc='printf alias-from-zshrc\\\\n'"
             printf '%s\n' "aish_tmux_function_from_zshrc() { printf 'function-from-zshrc\\n'; }"
@@ -64,7 +70,7 @@ printf "hooks:%s|%s\n" "$AISH_TMUX_ZSH_PRECMD" "$AISH_TMUX_ZSH_PREEXEC"
         ;;
     fish)
         mkdir -p "$HOME_DIR/.config/fish"
-        write_executable "$HOME_DIR/bin/from-aish-tmux-fish-config-path" "#!/bin/sh\nprintf 'path-from-fish-config\n'\n"
+        write_executable "$HOME_DIR/bin/from-aish-tmux-fish-config-path" "printf 'path-from-fish-config\n'"
         {
             printf '%s\n' 'function aish_tmux_function_from_fish_config'
             printf '%s\n' "    printf 'function-from-fish-config\\n'"

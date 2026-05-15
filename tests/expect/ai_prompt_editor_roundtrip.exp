@@ -30,7 +30,7 @@ aish_spawn
 aish_send "# "
 aish_enter
 aish_expect "editor saved draft"
-aish_wait_prompt
+aish_wait_any_prompt
 aish_expect_prompt_draft_contains "\[ai prompt: 2 lines"
 
 set first [string trim [read [open $first_input r]]]
@@ -41,7 +41,7 @@ if {$first ne ""} {
 
 send -- "\030\005"
 aish_expect "editor saved draft"
-aish_wait_prompt
+aish_wait_any_prompt
 aish_expect_prompt_draft_contains "\[ai prompt: 1 line"
 
 set reopened [string trim [read [open $reopened_input r]]]

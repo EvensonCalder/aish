@@ -590,11 +590,11 @@ fn assert_at_least_n_lines(captured: &str, expected_line: &str, min_count: usize
 }
 
 fn assert_common_shell_workflow_output(captured: &str) {
-    assert_line_present(captured, "beta");
+    assert_line_present(captured, "beta-output");
     assert_line_present(captured, "quoted:value with spaces");
     assert_line_present(captured, "visible");
-    assert_line_present(captured, "file-exists");
-    assert_line_present(captured, "after-failure");
+    assert_line_present(captured, "file exists");
+    assert_line_present(captured, "after:failure");
 }
 
 fn assert_line_present(captured: &str, expected_line: &str) {
