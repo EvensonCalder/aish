@@ -18,7 +18,7 @@ git diff --check
 
 Current test inventory:
 
-- 375 library unit tests.
+- 380 library unit tests.
 - 23 draft execution integration tests.
 - 1 first-run integration test.
 - 32 tmux screen-capture integration tests.
@@ -384,7 +384,7 @@ Implemented:
 - Terminal size has expect coverage proving startup outer terminal rows/columns propagate to backend child commands via `stty size`; runtime backend resize is covered by PTY integration.
 - `#key set` remains a placeholder, while `#key clear` removes the encrypted key file if present and logs the action without printing stored secret content.
 - `#completion` reports current completion config and persists `#completion max <count>`, `#completion inline on|off`, and `#completion tab-accept full|word`.
-- Inline ghost completion, configurable full/word `Tab` acceptance, and width-aware candidate row elision are implemented with Rust, expect, and tmux coverage.
+- Live inline ghost completion, configurable full/word `Tab` acceptance, and width-aware candidate row elision are implemented with Rust, expect, and tmux coverage.
 - Completion has pure current-token detection helpers that handle first-token classification, non-first-token classification, quoted whitespace, escaped whitespace, cursor-in-line contexts, path-like tokens, and UTF-8 cursor snapping.
 - Completion has a pure path completion helper that reads matching file and directory candidates, preserves directory prefixes, sorts candidates, marks directories with trailing `/`, preserves opening quotes in replacements, and handles missing directories as no matches.
 - Completion has a pure first-token helper that returns template candidates before newest-first history commands before PATH executables, with per-source deduplication.
@@ -394,7 +394,7 @@ Implemented:
 - Prompt cwd rendering abbreviates the user home directory as `~` and paths inside it as `~/...`.
 - Raw-terminal display writes normalize line feeds to CRLF through a terminal display writer, so multi-line shell output and UI messages return to column zero without corrupting stored command output.
 - Runtime state can build completion candidates from current draft, templates, in-memory history, cwd, PATH, and completion config without mutating input or terminal UI; candidate discovery is separate from below-prompt row limiting.
-- Non-empty Tab with inline completion enabled shows a display-only ghost suffix plus a labeled below-prompt panel, then accepts the inline suggestion on the next Tab. Inline-disabled mode accepts the first ranked candidate directly.
+- Non-empty typing with inline completion enabled shows a display-only ghost suffix plus labeled below-prompt hints; the first Tab accepts the already-visible inline suggestion. Inline-disabled mode accepts the first ranked candidate directly.
 - Right at end-of-line accepts the current inline suggestion or first completion candidate according to the configured accept amount; Right inside the line keeps ordinary cursor movement.
 - Completion helpers can render labeled width-aware candidate rows, compute display-only ghost suffixes, elide overflow with `...`, and return full or next-word accepted completion text/cursor without mutating input state.
 - Picker helpers support shell quoting and pure result edits for insert-at-cursor, replace-current-token, append-as-argument, and replace-line actions.
@@ -575,6 +575,10 @@ Tests:
 - `terminal::tests::tab_with_inline_disabled_accepts_first_completion_candidate`
 - `terminal::tests::tab_shows_multiple_completion_candidates_below_prompt`
 - `terminal::tests::tab_display_respects_completion_max_results`
+- `terminal::tests::typed_input_shows_live_inline_completion_without_tab`
+- `terminal::tests::live_inline_completion_shows_remaining_candidates_as_panel_hints`
+- `terminal::tests::first_tab_accepts_live_inline_completion`
+- `terminal::tests::live_inline_completion_respects_inline_disabled_config`
 - `terminal::tests::redraw_renders_completion_panel_below_prompt_and_restores_cursor`
 - `terminal::tests::redraw_renders_inline_completion_suffix_without_moving_cursor`
 - `terminal::tests::inline_completion_suffix_elides_to_terminal_width`

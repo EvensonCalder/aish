@@ -15,8 +15,9 @@ use crate::app::{
     save_draft_if_configured,
 };
 use crate::completion::{
-    accept_completion_with_mode, current_token_context, ghost_completion_suffix, limit_candidates,
-    render_completion_candidates_for_width, truncate_with_ellipsis,
+    CompletionCandidate, accept_completion_with_mode, current_token_context,
+    ghost_completion_suffix, limit_candidates, render_completion_candidates_for_width,
+    truncate_with_ellipsis,
 };
 use crate::editor::resolve_editor_command;
 use crate::picker::{
@@ -114,6 +115,7 @@ pub fn run(
     install_panic_cleanup();
     let _guard = TerminalGuard::enter()?;
     sync_backend_pty_size(backend)?;
+    refresh_live_completion_ui(state)?;
     redraw(state, out)?;
 
     loop {
@@ -130,6 +132,7 @@ pub fn run(
                         return Ok(());
                     }
                 }
+                refresh_live_completion_ui(state)?;
                 redraw(state, out)?;
             }
             Event::Resize(cols, rows) => {
@@ -155,8 +158,10 @@ fn handle_key(
     out: &mut impl Write,
     command_timeout: Duration,
 ) -> Result<bool> {
-    let had_completion_panel = !state.completion_panel.is_empty();
-    match apply_key_to_state(key, state) {
+    let had_completion_ui = !state.completion_panel.is_empty() || state.completion_inline.is_some();
+    let action = apply_key_to_state(key, state);
+    let refresh_completion = !matches!(action, KeyAction::CompleteOrShow);
+    match action {
         KeyAction::Exit => return Ok(true),
         KeyAction::ClearScreen => {
             clear_screen_for_redraw(state, out)?;
@@ -196,7 +201,7 @@ fn handle_key(
             accept_first_completion(state)?;
         }
         KeyAction::Submit => {
-            if had_completion_panel {
+            if had_completion_ui {
                 redraw(state, out)?;
             }
             move_to_rendered_end(state, out, terminal_display_width())?;
@@ -218,6 +223,9 @@ fn handle_key(
             return Ok(false);
         }
         KeyAction::Continue => {}
+    }
+    if refresh_completion {
+        refresh_live_completion_ui(state)?;
     }
     redraw(state, out)?;
     Ok(false)
@@ -804,6 +812,7 @@ pub fn complete_or_show_candidates(state: &mut AppState) -> Result<()> {
 pub fn complete_or_show_candidates_for_width(state: &mut AppState, width: usize) -> Result<()> {
     if state.completion_config.inline {
         if accept_inline_completion(state)? {
+            refresh_live_completion_ui_for_width(state, width)?;
             return Ok(());
         }
         let candidates = state.completion_candidates()?;
@@ -812,24 +821,7 @@ pub fn complete_or_show_candidates_for_width(state: &mut AppState, width: usize)
             state.completion_panel = vec!["no completions".to_string()];
             return Ok(());
         }
-        let token = current_token_context(state.draft.as_str(), state.draft.cursor());
-        let inline_completion = candidates.first().and_then(|candidate| {
-            ghost_completion_suffix(&token, candidate).map(|suffix| InlineCompletion {
-                candidate: candidate.clone(),
-                suffix,
-            })
-        });
-        let skip_inline_candidate = inline_completion.is_some();
-        state.completion_inline = inline_completion;
-        let panel_candidates = if skip_inline_candidate {
-            candidates.into_iter().skip(1).collect()
-        } else {
-            candidates
-        };
-        let panel_candidates =
-            limit_candidates(panel_candidates, state.completion_config.max_results);
-        state.completion_panel =
-            render_completion_candidates_for_width(&panel_candidates, &token, width);
+        set_completion_ui_from_candidates(state, candidates, width);
         return Ok(());
     }
 
@@ -840,6 +832,67 @@ pub fn complete_or_show_candidates_for_width(state: &mut AppState, width: usize)
     };
     accept_completion_candidate(state, candidate)?;
     Ok(())
+}
+
+fn refresh_live_completion_ui(state: &mut AppState) -> Result<()> {
+    refresh_live_completion_ui_for_width(state, terminal_display_width())
+}
+
+fn refresh_live_completion_ui_for_width(state: &mut AppState, width: usize) -> Result<()> {
+    state.clear_completion_ui();
+    if !should_refresh_live_completion(state) {
+        return Ok(());
+    }
+    let candidates = state.completion_candidates()?;
+    if !candidates.is_empty() {
+        set_completion_ui_from_candidates(state, candidates, width);
+    }
+    Ok(())
+}
+
+fn should_refresh_live_completion(state: &AppState) -> bool {
+    state.completion_config.inline
+        && state.pending_context.is_none()
+        && !state.ctrl_x_prefix
+        && state.mode == crate::modes::Mode::Draft
+        && !state.draft_from_editor
+        && !state.draft.is_empty()
+        && state.draft.cursor() == state.draft.as_str().len()
+}
+
+fn set_completion_ui_from_candidates(
+    state: &mut AppState,
+    candidates: Vec<CompletionCandidate>,
+    width: usize,
+) {
+    let token = current_token_context(state.draft.as_str(), state.draft.cursor());
+    let inline_completion = candidates
+        .first()
+        .and_then(|candidate| inline_completion_from_candidate(&token, candidate));
+    let skip_inline_candidate = inline_completion.is_some();
+    state.completion_inline = inline_completion;
+    let panel_candidates = if skip_inline_candidate {
+        candidates.into_iter().skip(1).collect()
+    } else {
+        candidates
+    };
+    let panel_candidates = panel_candidates
+        .into_iter()
+        .filter(|candidate| candidate.replacement != token.text)
+        .collect();
+    let panel_candidates = limit_candidates(panel_candidates, state.completion_config.max_results);
+    state.completion_panel =
+        render_completion_candidates_for_width(&panel_candidates, &token, width);
+}
+
+fn inline_completion_from_candidate(
+    token: &crate::completion::TokenContext,
+    candidate: &CompletionCandidate,
+) -> Option<InlineCompletion> {
+    ghost_completion_suffix(token, candidate).map(|suffix| InlineCompletion {
+        candidate: candidate.clone(),
+        suffix,
+    })
 }
 
 fn accept_inline_completion(state: &mut AppState) -> Result<bool> {
@@ -1135,6 +1188,79 @@ mod tests {
         complete_or_show_candidates(&mut state).unwrap();
 
         assert_eq!(state.draft.as_str(), "cat single.txt");
+        assert!(state.completion_inline.is_none());
+        assert!(state.completion_panel.is_empty());
+    }
+
+    #[test]
+    fn typed_input_shows_live_inline_completion_without_tab() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut state = AppState {
+            current_cwd: Some(temp.path().to_path_buf()),
+            ..AppState::default()
+        };
+        std::fs::write(temp.path().join("single.txt"), "").unwrap();
+        state.draft.insert_str("cat s");
+
+        apply_key_to_state(key(KeyCode::Char('i')), &mut state);
+        refresh_live_completion_ui_for_width(&mut state, 80).unwrap();
+
+        assert_eq!(state.draft.as_str(), "cat si");
+        assert_eq!(state.completion_inline.as_ref().unwrap().suffix, "ngle.txt");
+        assert!(state.completion_panel.is_empty());
+    }
+
+    #[test]
+    fn live_inline_completion_shows_remaining_candidates_as_panel_hints() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut state = AppState {
+            current_cwd: Some(temp.path().to_path_buf()),
+            ..AppState::default()
+        };
+        std::fs::write(temp.path().join("one.txt"), "").unwrap();
+        std::fs::write(temp.path().join("only.log"), "").unwrap();
+        state.draft.insert_str("cat o");
+
+        refresh_live_completion_ui_for_width(&mut state, 80).unwrap();
+
+        assert_eq!(state.completion_inline.as_ref().unwrap().suffix, "ne.txt");
+        assert_eq!(state.completion_panel, vec!["file\tnly.log".to_string()]);
+    }
+
+    #[test]
+    fn first_tab_accepts_live_inline_completion() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut state = AppState {
+            current_cwd: Some(temp.path().to_path_buf()),
+            ..AppState::default()
+        };
+        std::fs::write(temp.path().join("single.txt"), "").unwrap();
+        state.draft.insert_str("cat si");
+        refresh_live_completion_ui_for_width(&mut state, 80).unwrap();
+
+        complete_or_show_candidates(&mut state).unwrap();
+
+        assert_eq!(state.draft.as_str(), "cat single.txt");
+        assert!(state.completion_inline.is_none());
+        assert!(state.completion_panel.is_empty());
+    }
+
+    #[test]
+    fn live_inline_completion_respects_inline_disabled_config() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut state = AppState {
+            current_cwd: Some(temp.path().to_path_buf()),
+            completion_config: CompletionConfig {
+                inline: false,
+                ..CompletionConfig::default()
+            },
+            ..AppState::default()
+        };
+        std::fs::write(temp.path().join("single.txt"), "").unwrap();
+        state.draft.insert_str("cat si");
+
+        refresh_live_completion_ui_for_width(&mut state, 80).unwrap();
+
         assert!(state.completion_inline.is_none());
         assert!(state.completion_panel.is_empty());
     }
@@ -1499,6 +1625,53 @@ mod tests {
         let output = String::from_utf8(output).unwrap();
         assert!(
             output.contains("\u{1b}[13G\r\nhello"),
+            "output was {output:?}"
+        );
+    }
+
+    #[test]
+    fn submit_redraws_without_inline_ghost_suffix() {
+        let mut state = AppState {
+            regular_history: vec![crate::history::HistoryEntry {
+                t: 1,
+                command: "echo inline-history seeded".to_string(),
+                exit_code: Some(0),
+                source: crate::history::HistorySource::User,
+            }],
+            completion_config: CompletionConfig {
+                tab_accept: CompletionTabAccept::Word,
+                ..CompletionConfig::default()
+            },
+            ..AppState::default()
+        };
+        state.draft.insert_str("echo in");
+        refresh_live_completion_ui_for_width(&mut state, 80).unwrap();
+        complete_or_show_candidates(&mut state).unwrap();
+        assert_eq!(state.draft.as_str(), "echo inline-history");
+        assert_eq!(state.completion_inline.as_ref().unwrap().suffix, " seeded");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        handle_key(
+            key(KeyCode::Enter),
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(
+            output.contains("> echo inline-history"),
+            "output was {output:?}"
+        );
+        assert!(
+            output.contains("\r\ninline-history"),
+            "output was {output:?}"
+        );
+        assert!(
+            !output.contains("echo inline-history seeded\r\ninline-history"),
             "output was {output:?}"
         );
     }

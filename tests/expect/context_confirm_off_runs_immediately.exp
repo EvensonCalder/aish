@@ -10,6 +10,11 @@ set ::env(AISH_EXPECT_CONTEXT_KEY) "test-key"
 
 aish_spawn
 
+aish_send "#completion inline off"
+aish_enter
+aish_expect "completion.inline=false"
+aish_wait_prompt
+
 aish_send "#base-url https://127.0.0.1:1/v1"
 aish_enter
 aish_expect "#base-url=https://127.0.0.1:1/v1/chat/completions"

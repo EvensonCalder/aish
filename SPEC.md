@@ -736,14 +736,14 @@ For command completion:
 - Matching ignores spaces when configured.
 - The below-prompt panel displays at most `completion.max_results` candidates.
 
-### 10.3 Tab behavior
+### 10.3 Live inline completion and Tab behavior
 
 - Empty draft `Tab` switches modes.
-- Non-empty draft `Tab` computes completion candidates for the current token.
-- If there are no candidates, Aish displays `no completions` below the prompt and redraws the current draft.
-- If inline suggestions are enabled and at least one candidate exists, Aish shows the best candidate as an inline ghost suggestion in dim text on the active prompt line.
+- When inline suggestions are enabled, non-empty draft edits compute completion candidates for the current token and show the best candidate as an inline ghost suggestion in dim text on the active prompt line without requiring `Tab`.
+- Live inline completion also renders remaining candidates as below-prompt hints when they fit the configured display rules.
+- If the user presses `Tab` and there are no candidates, Aish displays `no completions` below the prompt and redraws the current draft.
 - The inline ghost suggestion is display-only. It must not modify the draft buffer, cursor position, history, or persisted draft until the user explicitly accepts it.
-- Pressing `Tab` with an inline ghost suggestion accepts the inline suggestion, not an arbitrary first row from the below-prompt panel.
+- Pressing `Tab` with an inline ghost suggestion accepts the inline suggestion, not an arbitrary first row from the below-prompt panel. In normal typing flows this means the first `Tab` accepts the already-visible inline suggestion.
 - If inline suggestions are disabled, non-empty `Tab` accepts the first ranked candidate directly, preserving the legacy behavior.
 - `completion.tab_accept = "full"` accepts the complete selected suggestion.
 - `completion.tab_accept = "word"` accepts only through the next whitespace boundary in the untyped suffix. If no whitespace boundary remains, it accepts the full suffix.
@@ -763,6 +763,7 @@ Inline suggestions:
 Below-prompt candidate panel:
 
 - `completion.max_results` controls only the number of rows displayed in the below-prompt panel.
+- When inline suggestions are enabled, the panel may update live while the user types and should skip the current inline candidate so the panel remains advisory.
 - Candidate rows must fit within the current terminal width and must not wrap.
 - Candidate rows should use the user's current command text as the overlap anchor and show as much of the untyped candidate text as possible.
 - When a row cannot fit, Aish should elide at the right edge with ASCII `...`.

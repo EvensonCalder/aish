@@ -1034,7 +1034,7 @@ enum AiItemKind {
 
 ## Phase 28: Inline completion UX
 
-Status: implemented. Inline completion is enabled by default, `completion.max_results` controls only the below-prompt panel row count, and bash/zsh real-terminal coverage proves completion behavior is owned by Aish rather than the backend shell. Fish backend coverage remains opt-in with `AISH_TEST_FISH=1` until cross-platform behavior is validated across macOS and Linux distributions.
+Status: implemented. Inline completion is enabled by default and refreshes while the user types, `completion.max_results` controls only the below-prompt panel row count, and bash/zsh real-terminal coverage proves completion behavior is owned by Aish rather than the backend shell. Fish backend coverage remains opt-in with `AISH_TEST_FISH=1` until cross-platform behavior is validated across macOS and Linux distributions.
 
 ### Tasks
 
@@ -1049,9 +1049,10 @@ Status: implemented. Inline completion is enabled by default, `completion.max_re
   - [x] `#completion tab-accept full|word`
 - [x] Split completion candidate discovery from panel row limiting so `completion.max_results` controls only below-prompt row count.
 - [x] Track the current inline suggestion separately from the draft buffer, cursor, history, persisted draft, and below-prompt panel state.
-- [x] Render the highest-ranked completion candidate as an inline ghost suffix in dim or light text when inline completion is enabled.
+- [x] Render the highest-ranked completion candidate as an inline ghost suffix in dim or light text while the user types when inline completion is enabled.
+- [x] Render remaining candidates as live below-prompt hints while keeping the inline suggestion as the only `Tab` acceptance target.
 - [x] Ensure editing, cursor movement, mode switching, prompt redraw, and command execution clear stale inline suggestions.
-- [x] Make `Tab` accept the inline suggestion when inline completion is enabled.
+- [x] Make the first `Tab` accept the already-visible inline suggestion when inline completion is enabled.
 - [x] Preserve legacy first-candidate acceptance when inline completion is disabled.
 - [x] Implement `completion.tab_accept = "full"` to accept the complete untyped suffix.
 - [x] Implement `completion.tab_accept = "word"` to accept only through the next whitespace boundary in the untyped suffix, or the full suffix when no boundary remains.
@@ -1065,16 +1066,16 @@ Status: implemented. Inline completion is enabled by default, `completion.max_re
 - [x] Private-command tests proving `#completion inline on|off` and `#completion tab-accept full|word` persist, report, and reject invalid input without changing config.
 - [x] Pure completion tests for computing an inline suffix from history, templates, executables, paths, and non-first-token arguments.
 - [x] Pure acceptance tests for full-suggestion and word-boundary acceptance, including quoted arguments and candidates with spaces.
-- [x] Terminal rendering tests proving the inline ghost is display-only, uses subdued styling, does not move the real cursor, and does not mutate draft text.
+- [x] Terminal rendering tests proving the inline ghost is display-only, refreshes while typing, uses subdued styling, does not move the real cursor, and does not mutate draft text.
 - [x] Terminal state tests proving stale inline suggestions clear after editing, cursor movement, mode changes, command execution, and no-match completion.
 - [x] Panel rendering tests for `completion.max_results`, narrow terminal widths, overlap anchoring, source labels, no wrapping, and `...` elision.
-- [x] Expect scenarios for inline visibility, disabled legacy mode, `Tab` full accept, `Tab` word accept, `Right` accept at end-of-line, and `Right` cursor movement inside a line.
+- [x] Expect scenarios for live inline visibility, disabled legacy mode, `Tab` full accept, `Tab` word accept, `Right` accept at end-of-line, and `Right` cursor movement inside a line.
 - [x] Tmux screen-capture tests for narrow-width panel elision and no-wrap behavior in a real terminal.
 - [x] Backend independence coverage for bash and zsh by default, plus opt-in fish coverage after cross-platform validation, proving inline completion behavior is owned by Aish and not by backend-shell completion.
 
 ### Acceptance criteria
 
-- Inline suggestions behave like fish-style ghost text: visible enough to guide the user, but never part of the command until accepted.
+- Inline suggestions behave like fish-style ghost text: visible while typing, clear enough to guide the user, but never part of the command until accepted.
 - `completion.max_results` controls only the below-prompt panel row count.
 - `Tab` acceptance is predictable and configurable between full-suggestion and next-word behavior.
 - The below-prompt panel remains readable in narrow terminals and never wraps candidate rows.

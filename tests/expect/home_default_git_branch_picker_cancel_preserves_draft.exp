@@ -33,6 +33,11 @@ file mkdir $repo
 
 aish_spawn_without_aish_home
 
+aish_send "#completion inline off"
+aish_enter
+aish_expect "completion.inline=false"
+aish_wait_prompt
+
 aish_send "git -C $repo init"
 aish_enter
 aish_expect "Initialized empty Git repository"

@@ -21,7 +21,7 @@ tmux send-keys -t "$SESSION" 'echo inline-history seeded' Enter
 sleep 1
 tmux send-keys -t "$SESSION" '#completion tab-accept word' Enter
 sleep 1
-tmux send-keys -t "$SESSION" 'echo in' Tab
+tmux send-keys -t "$SESSION" 'echo in'
 sleep 1
 PANEL_CAPTURE="$(tmux capture-pane -p -t "$SESSION")"
 tmux send-keys -t "$SESSION" Tab

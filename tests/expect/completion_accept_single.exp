@@ -1,6 +1,6 @@
 #!/usr/bin/env expect
-# A single completion candidate should first appear as inline/panel guidance, then
-# be accepted by the next Tab.
+# A single completion candidate should appear as inline guidance while typing,
+# then be accepted by the first Tab.
 
 set timeout 10
 source [file dirname [info script]]/_lib.exp
@@ -8,7 +8,6 @@ source [file dirname [info script]]/_lib.exp
 aish_spawn
 
 aish_send "cat Cargo.t"
-aish_send "\t"
 aish_expect "Cargo.toml"
 aish_send "\t"
 aish_expect "> cat Cargo.toml"

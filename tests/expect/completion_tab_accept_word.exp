@@ -1,6 +1,6 @@
 #!/usr/bin/env expect
-# Word acceptance should accept only the next shell word from the inline
-# suggestion, leaving the rest of a longer history command untouched.
+# Word acceptance should accept only the next shell word from the live inline
+# suggestion.
 
 set timeout 10
 source [file dirname [info script]]/_lib.exp
@@ -18,7 +18,7 @@ aish_expect "completion.tab_accept=word"
 aish_wait_prompt
 
 aish_send "pri"
-aish_send "\t"
+aish_expect "> printf"
 aish_send "\t"
 aish_expect "> printf"
 

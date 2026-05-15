@@ -1,6 +1,6 @@
 #!/usr/bin/env expect
-# Multiple Tab completion candidates should render as a refreshable panel below
-# the prompt rather than appending forever.
+# Multiple completion candidates should render as live below-prompt hints while
+# typing, then the first Tab should accept the inline suggestion.
 
 set timeout 10
 source [file dirname [info script]]/_lib.exp
@@ -8,10 +8,8 @@ source [file dirname [info script]]/_lib.exp
 aish_spawn
 
 aish_send "cat Cargo."
-aish_send "\t"
 aish_expect "file\ttoml"
 
-# The next Tab accepts the inline suggestion instead of refreshing the panel.
 aish_send "\t"
 aish_expect "> cat Cargo.lock"
 aish_send "\x03"
