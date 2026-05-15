@@ -85,14 +85,14 @@ Aish has three primary modes:
 | `$` | History | Browse regular command history read-only. |
 | `%` | AI | Browse AI-generated command items read-only. |
 
-Empty `Tab` cycles modes. Editing a read-only history or AI item copies it back into draft mode first. `Enter` executes the current draft or selected read-only item.
+Empty `Tab` cycles modes. Entering history mode selects the newest command, entering draft mode opens a blank prompt, and entering AI mode keeps the current AI item pointer. Editing a read-only history or AI item copies it back into draft mode first. `Enter` executes the current draft or selected read-only item.
 
 ## Keybindings
 
 Core keys:
 
 - `Enter`: submit the current draft or selected read-only item. Executed commands are copied into regular history, and the active prompt returns to a new blank draft. Saved drafts remain browsable with `Up` / `Down`.
-- Empty `Tab`: cycle `>` / `$` / `%` modes.
+- Empty `Tab`: cycle `>` / `$` / `%` modes. History opens at the newest item, draft opens blank, and AI resumes the current AI pointer.
 - Non-empty `Tab`: accept the current inline completion, or directly accept the first candidate when inline completion is disabled.
 - `Right` at end of line: accept completion using the configured accept mode.
 - `Up` / `Down` in draft mode: browse saved drafts. `Up` from a blank draft restores the newest saved draft; `Down` from the newest saved draft opens a blank draft.
@@ -114,7 +114,7 @@ Editing keys:
 Tools:
 
 - `Ctrl-R`: history search through external `fzf`.
-- `Ctrl-X Ctrl-E`: open the configured external editor.
+- `Ctrl-X Ctrl-E`: open the configured external editor. On a `# ...` AI prompt, the editor opens the AI prompt body and returns an opaque AI prompt draft for explicit sending.
 - `Ctrl-X Ctrl-F`: file picker through external `fzf`.
 - `Ctrl-X Ctrl-T`: template picker through external `fzf`.
 - `Ctrl-X Ctrl-B`: git branch picker through external `fzf`.
@@ -290,6 +290,8 @@ AI requests use a chat-completions-compatible endpoint. Configure the model, bas
 
 Saved editor content returns as an opaque editor draft. It is not executed until you press `Enter`.
 
+For AI prompts, type `# ` and press `Enter` to open the editor for a multi-line AI instruction. `Ctrl-X Ctrl-E` on an existing `# ...` prompt opens the same AI prompt editor and preserves the current prompt body. The returned draft shows an AI prompt summary; pressing `Enter` sends it to the AI pipeline rather than to the backend shell.
+
 Multiline paste defaults to editor-review behavior. Aish shows a compact draft summary instead of rendering the full pasted content inline. This prevents accidental execution and keeps the prompt usable. Editor-returned content is submitted as raw shell input when explicitly executed, even if it contains line-leading `#`.
 
 ## Templates
@@ -453,11 +455,11 @@ cargo test
 
 Current active inventory:
 
-- 395 library unit tests.
-- 24 draft execution integration tests.
+- 400 library unit tests.
+- 25 draft execution integration tests.
 - 1 first-run integration test.
 - 13 PTY integration tests, with bash/zsh active by default and fish-specific cases opt-in.
-- 108 expect-driven end-to-end interactive scenarios.
+- 109 expect-driven end-to-end interactive scenarios.
 - 34 tmux screen-capture integration tests.
 
 Expect and tmux tests launch real terminal sessions with isolated Aish homes. They should be serialized because concurrent real-terminal sessions can create false prompt and scheduler failures.

@@ -47,8 +47,8 @@ proc aish_spawn_without_aish_home {} {
     aish_wait_prompt
 }
 
-# Wait for the draft prompt, allowing optional restored or multi-line draft
-# text before the ANSI cursor-positioning codes.
+# Wait for the draft prompt, allowing optional editor or multi-line draft text
+# before the ANSI cursor-positioning codes.
 proc aish_wait_prompt {} {
     expect {
         -re {> ([^\x1b]*)\x1b\[}     { set ::aish_last_draft $expect_out(1,string) }
@@ -62,6 +62,14 @@ proc aish_expect_blank_prompt {} {
         return
     }
     puts stderr "expected blank draft prompt, got: $::aish_last_draft"
+    exit 6
+}
+
+proc aish_expect_prompt_draft_contains {needle} {
+    if {[info exists ::aish_last_draft] && [string first $needle $::aish_last_draft] >= 0} {
+        return
+    }
+    puts stderr "expected prompt draft containing: $needle; got: $::aish_last_draft"
     exit 6
 }
 

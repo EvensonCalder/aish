@@ -212,12 +212,24 @@ fn handle_key(
             if had_completion_ui {
                 redraw(state, out)?;
             }
-            move_to_rendered_end(state, out, terminal_display_width())?;
-            write!(out, "\r\n")?;
-            let mut display_out = CrLfWriter::new(out);
-            execute_draft(state, backend, &mut display_out, command_timeout)?;
-            if state.exit_requested {
-                return Ok(true);
+            let open_ai_editor = state.mode == crate::modes::Mode::Draft
+                && !state.draft_from_editor
+                && state
+                    .draft
+                    .as_str()
+                    .strip_prefix("# ")
+                    .is_some_and(|prompt| prompt.trim().is_empty());
+            if open_ai_editor {
+                let mut display_out = CrLfWriter::new(out);
+                run_external_editor(state, backend, &mut display_out, command_timeout)?;
+            } else {
+                move_to_rendered_end(state, out, terminal_display_width())?;
+                write!(out, "\r\n")?;
+                let mut display_out = CrLfWriter::new(out);
+                execute_draft(state, backend, &mut display_out, command_timeout)?;
+                if state.exit_requested {
+                    return Ok(true);
+                }
             }
         }
         KeyAction::ConfirmContext(accepted) => {
@@ -272,7 +284,12 @@ pub fn run_external_editor(
         disable_raw_mode()?;
     }
 
-    let result = state.run_editor_roundtrip(&temp_root, &command);
+    let is_ai_prompt_editor = state.should_open_ai_prompt_editor();
+    let result = if is_ai_prompt_editor {
+        state.run_ai_prompt_editor_roundtrip(&temp_root, &command)
+    } else {
+        state.run_editor_roundtrip(&temp_root, &command)
+    };
 
     if raw_mode_was_enabled {
         enable_raw_mode()?;
@@ -285,7 +302,10 @@ pub fn run_external_editor(
         } else {
             writeln!(out, "editor empty; canceled")?;
         }
-        if state.editor_config.execute_after_save && state.draft_from_editor {
+        if state.editor_config.execute_after_save
+            && state.draft_from_editor
+            && !state.draft_from_ai_editor
+        {
             execute_draft(state, backend, out, command_timeout)?;
         }
     } else {
@@ -691,6 +711,7 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
             if state.draft.is_empty() {
                 state.selected_draft_index = None;
                 state.draft_from_editor = false;
+                state.draft_from_ai_editor = false;
                 state.draft_from_template = false;
             }
             KeyAction::Continue
@@ -704,6 +725,7 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
             if state.draft.is_empty() {
                 state.selected_draft_index = None;
                 state.draft_from_editor = false;
+                state.draft_from_ai_editor = false;
                 state.draft_from_template = false;
             }
             KeyAction::Continue
@@ -725,6 +747,7 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
             state.copy_read_only_selection_to_draft();
             if state.draft.is_empty() {
                 state.draft_from_editor = false;
+                state.draft_from_ai_editor = false;
                 state.draft_from_template = false;
             }
             expand_template_draft_if_inside_placeholder(state);
@@ -2768,6 +2791,88 @@ mod tests {
         assert_eq!(state.last_status, Some(0));
         assert!(state.draft.is_empty());
         assert_eq!(String::from_utf8(output).unwrap(), "editor saved draft\n");
+    }
+
+    #[test]
+    fn run_external_editor_on_ai_prompt_creates_sendable_ai_editor_draft() {
+        let temp = tempfile::tempdir().unwrap();
+        let script = temp.path().join("fake-editor.sh");
+        let captured = temp.path().join("captured.txt");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\ncat \"$1\" > '{}'\nprintf 'line one\\nline two' > \"$1\"\n",
+                captured.display()
+            ),
+        )
+        .unwrap();
+        make_executable(&script);
+        let mut state = AppState {
+            editor_config: EditorConfig {
+                command: vec![script.display().to_string()],
+                execute_after_save: true,
+            },
+            editor_temp_root: Some(temp.path().join("editor")),
+            ..AppState::default()
+        };
+        state.draft.insert_str("# explain this");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        run_external_editor(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        assert_eq!(std::fs::read_to_string(captured).unwrap(), "explain this");
+        assert_eq!(state.draft.as_str(), "line one\nline two");
+        assert!(state.draft_from_editor);
+        assert!(state.draft_from_ai_editor);
+        assert_eq!(
+            state.render_prompt_line(),
+            "> [ai prompt: 2 lines, 17 bytes; Enter send, Ctrl-X Ctrl-E edit]"
+        );
+        assert_eq!(state.last_status, None);
+        assert_eq!(String::from_utf8(output).unwrap(), "editor saved draft\n");
+    }
+
+    #[test]
+    fn enter_on_empty_hash_space_opens_ai_prompt_editor() {
+        let temp = tempfile::tempdir().unwrap();
+        let script = temp.path().join("fake-editor.sh");
+        std::fs::write(&script, "#!/bin/sh\nprintf 'multi\\nAI' > \"$1\"\n").unwrap();
+        make_executable(&script);
+        let mut state = AppState {
+            editor_config: EditorConfig {
+                command: vec![script.display().to_string()],
+                execute_after_save: false,
+            },
+            editor_temp_root: Some(temp.path().join("editor")),
+            ..AppState::default()
+        };
+        state.draft.insert_str("# ");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        handle_key(
+            key(KeyCode::Enter),
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        assert_eq!(state.mode, Mode::Draft);
+        assert_eq!(state.draft.as_str(), "multi\nAI");
+        assert!(state.draft_from_editor);
+        assert!(state.draft_from_ai_editor);
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("editor saved draft\r\n"));
+        assert!(output.contains("[ai prompt: 2 lines, 8 bytes; Enter send"));
     }
 
     #[test]

@@ -104,6 +104,8 @@ Behavior:
 - Executing a draft sends its content to the backend shell unchanged.
 - Ordinary executed drafts are appended to regular history, then the active prompt returns to a new blank draft.
 - Up/down navigation browses saved draft entries only; regular history is browsed in history mode.
+- Entering draft mode through empty `Tab` always opens a blank draft prompt.
+- Startup loads draft history but must not auto-fill the prompt with the previous draft; `Up` restores saved drafts explicitly.
 - `Up` from a blank draft restores the newest saved draft when draft persistence is enabled.
 - `Up` / `Down` move older/newer through saved drafts.
 - `Down` from the newest saved draft opens a blank draft.
@@ -133,6 +135,8 @@ Behavior:
 - Read-only.
 - Up/down navigates AI-generated command items.
 - AI results are grouped internally as sessions, but the user browses command items in execution order.
+- Entering AI mode through empty `Tab` preserves the current AI item pointer if it is still valid.
+- A new AI query refreshes the AI item pointer to the first command item in the new session.
 - `Enter` executes only the currently selected AI command.
 - If execution succeeds and there is a next command in the same AI session, Aish selects the next AI command.
 - If execution succeeds and this is the last command in the session, Aish returns to `>` draft mode.
@@ -305,6 +309,8 @@ AI prompts use `# ` followed by arbitrary prompt text:
 
 AI-generated results enter `%` AI mode.
 
+`# ` followed only by whitespace and `Enter` opens the configured editor for a multi-line AI prompt body. `Ctrl-X Ctrl-E` on a `# ...` AI prompt also opens this AI prompt editor, using the current prompt body as the initial editor content. On save, Aish returns an opaque AI prompt draft summary; `Enter` sends that content to the AI pipeline, not to the backend shell.
+
 ### 5.6 Pseudo-pipe context syntax
 
 Aish supports a pseudo-pipe using `<`:
@@ -418,6 +424,8 @@ If invoked from history or AI mode:
 3. Save back to draft.
 
 Editor drafts are opaque in the main prompt. Aish should show a summary such as line count and byte count instead of rendering the full content inline. `Ctrl-X Ctrl-E` edits the editor draft again. `Enter` executes it.
+
+AI prompt editor drafts are a separate editor-draft subtype. They use the same opaque summary pattern, but `Enter` sends the editor content to the AI request path. They must not be treated as raw shell input, and `editor.execute_after_save` must not auto-send them.
 
 Editor content is raw shell input. Aish does not parse line-leading `#` inside it, does not escape it as `##`, and does not rewrite multi-line content or backslash continuations. The backend shell interprets the content exactly as submitted.
 

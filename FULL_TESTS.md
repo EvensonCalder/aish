@@ -151,6 +151,7 @@ Only run the fish command when `command -v fish` succeeds.
 | START-006 | Launch with `AISH_HOME` set to a relative path. | Startup fails with a readable error. | Paste error. |
 | START-007 | Launch with `AISH_HOME` pointing at an existing regular file. | Startup fails with a readable error and does not overwrite the file. | Paste error and file listing. |
 | START-008 | Use a disposable `HOME` with `AISH_HOME` unset. | Aish creates `$HOME/.aish` and does not touch unrelated files. | Paste `find "$HOME" -maxdepth 2`. |
+| START-009 | Create a saved draft, exit, relaunch with the same `AISH_HOME`, then press `Up`. | Startup prompt is blank; `Up` restores the newest saved draft explicitly. | Paste prompt behavior. |
 
 ## Ordinary Shell Commands
 
@@ -317,6 +318,8 @@ Network AI tests should use a disposable endpoint and disposable API key only.
 | AI-006 | Run `#context confirm off`, then repeat a safe context command. | Safe context command runs without confirmation. | Paste output. |
 | AI-007 | Try a dangerous context command pattern. | Aish still blocks or asks for confirmation even when confirmation is disabled. | Paste output. |
 | AI-008 | Produce context larger than the configured byte limit. | Aish discloses truncation. | Paste output. |
+| AI-009 | Type `# ` and press `Enter` with `EDITOR` configured. Save a multi-line prompt. | Aish returns an opaque AI prompt summary; pressing `Enter` sends it through the AI path, not to the backend shell. | Paste output or error. |
+| AI-010 | Type `# explain something`, press `Ctrl-X Ctrl-E`, save, then press `Ctrl-X Ctrl-E` again. | The editor opens with the current AI prompt body each time and preserves edits. | Describe editor contents. |
 
 ## Interactive And Stdin Passthrough
 

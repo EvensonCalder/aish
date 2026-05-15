@@ -173,6 +173,7 @@ Status as of the latest full review:
 - [x] Implement saved draft browsing with `Up` / `Down`.
 - [x] Implement `Down` from a non-empty new draft as save-current-draft and open-blank-draft.
 - [x] Return to a new blank active draft after `Enter` while copying executed commands into regular history and keeping saved drafts browsable.
+- [x] Keep startup and explicit draft-mode switching blank; saved drafts are restored only by draft history navigation.
 - [x] Implement command submission from draft to PTY.
 
 ### Acceptance criteria
@@ -182,6 +183,7 @@ Status as of the latest full review:
 - `Enter` sends the exact draft buffer to backend shell.
 - `Down` can save an unfinished ordinary draft and clear the prompt for a new draft without executing it; `Up` / `Down` can browse multiple saved drafts.
 - `Enter` executes a copy of an ordinary draft, appends it to regular history, and returns the active prompt to a new blank draft while preserving saved draft history.
+- Restarting Aish with persisted draft history shows a blank prompt; `Up` restores the newest saved draft explicitly.
 - Multi-line draft returned from external editor can be submitted.
 
 ---
@@ -350,6 +352,7 @@ Status as of the latest full review:
 - [x] Do not execute by default.
 - [x] Add optional `editor.execute_after_save` support.
 - [x] Ensure editor draft content bypasses Aish `#` parsing when submitted.
+- [x] Support `# ` + `Enter` and `Ctrl-X Ctrl-E` on `# ...` as an AI prompt editor flow that returns an explicit send prompt.
 
 ### Acceptance criteria
 
@@ -357,6 +360,7 @@ Status as of the latest full review:
 - Saving and quitting returns content to draft.
 - `#` lines inside editor content can be sent to shell as raw content.
 - Editor drafts render as summaries in the main prompt and can be reopened with `Ctrl-X Ctrl-E`.
+- AI prompt editor drafts render as summaries and submit to the AI pipeline instead of the backend shell.
 - Default does not auto-execute.
 - Optional execute-after-save works only if configured.
 

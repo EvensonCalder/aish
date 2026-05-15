@@ -140,6 +140,7 @@ pub struct AppState {
     pub last_rendered_cursor_row: usize,
     pub continuation_prompt: Option<String>,
     pub draft_from_editor: bool,
+    pub draft_from_ai_editor: bool,
     pub draft_from_template: bool,
     pub ctrl_x_prefix: bool,
     pub clock: fn() -> i64,
@@ -192,6 +193,7 @@ impl Default for AppState {
             last_rendered_cursor_row: 0,
             continuation_prompt: None,
             draft_from_editor: false,
+            draft_from_ai_editor: false,
             draft_from_template: false,
             ctrl_x_prefix: false,
             clock: unix_timestamp,
@@ -208,7 +210,9 @@ impl AppState {
             if self.mode == Mode::History {
                 self.select_newest_history_if_available();
             } else if self.mode == Mode::Ai {
-                self.select_first_ai_if_available();
+                self.select_ai_if_needed();
+            } else if self.mode == Mode::Draft {
+                self.clear_draft_for_new_draft();
             }
         }
     }
@@ -254,6 +258,7 @@ impl AppState {
         self.draft = InputBuffer::from(command);
         self.selected_draft_index = None;
         self.draft_from_editor = false;
+        self.draft_from_ai_editor = false;
         self.draft_from_template = false;
         self.mode = Mode::Draft;
         true
@@ -261,6 +266,15 @@ impl AppState {
 
     pub fn select_first_ai_if_available(&mut self) {
         self.selected_ai_index = (!self.ai_command_indices.is_empty()).then_some(0);
+    }
+
+    pub fn select_ai_if_needed(&mut self) {
+        let selected_is_valid = self
+            .selected_ai_index
+            .is_some_and(|index| index < self.ai_command_indices.len());
+        if !selected_is_valid {
+            self.select_first_ai_if_available();
+        }
     }
 
     pub fn selected_ai_command(&self) -> Option<&str> {
@@ -298,6 +312,7 @@ impl AppState {
         self.draft = InputBuffer::from(command);
         self.selected_draft_index = None;
         self.draft_from_editor = false;
+        self.draft_from_ai_editor = false;
         self.draft_from_template = false;
         self.mode = Mode::Draft;
         true
@@ -315,6 +330,7 @@ impl AppState {
         self.draft.clear();
         self.continuation_prompt = None;
         self.draft_from_editor = false;
+        self.draft_from_ai_editor = false;
         self.draft_from_template = false;
         self.selected_draft_index = None;
         self.mode = Mode::Draft;
@@ -383,6 +399,7 @@ impl AppState {
         self.draft = InputBuffer::from(entry.text.clone());
         self.selected_draft_index = Some(index);
         self.draft_from_editor = false;
+        self.draft_from_ai_editor = false;
         self.draft_from_template = false;
         self.mode = Mode::Draft;
         self.clear_completion_ui();
@@ -398,6 +415,23 @@ impl AppState {
         prepare_editor_file(temp_root, self.draft.as_str())
     }
 
+    pub fn should_open_ai_prompt_editor(&self) -> bool {
+        self.draft_from_ai_editor || draft_is_ai_prompt_or_empty_editor_trigger(self.draft.as_str())
+    }
+
+    pub fn prepare_ai_prompt_editor_session(
+        &mut self,
+        temp_root: &std::path::Path,
+    ) -> Result<PreparedEditorSession> {
+        self.mode = Mode::Draft;
+        let initial_text = if self.draft_from_ai_editor {
+            self.draft.as_str().to_string()
+        } else {
+            ai_editor_initial_text(self.draft.as_str()).unwrap_or_default()
+        };
+        prepare_editor_file(temp_root, &initial_text)
+    }
+
     pub fn replace_draft_from_editor_session(
         &mut self,
         session: &PreparedEditorSession,
@@ -406,6 +440,21 @@ impl AppState {
         self.draft = InputBuffer::from(content);
         self.selected_draft_index = None;
         self.draft_from_editor = !self.draft.is_empty();
+        self.draft_from_ai_editor = false;
+        self.draft_from_template = false;
+        self.mode = Mode::Draft;
+        Ok(())
+    }
+
+    pub fn replace_draft_from_ai_prompt_editor_session(
+        &mut self,
+        session: &PreparedEditorSession,
+    ) -> Result<()> {
+        let content = normalize_editor_draft_content(&read_editor_file(session)?);
+        self.draft = InputBuffer::from(content);
+        self.selected_draft_index = None;
+        self.draft_from_editor = !self.draft.is_empty();
+        self.draft_from_ai_editor = !self.draft.is_empty();
         self.draft_from_template = false;
         self.mode = Mode::Draft;
         Ok(())
@@ -424,11 +473,25 @@ impl AppState {
         Ok(result)
     }
 
+    pub fn run_ai_prompt_editor_roundtrip(
+        &mut self,
+        temp_root: &std::path::Path,
+        command: &EditorCommand,
+    ) -> Result<EditorRunResult> {
+        let session = self.prepare_ai_prompt_editor_session(temp_root)?;
+        let result = run_editor_command(command, &session)?;
+        if result.exit_code == Some(0) {
+            self.replace_draft_from_ai_prompt_editor_session(&session)?;
+        }
+        Ok(result)
+    }
+
     pub fn replace_draft_from_editor_text(&mut self, content: impl Into<String>) {
         let content = normalize_editor_draft_content(&content.into());
         self.draft = InputBuffer::from(content);
         self.selected_draft_index = None;
         self.draft_from_editor = !self.draft.is_empty();
+        self.draft_from_ai_editor = false;
         self.draft_from_template = false;
         self.mode = Mode::Draft;
     }
@@ -522,6 +585,7 @@ impl AppState {
         self.draft = InputBuffer::from(command.into());
         self.selected_draft_index = None;
         self.draft_from_editor = false;
+        self.draft_from_ai_editor = false;
         self.draft_from_template = false;
         self.mode = Mode::Draft;
     }
@@ -546,6 +610,7 @@ impl AppState {
         self.draft = InputBuffer::from(template.body.clone());
         self.selected_draft_index = None;
         self.draft_from_editor = false;
+        self.draft_from_ai_editor = false;
         self.draft_from_template = true;
         self.mode = Mode::Draft;
         Ok(true)
@@ -777,7 +842,13 @@ impl AppState {
             .count()
             .max(1);
         let line_label = if lines == 1 { "line" } else { "lines" };
-        format!("[draft: {lines} {line_label}, {bytes} bytes; Enter run, Ctrl-X Ctrl-E edit]")
+        if self.draft_from_ai_editor {
+            format!(
+                "[ai prompt: {lines} {line_label}, {bytes} bytes; Enter send, Ctrl-X Ctrl-E edit]"
+            )
+        } else {
+            format!("[draft: {lines} {line_label}, {bytes} bytes; Enter run, Ctrl-X Ctrl-E edit]")
+        }
     }
 
     fn push_output_entry(&mut self, entry: OutputEntry) {
@@ -815,14 +886,31 @@ fn normalize_editor_draft_content(content: &str) -> String {
         .to_string()
 }
 
+pub fn draft_is_ai_prompt_or_empty_editor_trigger(text: &str) -> bool {
+    if text
+        .strip_prefix("# ")
+        .is_some_and(|prompt| prompt.trim().is_empty())
+    {
+        return true;
+    }
+    matches!(
+        parse_line(text),
+        ParsedLine::AiPrompt(_) | ParsedLine::AiPromptWithContext { .. }
+    )
+}
+
+fn ai_editor_initial_text(text: &str) -> Option<String> {
+    if !draft_is_ai_prompt_or_empty_editor_trigger(text) {
+        return None;
+    }
+    text.strip_prefix("# ")
+        .map(|prompt| prompt.trim_start().to_string())
+}
+
 pub fn run() -> Result<()> {
     let (layout, config) = config::init_default_layout(config::runtime_aish_dir()?)?;
     let store = HistoryStore::load(&layout)?;
     let mut backend = PtyBackend::spawn(&config.shell.backend)?;
-    let restored_draft_index = latest_persisted_draft_index(&store, config.draft.persist);
-    let restored_draft = restored_draft_index
-        .and_then(|index| store.drafts.get(index))
-        .map(|entry| entry.text.clone());
     let mut state = AppState {
         current_cwd: backend.initial_cwd().map(PathBuf::from),
         backend_shell: Some(backend.shell_program().to_string()),
@@ -836,7 +924,6 @@ pub fn run() -> Result<()> {
         config_path: Some(layout.config),
         draft_persist: config.draft.persist,
         draft_history: store.drafts,
-        selected_draft_index: restored_draft_index,
         regular_history: store.regular,
         ai_sessions: store.ai_sessions,
         ai_command_indices: store.ai_command_indices,
@@ -850,9 +937,6 @@ pub fn run() -> Result<()> {
         editor_temp_root: Some(layout.runtime_cache.join("editor")),
         ..AppState::default()
     };
-    if let Some(draft) = restored_draft {
-        state.draft = InputBuffer::from(draft);
-    }
     run_startup_sync_check(&mut state, &layout.root, &mut io::stdout())?;
     crate::terminal::run(
         &mut state,
@@ -860,24 +944,6 @@ pub fn run() -> Result<()> {
         &mut io::stdout(),
         Duration::from_secs(60),
     )
-}
-
-#[cfg(test)]
-fn latest_persisted_draft(store: &HistoryStore, persist_enabled: bool) -> Option<String> {
-    latest_persisted_draft_index(store, persist_enabled)
-        .and_then(|index| store.drafts.get(index))
-        .map(|entry| entry.text.clone())
-}
-
-fn latest_persisted_draft_index(store: &HistoryStore, persist_enabled: bool) -> Option<usize> {
-    persist_enabled
-        .then(|| {
-            store
-                .drafts
-                .iter()
-                .rposition(|entry| !entry.text.is_empty())
-        })
-        .flatten()
 }
 
 pub fn execute_draft(
@@ -906,6 +972,23 @@ pub fn execute_draft(
     }
 
     let command = state.draft.as_str().to_string();
+    if state.draft_from_ai_editor {
+        let prompt = command.trim();
+        if prompt.is_empty() {
+            state.clear_draft_for_new_draft();
+            return Ok(());
+        }
+        let ai_line = format!("# {prompt}");
+        match parse_line(&ai_line) {
+            ParsedLine::AiPrompt(prompt) => submit_ai_prompt(state, prompt, out)?,
+            ParsedLine::AiPromptWithContext { prompt, command } => {
+                submit_ai_prompt_with_context(state, prompt, command, out, timeout)?;
+            }
+            _ => unreachable!("AI editor drafts are submitted as AI prompts"),
+        }
+        state.clear_draft_for_new_draft();
+        return Ok(());
+    }
     if state.draft_from_template {
         let unresolved = template_placeholders(&command);
         if !unresolved.is_empty() {
@@ -1190,6 +1273,7 @@ pub fn execute_draft(
                                                     );
                                                 state.draft = InputBuffer::from(rendered);
                                                 state.draft_from_editor = false;
+                                                state.draft_from_ai_editor = false;
                                                 state.draft_from_template = true;
                                                 keep_draft = true;
                                                 writeln!(
@@ -1375,6 +1459,7 @@ fn record_completed_command(
         state.draft.clear();
         state.selected_draft_index = None;
         state.draft_from_editor = false;
+        state.draft_from_ai_editor = false;
         state.draft_from_template = false;
     } else {
         state.clear_draft_for_new_draft();
@@ -2717,6 +2802,27 @@ mod tests {
     }
 
     #[test]
+    fn empty_tab_to_draft_always_opens_blank_draft() {
+        let mut state = AppState {
+            mode: Mode::Ai,
+            selected_draft_index: Some(0),
+            draft_from_editor: true,
+            draft_from_ai_editor: true,
+            draft_from_template: true,
+            ..AppState::default()
+        };
+
+        state.handle_empty_tab();
+
+        assert_eq!(state.mode, Mode::Draft);
+        assert!(state.draft.is_empty());
+        assert_eq!(state.selected_draft_index, None);
+        assert!(!state.draft_from_editor);
+        assert!(!state.draft_from_ai_editor);
+        assert!(!state.draft_from_template);
+    }
+
+    #[test]
     fn non_empty_tab_does_not_switch_modes() {
         let mut state = AppState::default();
         state.draft.insert_str("git");
@@ -2738,9 +2844,9 @@ mod tests {
     }
 
     #[test]
-    fn latest_persisted_draft_restores_only_when_enabled() {
-        let store = HistoryStore {
-            drafts: vec![
+    fn loaded_draft_history_is_browsable_but_not_selected_by_default() {
+        let mut state = AppState {
+            draft_history: vec![
                 DraftEntry {
                     t: 1,
                     text: "old".to_string(),
@@ -2750,20 +2856,15 @@ mod tests {
                     text: "new".to_string(),
                 },
             ],
-            ..empty_history_store()
+            ..AppState::default()
         };
 
-        assert_eq!(latest_persisted_draft(&store, true).as_deref(), Some("new"));
-        assert_eq!(latest_persisted_draft(&store, false), None);
+        assert!(state.draft.is_empty());
+        assert_eq!(state.selected_draft_index, None);
 
-        let empty_store = HistoryStore {
-            drafts: vec![DraftEntry {
-                t: 3,
-                text: String::new(),
-            }],
-            ..empty_history_store()
-        };
-        assert_eq!(latest_persisted_draft(&empty_store, true), None);
+        assert!(state.move_draft_selection_older().unwrap());
+        assert_eq!(state.draft.as_str(), "new");
+        assert_eq!(state.selected_draft_index, Some(1));
     }
 
     #[test]
@@ -3375,6 +3476,51 @@ mod tests {
     }
 
     #[test]
+    fn empty_tab_to_ai_preserves_existing_ai_selection() {
+        let mut state = AppState {
+            ai_sessions: vec![AiSession {
+                id: "a_1".to_string(),
+                t: 1,
+                prompt: "commands".to_string(),
+                ctx: false,
+                model: "test".to_string(),
+                items: vec![
+                    AiItem {
+                        kind: AiItemKind::Command,
+                        text: "one".to_string(),
+                        name: None,
+                    },
+                    AiItem {
+                        kind: AiItemKind::Command,
+                        text: "two".to_string(),
+                        name: None,
+                    },
+                ],
+            }],
+            ai_command_indices: vec![
+                AiCommandIndex {
+                    session_index: 0,
+                    item_index: 0,
+                },
+                AiCommandIndex {
+                    session_index: 0,
+                    item_index: 1,
+                },
+            ],
+            selected_ai_index: Some(1),
+            ..AppState::default()
+        };
+
+        state.handle_empty_tab();
+        assert_eq!(state.mode, Mode::History);
+        state.handle_empty_tab();
+
+        assert_eq!(state.mode, Mode::Ai);
+        assert_eq!(state.selected_ai_index, Some(1));
+        assert_eq!(state.selected_ai_command(), Some("two"));
+    }
+
+    #[test]
     fn selected_ai_copies_to_draft_for_editing() {
         let mut state = AppState {
             mode: Mode::Ai,
@@ -3521,6 +3667,33 @@ mod tests {
         assert!(state.draft_from_editor);
         assert_eq!(state.draft.as_str(), "echo one\necho two");
         assert!(state.render_prompt_line().contains("[draft: 2 lines"));
+    }
+
+    #[test]
+    fn ai_prompt_editor_session_uses_prompt_body_and_renders_send_summary() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut state = AppState::default();
+        state.draft.insert_str("# explain this");
+
+        let session = state.prepare_ai_prompt_editor_session(temp.path()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&session.path).unwrap(),
+            "explain this"
+        );
+
+        std::fs::write(&session.path, "line one\nline two\n").unwrap();
+        state
+            .replace_draft_from_ai_prompt_editor_session(&session)
+            .unwrap();
+
+        assert_eq!(state.mode, Mode::Draft);
+        assert_eq!(state.draft.as_str(), "line one\nline two");
+        assert!(state.draft_from_editor);
+        assert!(state.draft_from_ai_editor);
+        assert_eq!(
+            state.render_prompt_line(),
+            "> [ai prompt: 2 lines, 17 bytes; Enter send, Ctrl-X Ctrl-E edit]"
+        );
     }
 
     #[test]
@@ -5308,18 +5481,6 @@ mod tests {
             let mut permissions = std::fs::metadata(path).unwrap().permissions();
             permissions.set_mode(0o700);
             std::fs::set_permissions(path, permissions).unwrap();
-        }
-    }
-
-    fn empty_history_store() -> HistoryStore {
-        HistoryStore {
-            regular: Vec::new(),
-            regular_newest_indices: Vec::new(),
-            drafts: Vec::new(),
-            ai_sessions: Vec::new(),
-            ai_command_indices: Vec::new(),
-            notes: Vec::new(),
-            errors: Vec::new(),
         }
     }
 }

@@ -1,0 +1,58 @@
+#!/usr/bin/env expect
+# `# ` + Enter should open an AI prompt editor. Reopening the editor should
+# preserve the AI prompt body, and Enter should submit it through the AI path.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set home [aish_new_home]
+set editor_script "$home/fake-ai-editor.sh"
+set first_input "$home/first-input.txt"
+set reopened_input "$home/reopened-input.txt"
+set marker "$home/editor-ran"
+
+set fh [open $editor_script w]
+puts $fh "#!/bin/sh"
+puts $fh "if \[ ! -f '$marker' \]; then"
+puts $fh "  cat \"\$1\" > '$first_input'"
+puts $fh "  printf 'first line\\nsecond line' > \"\$1\""
+puts $fh "  touch '$marker'"
+puts $fh "else"
+puts $fh "  cat \"\$1\" > '$reopened_input'"
+puts $fh "  printf 'edited AI prompt' > \"\$1\""
+puts $fh "fi"
+close $fh
+file attributes $editor_script -permissions 0755
+set ::env(EDITOR) $editor_script
+
+aish_spawn
+
+aish_send "# "
+aish_enter
+aish_expect "editor saved draft"
+aish_wait_prompt
+aish_expect_prompt_draft_contains "\[ai prompt: 2 lines"
+
+set first [string trim [read [open $first_input r]]]
+if {$first ne ""} {
+    puts stderr "expected empty initial AI prompt editor input, got: $first"
+    exit 7
+}
+
+send -- "\030\005"
+aish_expect "editor saved draft"
+aish_wait_prompt
+aish_expect_prompt_draft_contains "\[ai prompt: 1 line"
+
+set reopened [string trim [read [open $reopened_input r]]]
+if {$reopened ne "first line\nsecond line"} {
+    puts stderr "expected reopened editor to preserve AI prompt body, got: $reopened"
+    exit 7
+}
+
+aish_enter
+aish_expect "AI request failed"
+aish_wait_prompt
+aish_expect_blank_prompt
+
+aish_quit

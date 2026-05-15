@@ -654,6 +654,35 @@ fn execute_history_selection_runs_selected_command() {
 }
 
 #[test]
+fn execute_ai_editor_draft_submits_as_ai_prompt_not_shell_text() {
+    let _guard = pty_execution_guard();
+    let mut state = AppState::default();
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+    let temp = tempfile::tempdir().unwrap();
+    let session = prepare_editor_file(temp.path(), "explain this").unwrap();
+
+    state
+        .replace_draft_from_ai_prompt_editor_session(&session)
+        .unwrap();
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.contains("AI request failed"));
+    assert_eq!(state.mode, Mode::Draft);
+    assert!(state.draft.is_empty());
+    assert!(!state.draft_from_editor);
+    assert!(!state.draft_from_ai_editor);
+}
+
+#[test]
 fn executed_draft_can_be_restored_from_draft_history_after_blank_prompt() {
     let _guard = pty_execution_guard();
     let mut state = AppState::default();

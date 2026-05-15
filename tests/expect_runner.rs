@@ -579,6 +579,11 @@ fn ai_mode_executes_sequence() {
 }
 
 #[test]
+fn ai_prompt_editor_roundtrip() {
+    run_script("ai_prompt_editor_roundtrip.exp");
+}
+
+#[test]
 fn home_default_ai_mode_executes_sequence() {
     run_script("home_default_ai_mode_executes_sequence.exp");
 }

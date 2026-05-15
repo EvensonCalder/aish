@@ -1,6 +1,6 @@
 #!/usr/bin/env expect
-# A persisted non-empty draft should restore into the prompt on startup when
-# draft persistence is enabled.
+# A persisted non-empty draft should not auto-fill the startup prompt. It should
+# remain available through draft history with Up.
 
 set timeout 10
 source [file dirname [info script]]/_lib.exp
@@ -17,12 +17,9 @@ close $f
 
 set ::env(AISH_HOME) $home
 spawn -noecho $::env(AISH_BIN)
-expect {
-    -ex "> echo restored-draft-ok" {}
-    timeout { puts stderr "persisted draft was not restored"; exit 3 }
-    eof { puts stderr "eof before restored draft prompt"; exit 3 }
-}
-aish_send "\x03"
 aish_wait_prompt
+aish_expect_blank_prompt
+aish_send "\033\[A"
+aish_expect "echo restored-draft-ok"
 
 aish_quit
