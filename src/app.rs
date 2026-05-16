@@ -15,7 +15,7 @@ use crate::commands::{
     IMPLEMENTED_PRIVATE_COMMANDS, ParsedLine, parse_line, suggest_private_command,
 };
 use crate::completion::{
-    CompletionCandidate, CompletionOptions, complete_first_token_with_options,
+    CompletionCandidate, CompletionOptions, CompletionSource, complete_first_token_with_options,
     complete_non_first_token_for_line_with_options, complete_private_commands,
     current_token_context, dedupe_completion_candidates, rank_completion_candidates,
 };
@@ -621,7 +621,10 @@ impl AppState {
         let candidates = self.immediate_completion_candidates_with_max_results(max_results)?;
         self.pending_completion = None;
         self.pending_completion_update = None;
-        if self.should_enqueue_async_completion(&line, cursor) {
+        let should_enqueue_async = self.should_enqueue_async_completion(&line, cursor);
+        let defer_initial_ui = should_enqueue_async
+            && self.should_defer_initial_completion_ui(&line, cursor, &candidates);
+        if should_enqueue_async {
             self.completion_generation = self.completion_generation.wrapping_add(1).max(1);
             let id = self.completion_generation;
             let history_newest_first = self.completion_history_snapshot();
@@ -632,6 +635,16 @@ impl AppState {
                 cursor,
                 candidates: candidates.clone(),
             });
+            if defer_initial_ui {
+                self.queue_completion_update(
+                    id,
+                    line.clone(),
+                    cursor,
+                    candidates.clone(),
+                    false,
+                    Instant::now(),
+                );
+            }
             let job = CompletionJob {
                 id,
                 line,
@@ -642,7 +655,11 @@ impl AppState {
             };
             self.ensure_completion_worker().enqueue(job)?;
         }
-        Ok(candidates)
+        Ok(if defer_initial_ui {
+            Vec::new()
+        } else {
+            candidates
+        })
     }
 
     pub fn drain_live_completion_events(&mut self) -> Option<Vec<CompletionCandidate>> {
@@ -865,6 +882,23 @@ impl AppState {
             return false;
         }
         !current_token_context(line, cursor).path_like
+    }
+
+    fn should_defer_initial_completion_ui(
+        &self,
+        line: &str,
+        cursor: usize,
+        candidates: &[CompletionCandidate],
+    ) -> bool {
+        if self.completion_config.coalesce_ms == 0 || candidates.is_empty() {
+            return false;
+        }
+        let token = current_token_context(line, cursor);
+        token.is_first_token
+            && !token.path_like
+            && candidates
+                .iter()
+                .all(|candidate| candidate.source == CompletionSource::Executable)
     }
 
     fn completion_history_snapshot(&mut self) -> Arc<Vec<HistoryEntry>> {
@@ -4760,6 +4794,60 @@ mod tests {
         assert_eq!(
             state.ready_completion_update(first_seen),
             Some(vec![candidate])
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn first_token_executable_live_candidate_waits_for_history_coalescing() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _guard = ENV_LOCK.lock().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let bin = temp.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        let executable = bin.join("aishco-exec");
+        std::fs::write(&executable, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let old_path = std::env::var_os("PATH");
+        unsafe {
+            std::env::set_var("PATH", &bin);
+        }
+
+        let mut state = AppState {
+            regular_history: vec![HistoryEntry {
+                t: 1,
+                command: "aishco-history".to_string(),
+                exit_code: Some(0),
+                source: HistorySource::User,
+            }],
+            completion_config: CompletionConfig {
+                coalesce_ms: 1_000,
+                ..CompletionConfig::default()
+            },
+            ..AppState::default()
+        };
+        state.draft.insert_str("aishco");
+
+        let visible_candidates = state.start_live_completion_request(usize::MAX);
+
+        unsafe {
+            match old_path {
+                Some(path) => std::env::set_var("PATH", path),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+        let visible_candidates = visible_candidates.unwrap();
+        assert!(visible_candidates.is_empty());
+        assert!(state.pending_completion_update.is_some());
+        assert!(
+            state
+                .pending_completion
+                .as_ref()
+                .unwrap()
+                .candidates
+                .iter()
+                .any(|candidate| candidate.source == CompletionSource::Executable)
         );
     }
 

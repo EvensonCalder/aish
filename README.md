@@ -132,7 +132,7 @@ Important rules:
 - The inline suggestion is display-only until accepted.
 - The below-prompt panel is advisory and never decides what `Tab` accepts.
 - `completion.max_results` controls only the number of below-prompt rows.
-- `completion.coalesce_ms` controls how long Aish may wait for the next background completion tier before refreshing the live UI. The default is `50` ms; `0` restores immediate tier-by-tier refreshes.
+- `completion.coalesce_ms` controls how long Aish may wait for the next background completion tier before refreshing the live UI. The default is `50` ms; `0` restores immediate tier-by-tier refreshes. First-token executable-only live hints may also wait for this window so history can replace lower-priority PATH matches before anything is drawn.
 - The panel skips the current inline candidate and shows remaining suffixes where possible.
 - Candidate rows are width-aware and elide with `...` instead of wrapping.
 - Structural history/template matches use `completion.match_threshold_percent` as a word-position match rate. The default is `50`, so one matching word out of two typed words is enough.

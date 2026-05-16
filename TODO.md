@@ -1078,7 +1078,7 @@ enum AiItemKind {
 ## Phase 28: Inline completion UX
 
 Status: implemented. Inline completion is enabled by default and refreshes while the user types, `completion.max_results` controls only the below-prompt panel row count, and bash/zsh real-terminal coverage proves completion behavior is owned by Aish rather than the backend shell. Fish backend coverage remains opt-in with `AISH_TEST_FISH=1` until cross-platform behavior is validated across macOS and Linux distributions.
-Update: completion now uses layered, non-blocking live discovery. Immediate candidates are shown first, structural history and typo-correction tiers arrive through versioned worker events, stale events are ignored, encrypted-write completion events refresh the live UI, and async UI refreshes are coalesced for up to `completion.coalesce_ms` to reduce flicker. `completion.enabled` and `completion.fuzzy` default to `true` so low-performance environments can disable all completion or only typo-correction work. `completion.match_threshold_percent` defaults to `50` as a structural word-position threshold, and `completion.typo_threshold_percent` defaults to `80` for typo correction.
+Update: completion now uses layered, non-blocking live discovery. Immediate candidates are shown first, structural history and typo-correction tiers arrive through versioned worker events, stale events are ignored, encrypted-write completion events refresh the live UI, async UI refreshes are coalesced for up to `completion.coalesce_ms`, and first-token executable-only live hints can wait for the same window so higher-priority history can arrive before lower-priority PATH matches are drawn. `completion.enabled` and `completion.fuzzy` default to `true` so low-performance environments can disable all completion or only typo-correction work. `completion.match_threshold_percent` defaults to `50` as a structural word-position threshold, and `completion.typo_threshold_percent` defaults to `80` for typo correction.
 
 ### Tasks
 
@@ -1105,6 +1105,7 @@ Update: completion now uses layered, non-blocking live discovery. Immediate cand
 - [x] Keep typo correction separate behind `completion.typo_threshold_percent`.
 - [x] Keep live completion non-blocking by sending history work to a versioned worker and ignoring stale events.
 - [x] Coalesce layered completion UI refreshes until the final tier arrives or the configured coalescing window expires.
+- [x] Defer first-token executable-only live hints during the coalescing window so they do not flash before history results.
 - [x] Do not run path fallback for empty non-first tokens after trailing whitespace.
 - [x] Keep `# ` AI prompts silent and restrict `#cmd` completion to Aish private commands.
 - [x] Split completion candidate discovery from panel row limiting so `completion.max_results` controls only below-prompt row count.

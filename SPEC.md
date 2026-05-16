@@ -776,7 +776,7 @@ For command completion:
 - History candidates are ordered newest to oldest.
 - Matching ignores spaces when configured.
 - The below-prompt panel displays at most `completion.max_results` candidates.
-- `completion.coalesce_ms` controls live UI refresh coalescing for layered background completion. The default is `50` ms; `0` disables coalescing and refreshes each changed tier immediately.
+- `completion.coalesce_ms` controls live UI refresh coalescing for layered background completion. The default is `50` ms; `0` disables coalescing and refreshes each changed tier immediately. First-token executable-only live hints may wait for this same window so lower-priority PATH matches do not flash before higher-priority history results arrive.
 - Empty tokens and candidates with zero matching positions are not displayed.
 - `completion.match_threshold_percent` is a structural word-position match rate, not character-level typo correction. For example, `git stx` matches `git status --short` at one of two typed positions, so the default `50` threshold can show it.
 - Structural matches pass when the word-position match rate is greater than or equal to the configured threshold.
@@ -791,6 +791,7 @@ For command completion:
 - Live completion must not scan regular history synchronously on every keypress. It sends a versioned background request using a cheap history snapshot reference.
 - Live completion is layered: immediate non-history candidates are shown first, structural history results can refresh the UI when the worker finishes, and slower typo-correction results can refresh the UI after that when `completion.fuzzy = true`.
 - Layered live completion refreshes may be coalesced until the final background tier arrives or `completion.coalesce_ms` elapses, whichever comes first, to avoid visible flicker while preserving non-blocking input.
+- If the first-token immediate result set contains only PATH executable candidates and an async history tier is pending, Aish may defer drawing those executable candidates until the coalescing window resolves.
 - Completion worker events carry the request id. Events for older input, different cursor positions, or stale request ids must be ignored.
 - Empty non-first tokens after trailing whitespace must not run path fallback. They may show structural template candidates immediately and structural history candidates when the worker returns.
 - Live inline completion also renders remaining candidates as below-prompt hints when they fit the configured display rules.
