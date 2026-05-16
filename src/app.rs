@@ -161,6 +161,9 @@ pub struct AppState {
     pub pending_completion_update: Option<PendingCompletionUpdate>,
     pub completion_history_snapshot: Arc<Vec<HistoryEntry>>,
     pub completion_history_snapshot_len: usize,
+    pub completion_template_snapshot: Arc<Vec<TemplateEntry>>,
+    pub completion_template_snapshot_len: usize,
+    pub completion_display_not_before: Option<Instant>,
     pub last_rendered_lines: usize,
     pub last_rendered_cursor_row: usize,
     pub render_anchor_saved: bool,
@@ -245,6 +248,9 @@ impl Default for AppState {
             pending_completion_update: None,
             completion_history_snapshot: Arc::new(Vec::new()),
             completion_history_snapshot_len: 0,
+            completion_template_snapshot: Arc::new(Vec::new()),
+            completion_template_snapshot_len: usize::MAX,
+            completion_display_not_before: None,
             last_rendered_lines: 1,
             last_rendered_cursor_row: 0,
             render_anchor_saved: false,
@@ -613,46 +619,53 @@ impl AppState {
         &mut self,
         max_results: usize,
     ) -> Result<Vec<CompletionCandidate>> {
+        let now = Instant::now();
         let line = self.draft.as_str().to_string();
         let cursor = self.draft.cursor();
         let candidates = self.immediate_completion_candidates_with_max_results(max_results)?;
         self.pending_completion = None;
         self.pending_completion_update = None;
         let should_enqueue_async = self.should_enqueue_async_completion(&line, cursor);
+        let display_deferred = !self.completion_display_ready(now) && !candidates.is_empty();
         let defer_initial_ui = should_enqueue_async
             && self.should_defer_initial_completion_ui(&line, cursor, &candidates);
-        if should_enqueue_async {
+        let hide_initial_ui = display_deferred || defer_initial_ui;
+        if should_enqueue_async || display_deferred {
             self.completion_generation = self.completion_generation.wrapping_add(1).max(1);
             let id = self.completion_generation;
-            let history_newest_first = self.completion_history_snapshot();
-            let templates = Arc::new(self.templates_for_completion()?);
             self.pending_completion = Some(PendingCompletion {
                 id,
                 line: line.clone(),
                 cursor,
                 candidates: candidates.clone(),
             });
-            if defer_initial_ui {
+            if hide_initial_ui && !candidates.is_empty() {
                 self.queue_completion_update(
                     id,
                     line.clone(),
                     cursor,
                     candidates.clone(),
-                    false,
-                    Instant::now(),
+                    !should_enqueue_async,
+                    now,
                 );
             }
-            let job = CompletionJob {
-                id,
-                line,
-                cursor,
-                history_newest_first,
-                templates,
-                options: self.completion_options(usize::MAX),
-            };
-            self.ensure_completion_worker().enqueue(job)?;
+            if should_enqueue_async {
+                let history_newest_first = self.completion_history_snapshot();
+                let templates = self.completion_template_snapshot()?;
+                let job = CompletionJob {
+                    id,
+                    line,
+                    cursor,
+                    cwd: completion_cwd(&self.current_cwd),
+                    path_dirs: Arc::new(path_dirs()),
+                    history_newest_first,
+                    templates,
+                    options: self.completion_options(usize::MAX),
+                };
+                self.ensure_completion_worker().enqueue(job)?;
+            }
         }
-        Ok(if defer_initial_ui {
+        Ok(if hide_initial_ui {
             Vec::new()
         } else {
             candidates
@@ -772,10 +785,15 @@ impl AppState {
             return None;
         }
         let coalesce_ms = self.completion_config.coalesce_ms;
-        let ready = coalesce_ms == 0
-            || final_tier_seen
-            || now.saturating_duration_since(first_seen) >= Duration::from_millis(coalesce_ms);
-        ready.then(|| self.pending_completion_update.take().unwrap().candidates)
+        let display_ready = self.completion_display_ready(now);
+        let ready = display_ready
+            && (coalesce_ms == 0
+                || final_tier_seen
+                || now.saturating_duration_since(first_seen) >= Duration::from_millis(coalesce_ms));
+        ready.then(|| {
+            self.completion_display_not_before = None;
+            self.pending_completion_update.take().unwrap().candidates
+        })
     }
 
     pub fn cached_live_completion_candidates_with_max_results(
@@ -822,23 +840,16 @@ impl AppState {
             return Ok(complete_private_command_line(line, cursor, max_results));
         }
 
-        let templates = self.templates_for_completion()?;
         let options = self.completion_options(max_results);
         if token.is_first_token && !token.path_like {
-            return Ok(complete_first_token_with_options(
-                &token.text,
-                &templates,
-                &[],
-                &path_dirs(),
-                options,
-            ));
+            return Ok(Vec::new());
         }
         Ok(complete_non_first_token_for_line_with_options(
             line,
             cursor,
             &completion_cwd(&self.current_cwd),
             &[],
-            &templates,
+            &[],
             options,
         ))
     }
@@ -899,6 +910,44 @@ impl AppState {
 
     fn invalidate_completion_history_snapshot(&mut self) {
         self.completion_history_snapshot_len = usize::MAX;
+    }
+
+    fn completion_template_snapshot(&mut self) -> Result<Arc<Vec<TemplateEntry>>> {
+        let memory_backed = !self.templates.is_empty() || self.encryption_config.enabled;
+        if self.completion_template_snapshot_len == usize::MAX
+            || (memory_backed && self.completion_template_snapshot_len != self.templates.len())
+        {
+            let templates = self.templates_for_completion()?;
+            self.completion_template_snapshot_len = if memory_backed {
+                self.templates.len()
+            } else {
+                templates.len()
+            };
+            self.completion_template_snapshot = Arc::new(templates);
+        }
+        Ok(Arc::clone(&self.completion_template_snapshot))
+    }
+
+    fn invalidate_completion_template_snapshot(&mut self) {
+        self.completion_template_snapshot_len = usize::MAX;
+    }
+
+    pub(crate) fn defer_completion_display(&mut self, now: Instant) {
+        if self.completion_config.display_delay_ms == 0 {
+            self.completion_display_not_before = None;
+            return;
+        }
+        self.completion_display_not_before =
+            Some(now + Duration::from_millis(self.completion_config.display_delay_ms));
+    }
+
+    pub(crate) fn clear_completion_display_delay(&mut self) -> bool {
+        self.completion_display_not_before.take().is_some()
+    }
+
+    fn completion_display_ready(&self, now: Instant) -> bool {
+        self.completion_display_not_before
+            .is_none_or(|deadline| now >= deadline)
     }
 
     pub fn clear_completion_ui(&mut self) {
@@ -1015,6 +1064,7 @@ impl AppState {
             append_template(path, entry)?;
         }
         self.templates.push(entry.clone());
+        self.invalidate_completion_template_snapshot();
         Ok(())
     }
 
@@ -1075,6 +1125,7 @@ impl AppState {
         };
         self.templates = removal.remaining.clone();
         self.template_errors = removal.errors.clone();
+        self.invalidate_completion_template_snapshot();
         Ok(Some(removal))
     }
 
@@ -1118,6 +1169,7 @@ impl AppState {
         };
         self.templates = removal.remaining.clone();
         self.template_errors = removal.errors.clone();
+        self.invalidate_completion_template_snapshot();
         Ok(Some(removal))
     }
 
@@ -2629,6 +2681,11 @@ fn write_status_report(state: &AppState, out: &mut impl Write) -> Result<()> {
     )?;
     writeln!(
         out,
+        "completion.display_delay_ms={}",
+        state.completion_config.display_delay_ms
+    )?;
+    writeln!(
+        out,
         "completion.ignore_spaces={}",
         state.completion_config.ignore_spaces
     )?;
@@ -2800,6 +2857,11 @@ fn write_config_report(state: &AppState, out: &mut impl Write) -> Result<()> {
         out,
         "completion.coalesce_ms={}",
         state.completion_config.coalesce_ms
+    )?;
+    writeln!(
+        out,
+        "completion.display_delay_ms={}",
+        state.completion_config.display_delay_ms
     )?;
     writeln!(
         out,
@@ -4039,6 +4101,20 @@ fn update_completion_config(state: &mut AppState, out: &mut impl Write, args: &s
                 Ok(())
             })
         }
+        (Some("display-delay" | "display-delay-ms"), Some(value), None) => {
+            let Ok(display_delay_ms) = value.parse::<u64>() else {
+                writeln!(out, "usage: #completion display-delay-ms <0-1000>")?;
+                return Ok(());
+            };
+            if display_delay_ms > 1_000 {
+                writeln!(out, "completion display delay ms must be between 0 and 1000")?;
+                return Ok(());
+            }
+            set_completion_config(state, out, |config| {
+                config.completion.display_delay_ms = display_delay_ms;
+                Ok(())
+            })
+        }
         (Some("inline"), Some(value), None) => {
             let Some(inline) = parse_on_off(value) else {
                 writeln!(out, "usage: #completion inline on|off")?;
@@ -4103,7 +4179,7 @@ fn update_completion_config(state: &mut AppState, out: &mut impl Write, args: &s
         }
         _ => writeln!(
             out,
-            "usage: #completion on|off|mode auto|tab|off|max <count>|coalesce-ms <0-1000>|inline on|off|fuzzy on|off|tab-accept full|word|match-threshold <0-100>|typo-threshold <0-100>"
+            "usage: #completion on|off|mode auto|tab|off|max <count>|coalesce-ms <0-1000>|display-delay-ms <0-1000>|inline on|off|fuzzy on|off|tab-accept full|word|match-threshold <0-100>|typo-threshold <0-100>"
         )
         .map_err(Into::into),
     }
@@ -4140,6 +4216,11 @@ fn write_completion_config(out: &mut impl Write, config: &CompletionConfig) -> R
     writeln!(out, "completion.enabled={}", config.enabled)?;
     writeln!(out, "completion.max_results={}", config.max_results)?;
     writeln!(out, "completion.coalesce_ms={}", config.coalesce_ms)?;
+    writeln!(
+        out,
+        "completion.display_delay_ms={}",
+        config.display_delay_ms
+    )?;
     writeln!(out, "completion.ignore_spaces={}", config.ignore_spaces)?;
     writeln!(out, "completion.template_first={}", config.template_first)?;
     writeln!(out, "completion.inline={}", config.inline)?;
@@ -4571,6 +4652,7 @@ mod tests {
                 enabled: true,
                 max_results: 2,
                 coalesce_ms: 50,
+                display_delay_ms: 120,
                 ignore_spaces: true,
                 template_first: true,
                 inline: true,
@@ -4822,8 +4904,70 @@ mod tests {
     }
 
     #[test]
+    fn completion_display_delay_hides_ui_without_blocking_candidate_cache() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("single.txt"), "").unwrap();
+        let mut state = AppState {
+            current_cwd: Some(temp.path().to_path_buf()),
+            completion_config: CompletionConfig {
+                display_delay_ms: 120,
+                ..CompletionConfig::default()
+            },
+            ..AppState::default()
+        };
+        state.draft.insert_str("cat si");
+        let now = Instant::now();
+        state.defer_completion_display(now);
+        let deadline = state.completion_display_not_before.unwrap();
+
+        let visible_candidates = state.start_live_completion_request(usize::MAX).unwrap();
+
+        assert!(visible_candidates.is_empty());
+        let pending = state.pending_completion.as_ref().unwrap();
+        assert!(
+            pending
+                .candidates
+                .iter()
+                .any(|candidate| candidate.display == "single.txt")
+        );
+        assert!(
+            state
+                .ready_completion_update(deadline - Duration::from_millis(1))
+                .is_none()
+        );
+        assert!(
+            state
+                .ready_completion_update(deadline)
+                .unwrap()
+                .iter()
+                .any(|candidate| candidate.display == "single.txt")
+        );
+    }
+
+    #[test]
+    fn completion_display_delay_resets_to_latest_input_time() {
+        let mut state = AppState {
+            completion_config: CompletionConfig {
+                display_delay_ms: 120,
+                ..CompletionConfig::default()
+            },
+            ..AppState::default()
+        };
+        let first = Instant::now();
+        state.defer_completion_display(first);
+        let first_deadline = state.completion_display_not_before.unwrap();
+
+        state.defer_completion_display(first + Duration::from_millis(80));
+
+        assert_eq!(
+            state.completion_display_not_before,
+            Some(first_deadline + Duration::from_millis(80))
+        );
+    }
+
+    #[test]
     #[cfg(unix)]
-    fn first_token_executable_live_candidate_waits_for_history_coalescing() {
+    fn first_token_executable_live_candidate_arrives_from_background_worker() {
         use std::os::unix::fs::PermissionsExt;
 
         let _guard = ENV_LOCK.lock().unwrap();
@@ -4839,14 +4983,8 @@ mod tests {
         }
 
         let mut state = AppState {
-            regular_history: vec![HistoryEntry {
-                t: 1,
-                command: "aishco-history".to_string(),
-                exit_code: Some(0),
-                source: HistorySource::User,
-            }],
             completion_config: CompletionConfig {
-                coalesce_ms: 1_000,
+                fuzzy: false,
                 ..CompletionConfig::default()
             },
             ..AppState::default()
@@ -4863,16 +5001,21 @@ mod tests {
         }
         let visible_candidates = visible_candidates.unwrap();
         assert!(visible_candidates.is_empty());
-        assert!(state.pending_completion_update.is_some());
-        assert!(
-            state
-                .pending_completion
-                .as_ref()
-                .unwrap()
-                .candidates
-                .iter()
-                .any(|candidate| candidate.source == CompletionSource::Executable)
-        );
+        assert!(state.pending_completion.is_some());
+        assert!(state.pending_completion_update.is_none());
+
+        let mut candidates = None;
+        for _ in 0..50 {
+            candidates = state.drain_live_completion_events();
+            if candidates.is_some() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let candidates = candidates.expect("missing executable completion worker event");
+        assert!(candidates.iter().any(|candidate| {
+            candidate.source == CompletionSource::Executable && candidate.display == "aishco-exec"
+        }));
     }
 
     #[test]
@@ -6173,6 +6316,7 @@ mod tests {
             ("#completion", "completion.max_results=5"),
             ("#completion", "completion.enabled=true"),
             ("#completion", "completion.coalesce_ms=50"),
+            ("#completion", "completion.display_delay_ms=120"),
             ("#completion", "completion.fuzzy=true"),
             ("#editor", "editor temp directory is not configured"),
         ] {
@@ -6218,6 +6362,14 @@ mod tests {
             ("#completion max 2", "completion.max_results=2"),
             ("#completion coalesce-ms 75", "completion.coalesce_ms=75"),
             ("#completion coalesce 50", "completion.coalesce_ms=50"),
+            (
+                "#completion display-delay-ms 180",
+                "completion.display_delay_ms=180",
+            ),
+            (
+                "#completion display-delay 120",
+                "completion.display_delay_ms=120",
+            ),
             ("#completion inline off", "completion.mode=tab"),
             ("#completion tab-accept word", "completion.tab_accept=word"),
             ("#completion fuzzy off", "completion.fuzzy=false"),
@@ -6242,6 +6394,14 @@ mod tests {
             (
                 "#completion coalesce-ms nope",
                 "usage: #completion coalesce-ms <0-1000>",
+            ),
+            (
+                "#completion display-delay-ms 1001",
+                "completion display delay ms must be between 0 and 1000",
+            ),
+            (
+                "#completion display-delay-ms nope",
+                "usage: #completion display-delay-ms <0-1000>",
             ),
             (
                 "#completion inline maybe",
@@ -6295,6 +6455,7 @@ mod tests {
         assert_eq!(state.completion_config.mode(), CompletionMode::Tab);
         assert_eq!(state.completion_config.max_results, 2);
         assert_eq!(state.completion_config.coalesce_ms, 50);
+        assert_eq!(state.completion_config.display_delay_ms, 120);
         assert!(!state.completion_config.inline);
         assert!(state.completion_config.fuzzy);
         assert_eq!(
@@ -6308,6 +6469,7 @@ mod tests {
         assert_eq!(loaded.mode(), CompletionMode::Tab);
         assert_eq!(loaded.max_results, 2);
         assert_eq!(loaded.coalesce_ms, 50);
+        assert_eq!(loaded.display_delay_ms, 120);
         assert!(!loaded.inline);
         assert!(loaded.fuzzy);
         assert_eq!(loaded.tab_accept, CompletionTabAccept::Word);
@@ -7662,6 +7824,7 @@ mod tests {
                 enabled: true,
                 max_results: 8,
                 coalesce_ms: 50,
+                display_delay_ms: 120,
                 ignore_spaces: false,
                 template_first: true,
                 inline: false,
@@ -7709,6 +7872,7 @@ mod tests {
         assert!(output.contains("completion.mode=tab"));
         assert!(output.contains("completion.max_results=8"));
         assert!(output.contains("completion.coalesce_ms=50"));
+        assert!(output.contains("completion.display_delay_ms=120"));
         assert!(output.contains("completion.ignore_spaces=false"));
         assert!(output.contains("completion.template_first=true"));
         assert!(output.contains("completion.inline=false"));
@@ -7921,6 +8085,7 @@ mod tests {
         assert!(output.contains("completion.mode=auto"));
         assert!(output.contains("completion.max_results=5"));
         assert!(output.contains("completion.coalesce_ms=50"));
+        assert!(output.contains("completion.display_delay_ms=120"));
         assert!(output.contains("completion.fuzzy=true"));
         assert!(output.contains("completion.match_threshold_percent=50"));
         assert!(output.contains("completion.typo_threshold_percent=80"));

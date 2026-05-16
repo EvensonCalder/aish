@@ -1078,7 +1078,7 @@ enum AiItemKind {
 ## Phase 28: Inline completion UX
 
 Status: implemented. Inline completion is enabled by default and refreshes while the user types, `completion.max_results` controls only the below-prompt panel row count, and bash/zsh real-terminal coverage proves completion behavior is owned by Aish rather than the backend shell. Fish backend coverage remains opt-in with `AISH_TEST_FISH=1` until cross-platform behavior is validated across macOS and Linux distributions.
-Update: completion now uses layered, non-blocking live discovery. Immediate candidates are shown first, structural history and typo-correction tiers arrive through versioned worker events, stale events are ignored, encrypted-write completion events refresh the live UI, async UI refreshes are coalesced for up to `completion.coalesce_ms`, and first-token executable-only live hints can wait for the same window so higher-priority history can arrive before lower-priority PATH matches are drawn. `completion.mode` supports `auto`, `tab`, and `off`; `completion.enabled`/`completion.inline` remain legacy compatibility fields. `completion.fuzzy` defaults to `true` so low-performance environments can disable only typo-correction work. `completion.match_threshold_percent` defaults to `50` as a structural word-position threshold, and `completion.typo_threshold_percent` defaults to `80` for typo correction.
+Update: completion now uses layered, non-blocking live discovery. Cheap local path candidates can be found immediately, template/history/PATH executable and typo-correction tiers arrive through versioned worker events, stale events are ignored, encrypted-write completion events refresh the live UI, async UI refreshes are coalesced for up to `completion.coalesce_ms`, and auto-mode display is debounced by `completion.display_delay_ms` after the latest edit while matching continues in the background. `completion.mode` supports `auto`, `tab`, and `off`; `completion.enabled`/`completion.inline` remain legacy compatibility fields. `completion.fuzzy` defaults to `true` so low-performance environments can disable only typo-correction work. `completion.match_threshold_percent` defaults to `50` as a structural word-position threshold, and `completion.typo_threshold_percent` defaults to `80` for typo correction.
 
 ### Tasks
 
@@ -1088,6 +1088,7 @@ Update: completion now uses layered, non-blocking live discovery. Immediate cand
   - [x] `completion.inline = true` by default.
   - [x] `completion.fuzzy = true` by default.
   - [x] `completion.coalesce_ms = 50` by default.
+  - [x] `completion.display_delay_ms = 120` by default.
   - [x] `completion.tab_accept = "full"` by default.
   - [x] `completion.match_threshold_percent = 50` by default.
   - [x] `completion.typo_threshold_percent = 80` by default.
@@ -1100,6 +1101,7 @@ Update: completion now uses layered, non-blocking live discovery. Immediate cand
   - [x] `#completion inline on|off`
   - [x] `#completion fuzzy on|off`
   - [x] `#completion coalesce-ms <0-1000>`
+  - [x] `#completion display-delay-ms <0-1000>`
   - [x] `#completion tab-accept full|word`
   - [x] `#completion match-threshold <0-100>`
   - [x] `#completion typo-threshold <0-100>`

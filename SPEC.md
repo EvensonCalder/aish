@@ -780,6 +780,7 @@ For command completion:
 - Matching ignores spaces when configured.
 - The below-prompt panel displays at most `completion.max_results` candidates.
 - `completion.coalesce_ms` controls live UI refresh coalescing for layered background completion. The default is `50` ms; `0` disables coalescing and refreshes each changed tier immediately. First-token executable-only live hints may wait for this same window so lower-priority PATH matches do not flash before higher-priority history results arrive.
+- `completion.display_delay_ms` controls auto-mode display debounce after the latest edit. Matching may run and update the pending candidate cache during this delay, but Aish must not redraw completion UI before the delay expires. The default is `120` ms; `0` disables this display debounce.
 - Empty tokens and candidates with zero matching positions are not displayed.
 - `completion.match_threshold_percent` is a structural word-position match rate, not character-level typo correction. For example, `git stx` matches `git status --short` at one of two typed positions, so the default `50` threshold can show it.
 - Structural matches pass when the word-position match rate is greater than or equal to the configured threshold.
@@ -792,9 +793,10 @@ For command completion:
 - Empty draft `Tab` switches modes.
 - In `auto` mode, non-empty draft edits start a layered completion request for the current token and show the best available candidate as an inline ghost suggestion in dim text on the active prompt line without requiring `Tab`.
 - In `tab` mode, ordinary typing clears any stale completion UI and does not start a live completion request. Pressing `Tab` starts the same layered request explicitly; background history and typo tiers may update the displayed hints for that request without accepting anything.
-- Live completion must not scan regular history synchronously on every keypress. It sends a versioned background request using a cheap history snapshot reference.
-- Live completion is layered: immediate non-history candidates are shown first, structural history results can refresh the UI when the worker finishes, and slower typo-correction results can refresh the UI after that when `completion.fuzzy = true`.
+- Live completion must not scan regular history, stored templates, or PATH executables synchronously on every keypress. It sends a versioned background request using cheap cached snapshot references.
+- Live completion is layered: cheap local path candidates can be found immediately, template/history/PATH executable results can refresh the UI when the worker finishes, and slower typo-correction results can refresh the UI after that when `completion.fuzzy = true`.
 - Layered live completion refreshes may be coalesced until the final background tier arrives or `completion.coalesce_ms` elapses, whichever comes first, to avoid visible flicker while preserving non-blocking input.
+- Auto-mode completion refreshes may also be delayed until `completion.display_delay_ms` after the most recent edit. This delay is only a display gate; it must not block input and must not prevent background matching from progressing.
 - If the first-token immediate result set contains only PATH executable candidates and an async history tier is pending, Aish may defer drawing those executable candidates until the coalescing window resolves.
 - Completion worker events carry the request id. Events for older input, different cursor positions, or stale request ids must be ignored.
 - Empty non-first tokens after trailing whitespace must not run path fallback. They may show structural template candidates immediately and structural history candidates when the worker returns.
@@ -838,6 +840,7 @@ mode = "auto" # "auto", "tab", or "off"
 enabled = true
 max_results = 5
 coalesce_ms = 50
+display_delay_ms = 120
 ignore_spaces = true
 template_first = true
 inline = true
@@ -854,6 +857,7 @@ Command:
 #completion mode auto|tab|off
 #completion max 8
 #completion coalesce-ms <0-1000>
+#completion display-delay-ms <0-1000>
 #completion inline on|off
 #completion fuzzy on|off
 #completion tab-accept full|word
@@ -1026,6 +1030,7 @@ mode = "auto"
 enabled = true
 max_results = 5
 coalesce_ms = 50
+display_delay_ms = 120
 ignore_spaces = true
 template_first = true
 inline = true
@@ -1266,6 +1271,7 @@ Initial command set:
 #completion mode auto|tab|off
 #completion max <count>
 #completion coalesce-ms <0-1000>
+#completion display-delay-ms <0-1000>
 #completion inline on|off
 #completion fuzzy on|off
 #completion tab-accept full|word

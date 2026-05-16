@@ -136,6 +136,7 @@ Important rules:
 - The below-prompt panel is advisory and never decides what `Tab` accepts.
 - `completion.max_results` controls only the number of below-prompt rows.
 - `completion.coalesce_ms` controls how long Aish may wait for the next background completion tier before refreshing the live UI. The default is `50` ms; `0` restores immediate tier-by-tier refreshes. First-token executable-only live hints may also wait for this window so history can replace lower-priority PATH matches before anything is drawn.
+- `completion.display_delay_ms` controls how long auto mode waits after the latest edit before drawing completion UI. Matching still runs in the background while the display is delayed. The default is `120` ms; `0` draws as soon as candidates are ready.
 - The panel skips the current inline candidate and shows the full command that would result from accepting each remaining candidate.
 - Candidate rows are width-aware, align command text with the prompt input column when space permits, and left-elide long commands with `...` at word boundaries instead of wrapping.
 - Structural history/template matches use `completion.match_threshold_percent` as a word-position match rate. The default is `50`, so one matching word out of two typed words is enough.
@@ -149,7 +150,7 @@ Completion sources:
 - After a trailing space, Aish uses structural template/history matches and does not show unrelated filesystem entries for the empty token.
 - Template completions use newest stored templates first.
 - Paths preserve directory prefixes and mark directories with `/`.
-- Live completion is layered: immediate non-history candidates are shown first, structural history updates arrive from a background worker, and slower typo-correction results can update the same UI later. Stale worker results are ignored when the input changes.
+- Live completion is layered: cheap local path candidates can be found immediately, template/history/PATH executable matching arrives from a background worker, and slower typo-correction results can update the same UI later. Stale worker results are ignored when the input changes.
 
 Configuration:
 
@@ -159,6 +160,7 @@ mode = "auto" # "auto", "tab", or "off"
 enabled = true
 max_results = 5
 coalesce_ms = 50
+display_delay_ms = 120
 ignore_spaces = true
 template_first = true
 inline = true
@@ -179,6 +181,7 @@ Commands:
 #completion mode off
 #completion max 8
 #completion coalesce-ms 50
+#completion display-delay-ms 120
 #completion inline on
 #completion inline off
 #completion fuzzy on
@@ -221,6 +224,7 @@ Completion:
 #completion mode auto|tab|off
 #completion max <count>
 #completion coalesce-ms <0-1000>
+#completion display-delay-ms <0-1000>
 #completion inline on|off
 #completion fuzzy on|off
 #completion tab-accept full|word

@@ -313,6 +313,7 @@ fn private_command_argument_candidates(
             "mode",
             "max",
             "coalesce-ms",
+            "display-delay-ms",
             "inline",
             "fuzzy",
             "tab-accept",
@@ -588,10 +589,29 @@ pub fn complete_first_token_executables_with_options(
     if prefix.is_empty() {
         return Vec::new();
     }
-    limit_candidates(
-        complete_path_executables(prefix, path_dirs),
-        options.max_results,
-    )
+    let executables = scan_path_executables(path_dirs);
+    complete_first_token_executables_from_names_with_options(prefix, &executables, options)
+}
+
+pub(crate) fn complete_first_token_executables_from_names_with_options(
+    prefix: &str,
+    executables: &[String],
+    options: CompletionOptions,
+) -> Vec<CompletionCandidate> {
+    if prefix.is_empty() {
+        return Vec::new();
+    }
+    let candidates = executables
+        .iter()
+        .filter(|name| name.starts_with(prefix))
+        .map(|name| CompletionCandidate {
+            display: name.clone(),
+            replacement: name.clone(),
+            is_dir: false,
+            source: CompletionSource::Executable,
+        })
+        .collect();
+    limit_candidates(candidates, options.max_results)
 }
 
 pub fn complete_non_first_token_fallbacks_for_line_with_options(
@@ -1611,8 +1631,23 @@ fn join_words(words: &[String]) -> String {
 }
 
 fn complete_path_executables(prefix: &str, path_dirs: &[PathBuf]) -> Vec<CompletionCandidate> {
+    let executables = scan_path_executables(path_dirs);
+    complete_first_token_executables_from_names_with_options(
+        prefix,
+        &executables,
+        CompletionOptions {
+            max_results: usize::MAX,
+            ignore_spaces: false,
+            fuzzy_enabled: true,
+            match_threshold_percent: 50,
+            typo_threshold_percent: 80,
+        },
+    )
+}
+
+pub(crate) fn scan_path_executables(path_dirs: &[PathBuf]) -> Vec<String> {
     let mut seen = HashSet::new();
-    let mut candidates = Vec::new();
+    let mut names = Vec::new();
     for dir in path_dirs {
         let Ok(entries) = fs::read_dir(dir) else {
             continue;
@@ -1621,23 +1656,18 @@ fn complete_path_executables(prefix: &str, path_dirs: &[PathBuf]) -> Vec<Complet
             let Ok(file_name) = entry.file_name().into_string() else {
                 continue;
             };
-            if !file_name.starts_with(prefix) || !seen.insert(file_name.clone()) {
+            if !seen.insert(file_name.clone()) {
                 continue;
             }
             let path = entry.path();
             if !is_executable_file(&path) {
                 continue;
             }
-            candidates.push(CompletionCandidate {
-                display: file_name.clone(),
-                replacement: file_name,
-                is_dir: false,
-                source: CompletionSource::Executable,
-            });
+            names.push(file_name);
         }
     }
-    candidates.sort_by(|left, right| left.display.cmp(&right.display));
-    candidates
+    names.sort();
+    names
 }
 
 #[cfg(unix)]
@@ -2366,6 +2396,11 @@ mod tests {
             candidates
                 .iter()
                 .any(|candidate| candidate.replacement == "tab-accept")
+        );
+        assert!(
+            candidates
+                .iter()
+                .any(|candidate| candidate.replacement == "display-delay-ms")
         );
 
         let mode_candidates = complete_private_command_line(

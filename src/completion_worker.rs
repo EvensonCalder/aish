@@ -6,13 +6,17 @@ use std::thread::{self, JoinHandle};
 use anyhow::{Context, Result};
 
 use crate::completion::{
-    CompletionCandidate, CompletionOptions, complete_first_token_history_with_options,
-    complete_non_first_token_typos_for_line_with_options,
-    complete_structural_history_for_line_with_options, current_token_context,
-    dedupe_completion_candidates, limit_candidates,
+    CompletionCandidate, CompletionOptions,
+    complete_first_token_executables_from_names_with_options,
+    complete_first_token_history_with_options, complete_first_token_templates_with_options,
+    complete_non_first_token_for_line_with_options,
+    complete_non_first_token_typos_for_line_with_options, current_token_context,
+    dedupe_completion_candidates, limit_candidates, rank_completion_candidates,
+    scan_path_executables,
 };
 use crate::history::HistoryEntry;
 use crate::templates::TemplateEntry;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompletionTier {
@@ -25,6 +29,8 @@ pub struct CompletionJob {
     pub id: u64,
     pub line: String,
     pub cursor: usize,
+    pub cwd: PathBuf,
+    pub path_dirs: Arc<Vec<PathBuf>>,
     pub history_newest_first: Arc<Vec<HistoryEntry>>,
     pub templates: Arc<Vec<TemplateEntry>>,
     pub options: CompletionOptions,
@@ -98,6 +104,7 @@ fn run_worker(
     events: mpsc::Sender<CompletionEvent>,
     latest_id: Arc<AtomicU64>,
 ) {
+    let mut executable_index = ExecutableIndex::default();
     while let Ok(message) = receiver.recv() {
         let mut job = match message {
             CompletionWorkerMessage::Job(job) => job,
@@ -114,7 +121,7 @@ fn run_worker(
             continue;
         }
 
-        let history_candidates = complete_history_tier(&job);
+        let history_candidates = complete_primary_tier(&job, &mut executable_index);
         if is_latest(job.id, &latest_id) {
             let _ = events.send(CompletionEvent {
                 id: job.id,
@@ -137,20 +144,55 @@ fn run_worker(
     }
 }
 
-fn complete_history_tier(job: &CompletionJob) -> Vec<CompletionCandidate> {
+#[derive(Default)]
+struct ExecutableIndex {
+    path_dirs: Vec<PathBuf>,
+    names: Vec<String>,
+}
+
+impl ExecutableIndex {
+    fn names_for(&mut self, path_dirs: &[PathBuf]) -> &[String] {
+        if self.path_dirs != path_dirs {
+            self.names = scan_path_executables(path_dirs);
+            self.path_dirs = path_dirs.to_vec();
+        }
+        &self.names
+    }
+}
+
+fn complete_primary_tier(
+    job: &CompletionJob,
+    executable_index: &mut ExecutableIndex,
+) -> Vec<CompletionCandidate> {
     let mut options = job.options;
     options.max_results = usize::MAX;
     let token = current_token_context(&job.line, job.cursor);
-    let candidates = if token.is_first_token && !token.path_like {
-        complete_first_token_history_with_options(&token.text, &job.history_newest_first, options)
+    let mut candidates = if token.is_first_token && !token.path_like {
+        let mut candidates =
+            complete_first_token_templates_with_options(&token.text, &job.templates, options);
+        candidates.extend(complete_first_token_history_with_options(
+            &token.text,
+            &job.history_newest_first,
+            options,
+        ));
+        candidates.extend(complete_first_token_executables_from_names_with_options(
+            &token.text,
+            executable_index.names_for(&job.path_dirs),
+            options,
+        ));
+        candidates
     } else {
-        complete_structural_history_for_line_with_options(
+        complete_non_first_token_for_line_with_options(
             &job.line,
             job.cursor,
+            &job.cwd,
             &job.history_newest_first,
+            &job.templates,
             options,
         )
     };
+    dedupe_completion_candidates(&mut candidates);
+    rank_completion_candidates(&mut candidates);
     limit_candidates(candidates, job.options.max_results)
 }
 

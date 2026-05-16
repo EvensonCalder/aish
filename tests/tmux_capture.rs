@@ -400,6 +400,12 @@ fn tmux_status_command_is_visible_and_shell_recovers() {
             .any(|line| line == "completion.coalesce_ms=50"),
         "status completion coalesce config line was not visible: {captured:?}"
     );
+    assert!(
+        captured
+            .lines()
+            .any(|line| line == "completion.display_delay_ms=120"),
+        "status completion display delay config line was not visible: {captured:?}"
+    );
     assert_adjacent_output(&captured, "echo after-status", "after-status");
 }
 

@@ -70,6 +70,7 @@ pub struct CompletionConfig {
     pub enabled: bool,
     pub max_results: usize,
     pub coalesce_ms: u64,
+    pub display_delay_ms: u64,
     pub ignore_spaces: bool,
     pub template_first: bool,
     pub inline: bool,
@@ -264,6 +265,7 @@ impl Default for CompletionConfig {
             enabled: true,
             max_results: 5,
             coalesce_ms: 50,
+            display_delay_ms: 120,
             ignore_spaces: true,
             template_first: true,
             inline: true,
@@ -442,6 +444,9 @@ pub fn normalize_config(config: &mut Config) {
     if config.completion.coalesce_ms > 1_000 {
         config.completion.coalesce_ms = CompletionConfig::default().coalesce_ms;
     }
+    if config.completion.display_delay_ms > 1_000 {
+        config.completion.display_delay_ms = CompletionConfig::default().display_delay_ms;
+    }
     if config.completion.match_threshold_percent > 100 {
         config.completion.match_threshold_percent =
             CompletionConfig::default().match_threshold_percent;
@@ -489,6 +494,7 @@ mod tests {
         assert_eq!(config.completion.max_results, 5);
         assert!(config.completion.enabled);
         assert_eq!(config.completion.coalesce_ms, 50);
+        assert_eq!(config.completion.display_delay_ms, 120);
         assert!(config.completion.ignore_spaces);
         assert!(config.completion.template_first);
         assert!(config.completion.inline);
@@ -532,6 +538,7 @@ mod tests {
                 enabled: true,
                 max_results: 0,
                 coalesce_ms: 1_001,
+                display_delay_ms: 1_001,
                 ignore_spaces: true,
                 template_first: true,
                 inline: true,
@@ -590,6 +597,7 @@ mod tests {
         expected.completion.match_threshold_percent = 50;
         expected.completion.typo_threshold_percent = 80;
         expected.completion.coalesce_ms = 50;
+        expected.completion.display_delay_ms = 120;
         expected.sync = SyncConfig {
             remote: "git@example.invalid:aish.git".to_string(),
             enabled: true,

@@ -238,7 +238,11 @@ fn handle_key(
     command_timeout: Duration,
 ) -> Result<bool> {
     let had_completion_ui = !state.completion_panel.is_empty() || state.completion_inline.is_some();
+    let previous_completion_input = live_completion_input_key(state);
     let action = apply_key_to_state(key, state);
+    if refresh_should_defer_completion_display(state, &previous_completion_input, &action) {
+        state.defer_completion_display(std::time::Instant::now());
+    }
     let refresh_completion = !matches!(action, KeyAction::CompleteOrShow);
     match action {
         KeyAction::Exit => return Ok(true),
@@ -791,7 +795,10 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
                     && state.draft.cursor() == state.draft.as_str().len()
                     && !state.draft.is_empty()
                     && state.completion_config.mode() != CompletionMode::Off
-                    && state.completion_inline.is_some()
+                    && (state.completion_inline.is_some()
+                        || state
+                            .cached_live_completion_candidates_with_max_results(1)
+                            .is_some_and(|candidates| !candidates.is_empty()))
                 {
                     return KeyAction::AcceptCompletion;
                 }
@@ -983,8 +990,11 @@ pub fn complete_or_show_candidates(state: &mut AppState) -> Result<()> {
 }
 
 pub fn complete_or_show_candidates_for_width(state: &mut AppState, width: usize) -> Result<()> {
+    let had_display_delay = state.clear_completion_display_delay();
     match state.completion_config.mode() {
-        CompletionMode::Auto => complete_or_show_auto_candidates_for_width(state, width),
+        CompletionMode::Auto => {
+            complete_or_show_auto_candidates_for_width(state, width, had_display_delay)
+        }
         CompletionMode::Tab => complete_or_show_tab_candidates_for_width(state, width),
         CompletionMode::Off => {
             state.clear_completion_ui();
@@ -993,7 +1003,11 @@ pub fn complete_or_show_candidates_for_width(state: &mut AppState, width: usize)
     }
 }
 
-fn complete_or_show_auto_candidates_for_width(state: &mut AppState, width: usize) -> Result<()> {
+fn complete_or_show_auto_candidates_for_width(
+    state: &mut AppState,
+    width: usize,
+    had_display_delay: bool,
+) -> Result<()> {
     {
         if accept_inline_completion(state)? {
             refresh_live_completion_ui_for_width(state, width)?;
@@ -1001,9 +1015,19 @@ fn complete_or_show_auto_candidates_for_width(state: &mut AppState, width: usize
         }
         let had_panel_without_inline =
             state.completion_inline.is_none() && !state.completion_panel.is_empty();
+        let had_no_visible_completion =
+            state.completion_inline.is_none() && state.completion_panel.is_empty();
         let candidates = state.live_completion_candidates_with_max_results(usize::MAX)?;
         if candidates.is_empty() {
             state.clear_completion_ui();
+            return Ok(());
+        }
+        if had_display_delay && had_no_visible_completion {
+            let Some(candidate) = candidates.into_iter().next() else {
+                return Ok(());
+            };
+            accept_completion_candidate(state, candidate)?;
+            refresh_live_completion_ui_for_width(state, width)?;
             return Ok(());
         }
         if had_panel_without_inline {
@@ -1057,6 +1081,29 @@ fn should_refresh_live_completion(state: &AppState) -> bool {
         && !state.draft_from_editor
         && !state.draft.is_empty()
         && state.draft.cursor() == state.draft.as_str().len()
+}
+
+fn live_completion_input_key(state: &AppState) -> Option<(String, usize)> {
+    should_refresh_live_completion(state)
+        .then(|| (state.draft.as_str().to_string(), state.draft.cursor()))
+}
+
+fn refresh_should_defer_completion_display(
+    state: &AppState,
+    previous: &Option<(String, usize)>,
+    action: &KeyAction,
+) -> bool {
+    if !matches!(action, KeyAction::Continue) {
+        return false;
+    }
+    let current = live_completion_input_key(state);
+    if &current == previous {
+        return false;
+    }
+    let Some((line, _cursor)) = current else {
+        return false;
+    };
+    !line.trim().is_empty() && !line.starts_with('#')
 }
 
 fn accept_visible_completion(state: &mut AppState) -> Result<bool> {
@@ -1317,11 +1364,10 @@ pub fn accept_first_completion(state: &mut AppState) -> Result<bool> {
     if accept_inline_completion(state)? {
         return Ok(true);
     }
-    let candidates = if state.completion_config.inline {
-        state.live_completion_candidates_with_max_results(usize::MAX)?
-    } else {
-        state.completion_candidates()?
-    };
+    let candidates = state
+        .cached_live_completion_candidates_with_max_results(usize::MAX)
+        .map(Ok)
+        .unwrap_or_else(|| state.completion_candidates())?;
     let Some(candidate) = candidates.into_iter().next() else {
         return Ok(false);
     };
@@ -1395,6 +1441,25 @@ mod tests {
         }
         panic!(
             "missing inline suffix {suffix:?}; inline was {:?}, panel was {:?}",
+            state.completion_inline, state.completion_panel
+        );
+    }
+
+    fn wait_for_completion_panel_contains(state: &mut AppState, needle: &str) {
+        let mut output = Vec::new();
+        for _ in 0..50 {
+            refresh_after_background_events(state, &mut output).unwrap();
+            if state
+                .completion_panel
+                .iter()
+                .any(|row| row.contains(needle))
+            {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!(
+            "missing completion panel row containing {needle:?}; inline was {:?}, panel was {:?}",
             state.completion_inline, state.completion_panel
         );
     }
@@ -1865,6 +1930,28 @@ mod tests {
 
         assert_eq!(state.draft.as_str(), "cat si");
         assert_eq!(state.completion_inline.as_ref().unwrap().suffix, "ngle.txt");
+        assert!(state.completion_panel.is_empty());
+
+        complete_or_show_candidates(&mut state).unwrap();
+
+        assert_eq!(state.draft.as_str(), "cat single.txt");
+        assert!(state.completion_inline.is_none());
+        assert!(state.completion_panel.is_empty());
+    }
+
+    #[test]
+    fn tab_accepts_cached_completion_hidden_by_display_delay() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut state = AppState {
+            current_cwd: Some(temp.path().to_path_buf()),
+            ..AppState::default()
+        };
+        std::fs::write(temp.path().join("single.txt"), "").unwrap();
+        state.draft.insert_str("cat si");
+        state.defer_completion_display(Instant::now());
+        refresh_live_completion_ui_for_width(&mut state, 80).unwrap();
+
+        assert!(state.completion_inline.is_none());
         assert!(state.completion_panel.is_empty());
 
         complete_or_show_candidates(&mut state).unwrap();
@@ -2573,6 +2660,7 @@ mod tests {
         state.draft.insert_str("echo something");
 
         refresh_live_completion_ui_for_width(&mut state, 80).unwrap();
+        wait_for_completion_panel_contains(&mut state, "{something}");
 
         assert!(state.completion_inline.is_none());
         assert!(
