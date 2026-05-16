@@ -345,6 +345,7 @@ fn private_command_argument_candidates(
         ("completion", ["inline" | "fuzzy"]) => &["on", "off"],
         ("completion", ["tab-accept"]) => &["full", "word"],
         ("key", []) => &["set", "clear"],
+        ("prompt", []) => &["draft", "history", "ai", "reset"],
         ("context", []) => &["on", "off", "confirm"],
         ("context", ["confirm"]) => &["on", "off"],
         ("template", []) => &["find", "list", "rm", "replace", "show", "use"],
@@ -2702,6 +2703,16 @@ mod tests {
             candidates
                 .iter()
                 .any(|candidate| candidate.replacement == "display-delay-ms")
+        );
+
+        let prompt_candidates =
+            complete_private_command_line("#prompt ", "#prompt ".len(), usize::MAX);
+        assert_eq!(
+            prompt_candidates
+                .iter()
+                .map(|candidate| candidate.replacement.as_str())
+                .collect::<Vec<_>>(),
+            ["draft", "history", "ai", "reset"]
         );
 
         let mode_candidates = complete_private_command_line(

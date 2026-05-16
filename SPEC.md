@@ -289,6 +289,8 @@ Private commands use `#<name>` with no required space after `#`:
 #model gpt-4.1
 #base-url https://example.com/v1
 #env-key OPENAI_API_KEY
+#prompt draft "{basename} > "
+#prompt reset
 #key set
 #encrypt on
 #history 20000
@@ -1259,6 +1261,12 @@ Initial command set:
 #status
 #config
 #doctor
+
+#prompt
+#prompt draft "{basename} > "
+#prompt history "{basename} $ "
+#prompt ai "{basename} % "
+#prompt reset
 
 #model <name>
 #base-url <url>

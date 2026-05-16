@@ -23,6 +23,7 @@ pub const IMPLEMENTED_PRIVATE_COMMANDS: &[&str] = &[
     "status",
     "config",
     "doctor",
+    "prompt",
     "model",
     "base-url",
     "env-key",

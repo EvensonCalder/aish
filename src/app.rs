@@ -1789,6 +1789,11 @@ pub fn execute_draft(
                         state.clear_draft_for_new_draft();
                         return Ok(());
                     }
+                    "prompt" => {
+                        update_prompt_config(state, out, args)?;
+                        state.clear_draft_for_new_draft();
+                        return Ok(());
+                    }
                     "model" => {
                         update_ai_config_field(state, out, "model", args)?;
                         state.clear_draft_for_new_draft();
@@ -2845,6 +2850,7 @@ fn write_config_report(state: &AppState, out: &mut impl Write) -> Result<()> {
         "paste.confirm_execute={}",
         state.paste_config.confirm_execute
     )?;
+    write_prompt_config(out, &state.prompt_templates)?;
     writeln!(
         out,
         "completion.mode={}",
@@ -3978,6 +3984,112 @@ fn write_ai_config_value(out: &mut impl Write, name: &str, state: &AppState) -> 
         writeln!(out, "#{name}={value}")?;
     }
     Ok(())
+}
+
+fn update_prompt_config(state: &mut AppState, out: &mut impl Write, args: &str) -> Result<()> {
+    let args = args.trim_start();
+    if args.is_empty() {
+        return write_prompt_config(out, &state.prompt_templates);
+    }
+    let (field, rest) = split_first_word(args);
+    match field {
+        "draft" | "history" | "ai" => {
+            let raw_value = rest.trim_start();
+            let Some(value) = parse_prompt_template_value(raw_value) else {
+                writeln!(out, "usage: #prompt [draft|history|ai <template>|reset]")?;
+                return Ok(());
+            };
+            if value.is_empty() {
+                writeln!(out, "prompt template must not be empty")?;
+                return Ok(());
+            }
+            set_prompt_config(state, out, |config| {
+                match field {
+                    "draft" => config.prompt.draft = value,
+                    "history" => config.prompt.history = value,
+                    "ai" => config.prompt.ai = value,
+                    _ => unreachable!("validated prompt field"),
+                }
+                Ok(())
+            })
+        }
+        "reset" if rest.trim().is_empty() => set_prompt_config(state, out, |config| {
+            config.prompt = PromptConfig::default();
+            Ok(())
+        }),
+        _ => {
+            writeln!(out, "usage: #prompt [draft|history|ai <template>|reset]").map_err(Into::into)
+        }
+    }
+}
+
+fn set_prompt_config(
+    state: &mut AppState,
+    out: &mut impl Write,
+    update: impl FnOnce(&mut config::Config) -> Result<()>,
+) -> Result<()> {
+    let Some(path) = &state.config_path else {
+        writeln!(out, "config path is not configured; #prompt not saved")?;
+        return Ok(());
+    };
+    let mut config = match config::load_config(path) {
+        Ok(config) => config,
+        Err(err) => {
+            state.append_event(EventLevel::Error, "config error")?;
+            return Err(err);
+        }
+    };
+    update(&mut config)?;
+    config::normalize_config(&mut config);
+    if let Err(err) = config::save_config(path, &config) {
+        state.append_event(EventLevel::Error, "config error")?;
+        return Err(err);
+    }
+    state.prompt_templates = config.prompt.into();
+    write_prompt_config(out, &state.prompt_templates)
+}
+
+fn write_prompt_config(out: &mut impl Write, prompt: &PromptTemplates) -> Result<()> {
+    writeln!(
+        out,
+        "prompt.draft={}",
+        format_prompt_template_value(&prompt.draft)
+    )?;
+    writeln!(
+        out,
+        "prompt.history={}",
+        format_prompt_template_value(&prompt.history)
+    )?;
+    writeln!(
+        out,
+        "prompt.ai={}",
+        format_prompt_template_value(&prompt.ai)
+    )?;
+    Ok(())
+}
+
+fn parse_prompt_template_value(raw: &str) -> Option<String> {
+    if raw.is_empty() {
+        return None;
+    }
+    match raw.chars().next()? {
+        '"' => serde_json::from_str::<String>(raw).ok(),
+        '\'' => raw
+            .strip_prefix('\'')
+            .and_then(|value| value.strip_suffix('\''))
+            .map(str::to_string),
+        _ => Some(raw.to_string()),
+    }
+}
+
+fn format_prompt_template_value(value: &str) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| format!("{value:?}"))
+}
+
+fn split_first_word(value: &str) -> (&str, &str) {
+    let split_at = value.find(char::is_whitespace).unwrap_or(value.len());
+    let (word, rest) = value.split_at(split_at);
+    (word, rest)
 }
 
 fn update_context_config(state: &mut AppState, out: &mut impl Write, args: &str) -> Result<()> {
@@ -5805,6 +5917,7 @@ mod tests {
         assert!(output.contains("#status"));
         assert!(output.contains("#config"));
         assert!(output.contains("#doctor"));
+        assert!(output.contains("#prompt"));
         assert!(output.contains("#model"));
         assert!(output.contains("#base-url"));
         assert!(output.contains("#env-key"));
@@ -6346,6 +6459,121 @@ mod tests {
                 "missing {expected:?} in {output:?}"
             );
             assert_eq!(state.last_status, None);
+            assert!(state.draft.is_empty());
+        }
+    }
+
+    #[test]
+    fn prompt_config_commands_persist_apply_and_reset() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("config.toml");
+        let repo = temp.path().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        config::save_config(&config_path, &config::Config::default()).unwrap();
+        let mut state = AppState {
+            config_path: Some(config_path.clone()),
+            current_cwd: Some(repo),
+            ..AppState::default()
+        };
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+
+        for (line, expected) in [
+            ("#prompt", "prompt.draft=\"{mode} \""),
+            (
+                "#prompt draft \"[{basename}] > \"",
+                "prompt.draft=\"[{basename}] > \"",
+            ),
+            (
+                "#prompt history \"hist {mode} \"",
+                "prompt.history=\"hist {mode} \"",
+            ),
+            ("#prompt ai 'ai {mode} '", "prompt.ai=\"ai {mode} \""),
+        ] {
+            state.draft.insert_str(line);
+            let mut output = Vec::new();
+
+            execute_draft(
+                &mut state,
+                &mut backend,
+                &mut output,
+                Duration::from_secs(5),
+            )
+            .unwrap();
+
+            let output = String::from_utf8(output).unwrap();
+            assert!(
+                output.contains(expected),
+                "missing {expected:?} in {output:?}"
+            );
+            assert!(state.draft.is_empty());
+        }
+
+        assert_eq!(state.render_prompt_line(), "[repo] > ");
+        state.mode = Mode::History;
+        assert_eq!(state.render_prompt_line(), "hist $ ");
+        state.mode = Mode::Ai;
+        assert_eq!(state.render_prompt_line(), "ai % ");
+        state.mode = Mode::Draft;
+
+        let loaded = config::load_config(&config_path).unwrap();
+        assert_eq!(loaded.prompt.draft, "[{basename}] > ");
+        assert_eq!(loaded.prompt.history, "hist {mode} ");
+        assert_eq!(loaded.prompt.ai, "ai {mode} ");
+
+        state.draft.insert_str("#prompt reset");
+        let mut output = Vec::new();
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("prompt.draft=\"{user}@{host} {cwd} > \""));
+        assert_eq!(state.prompt_templates, PromptConfig::default().into());
+        assert_eq!(
+            config::load_config(&config_path).unwrap().prompt,
+            PromptConfig::default()
+        );
+    }
+
+    #[test]
+    fn prompt_config_commands_report_usage_and_missing_config() {
+        for (line, expected) in [
+            (
+                "#prompt draft",
+                "usage: #prompt [draft|history|ai <template>|reset]",
+            ),
+            ("#prompt draft \"\"", "prompt template must not be empty"),
+            (
+                "#prompt nope value",
+                "usage: #prompt [draft|history|ai <template>|reset]",
+            ),
+            (
+                "#prompt draft \"x> \"",
+                "config path is not configured; #prompt not saved",
+            ),
+        ] {
+            let mut state = AppState::default();
+            state.draft.insert_str(line);
+            let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+            let mut output = Vec::new();
+
+            execute_draft(
+                &mut state,
+                &mut backend,
+                &mut output,
+                Duration::from_secs(5),
+            )
+            .unwrap();
+
+            let output = String::from_utf8(output).unwrap();
+            assert!(
+                output.contains(expected),
+                "missing {expected:?} in {output:?}"
+            );
             assert!(state.draft.is_empty());
         }
     }

@@ -216,6 +216,18 @@ AI configuration:
 #env-key <ENV_NAME>
 ```
 
+Prompt customization:
+
+```text
+#prompt
+#prompt draft "{basename} > "
+#prompt history "{basename} $ "
+#prompt ai "{basename} % "
+#prompt reset
+```
+
+Use quotes when the prompt template should keep leading or trailing spaces.
+
 Completion:
 
 ```text
