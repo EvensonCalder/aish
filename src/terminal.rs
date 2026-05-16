@@ -201,12 +201,19 @@ fn refresh_after_background_events(state: &mut AppState, out: &mut impl Write) -
     if let Some(candidates) = state.drain_live_completion_events()
         && should_apply_completion_event_update(state)
     {
-        should_redraw |=
-            replace_completion_ui_from_candidates(state, candidates, terminal_display_width());
+        should_redraw |= replace_completion_ui_from_candidates(
+            state,
+            candidates,
+            terminal_display_width(),
+            should_show_completion_panel_for_event_update(state),
+        );
     }
     if state.drain_encrypted_write_events() {
+        let previous_inline = state.completion_inline.clone();
+        let previous_panel = state.completion_panel.clone();
         refresh_live_completion_ui(state)?;
-        should_redraw = true;
+        should_redraw |=
+            state.completion_inline != previous_inline || state.completion_panel != previous_panel;
     }
     if should_redraw {
         redraw(state, out)?;
@@ -225,6 +232,10 @@ fn should_apply_completion_event_update(state: &AppState) -> bool {
         && state.draft.cursor() == state.draft.as_str().len()
 }
 
+fn should_show_completion_panel_for_event_update(state: &AppState) -> bool {
+    state.completion_config.mode() == CompletionMode::Tab || !state.completion_panel.is_empty()
+}
+
 fn sync_backend_pty_size(backend: &mut PtyBackend) -> Result<()> {
     let (cols, rows) = size()?;
     backend.resize(pty_size(cols, rows))
@@ -238,6 +249,10 @@ fn handle_key(
     command_timeout: Duration,
 ) -> Result<bool> {
     let had_completion_ui = !state.completion_panel.is_empty() || state.completion_inline.is_some();
+    let previous_draft = state.draft.as_str().to_string();
+    let previous_cursor = state.draft.cursor();
+    let previous_mode = state.mode;
+    let previous_draft_from_editor = state.draft_from_editor;
     let previous_completion_input = live_completion_input_key(state);
     let action = apply_key_to_state(key, state);
     if refresh_should_defer_completion_display(state, &previous_completion_input, &action) {
@@ -291,6 +306,7 @@ fn handle_key(
             state.move_draft_selection_newer()?;
         }
         KeyAction::Submit => {
+            state.cancel_live_completion();
             if had_completion_ui {
                 redraw(state, out)?;
             }
@@ -331,8 +347,85 @@ fn handle_key(
     if refresh_completion {
         refresh_live_completion_ui(state)?;
     }
+    let width = terminal_display_width();
+    if can_render_appended_char_incrementally(
+        key,
+        &action,
+        state,
+        had_completion_ui,
+        &previous_draft,
+        previous_cursor,
+        previous_mode,
+        previous_draft_from_editor,
+        width,
+    ) {
+        write_incremental_appended_char(state, out, key, width)?;
+        return Ok(false);
+    }
     redraw(state, out)?;
     Ok(false)
+}
+
+fn can_render_appended_char_incrementally(
+    key: KeyEvent,
+    action: &KeyAction,
+    state: &AppState,
+    had_completion_ui: bool,
+    previous_draft: &str,
+    previous_cursor: usize,
+    previous_mode: crate::modes::Mode,
+    previous_draft_from_editor: bool,
+    width: usize,
+) -> bool {
+    let KeyCode::Char(ch) = key.code else {
+        return false;
+    };
+    if !key.modifiers.difference(KeyModifiers::SHIFT).is_empty()
+        || !matches!(action, KeyAction::Continue)
+        || had_completion_ui
+        || state.completion_inline.is_some()
+        || !state.completion_panel.is_empty()
+        || !state.render_anchor_saved
+        || previous_mode != crate::modes::Mode::Draft
+        || state.mode != crate::modes::Mode::Draft
+        || previous_draft_from_editor
+        || state.draft_from_editor
+        || previous_cursor != previous_draft.len()
+        || previous_draft.contains('\n')
+    {
+        return false;
+    }
+    if state.draft.as_str().len() < previous_draft.len() {
+        return false;
+    }
+    let appended = &state.draft.as_str()[previous_draft.len()..];
+    if state.draft.cursor() != state.draft.as_str().len()
+        || !state.draft.as_str().starts_with(previous_draft)
+        || appended != ch.to_string()
+    {
+        return false;
+    }
+    let previous_rendered = format!("{}{}", state.prompt_prefix(), previous_draft);
+    let (previous_row, _) = visual_position(&previous_rendered, width);
+    let (current_row, _) = terminal_cursor_position_for_width(state, width);
+    current_row == previous_row
+}
+
+fn write_incremental_appended_char(
+    state: &mut AppState,
+    out: &mut impl Write,
+    key: KeyEvent,
+    width: usize,
+) -> Result<()> {
+    let KeyCode::Char(ch) = key.code else {
+        return Ok(());
+    };
+    write!(out, "{ch}")?;
+    let rendered = state.rendered_text();
+    state.last_rendered_lines = visual_line_count(&rendered, width);
+    state.last_rendered_cursor_row = terminal_cursor_position_for_width(state, width).0;
+    out.flush()?;
+    Ok(())
 }
 
 fn clear_screen_for_redraw(state: &mut AppState, out: &mut impl Write) -> Result<()> {
@@ -1067,7 +1160,7 @@ fn refresh_live_completion_ui_for_width(state: &mut AppState, width: usize) -> R
     }
     let candidates = state.start_live_completion_request(usize::MAX)?;
     if !candidates.is_empty() {
-        set_completion_ui_from_candidates(state, candidates, width);
+        set_completion_ui_from_candidates_without_panel(state, candidates, width);
     }
     Ok(())
 }
@@ -1129,6 +1222,23 @@ fn set_completion_ui_from_candidates(
     candidates: Vec<CompletionCandidate>,
     width: usize,
 ) {
+    set_completion_ui_from_candidates_with_panel(state, candidates, width, true);
+}
+
+fn set_completion_ui_from_candidates_without_panel(
+    state: &mut AppState,
+    candidates: Vec<CompletionCandidate>,
+    width: usize,
+) {
+    set_completion_ui_from_candidates_with_panel(state, candidates, width, false);
+}
+
+fn set_completion_ui_from_candidates_with_panel(
+    state: &mut AppState,
+    candidates: Vec<CompletionCandidate>,
+    width: usize,
+    show_panel: bool,
+) {
     let token = current_token_context(state.draft.as_str(), state.draft.cursor());
     let inline_index = candidates
         .iter()
@@ -1138,6 +1248,10 @@ fn set_completion_ui_from_candidates(
             .get(index)
             .and_then(|candidate| inline_completion_from_candidate(&token, candidate))
     });
+    if !show_panel {
+        state.completion_panel.clear();
+        return;
+    }
     let panel_candidates: Vec<_> = if let Some(inline_index) = inline_index {
         candidates
             .into_iter()
@@ -1166,12 +1280,13 @@ fn replace_completion_ui_from_candidates(
     state: &mut AppState,
     candidates: Vec<CompletionCandidate>,
     width: usize,
+    show_panel: bool,
 ) -> bool {
     let previous_inline = state.completion_inline.clone();
     let previous_panel = state.completion_panel.clone();
     state.clear_completion_ui();
     if !candidates.is_empty() {
-        set_completion_ui_from_candidates(state, candidates, width);
+        set_completion_ui_from_candidates_with_panel(state, candidates, width, show_panel);
     }
     state.completion_inline != previous_inline || state.completion_panel != previous_panel
 }
@@ -1445,21 +1560,24 @@ mod tests {
         );
     }
 
-    fn wait_for_completion_panel_contains(state: &mut AppState, needle: &str) {
+    fn wait_for_cached_completion_contains(state: &mut AppState, needle: &str) {
         let mut output = Vec::new();
         for _ in 0..50 {
             refresh_after_background_events(state, &mut output).unwrap();
             if state
-                .completion_panel
+                .cached_live_completion_candidates_with_max_results(usize::MAX)
+                .unwrap_or_default()
                 .iter()
-                .any(|row| row.contains(needle))
+                .any(|candidate| {
+                    candidate.display.contains(needle) || candidate.replacement.contains(needle)
+                })
             {
                 return;
             }
             std::thread::sleep(Duration::from_millis(10));
         }
         panic!(
-            "missing completion panel row containing {needle:?}; inline was {:?}, panel was {:?}",
+            "missing cached completion containing {needle:?}; inline was {:?}, panel was {:?}",
             state.completion_inline, state.completion_panel
         );
     }
@@ -1980,6 +2098,33 @@ mod tests {
     }
 
     #[test]
+    fn append_only_typing_renders_incrementally_without_full_redraw() {
+        let mut completion_config = CompletionConfig::default();
+        completion_config.set_mode(CompletionMode::Off);
+        let mut state = AppState {
+            completion_config,
+            ..AppState::default()
+        };
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+        redraw(&mut state, &mut output).unwrap();
+        output.clear();
+
+        handle_key(
+            key(KeyCode::Char('x')),
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        assert_eq!(state.draft.as_str(), "x");
+        assert_eq!(String::from_utf8(output).unwrap(), "x");
+        assert!(state.render_anchor_saved);
+    }
+
+    #[test]
     fn async_history_completion_updates_live_ui_after_request() {
         let temp = tempfile::tempdir().unwrap();
         std::fs::write(temp.path().join("local-file"), "").unwrap();
@@ -2122,7 +2267,7 @@ mod tests {
     }
 
     #[test]
-    fn live_inline_completion_shows_remaining_candidates_as_panel_hints() {
+    fn live_inline_completion_keeps_remaining_candidates_hidden_until_tab() {
         let temp = tempfile::tempdir().unwrap();
         let mut state = AppState {
             current_cwd: Some(temp.path().to_path_buf()),
@@ -2135,10 +2280,7 @@ mod tests {
         refresh_live_completion_ui_for_width(&mut state, 80).unwrap();
 
         assert_eq!(state.completion_inline.as_ref().unwrap().suffix, "ne.txt");
-        assert_eq!(
-            state.completion_panel,
-            vec!["file cat only.log".to_string()]
-        );
+        assert!(state.completion_panel.is_empty());
     }
 
     #[test]
@@ -2645,7 +2787,7 @@ mod tests {
     }
 
     #[test]
-    fn live_template_placeholder_name_completion_accepts_raw_placeholder() {
+    fn tab_template_placeholder_name_completion_accepts_raw_placeholder() {
         let temp = tempfile::tempdir().unwrap();
         let template_path = temp.path().join("templates.jsonl");
         crate::templates::append_template(
@@ -2660,7 +2802,11 @@ mod tests {
         state.draft.insert_str("echo something");
 
         refresh_live_completion_ui_for_width(&mut state, 80).unwrap();
-        wait_for_completion_panel_contains(&mut state, "{something}");
+        assert!(state.completion_inline.is_none());
+        assert!(state.completion_panel.is_empty());
+        wait_for_cached_completion_contains(&mut state, "{something}");
+
+        complete_or_show_candidates_for_width(&mut state, 80).unwrap();
 
         assert!(state.completion_inline.is_none());
         assert!(
@@ -2887,6 +3033,54 @@ mod tests {
         assert_eq!(screen.line(0), "> echo hello");
         assert_eq!(screen.line(1), "hello");
         assert_eq!(screen.line(2), "> ");
+    }
+
+    #[test]
+    fn submit_cancels_hidden_completion_request_before_command_output() {
+        let candidate = CompletionCandidate {
+            display: "echo hidden-history".to_string(),
+            replacement: "echo hidden-history".to_string(),
+            is_dir: false,
+            source: crate::completion::CompletionSource::History,
+        };
+        let mut state = AppState::default();
+        state.draft.insert_str("echo hello");
+        state.pending_completion = Some(crate::app::PendingCompletion {
+            id: 9,
+            line: "echo hello".to_string(),
+            cursor: "echo hello".len(),
+            candidates: vec![candidate.clone()],
+        });
+        state.pending_completion_update = Some(crate::app::PendingCompletionUpdate {
+            id: 9,
+            line: "echo hello".to_string(),
+            cursor: "echo hello".len(),
+            candidates: vec![candidate],
+            first_seen: Instant::now(),
+            final_tier_seen: true,
+        });
+        state.completion_display_not_before = Some(Instant::now() + Duration::from_secs(1));
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        handle_key(
+            key(KeyCode::Enter),
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let rendered = String::from_utf8(output).unwrap();
+        assert!(rendered.contains("hello"), "output was {rendered:?}");
+        assert!(
+            !rendered.contains("hidden-history"),
+            "hidden completion leaked into output: {rendered:?}"
+        );
+        assert!(state.pending_completion.is_none());
+        assert!(state.pending_completion_update.is_none());
+        assert!(state.completion_display_not_before.is_none());
     }
 
     #[test]

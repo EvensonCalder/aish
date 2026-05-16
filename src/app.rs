@@ -955,6 +955,13 @@ impl AppState {
         self.completion_inline = None;
     }
 
+    pub(crate) fn cancel_live_completion(&mut self) {
+        self.clear_completion_ui();
+        self.pending_completion = None;
+        self.pending_completion_update = None;
+        self.completion_display_not_before = None;
+    }
+
     fn templates_for_completion(&self) -> Result<Vec<TemplateEntry>> {
         if !self.templates.is_empty() || self.encryption_config.enabled {
             return Ok(self.templates.clone());
@@ -1672,7 +1679,7 @@ pub fn execute_draft(
     out: &mut impl Write,
     timeout: Duration,
 ) -> Result<()> {
-    state.clear_completion_ui();
+    state.cancel_live_completion();
     if state.pending_context.is_some() {
         writeln!(out, "context confirmation is pending; answer Y or n")?;
         state.mode = Mode::Draft;

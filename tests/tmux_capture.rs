@@ -272,6 +272,21 @@ fn tmux_completion_no_matches_remains_quiet_and_usable() {
 }
 
 #[test]
+fn tmux_completion_panel_is_cleared_before_enter_executes() {
+    let Some(captured) = run_tmux_script("completion_enter_clears_panel.sh") else {
+        return;
+    };
+    assert_adjacent_output(&captured, "echo after-enter", "after-enter");
+}
+
+#[test]
+fn tmux_completion_auto_panel_does_not_leak_to_scrollback() {
+    let Some(_captured) = run_tmux_script("completion_auto_panel_scrollback.sh") else {
+        return;
+    };
+}
+
+#[test]
 fn tmux_completion_right_accepts_first_and_executes() {
     let Some(captured) = run_tmux_script("completion_right_accepts.sh") else {
         return;

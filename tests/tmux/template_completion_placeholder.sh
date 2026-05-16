@@ -16,6 +16,10 @@ sleep 1
 
 tmux send-keys -t "$SESSION" 'echo something'
 sleep 1
+AUTO_CAPTURE="$(tmux capture-pane -p -t "$SESSION")"
+
+tmux send-keys -t "$SESSION" Tab
+sleep 1
 PANEL_CAPTURE="$(tmux capture-pane -p -t "$SESSION")"
 
 tmux send-keys -t "$SESSION" Tab
@@ -36,6 +40,10 @@ sleep 1
 
 tmux send-keys -t "$SESSION" 'echo {a} {something}'
 sleep 1
+STRUCTURAL_AUTO_CAPTURE="$(tmux capture-pane -p -t "$SESSION")"
+
+tmux send-keys -t "$SESSION" Tab
+sleep 1
 STRUCTURAL_PANEL_CAPTURE="$(tmux capture-pane -p -t "$SESSION")"
 
 tmux send-keys -t "$SESSION" Tab
@@ -46,9 +54,11 @@ tmux send-keys -t "$SESSION" Enter
 sleep 1
 STRUCTURAL_BLOCK_CAPTURE="$(tmux capture-pane -p -S - -t "$SESSION")"
 
+printf '%s\n' "$AUTO_CAPTURE"
 printf '%s\n' "$PANEL_CAPTURE"
 printf '%s\n' "$ACCEPT_CAPTURE"
 printf '%s\n' "$BLOCK_CAPTURE"
+printf '%s\n' "$STRUCTURAL_AUTO_CAPTURE"
 printf '%s\n' "$STRUCTURAL_PANEL_CAPTURE"
 printf '%s\n' "$STRUCTURAL_ACCEPT_CAPTURE"
 printf '%s\n' "$STRUCTURAL_BLOCK_CAPTURE"

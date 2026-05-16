@@ -33,7 +33,10 @@ tmux send-keys -t "$SESSION" C-c
 sleep 1
 tmux send-keys -t "$SESSION" '#completion max 1' Enter
 sleep 1
+tmux send-keys -t "$SESSION" '#completion mode tab' Enter
+sleep 1
 tmux send-keys -t "$SESSION" 'cat alpha-'
+tmux send-keys -t "$SESSION" Tab
 sleep 1
 PANEL_MAX_ONE="$(tmux capture-pane -p -t "$SESSION")"
 tmux send-keys -t "$SESSION" Escape
