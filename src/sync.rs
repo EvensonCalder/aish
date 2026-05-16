@@ -310,33 +310,68 @@ pub fn classify_git_sync_step(success: bool, stdout: &str, stderr: &str) -> Sync
 }
 
 pub fn managed_add_plan(config: &SyncConfig) -> ManagedAddPlan {
+    managed_add_plan_with_encryption(config, false)
+}
+
+pub fn managed_add_plan_with_encryption(
+    config: &SyncConfig,
+    encryption_enabled: bool,
+) -> ManagedAddPlan {
     let mut paths = vec![".gitignore".to_string()];
     if config.ai {
-        paths.push("history/ai.jsonl".to_string());
+        paths.push(managed_storage_path("history/ai.jsonl", encryption_enabled));
     }
     if config.history {
-        paths.push("history/notes.jsonl".to_string());
-        paths.push("history/regular.jsonl".to_string());
+        paths.push(managed_storage_path(
+            "history/notes.jsonl",
+            encryption_enabled,
+        ));
+        paths.push(managed_storage_path(
+            "history/regular.jsonl",
+            encryption_enabled,
+        ));
     }
     if config.templates {
-        paths.push("templates/templates.jsonl".to_string());
+        paths.push(managed_storage_path(
+            "templates/templates.jsonl",
+            encryption_enabled,
+        ));
     }
     if config.drafts {
-        paths.push("history/draft.jsonl".to_string());
+        paths.push(managed_storage_path(
+            "history/draft.jsonl",
+            encryption_enabled,
+        ));
     }
     paths.sort();
     paths.dedup();
     ManagedAddPlan { paths }
 }
 
+fn managed_storage_path(path: &str, encryption_enabled: bool) -> String {
+    if encryption_enabled {
+        format!("{path}.gpg")
+    } else {
+        path.to_string()
+    }
+}
+
 pub fn existing_managed_add_plan(
     root: impl AsRef<Path>,
     config: &SyncConfig,
 ) -> ExistingManagedAddPlan {
+    existing_managed_add_plan_with_encryption(root, config, false)
+}
+
+pub fn existing_managed_add_plan_with_encryption(
+    root: impl AsRef<Path>,
+    config: &SyncConfig,
+    encryption_enabled: bool,
+) -> ExistingManagedAddPlan {
     let root = root.as_ref();
     let mut paths = Vec::new();
     let mut missing_paths = Vec::new();
-    for path in managed_add_plan(config).paths {
+    for path in managed_add_plan_with_encryption(config, encryption_enabled).paths {
         if path == ".gitignore" || root.join(&path).exists() {
             paths.push(path);
         } else {
@@ -401,7 +436,15 @@ pub fn conservative_sync_plan_for_existing_paths(
     root: impl AsRef<Path>,
     config: &SyncConfig,
 ) -> ConservativeSyncPlan {
-    let add_plan = existing_managed_add_plan(root, config);
+    conservative_sync_plan_for_existing_paths_with_encryption(root, config, false)
+}
+
+pub fn conservative_sync_plan_for_existing_paths_with_encryption(
+    root: impl AsRef<Path>,
+    config: &SyncConfig,
+    encryption_enabled: bool,
+) -> ConservativeSyncPlan {
+    let add_plan = existing_managed_add_plan_with_encryption(root, config, encryption_enabled);
     let commands = vec![
         pull_rebase_plan(),
         GitCommandPlan {
@@ -757,6 +800,29 @@ mod tests {
                 "history/notes.jsonl",
                 "history/regular.jsonl",
                 "templates/templates.jsonl",
+            ]
+        );
+    }
+
+    #[test]
+    fn managed_add_plan_uses_gpg_paths_when_encryption_is_enabled() {
+        let config = SyncConfig {
+            ai: true,
+            history: true,
+            templates: true,
+            drafts: true,
+            ..SyncConfig::default()
+        };
+
+        assert_eq!(
+            managed_add_plan_with_encryption(&config, true).paths,
+            vec![
+                ".gitignore",
+                "history/ai.jsonl.gpg",
+                "history/draft.jsonl.gpg",
+                "history/notes.jsonl.gpg",
+                "history/regular.jsonl.gpg",
+                "templates/templates.jsonl.gpg",
             ]
         );
     }

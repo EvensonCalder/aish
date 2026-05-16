@@ -17,6 +17,7 @@ pub struct Config {
     pub completion: CompletionConfig,
     pub ai: AiConfig,
     pub context: ContextConfig,
+    pub encryption: EncryptionConfig,
     pub sync: SyncConfig,
 }
 
@@ -112,6 +113,8 @@ pub struct AiConfig {
     pub model: String,
     pub base_url: String,
     pub env_key: String,
+    #[serde(skip)]
+    pub api_key_override: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -120,6 +123,13 @@ pub struct ContextConfig {
     pub enabled: bool,
     pub confirm: bool,
     pub max_bytes: usize,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct EncryptionConfig {
+    pub enabled: bool,
+    pub recipient: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -372,9 +382,11 @@ pub fn normalize_config(config: &mut Config) {
     config.ai.model = config.ai.model.trim().to_string();
     config.ai.base_url = config.ai.base_url.trim().to_string();
     config.ai.env_key = config.ai.env_key.trim().to_string();
+    config.ai.api_key_override = None;
     if config.context.max_bytes == 0 {
         config.context.max_bytes = ContextConfig::default().max_bytes;
     }
+    config.encryption.recipient = config.encryption.recipient.trim().to_string();
     config.sync.remote = config.sync.remote.trim().to_string();
     config.sync.schedule = config.sync.schedule.trim().to_string();
 }
@@ -407,6 +419,7 @@ mod tests {
         assert_eq!(config.completion.match_threshold_percent, 50);
         assert_eq!(config.ai, AiConfig::default());
         assert_eq!(config.context, ContextConfig::default());
+        assert_eq!(config.encryption, EncryptionConfig::default());
         assert_eq!(config.sync, SyncConfig::default());
         assert!(config.storage.home.ends_with(".aish"));
     }
@@ -446,11 +459,16 @@ mod tests {
                 model: "  gpt-test  ".to_string(),
                 base_url: "  https://example.invalid/v1  ".to_string(),
                 env_key: "  OPENAI_API_KEY  ".to_string(),
+                api_key_override: Some("must-not-persist".to_string()),
             },
             context: ContextConfig {
                 enabled: false,
                 confirm: false,
                 max_bytes: 0,
+            },
+            encryption: EncryptionConfig {
+                enabled: true,
+                recipient: "  test@example.invalid  ".to_string(),
             },
             sync: SyncConfig {
                 remote: "  git@example.invalid:aish.git  ".to_string(),
@@ -471,11 +489,16 @@ mod tests {
             model: "gpt-test".to_string(),
             base_url: "https://example.invalid/v1".to_string(),
             env_key: "OPENAI_API_KEY".to_string(),
+            api_key_override: None,
         };
         expected.context = ContextConfig {
             enabled: false,
             confirm: false,
             max_bytes: 65_536,
+        };
+        expected.encryption = EncryptionConfig {
+            enabled: true,
+            recipient: "test@example.invalid".to_string(),
         };
         expected.completion.match_threshold_percent = 50;
         expected.sync = SyncConfig {

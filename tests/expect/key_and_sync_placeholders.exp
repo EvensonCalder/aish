@@ -1,6 +1,6 @@
 #!/usr/bin/env expect
-# Placeholder key/encryption/sync commands should report safe no-op behavior and
-# must not run shell/git/GPG side effects.
+# Key/encryption/sync commands should report current state and avoid implicit
+# shell/git/GPG side effects when required config is missing.
 
 set timeout 10
 source [file dirname [info script]]/_lib.exp
@@ -9,7 +9,7 @@ aish_spawn
 
 aish_send "#key set"
 aish_enter
-aish_expect "#key set is not implemented yet; no key stored"
+aish_expect {encryption recipient is not configured; run #encrypt on <recipient> or set [encryption].recipient}
 aish_wait_prompt
 
 aish_send "#key clear"
@@ -19,8 +19,7 @@ aish_wait_prompt
 
 aish_send "#encrypt on"
 aish_enter
-aish_expect "warning: existing plaintext data may remain in git history; Aish will not rewrite history automatically"
-aish_expect "encryption is not implemented yet; no data changed"
+aish_expect {encryption recipient is not configured; run #encrypt on <recipient> or set [encryption].recipient}
 aish_wait_prompt
 
 aish_send "#push"

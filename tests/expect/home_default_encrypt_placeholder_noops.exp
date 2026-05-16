@@ -1,12 +1,11 @@
 #!/usr/bin/env expect
-# Production-style encryption placeholder: without AISH_HOME, #encrypt on should
-# warn conservatively but must not mutate storage, initialize git, or create
-# scheduler files while encryption is still unimplemented.
+# Production-style encryption: without AISH_HOME, #encrypt on should migrate
+# managed JSONL storage to GPG files without initializing git or scheduler files.
 
 set timeout 10
 source [file dirname [info script]]/_lib.exp
 
-set isolated_home "/tmp/aish-home-encrypt-placeholder-[pid]-[clock clicks]"
+set isolated_home "/tmp/aish-home-encrypt-[pid]-[clock clicks]"
 file delete -force $isolated_home
 file mkdir $isolated_home
 set old_home $::env(HOME)
@@ -14,15 +13,47 @@ set old_aish_home_exists [info exists ::env(AISH_HOME)]
 if {$old_aish_home_exists} {
     set old_aish_home $::env(AISH_HOME)
 }
+set old_aish_gpg_exists [info exists ::env(AISH_GPG)]
+if {$old_aish_gpg_exists} {
+    set old_aish_gpg $::env(AISH_GPG)
+}
+
+set fake_gpg "$isolated_home/fake-gpg"
+set fh [open $fake_gpg w]
+puts $fh {#!/bin/sh
+mode=encrypt
+out=""
+input=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --version) printf 'fake gpg\n'; exit 0 ;;
+    --decrypt) mode=decrypt ;;
+    --output) shift; out="$1" ;;
+    --recipient|--trust-model) shift ;;
+    --batch|--yes|--no-tty|--encrypt) ;;
+    *) input="$1" ;;
+  esac
+  shift
+done
+if [ "$mode" = decrypt ]; then
+  cat "$input"
+else
+  cp "$input" "$out"
+fi
+}
+close $fh
+file attributes $fake_gpg -permissions 0755
+
 unset -nocomplain ::env(AISH_HOME)
 set ::env(HOME) $isolated_home
+set ::env(AISH_GPG) $fake_gpg
 set aish_home "$isolated_home/.aish"
 
 aish_spawn_without_aish_home
 
-aish_send "echo encrypt-placeholder-history"
+aish_send "echo encrypt-history"
 aish_enter
-aish_expect "encrypt-placeholder-history"
+aish_expect "encrypt-history"
 aish_wait_prompt
 
 aish_send "#mt echo encrypt-template-ok"
@@ -30,26 +61,26 @@ aish_enter
 aish_expect_template_stored
 aish_wait_prompt
 
-aish_send "#encrypt on"
+aish_send "#encrypt on test@example.invalid"
 aish_enter
-aish_expect "warning: existing plaintext data may remain in git history; Aish will not rewrite history automatically"
-aish_expect "encryption is not implemented yet; no data changed"
+aish_expect "Encryption is now enabled for future writes."
+aish_expect "Aish will sync encrypted files from now on."
+aish_expect "encryption=on"
 aish_wait_prompt
 
 aish_send "#status"
 aish_enter
-aish_expect "encryption=off"
+aish_expect "encryption=on"
+aish_expect "encryption.recipient=test@example.invalid"
 aish_wait_prompt
 
 aish_quit
 
 foreach path [list \
-    "$aish_home/history/regular.jsonl" \
-    "$aish_home/templates/templates.jsonl" \
     "$aish_home/config.toml" \
 ] {
     if {![file exists $path]} {
-        puts stderr "expected plaintext file missing after placeholder encryption: $path"
+        puts stderr "expected config file missing after encryption: $path"
         exit 6
     }
 }
@@ -57,12 +88,30 @@ foreach path [list \
 foreach path [list \
     "$aish_home/history/regular.jsonl.gpg" \
     "$aish_home/templates/templates.jsonl.gpg" \
+] {
+    if {![file exists $path]} {
+        puts stderr "expected encrypted file missing after encryption: $path"
+        exit 6
+    }
+}
+
+foreach path [list \
+    "$aish_home/history/regular.jsonl" \
+    "$aish_home/templates/templates.jsonl" \
+] {
+    if {[file exists $path]} {
+        puts stderr "unexpected plaintext file after encryption: $path"
+        exit 6
+    }
+}
+
+foreach path [list \
     "$aish_home/config.toml.gpg" \
     "$aish_home/.git" \
     "$aish_home/cache/runtime/scheduler" \
 ] {
     if {[file exists $path]} {
-        puts stderr "unexpected encryption placeholder side effect: $path"
+        puts stderr "unexpected encryption side effect: $path"
         exit 6
     }
 }
@@ -70,7 +119,8 @@ foreach path [list \
 aish_spawn_without_aish_home
 aish_send "#status"
 aish_enter
-aish_expect "encryption=off"
+aish_expect "encryption=on"
+aish_expect "encryption.recipient=test@example.invalid"
 aish_wait_prompt
 aish_quit
 
@@ -79,5 +129,10 @@ if {$old_aish_home_exists} {
     set ::env(AISH_HOME) $old_aish_home
 } else {
     unset -nocomplain ::env(AISH_HOME)
+}
+if {$old_aish_gpg_exists} {
+    set ::env(AISH_GPG) $old_aish_gpg
+} else {
+    unset -nocomplain ::env(AISH_GPG)
 }
 file delete -force $isolated_home

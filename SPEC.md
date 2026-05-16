@@ -1055,7 +1055,7 @@ Commands:
 Priority:
 
 1. Environment variable named by `#env-key`.
-2. GPG-stored key from `#key set`.
+2. GPG-stored key from `#key set`. `#key set` encrypts the current environment key value for `[encryption].recipient`.
 3. Common fallback environment variables if configured later.
 
 ---
@@ -1066,11 +1066,13 @@ Commands:
 
 ```text
 #encrypt on
+#encrypt on <recipient>
 #encrypt off
 ```
 
 Behavior:
 
+- `[encryption].recipient` supplies the GPG recipient. `#encrypt on <recipient>` may set and persist it before migration.
 - Encrypt regular history, AI history, draft history, notes, and templates.
 - Encrypt template payload metadata as well as bodies. User-facing template names are not part of the product model; template IDs are stable content-hash handles used for exact operations, and no plaintext template search/list index should be persisted when encryption is enabled.
 - Secrets are always stored encrypted.

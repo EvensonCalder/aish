@@ -51,7 +51,7 @@ aish_send "#status"
 aish_enter
 aish_expect "ai.model=home-model"
 aish_expect "ai.final_url=https://home.example.invalid/v1/chat/completions"
-aish_expect "ai.key_source=env"
+aish_expect "ai.key_source=unconfigured"
 assert_no "HOME_EXPECT_API_KEY" "keybindings="
 aish_wait_prompt
 

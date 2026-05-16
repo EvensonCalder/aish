@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use crossterm::event::{self, Event};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, is_raw_mode_enabled};
 
-use crate::ai::{normalize_chat_completions_url, request_ai_items};
+use crate::ai::{normalize_chat_completions_url, read_api_key_from_env, request_ai_items};
 use crate::commands::{
     IMPLEMENTED_PRIVATE_COMMANDS, ParsedLine, parse_line, suggest_private_command,
 };
@@ -19,7 +19,7 @@ use crate::completion::{
 };
 use crate::config::{
     self, AiConfig, CompletionConfig, CompletionTabAccept, ContextConfig, EditorConfig,
-    PasteConfig, PromptConfig, SyncConfig,
+    EncryptionConfig, PasteConfig, PromptConfig, SyncConfig,
 };
 use crate::context::{
     build_contextual_ai_prompt, is_dangerous_context_command, run_context_command,
@@ -28,10 +28,15 @@ use crate::editor::{
     EditorCommand, EditorRunResult, PreparedEditorSession, prepare_editor_file, read_editor_file,
     resolve_editor_command, run_editor_command,
 };
-use crate::encryption::plaintext_git_history_warning;
+use crate::encryption::{
+    append_encrypted_jsonl, atomic_gpg_encrypt_bytes, gpg_decrypt_file, gpg_program,
+    load_encrypted_jsonl, migrate_gpg_jsonl_to_plaintext, migrate_plaintext_jsonl_to_gpg,
+    plaintext_git_history_warning, rewrite_encrypted_jsonl,
+};
 use crate::history::{
     AiCommandIndex, AiItem, AiItemKind, AiSession, DraftEntry, HistoryEntry, HistorySource,
-    HistoryStore, NoteEntry, ai_command_indices, append_jsonl, load_jsonl, trim_combined_history,
+    HistoryStore, NoteEntry, ai_command_indices, append_jsonl, load_jsonl, newest_first_indices,
+    trim_combined_history,
 };
 use crate::input::InputBuffer;
 use crate::keybindings::default_keybindings;
@@ -46,15 +51,16 @@ use crate::pty::{PtyBackend, PtyCommandEvent};
 use crate::shell_integration::{is_interactive_passthrough_command, passthrough_key_bytes};
 use crate::sync::{
     GitCommandPlan, StartupSyncDecision, SyncFailureKind, SyncLock, SyncStepOutcome,
-    classify_git_sync_step, conservative_sync_plan_for_existing_paths, init_repo_plan,
-    log_sync_failure, maintain_managed_gitignore, startup_sync_decision,
+    classify_git_sync_step, conservative_sync_plan_for_existing_paths_with_encryption,
+    init_repo_plan, log_sync_failure, maintain_managed_gitignore, startup_sync_decision,
     tracked_managed_files_warning,
 };
 #[cfg(test)]
 use crate::templates::template_id;
 use crate::templates::{
-    TemplateEntry, append_template, apply_template_values_with_usage, find_template_by_id,
-    load_templates, remove_templates_by_id, replace_template_by_id, template_placeholders,
+    TemplateEntry, TemplateRemoval, append_template, apply_template_values_with_usage,
+    find_template_by_id, load_templates, remove_templates_by_id, replace_template_by_id,
+    template_placeholders,
 };
 
 const OUTPUT_RING_CAPACITY: usize = 100;
@@ -133,6 +139,7 @@ pub struct AppState {
     pub ai_config: AiConfig,
     pub ai_requester: fn(&AiConfig, &str) -> Result<Vec<AiItem>>,
     pub context_config: ContextConfig,
+    pub encryption_config: EncryptionConfig,
     pub sync_config: SyncConfig,
     pub pending_context: Option<PendingContextPrompt>,
     pub completion_panel: Vec<String>,
@@ -187,6 +194,7 @@ impl Default for AppState {
             ai_config: AiConfig::default(),
             ai_requester: request_ai_items,
             context_config: ContextConfig::default(),
+            encryption_config: EncryptionConfig::default(),
             sync_config: SyncConfig::default(),
             pending_context: None,
             completion_panel: Vec::new(),
@@ -360,9 +368,7 @@ impl AppState {
             t: (self.clock)(),
             text,
         };
-        if let Some(path) = &self.draft_history_path {
-            append_jsonl(path, &entry)?;
-        }
+        self.append_draft_entry(&entry)?;
         self.draft_history.push(entry);
         self.selected_draft_index = self.draft_history.len().checked_sub(1);
         Ok(true)
@@ -518,10 +524,7 @@ impl AppState {
             return Ok(Vec::new());
         }
         let token = current_token_context(self.draft.as_str(), self.draft.cursor());
-        let templates = match &self.template_store_path {
-            Some(path) => load_templates(path)?.items,
-            None => Vec::new(),
-        };
+        let templates = self.load_templates()?.items;
         let history_newest_first: Vec<_> = self.regular_history.iter().rev().cloned().collect();
         let options = CompletionOptions {
             max_results,
@@ -598,19 +601,13 @@ impl AppState {
     }
 
     pub fn template_picker_candidates(&self) -> Result<Vec<String>> {
-        let Some(path) = &self.template_store_path else {
-            return Ok(Vec::new());
-        };
-        let loaded = load_templates(path)?;
+        let loaded = self.load_templates()?;
         Ok(template_picker_candidates(&loaded.items))
     }
 
     pub fn replace_draft_from_template_picker(&mut self, selected: &str) -> Result<bool> {
-        let Some(path) = &self.template_store_path else {
-            return Ok(false);
-        };
         let id = selected.split_whitespace().next().unwrap_or(selected);
-        let loaded = find_template_by_id(path, id)?;
+        let loaded = self.find_template_by_id(id)?;
         let Some(template) = loaded.items.first() else {
             return Ok(false);
         };
@@ -621,6 +618,160 @@ impl AppState {
         self.draft_from_template = true;
         self.mode = Mode::Draft;
         Ok(true)
+    }
+
+    fn load_templates(&self) -> Result<crate::history::JsonlLoad<TemplateEntry>> {
+        let Some(path) = &self.template_store_path else {
+            return Ok(crate::history::JsonlLoad {
+                items: Vec::new(),
+                errors: Vec::new(),
+            });
+        };
+        if self.encryption_config.enabled {
+            load_encrypted_jsonl::<TemplateEntry>(gpg_program(), path)
+        } else {
+            load_templates(path)
+        }
+    }
+
+    fn append_template(&self, entry: &TemplateEntry) -> Result<()> {
+        let Some(path) = &self.template_store_path else {
+            return Ok(());
+        };
+        if self.encryption_config.enabled {
+            append_encrypted_jsonl(
+                gpg_program(),
+                self.encryption_config.recipient.as_str(),
+                path,
+                entry,
+            )
+        } else {
+            append_template(path, entry)
+        }
+    }
+
+    fn find_template_by_id(&self, id: &str) -> Result<crate::history::JsonlLoad<TemplateEntry>> {
+        let Some(path) = &self.template_store_path else {
+            return Ok(crate::history::JsonlLoad {
+                items: Vec::new(),
+                errors: Vec::new(),
+            });
+        };
+        if self.encryption_config.enabled {
+            let mut loaded = self.load_templates()?;
+            loaded.items = loaded
+                .items
+                .into_iter()
+                .rev()
+                .find(|template| template.id() == id)
+                .into_iter()
+                .collect();
+            Ok(loaded)
+        } else {
+            find_template_by_id(path, id)
+        }
+    }
+
+    fn remove_templates_by_id(&self, id: &str) -> Result<Option<TemplateRemoval>> {
+        let Some(path) = &self.template_store_path else {
+            return Ok(None);
+        };
+        if !self.encryption_config.enabled {
+            return remove_templates_by_id(path, id).map(Some);
+        }
+        let loaded = self.load_templates()?;
+        let before = loaded.items.len();
+        let remaining: Vec<_> = loaded
+            .items
+            .into_iter()
+            .filter(|template| template.id() != id)
+            .collect();
+        let removed = before - remaining.len();
+        rewrite_encrypted_jsonl(
+            gpg_program(),
+            self.encryption_config.recipient.as_str(),
+            path,
+            &remaining,
+        )?;
+        Ok(Some(TemplateRemoval {
+            removed,
+            remaining,
+            errors: loaded.errors,
+        }))
+    }
+
+    fn replace_template_by_id(
+        &self,
+        existing_id: &str,
+        entry: TemplateEntry,
+    ) -> Result<Option<TemplateRemoval>> {
+        let Some(path) = &self.template_store_path else {
+            return Ok(None);
+        };
+        if !self.encryption_config.enabled {
+            return replace_template_by_id(path, existing_id, entry).map(Some);
+        }
+        let loaded = self.load_templates()?;
+        let before = loaded.items.len();
+        let mut remaining: Vec<_> = loaded
+            .items
+            .into_iter()
+            .filter(|template| template.id() != existing_id)
+            .collect();
+        let removed = before - remaining.len();
+        remaining.push(entry);
+        rewrite_encrypted_jsonl(
+            gpg_program(),
+            self.encryption_config.recipient.as_str(),
+            path,
+            &remaining,
+        )?;
+        Ok(Some(TemplateRemoval {
+            removed,
+            remaining,
+            errors: loaded.errors,
+        }))
+    }
+
+    fn append_note(&self, entry: NoteEntry) -> Result<()> {
+        let Some(path) = &self.notes_path else {
+            return Ok(());
+        };
+        self.append_jsonl_item(path, &entry)
+    }
+
+    fn append_draft_entry(&self, entry: &DraftEntry) -> Result<()> {
+        let Some(path) = &self.draft_history_path else {
+            return Ok(());
+        };
+        self.append_jsonl_item(path, entry)
+    }
+
+    fn append_ai_session(&self, session: &AiSession) -> Result<()> {
+        let Some(path) = &self.ai_history_path else {
+            return Ok(());
+        };
+        self.append_jsonl_item(path, session)
+    }
+
+    fn append_regular_history_entry(&self, entry: &HistoryEntry) -> Result<()> {
+        let Some(path) = &self.regular_history_path else {
+            return Ok(());
+        };
+        self.append_jsonl_item(path, entry)
+    }
+
+    fn append_jsonl_item<T: serde::Serialize>(&self, path: &Path, item: &T) -> Result<()> {
+        if self.encryption_config.enabled {
+            append_encrypted_jsonl(
+                gpg_program(),
+                self.encryption_config.recipient.as_str(),
+                path,
+                item,
+            )
+        } else {
+            append_jsonl(path, item)
+        }
     }
 
     pub fn store_ai_session_from_items(
@@ -637,9 +788,7 @@ impl AppState {
             model: model.to_string(),
             items,
         };
-        if let Some(path) = &self.ai_history_path {
-            append_jsonl(path, &session)?;
-        }
+        self.append_ai_session(&session)?;
         let new_session_index = self.ai_sessions.len();
         self.ai_sessions.push(session);
         self.ai_command_indices = ai_command_indices(&self.ai_sessions);
@@ -916,7 +1065,7 @@ fn ai_editor_initial_text(text: &str) -> Option<String> {
 
 pub fn run() -> Result<()> {
     let (layout, config) = config::init_default_layout(config::runtime_aish_dir()?)?;
-    let store = HistoryStore::load(&layout)?;
+    let store = load_history_store(&layout, &config.encryption)?;
     let mut backend = PtyBackend::spawn(&config.shell.backend)?;
     let mut state = AppState {
         current_cwd: backend.initial_cwd().map(PathBuf::from),
@@ -940,6 +1089,7 @@ pub fn run() -> Result<()> {
         completion_config: config.completion,
         ai_config: config.ai,
         context_config: config.context,
+        encryption_config: config.encryption,
         sync_config: config.sync,
         editor_temp_root: Some(layout.runtime_cache.join("editor")),
         ..AppState::default()
@@ -951,6 +1101,39 @@ pub fn run() -> Result<()> {
         &mut io::stdout(),
         Duration::from_secs(60),
     )
+}
+
+fn load_history_store(
+    layout: &config::DirectoryLayout,
+    encryption: &EncryptionConfig,
+) -> Result<HistoryStore> {
+    if !encryption.enabled {
+        return HistoryStore::load(layout);
+    }
+
+    let program = gpg_program();
+    let regular = load_encrypted_jsonl::<HistoryEntry>(&program, &layout.regular_history)?;
+    let drafts = load_encrypted_jsonl::<DraftEntry>(&program, &layout.draft_history)?;
+    let ai_sessions = load_encrypted_jsonl::<AiSession>(&program, &layout.ai_history)?;
+    let notes = load_encrypted_jsonl::<NoteEntry>(&program, &layout.notes)?;
+    let regular_newest_indices = newest_first_indices(regular.items.len());
+    let ai_command_indices = ai_command_indices(&ai_sessions.items);
+
+    let mut errors = Vec::new();
+    errors.extend(regular.errors);
+    errors.extend(drafts.errors);
+    errors.extend(ai_sessions.errors);
+    errors.extend(notes.errors);
+
+    Ok(HistoryStore {
+        regular: regular.items,
+        regular_newest_indices,
+        drafts: drafts.items,
+        ai_sessions: ai_sessions.items,
+        ai_command_indices,
+        notes: notes.items,
+        errors,
+    })
 }
 
 pub fn execute_draft(
@@ -1017,15 +1200,10 @@ pub fn execute_draft(
                 return Ok(());
             }
             ParsedLine::Note { tag, text } => {
-                if let Some(path) = &state.notes_path {
-                    append_jsonl(
-                        path,
-                        &NoteEntry {
-                            tag,
-                            text: text.to_string(),
-                        },
-                    )?;
-                }
+                state.append_note(NoteEntry {
+                    tag,
+                    text: text.to_string(),
+                })?;
                 writeln!(out, "note stored")?;
                 state.clear_draft_for_new_draft();
                 return Ok(());
@@ -1090,10 +1268,8 @@ pub fn execute_draft(
                         return Ok(());
                     }
                     "key" => {
-                        match args.split_whitespace().next() {
-                            Some("set") => {
-                                writeln!(out, "#key set is not implemented yet; no key stored")?
-                            }
+                        match parse_key_command(args) {
+                            Some("set") => set_stored_key(state, out)?,
                             Some("clear") => clear_stored_key(state, out)?,
                             _ => writeln!(out, "usage: #key set | #key clear")?,
                         }
@@ -1123,11 +1299,11 @@ pub fn execute_draft(
                     "history" => {
                         let count = args.parse::<usize>();
                         match (count, &state.regular_history_path, &state.ai_history_path) {
-                            (Ok(count), Some(regular_path), Some(ai_path)) => {
-                                let loaded = trim_combined_history(regular_path, ai_path, count)?;
+                            (Ok(count), Some(_), Some(_)) => {
+                                let loaded = trim_history_for_state(state, count)?;
                                 let keep_from = loaded.regular.items.len().saturating_sub(count);
                                 state.regular_history = loaded.regular.items[keep_from..].to_vec();
-                                state.ai_sessions = load_jsonl::<AiSession>(ai_path)?.items;
+                                state.ai_sessions = load_ai_sessions_for_state(state)?;
                                 state.ai_command_indices = ai_command_indices(&state.ai_sessions);
                                 state.selected_history_index = None;
                                 state.selected_ai_index = None;
@@ -1146,15 +1322,16 @@ pub fn execute_draft(
                     }
                     "mt" => {
                         match parse_template_body(args) {
-                            Some(body) => match &state.template_store_path {
-                                Some(path) => {
+                            Some(body) => {
+                                if state.template_store_path.is_some() {
                                     let entry = TemplateEntry::new(body);
                                     let id = entry.id();
-                                    append_template(path, &entry)?;
+                                    state.append_template(&entry)?;
                                     writeln!(out, "template stored: {id}")?;
+                                } else {
+                                    writeln!(out, "template storage is not configured")?;
                                 }
-                                None => writeln!(out, "template storage is not configured")?,
-                            },
+                            }
                             None => writeln!(out, "usage: #mt <template-body>")?,
                         }
                         state.clear_draft_for_new_draft();
@@ -1170,9 +1347,9 @@ pub fn execute_draft(
                                 )?;
                             }
                             Some("find") => match parse_template_find_query(args) {
-                                Some(query) => match &state.template_store_path {
-                                    Some(path) => {
-                                        let loaded = load_templates(path)?;
+                                Some(query) => {
+                                    if state.template_store_path.is_some() {
+                                        let loaded = state.load_templates()?;
                                         let mut matches = Vec::new();
                                         for template in loaded.items.iter().rev() {
                                             let id = template.id();
@@ -1194,15 +1371,15 @@ pub fn execute_draft(
                                                 loaded.errors.len()
                                             )?;
                                         }
+                                    } else {
+                                        writeln!(out, "template storage is not configured")?;
                                     }
-                                    None => writeln!(out, "template storage is not configured")?,
-                                },
+                                }
                                 None => writeln!(out, "{}", template_usage())?,
                             },
                             Some("rm") => match args.split_whitespace().nth(1) {
-                                Some(id) => match &state.template_store_path {
-                                    Some(path) => {
-                                        let removal = remove_templates_by_id(path, id)?;
+                                Some(id) => match state.remove_templates_by_id(id)? {
+                                    Some(removal) => {
                                         writeln!(
                                             out,
                                             "template removed: {id} ({})",
@@ -1221,11 +1398,13 @@ pub fn execute_draft(
                                 None => writeln!(out, "{}", template_usage())?,
                             },
                             Some("replace") => match parse_template_subcommand_args(args) {
-                                Some((id, body)) => match &state.template_store_path {
-                                    Some(path) => {
+                                Some((id, body)) => {
+                                    if state.template_store_path.is_some() {
                                         let entry = TemplateEntry::new(body);
                                         let new_id = entry.id();
-                                        let removal = replace_template_by_id(path, id, entry)?;
+                                        let removal = state
+                                            .replace_template_by_id(id, entry)?
+                                            .expect("template store path was checked");
                                         writeln!(
                                             out,
                                             "template replaced: {id} -> {new_id} (removed {})",
@@ -1238,15 +1417,16 @@ pub fn execute_draft(
                                                 removal.errors.len()
                                             )?;
                                         }
+                                    } else {
+                                        writeln!(out, "template storage is not configured")?;
                                     }
-                                    None => writeln!(out, "template storage is not configured")?,
-                                },
+                                }
                                 None => writeln!(out, "{}", template_usage())?,
                             },
                             Some("show") => match args.split_whitespace().nth(1) {
-                                Some(id) => match &state.template_store_path {
-                                    Some(path) => {
-                                        let loaded = find_template_by_id(path, id)?;
+                                Some(id) => {
+                                    if state.template_store_path.is_some() {
+                                        let loaded = state.find_template_by_id(id)?;
                                         match loaded.items.first() {
                                             Some(template) => {
                                                 writeln!(out, "template: {}", template.id())?;
@@ -1261,15 +1441,16 @@ pub fn execute_draft(
                                                 loaded.errors.len()
                                             )?;
                                         }
+                                    } else {
+                                        writeln!(out, "template storage is not configured")?;
                                     }
-                                    None => writeln!(out, "template storage is not configured")?,
-                                },
+                                }
                                 None => writeln!(out, "{}", template_usage())?,
                             },
                             Some("use") => match args.split_whitespace().nth(1) {
-                                Some(id) => match &state.template_store_path {
-                                    Some(path) => {
-                                        let loaded = find_template_by_id(path, id)?;
+                                Some(id) => {
+                                    if state.template_store_path.is_some() {
+                                        let loaded = state.find_template_by_id(id)?;
                                         match loaded.items.first() {
                                             Some(template) => {
                                                 let values = parse_template_values(args);
@@ -1332,9 +1513,10 @@ pub fn execute_draft(
                                                 loaded.errors.len()
                                             )?;
                                         }
+                                    } else {
+                                        writeln!(out, "template storage is not configured")?;
                                     }
-                                    None => writeln!(out, "template storage is not configured")?,
-                                },
+                                }
                                 None => writeln!(out, "{}", template_usage())?,
                             },
                             _ => writeln!(out, "{}", template_usage())?,
@@ -1348,10 +1530,7 @@ pub fn execute_draft(
                         return Ok(());
                     }
                     "encrypt" => {
-                        if args.split_whitespace().next() == Some("on") {
-                            writeln!(out, "{}", plaintext_git_history_warning())?;
-                        }
-                        writeln!(out, "encryption is not implemented yet; no data changed")?;
+                        update_encryption_config(state, out, args)?;
                         state.clear_draft_for_new_draft();
                         return Ok(());
                     }
@@ -1441,7 +1620,7 @@ fn record_completed_command(
         output: output.clone(),
         exit_code,
     });
-    if let Some(path) = &state.regular_history_path {
+    if state.regular_history_path.is_some() {
         let entry = HistoryEntry {
             command,
             t: (state.clock)(),
@@ -1452,7 +1631,7 @@ fn record_completed_command(
                 HistorySource::User
             },
         };
-        append_jsonl(path, &entry)?;
+        state.append_regular_history_entry(&entry)?;
         state.regular_history.push(entry);
     }
     state.last_status = Some(exit_code);
@@ -1666,10 +1845,19 @@ pub fn answer_context_confirmation(
 }
 
 fn submit_ai_prompt(state: &mut AppState, prompt: &str, out: &mut impl Write) -> Result<()> {
-    match (state.ai_requester)(&state.ai_config, prompt) {
+    let request_config = match ai_config_for_request(state) {
+        Ok(config) => config,
+        Err(error) => {
+            state.append_event(EventLevel::Error, "AI request failed")?;
+            writeln!(out, "AI request failed: {error}")?;
+            state.mode = Mode::Draft;
+            return Ok(());
+        }
+    };
+    match (state.ai_requester)(&request_config, prompt) {
         Ok(items) => {
             let item_count = items.len();
-            let model = state.ai_config.model.clone();
+            let model = request_config.model.clone();
             if state.store_ai_session_from_items(prompt, &model, items)? {
                 state.append_event(
                     EventLevel::Info,
@@ -1793,6 +1981,80 @@ fn show_event_log(state: &AppState, out: &mut impl Write, args: &str) -> Result<
     Ok(())
 }
 
+fn trim_history_for_state(
+    state: &AppState,
+    count: usize,
+) -> Result<crate::history::TrimHistoryLoad> {
+    let Some(regular_path) = &state.regular_history_path else {
+        anyhow::bail!("history storage is not configured");
+    };
+    let Some(ai_path) = &state.ai_history_path else {
+        anyhow::bail!("history storage is not configured");
+    };
+    if !state.encryption_config.enabled {
+        return trim_combined_history(regular_path, ai_path, count);
+    }
+
+    let regular = load_encrypted_jsonl::<HistoryEntry>(gpg_program(), regular_path)?;
+    let ai_sessions = load_encrypted_jsonl::<AiSession>(gpg_program(), ai_path)?;
+
+    let keep_from = regular.items.len().saturating_sub(count);
+    let trimmed_regular = regular.items[keep_from..].to_vec();
+
+    let mut remaining_ai_commands = count.saturating_sub(trimmed_regular.len());
+    let mut trimmed_ai_sessions = Vec::new();
+    for session in ai_sessions.items.iter().rev() {
+        let mut kept_items = Vec::new();
+        let mut kept_command = false;
+        for item in session.items.iter().rev() {
+            if item.kind == AiItemKind::Command {
+                if remaining_ai_commands == 0 {
+                    continue;
+                }
+                remaining_ai_commands -= 1;
+                kept_command = true;
+            }
+            kept_items.push(item.clone());
+        }
+        kept_items.reverse();
+        if kept_command {
+            let mut trimmed_session = session.clone();
+            trimmed_session.items = kept_items;
+            trimmed_ai_sessions.push(trimmed_session);
+        }
+    }
+    trimmed_ai_sessions.reverse();
+
+    rewrite_encrypted_jsonl(
+        gpg_program(),
+        state.encryption_config.recipient.as_str(),
+        regular_path,
+        &trimmed_regular,
+    )?;
+    rewrite_encrypted_jsonl(
+        gpg_program(),
+        state.encryption_config.recipient.as_str(),
+        ai_path,
+        &trimmed_ai_sessions,
+    )?;
+
+    Ok(crate::history::TrimHistoryLoad {
+        regular,
+        ai_sessions,
+    })
+}
+
+fn load_ai_sessions_for_state(state: &AppState) -> Result<Vec<AiSession>> {
+    let Some(ai_path) = &state.ai_history_path else {
+        return Ok(Vec::new());
+    };
+    if state.encryption_config.enabled {
+        Ok(load_encrypted_jsonl::<AiSession>(gpg_program(), ai_path)?.items)
+    } else {
+        Ok(load_jsonl::<AiSession>(ai_path)?.items)
+    }
+}
+
 fn write_doctor_report(state: &AppState, out: &mut impl Write) -> Result<()> {
     writeln!(out, "Aish doctor")?;
     writeln!(out, "mode={}", state.mode.symbol())?;
@@ -1824,7 +2086,7 @@ fn write_doctor_report(state: &AppState, out: &mut impl Write) -> Result<()> {
     writeln!(out, "output_ring_entries={}", state.output_ring.len())?;
     writeln!(out, "backend_shell={}", backend_shell_value(state))?;
     writeln!(out, "pty=ok")?;
-    writeln!(out, "gpg=not_configured")?;
+    writeln!(out, "gpg={}", gpg_status(state))?;
     writeln!(out, "git=not_configured")?;
     writeln!(out, "fzf=external")?;
     write_ai_runtime_status(state, out)?;
@@ -1901,16 +2163,22 @@ fn write_ai_runtime_status(state: &AppState, out: &mut impl Write) -> Result<()>
         "ai.final_url={}",
         config_value(&state.ai_config.base_url)
     )?;
-    writeln!(
-        out,
-        "ai.key_source={}",
-        if state.ai_config.env_key.is_empty() {
-            "unconfigured"
-        } else {
-            "env"
-        }
-    )?;
+    writeln!(out, "ai.key_source={}", ai_key_source(state))?;
     Ok(())
+}
+
+fn ai_key_source(state: &AppState) -> &'static str {
+    if read_api_key_from_env(&state.ai_config.env_key).is_ok() {
+        "env"
+    } else if state
+        .secret_key_path
+        .as_ref()
+        .is_some_and(|path| path.exists())
+    {
+        "gpg"
+    } else {
+        "unconfigured"
+    }
 }
 
 fn backend_shell_value(state: &AppState) -> &str {
@@ -1918,7 +2186,20 @@ fn backend_shell_value(state: &AppState) -> &str {
 }
 
 fn write_encryption_sync_status(state: &AppState, out: &mut impl Write) -> Result<()> {
-    writeln!(out, "encryption=off")?;
+    writeln!(
+        out,
+        "encryption={}",
+        if state.encryption_config.enabled {
+            "on"
+        } else {
+            "off"
+        }
+    )?;
+    writeln!(
+        out,
+        "encryption.recipient={}",
+        config_value(&state.encryption_config.recipient)
+    )?;
     writeln!(out, "sync.enabled={}", state.sync_config.enabled)?;
     writeln!(
         out,
@@ -1935,6 +2216,16 @@ fn write_encryption_sync_status(state: &AppState, out: &mut impl Write) -> Resul
     writeln!(out, "sync.templates={}", state.sync_config.templates)?;
     writeln!(out, "sync.drafts={}", state.sync_config.drafts)?;
     Ok(())
+}
+
+fn gpg_status(state: &AppState) -> &'static str {
+    if state.encryption_config.recipient.trim().is_empty() {
+        return "not_configured";
+    }
+    match Command::new(gpg_program()).arg("--version").output() {
+        Ok(output) if output.status.success() => "available",
+        _ => "unavailable",
+    }
 }
 
 fn write_config_report(state: &AppState, out: &mut impl Write) -> Result<()> {
@@ -2011,6 +2302,21 @@ fn config_value(value: &str) -> &str {
     }
 }
 
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct StoredApiKey {
+    env_key: String,
+    value: String,
+}
+
+fn parse_key_command(args: &str) -> Option<&str> {
+    let mut parts = args.split_whitespace();
+    let command = parts.next()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some(command)
+}
+
 fn write_editor_report(state: &AppState, out: &mut impl Write) -> Result<()> {
     writeln!(out, "Aish editor")?;
     writeln!(
@@ -2056,6 +2362,38 @@ fn write_config_path(out: &mut impl Write, name: &str, path: &Option<PathBuf>) -
     Ok(())
 }
 
+fn set_stored_key(state: &mut AppState, out: &mut impl Write) -> Result<()> {
+    let Some(path) = &state.secret_key_path else {
+        writeln!(out, "key storage is not configured; no key stored")?;
+        return Ok(());
+    };
+    let recipient = state.encryption_config.recipient.trim();
+    if recipient.is_empty() {
+        writeln!(
+            out,
+            "encryption recipient is not configured; run #encrypt on <recipient> or set [encryption].recipient"
+        )?;
+        return Ok(());
+    }
+    let value = match read_api_key_from_env(&state.ai_config.env_key) {
+        Ok(value) => value,
+        Err(err) => {
+            writeln!(out, "{err}")?;
+            return Ok(());
+        }
+    };
+    let record = StoredApiKey {
+        env_key: state.ai_config.env_key.clone(),
+        value,
+    };
+    let plaintext =
+        serde_json::to_vec(&record).context("failed to serialize encrypted API key record")?;
+    atomic_gpg_encrypt_bytes(gpg_program(), recipient, path, &plaintext)?;
+    state.append_event(EventLevel::Info, "stored key encrypted")?;
+    writeln!(out, "stored key encrypted")?;
+    Ok(())
+}
+
 fn clear_stored_key(state: &mut AppState, out: &mut impl Write) -> Result<()> {
     let Some(path) = &state.secret_key_path else {
         writeln!(out, "key storage is not configured; no key removed")?;
@@ -2073,6 +2411,145 @@ fn clear_stored_key(state: &mut AppState, out: &mut impl Write) -> Result<()> {
         Err(err) => return Err(err.into()),
     }
     Ok(())
+}
+
+fn load_stored_api_key(state: &AppState) -> Result<Option<String>> {
+    let Some(path) = &state.secret_key_path else {
+        return Ok(None);
+    };
+    if !path.exists() {
+        return Ok(None);
+    }
+    let bytes = gpg_decrypt_file(gpg_program(), path)?;
+    let record: StoredApiKey =
+        serde_json::from_slice(&bytes).context("stored API key record is not valid JSON")?;
+    if record.value.trim().is_empty() {
+        anyhow::bail!("stored API key is empty");
+    }
+    Ok(Some(record.value))
+}
+
+fn ai_config_for_request(state: &AppState) -> Result<AiConfig> {
+    let mut config = state.ai_config.clone();
+    config.api_key_override = None;
+    if read_api_key_from_env(&config.env_key).is_ok() {
+        return Ok(config);
+    }
+    if let Some(api_key) = load_stored_api_key(state)? {
+        config.api_key_override = Some(api_key);
+    }
+    Ok(config)
+}
+
+fn update_encryption_config(state: &mut AppState, out: &mut impl Write, args: &str) -> Result<()> {
+    let mut parts = args.split_whitespace();
+    match (parts.next(), parts.next(), parts.next()) {
+        (Some("on"), recipient, None) => enable_encryption(state, out, recipient),
+        (Some("off"), None, None) => disable_encryption(state, out),
+        _ => writeln!(out, "usage: #encrypt on [recipient] | #encrypt off").map_err(Into::into),
+    }
+}
+
+fn enable_encryption(
+    state: &mut AppState,
+    out: &mut impl Write,
+    recipient_arg: Option<&str>,
+) -> Result<()> {
+    if state.config_path.is_none() {
+        writeln!(out, "config path is not configured; #encrypt not saved")?;
+        return Ok(());
+    }
+    let recipient = recipient_arg
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| state.encryption_config.recipient.trim())
+        .to_string();
+    if recipient.is_empty() {
+        writeln!(
+            out,
+            "encryption recipient is not configured; run #encrypt on <recipient> or set [encryption].recipient"
+        )?;
+        return Ok(());
+    }
+
+    migrate_storage_to_encrypted(state, &recipient)?;
+    set_encryption_config(state, |config| {
+        config.encryption.enabled = true;
+        config.encryption.recipient = recipient;
+    })?;
+    writeln!(out, "{}", plaintext_git_history_warning())?;
+    writeln!(out, "encryption=on")?;
+    Ok(())
+}
+
+fn disable_encryption(state: &mut AppState, out: &mut impl Write) -> Result<()> {
+    if state.config_path.is_none() {
+        writeln!(out, "config path is not configured; #encrypt not saved")?;
+        return Ok(());
+    }
+
+    migrate_storage_to_plaintext(state)?;
+    set_encryption_config(state, |config| {
+        config.encryption.enabled = false;
+    })?;
+    writeln!(out, "encryption=off")?;
+    writeln!(
+        out,
+        "plaintext history and templates will be written from now on"
+    )?;
+    Ok(())
+}
+
+fn set_encryption_config(
+    state: &mut AppState,
+    update: impl FnOnce(&mut config::Config),
+) -> Result<()> {
+    let Some(path) = &state.config_path else {
+        anyhow::bail!("config path is not configured; #encrypt not saved");
+    };
+    let mut config = match config::load_config(path) {
+        Ok(config) => config,
+        Err(err) => {
+            state.append_event(EventLevel::Error, "config error")?;
+            return Err(err);
+        }
+    };
+    update(&mut config);
+    config::normalize_config(&mut config);
+    if let Err(err) = config::save_config(path, &config) {
+        state.append_event(EventLevel::Error, "config error")?;
+        return Err(err);
+    }
+    state.encryption_config = config.encryption;
+    state.append_event(EventLevel::Info, "encryption config changed")?;
+    Ok(())
+}
+
+fn migrate_storage_to_encrypted(state: &AppState, recipient: &str) -> Result<()> {
+    for path in encrypted_storage_paths(state) {
+        migrate_plaintext_jsonl_to_gpg(gpg_program(), recipient, path)?;
+    }
+    Ok(())
+}
+
+fn migrate_storage_to_plaintext(state: &AppState) -> Result<()> {
+    for path in encrypted_storage_paths(state) {
+        migrate_gpg_jsonl_to_plaintext(gpg_program(), path)?;
+    }
+    Ok(())
+}
+
+fn encrypted_storage_paths(state: &AppState) -> Vec<PathBuf> {
+    [
+        &state.regular_history_path,
+        &state.ai_history_path,
+        &state.draft_history_path,
+        &state.notes_path,
+        &state.template_store_path,
+    ]
+    .into_iter()
+    .filter_map(|path| path.clone())
+    .collect()
 }
 
 fn set_sync_remote(state: &mut AppState, out: &mut impl Write, args: &str) -> Result<()> {
@@ -2171,7 +2648,13 @@ fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -> Result<()
         initialized_repo = true;
     }
 
-    for command in conservative_sync_plan_for_existing_paths(&root, &state.sync_config).commands {
+    for command in conservative_sync_plan_for_existing_paths_with_encryption(
+        &root,
+        &state.sync_config,
+        state.encryption_config.enabled,
+    )
+    .commands
+    {
         if initialized_repo && is_pull_rebase_command(&command) {
             writeln!(
                 out,
@@ -2824,17 +3307,14 @@ pub fn save_draft_if_configured(state: &AppState) -> Result<bool> {
     if !state.draft_persist || state.draft.is_empty() {
         return Ok(false);
     }
-    let Some(path) = &state.draft_history_path else {
+    if state.draft_history_path.is_none() {
         return Ok(false);
-    };
+    }
 
-    append_jsonl(
-        path,
-        &DraftEntry {
-            t: (state.clock)(),
-            text: state.draft.as_str().to_string(),
-        },
-    )?;
+    state.append_draft_entry(&DraftEntry {
+        t: (state.clock)(),
+        text: state.draft.as_str().to_string(),
+    })?;
     Ok(true)
 }
 
@@ -2842,6 +3322,33 @@ pub fn save_draft_if_configured(state: &AppState) -> Result<bool> {
 mod tests {
     use super::*;
     use std::path::Path;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[cfg(unix)]
+    fn write_fake_gpg(temp: &tempfile::TempDir) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let fake_gpg = temp.path().join("fake-gpg");
+        fs::write(
+            &fake_gpg,
+            "#!/bin/sh\nmode=encrypt\nout=\"\"\ninput=\"\"\nwhile [ \"$#\" -gt 0 ]; do\n  case \"$1\" in\n    --version) printf 'fake gpg\\n'; exit 0 ;;\n    --decrypt) mode=decrypt ;;\n    --output) shift; out=\"$1\" ;;\n    --recipient|--trust-model) shift ;;\n    --batch|--yes|--no-tty|--encrypt) ;;\n    *) input=\"$1\" ;;\n  esac\n  shift\ndone\nif [ \"$mode\" = decrypt ]; then\n  cat \"$input\"\nelse\n  cp \"$input\" \"$out\"\nfi\n",
+        )
+        .unwrap();
+        fs::set_permissions(&fake_gpg, fs::Permissions::from_mode(0o755)).unwrap();
+        fake_gpg
+    }
+
+    fn ai_requester_requires_stored_key(config: &AiConfig, _prompt: &str) -> Result<Vec<AiItem>> {
+        assert_eq!(config.api_key_override.as_deref(), Some("secret-test-key"));
+        assert_eq!(config.model, "test-model");
+        Ok(vec![AiItem {
+            kind: AiItemKind::Command,
+            text: "pwd".to_string(),
+            name: None,
+        }])
+    }
 
     #[test]
     fn empty_tab_cycles_modes() {
@@ -4297,9 +4804,9 @@ mod tests {
     }
 
     #[test]
-    fn key_commands_report_placeholders_without_secret_side_effects() {
+    fn key_commands_report_current_state_without_secret_side_effects() {
         for (line, expected) in [
-            ("#key set", "#key set is not implemented yet; no key stored"),
+            ("#key set", "key storage is not configured; no key stored"),
             (
                 "#key clear",
                 "key storage is not configured; no key removed",
@@ -4863,11 +5370,11 @@ mod tests {
     }
 
     #[test]
-    fn encryption_and_sync_commands_report_placeholders_without_side_effects() {
+    fn encryption_and_sync_commands_report_current_state_without_side_effects() {
         for (line, expected) in [
             (
                 "#encrypt on",
-                "encryption is not implemented yet; no data changed",
+                "config path is not configured; #encrypt not saved",
             ),
             (
                 "#set-remote git@example.invalid:aish.git",
@@ -4900,6 +5407,345 @@ mod tests {
             assert_eq!(state.last_status, None);
             assert!(state.draft.is_empty());
         }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn encrypt_on_migrates_plaintext_storage_and_persists_config() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let fake_gpg = write_fake_gpg(&temp);
+        unsafe {
+            std::env::set_var("AISH_GPG", &fake_gpg);
+        }
+        let config_path = temp.path().join("config.toml");
+        let regular_path = temp.path().join("history/regular.jsonl");
+        let ai_path = temp.path().join("history/ai.jsonl");
+        let draft_path = temp.path().join("history/draft.jsonl");
+        let notes_path = temp.path().join("history/notes.jsonl");
+        let template_path = temp.path().join("templates/templates.jsonl");
+        config::save_config(&config_path, &config::Config::default()).unwrap();
+        append_jsonl(
+            &regular_path,
+            &HistoryEntry {
+                t: 1,
+                command: "pwd".to_string(),
+                exit_code: Some(0),
+                source: HistorySource::User,
+            },
+        )
+        .unwrap();
+        append_jsonl(
+            &ai_path,
+            &AiSession {
+                id: "ai-1".to_string(),
+                t: 2,
+                prompt: "list".to_string(),
+                ctx: false,
+                model: "test".to_string(),
+                items: vec![AiItem {
+                    kind: AiItemKind::Command,
+                    text: "ls".to_string(),
+                    name: None,
+                }],
+            },
+        )
+        .unwrap();
+        append_jsonl(
+            &draft_path,
+            &DraftEntry {
+                t: 3,
+                text: "draft".to_string(),
+            },
+        )
+        .unwrap();
+        append_jsonl(
+            &notes_path,
+            &NoteEntry {
+                tag: crate::commands::NoteTag::Note,
+                text: "note".to_string(),
+            },
+        )
+        .unwrap();
+        append_template(&template_path, &TemplateEntry::new("echo {message}")).unwrap();
+        let mut state = AppState {
+            config_path: Some(config_path.clone()),
+            regular_history_path: Some(regular_path.clone()),
+            ai_history_path: Some(ai_path.clone()),
+            draft_history_path: Some(draft_path.clone()),
+            notes_path: Some(notes_path.clone()),
+            template_store_path: Some(template_path.clone()),
+            ..AppState::default()
+        };
+        state.draft.insert_str("#encrypt on test@example.invalid");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        unsafe {
+            std::env::remove_var("AISH_GPG");
+        }
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("Encryption is now enabled for future writes."));
+        assert!(output.contains("encryption=on"));
+        assert!(state.encryption_config.enabled);
+        assert_eq!(state.encryption_config.recipient, "test@example.invalid");
+        let loaded = config::load_config(&config_path).unwrap();
+        assert!(loaded.encryption.enabled);
+        assert_eq!(loaded.encryption.recipient, "test@example.invalid");
+        for path in [
+            &regular_path,
+            &ai_path,
+            &draft_path,
+            &notes_path,
+            &template_path,
+        ] {
+            assert!(!path.exists(), "plaintext remained: {}", path.display());
+            assert!(
+                crate::encryption::encrypted_path(path).exists(),
+                "encrypted file missing: {}",
+                path.display()
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn encrypted_writes_use_gpg_files_without_plaintext_jsonl() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let fake_gpg = write_fake_gpg(&temp);
+        unsafe {
+            std::env::set_var("AISH_GPG", &fake_gpg);
+        }
+        let regular_path = temp.path().join("history/regular.jsonl");
+        let template_path = temp.path().join("templates/templates.jsonl");
+        let mut state = AppState {
+            regular_history_path: Some(regular_path.clone()),
+            template_store_path: Some(template_path.clone()),
+            encryption_config: EncryptionConfig {
+                enabled: true,
+                recipient: "test@example.invalid".to_string(),
+            },
+            ..AppState::default()
+        };
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+
+        state.draft.insert_str("echo encrypted-history");
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut Vec::new(),
+            Duration::from_secs(5),
+        )
+        .unwrap();
+        state.draft.insert_str("#mt echo encrypted-template");
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut Vec::new(),
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let loaded_history =
+            load_encrypted_jsonl::<HistoryEntry>(fake_gpg.display().to_string(), &regular_path)
+                .unwrap();
+        let loaded_templates =
+            load_encrypted_jsonl::<TemplateEntry>(fake_gpg.display().to_string(), &template_path)
+                .unwrap();
+        unsafe {
+            std::env::remove_var("AISH_GPG");
+        }
+        assert!(!regular_path.exists());
+        assert!(!template_path.exists());
+        assert!(crate::encryption::encrypted_path(&regular_path).exists());
+        assert!(crate::encryption::encrypted_path(&template_path).exists());
+        assert_eq!(loaded_history.items.len(), 1);
+        assert_eq!(loaded_history.items[0].command, "echo encrypted-history");
+        assert_eq!(loaded_templates.items.len(), 1);
+        assert_eq!(loaded_templates.items[0].body, "echo encrypted-template");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn key_set_encrypts_env_api_key_without_printing_secret() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let fake_gpg = write_fake_gpg(&temp);
+        unsafe {
+            std::env::set_var("AISH_GPG", &fake_gpg);
+            std::env::set_var("AISH_TEST_API_KEY", "secret-test-key");
+        }
+        let key_path = temp.path().join("secrets/key.json.gpg");
+        let events_path = temp.path().join("logs/events.jsonl");
+        let mut state = AppState {
+            secret_key_path: Some(key_path.clone()),
+            events_path: Some(events_path.clone()),
+            ai_config: AiConfig {
+                env_key: "AISH_TEST_API_KEY".to_string(),
+                ..AiConfig::default()
+            },
+            encryption_config: EncryptionConfig {
+                enabled: false,
+                recipient: "test@example.invalid".to_string(),
+            },
+            ..AppState::default()
+        };
+        state.draft.insert_str("#key set");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let decrypted = gpg_decrypt_file(fake_gpg.display().to_string(), &key_path).unwrap();
+        let record: StoredApiKey = serde_json::from_slice(&decrypted).unwrap();
+        unsafe {
+            std::env::remove_var("AISH_GPG");
+            std::env::remove_var("AISH_TEST_API_KEY");
+        }
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("stored key encrypted"));
+        assert!(!output.contains("secret-test-key"));
+        assert_eq!(record.env_key, "AISH_TEST_API_KEY");
+        assert_eq!(record.value, "secret-test-key");
+        assert!(key_path.exists());
+        let events = load_events(&events_path).unwrap();
+        assert_eq!(events.items[0].msg, "stored key encrypted");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn ai_prompt_uses_gpg_stored_key_when_env_key_is_missing() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let fake_gpg = write_fake_gpg(&temp);
+        unsafe {
+            std::env::set_var("AISH_GPG", &fake_gpg);
+            std::env::set_var("AISH_TEST_API_KEY", "secret-test-key");
+        }
+        let key_path = temp.path().join("secrets/key.json.gpg");
+        let mut state = AppState {
+            secret_key_path: Some(key_path),
+            ai_config: AiConfig {
+                model: "test-model".to_string(),
+                base_url: "https://example.invalid/v1/chat/completions".to_string(),
+                env_key: "AISH_TEST_API_KEY".to_string(),
+                ..AiConfig::default()
+            },
+            ai_requester: ai_requester_requires_stored_key,
+            encryption_config: EncryptionConfig {
+                enabled: false,
+                recipient: "test@example.invalid".to_string(),
+            },
+            ..AppState::default()
+        };
+        state.draft.insert_str("#key set");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut Vec::new(),
+            Duration::from_secs(5),
+        )
+        .unwrap();
+        unsafe {
+            std::env::remove_var("AISH_TEST_API_KEY");
+        }
+        state.draft.insert_str("# list files");
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        unsafe {
+            std::env::remove_var("AISH_GPG");
+        }
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("AI items generated: 1"));
+        assert_eq!(state.ai_sessions.len(), 1);
+        assert_eq!(state.ai_sessions[0].items[0].text, "pwd");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn encrypt_off_decrypts_storage_and_persists_config() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let fake_gpg = write_fake_gpg(&temp);
+        unsafe {
+            std::env::set_var("AISH_GPG", &fake_gpg);
+        }
+        let config_path = temp.path().join("config.toml");
+        let regular_path = temp.path().join("history/regular.jsonl");
+        let mut config = config::Config::default();
+        config.encryption.enabled = true;
+        config.encryption.recipient = "test@example.invalid".to_string();
+        config::save_config(&config_path, &config).unwrap();
+        rewrite_encrypted_jsonl(
+            fake_gpg.display().to_string(),
+            "test@example.invalid",
+            &regular_path,
+            &[HistoryEntry {
+                t: 1,
+                command: "pwd".to_string(),
+                exit_code: Some(0),
+                source: HistorySource::User,
+            }],
+        )
+        .unwrap();
+        let mut state = AppState {
+            config_path: Some(config_path.clone()),
+            regular_history_path: Some(regular_path.clone()),
+            encryption_config: config.encryption,
+            ..AppState::default()
+        };
+        state.draft.insert_str("#encrypt off");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        unsafe {
+            std::env::remove_var("AISH_GPG");
+        }
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("encryption=off"));
+        assert!(!state.encryption_config.enabled);
+        assert!(
+            !config::load_config(&config_path)
+                .unwrap()
+                .encryption
+                .enabled
+        );
+        assert!(regular_path.exists());
+        assert!(!crate::encryption::encrypted_path(&regular_path).exists());
+        let loaded = load_jsonl::<HistoryEntry>(&regular_path).unwrap();
+        assert_eq!(loaded.items[0].command, "pwd");
     }
 
     #[test]
@@ -5230,6 +6076,7 @@ mod tests {
                 model: "gpt-test".to_string(),
                 base_url: "https://example.invalid/v1".to_string(),
                 env_key: "OPENAI_API_KEY".to_string(),
+                ..AiConfig::default()
             },
             context_config: ContextConfig {
                 enabled: false,
@@ -5308,6 +6155,7 @@ mod tests {
                 model: "test".to_string(),
                 base_url: "https://example.invalid/v1/chat/completions".to_string(),
                 env_key: "OPENAI_API_KEY".to_string(),
+                ..AiConfig::default()
             },
             regular_history_path: Some(history_path.clone()),
             notes_path: Some(notes_path.clone()),
@@ -5364,7 +6212,7 @@ mod tests {
         assert!(output.contains("git=not_configured"));
         assert!(output.contains("fzf=external"));
         assert!(output.contains("ai.final_url="));
-        assert!(output.contains("ai.key_source=env"));
+        assert!(output.contains("ai.key_source=unconfigured"));
         assert!(output.contains("encryption=off"));
         assert!(output.contains("sync.enabled=false"));
         assert!(output.contains("editor.resolved=vim"));
@@ -5439,6 +6287,7 @@ mod tests {
                 model: "gpt-test".to_string(),
                 base_url: "https://example.invalid/v1/chat/completions".to_string(),
                 env_key: "OPENAI_API_KEY".to_string(),
+                ..AiConfig::default()
             },
             ..AppState::default()
         };
@@ -5461,7 +6310,7 @@ mod tests {
         assert!(output.contains(&format!("cwd={}", std::env::temp_dir().display())));
         assert!(output.contains("shell=/bin/bash"));
         assert!(output.contains("ai.final_url="));
-        assert!(output.contains("ai.key_source=env"));
+        assert!(output.contains("ai.key_source=unconfigured"));
         assert!(output.contains("encryption=off"));
         assert!(output.contains("sync.enabled=false"));
         assert!(output.contains("context.enabled=true"));

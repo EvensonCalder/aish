@@ -72,7 +72,10 @@ pub fn build_ai_request(config: &AiConfig, prompt: &str) -> Result<AiRequest> {
         bail!("AI model is not configured");
     }
     let url = normalize_chat_completions_url(&config.base_url)?;
-    let api_key = read_api_key_from_env(&config.env_key)?;
+    let api_key = match &config.api_key_override {
+        Some(value) if !value.trim().is_empty() => value.clone(),
+        _ => read_api_key_from_env(&config.env_key)?,
+    };
     let body = build_chat_completions_body(&config.model, prompt);
     Ok(AiRequest { url, api_key, body })
 }

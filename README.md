@@ -21,14 +21,14 @@ Implemented and covered:
 - `fzf`-based history, file, template, git branch, and environment pickers.
 - Allowlisted foreground passthrough for interactive and stdin-oriented commands.
 - Conservative Git sync configuration and manual push flow.
+- GPG-backed key storage and encrypted history/template storage.
 - Real-terminal regression coverage through `tmux`.
 
 Explicitly incomplete:
 
-- GPG-backed key storage and encrypted history/templates are not implemented yet.
-- `#key set` and `#encrypt on|off` are safe placeholders; `#key clear` can remove an existing key file.
 - Configurable key rebinding is not implemented yet.
 - Fish support is opt-in until behavior is validated across macOS and representative Linux distributions.
+- Async encrypted-history unlock and terminal passthrough for passphrase entry remain future work.
 - Full automatic passthrough for arbitrary interactive programs remains future work; Aish currently uses an allowlist and tested stdin-command handling.
 
 ## Quickstart
@@ -234,12 +234,12 @@ Sync:
 #sync drafts on|off
 ```
 
-Encryption placeholders:
+Encryption:
 
 ```text
 #key set
 #key clear
-#encrypt on
+#encrypt on [recipient]
 #encrypt off
 ```
 
@@ -399,16 +399,19 @@ Aish does not:
 
 ## Encryption Status
 
-Encryption is intentionally not overclaimed.
+Aish uses the `gpg` command-line tool for encrypted local storage.
 
 Current behavior:
 
-- `#key set` reports that key storage is not implemented yet.
-- `#key clear` removes an existing encrypted key file if present.
-- `#encrypt on|off` are safe placeholders and do not migrate storage.
-- `#encrypt on` warns conservatively about plaintext that may already exist in Git history.
+- Configure `[encryption].recipient` in `config.toml`, or pass it once with `#encrypt on <recipient>`.
+- `#encrypt on` migrates managed history, notes, drafts, AI history, and templates to `*.jsonl.gpg` files and removes the plaintext JSONL files after successful encryption.
+- Future writes go to encrypted JSONL files while encryption is enabled.
+- `#encrypt off` decrypts managed encrypted JSONL files back to plaintext and disables encrypted writes.
+- `#key set` encrypts the API key currently available through `#env-key <ENV_NAME>` into `secrets/key.json.gpg`.
+- `#key clear` removes the encrypted key file if present.
+- `#status`, `#config`, and `#doctor` report encryption state, recipient configuration, and GPG availability.
 
-Future encryption work needs a tested GPG boundary, fake-GPG or isolated-key integration tests, encrypted history/template writes, locked-history behavior, and a terminal-safe unlock/pinentry flow before it can be considered complete.
+Known limits: encrypted startup loading is synchronous, and passphrase entry depends on `gpg-agent` rather than an Aish unlock passthrough flow. Aish still warns that plaintext already tracked by Git can remain in repository history; it does not rewrite Git history or run `git rm --cached` automatically.
 
 ## Files And Storage
 

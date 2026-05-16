@@ -8,8 +8,8 @@ Status as of the latest full review:
 
 - Core interactive shell wrapper is implemented: PTY backend, raw terminal input, draft editing, continuation handling, history/AI modes, private command parsing, editor/paste flows, templates, completion, picker boundaries, AI request plumbing, context pseudo-pipe, event log, and diagnostics.
 - Rust unit/integration coverage and expect-driven real terminal coverage both exist for the implemented interactive behaviors. New user-facing terminal behavior should continue to receive both Rust-level and expect-level coverage.
-- Large intentionally incomplete areas remain: configurable key rebinding, GPG-backed secrets/encryption, independent PTY/timer event-loop sources, and robust automatic passthrough for arbitrary interactive commands.
-- Placeholder commands for encryption/key storage are deliberately safe no-ops until Phase 18 is implemented; they should not be marked functionally complete until they perform the actual encrypted storage behavior.
+- Large intentionally incomplete areas remain: configurable key rebinding, async encrypted-history unlock/pinentry passthrough, independent PTY/timer event-loop sources, and robust automatic passthrough for arbitrary interactive commands.
+- GPG-backed secrets and encrypted history/template storage are implemented synchronously; they should not be marked complete for async unlock behavior until Phase 18 passthrough work lands.
 - The remaining unchecked items below are the source of truth for future work; do not skip them just because adjacent scaffolding exists.
 
 ---
@@ -633,29 +633,30 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 
 ### Tasks
 
-- [ ] Implement `#key set` using GPG encryption.
+- [x] Implement `#key set` using GPG encryption.
 - [x] Implement `#key clear`.
-- [ ] Implement `#encrypt on`.
-- [ ] Implement `#encrypt off`.
-- [ ] Encrypt:
-  - [ ] regular history
-  - [ ] AI history
-  - [ ] draft history
-  - [ ] notes
-  - [ ] templates
-- [ ] Encrypt template payload metadata and avoid plaintext template names, search indexes, and list indexes when encryption is enabled.
-- [ ] Do not persist plaintext search indexes when encrypted.
+- [x] Implement `#encrypt on`.
+- [x] Implement `#encrypt off`.
+- [x] Encrypt:
+  - [x] regular history
+  - [x] AI history
+  - [x] draft history
+  - [x] notes
+  - [x] templates
+- [x] Encrypt template payload metadata and avoid plaintext template names, search indexes, and list indexes when encryption is enabled.
+- [x] Do not persist plaintext search indexes when encrypted.
 - [ ] Decrypt asynchronously on startup.
 - [ ] Show `history is still unlocking...` when needed.
 - [ ] Handle GPG/pinentry by temporarily entering UnlockPassthrough.
 - [x] Add atomic encrypted-write helper.
+- [x] Add GPG decrypt/load helpers for encrypted JSONL.
 - [x] Warn about existing plaintext in git history.
 
 ### Acceptance criteria
 
 - API key can be stored and used from GPG secret.
 - Encrypted history/templates can be loaded.
-- Aish remains usable while decrypting history.
+- Aish remains usable while decrypting history. Not complete; current encrypted loading is synchronous.
 - No plaintext index is written when encrypted.
 - Enabling encryption prints the git-history warning.
 
@@ -848,7 +849,8 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 - [x] Cover editor-returned line-leading `#` content bypassing Aish private command parsing.
 - [x] Cover multiline paste editor-review execution.
 - [x] Cover multiline paste/editor draft review warning before execution.
-- [x] Cover key/encryption/sync placeholder commands as safe no-ops.
+- [x] Cover key/encryption/sync missing-config behavior.
+- [x] Cover GPG encrypted key storage and encrypted history/template migration with fake GPG.
 - [x] Cover `echo "` and `echo '` continuation UX.
 - [x] Cover trailing backslash continuation UX.
 - [x] Cover `Ctrl-C` cancellation from continuation drafts.
