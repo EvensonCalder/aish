@@ -1078,21 +1078,32 @@ enum AiItemKind {
 ## Phase 28: Inline completion UX
 
 Status: implemented. Inline completion is enabled by default and refreshes while the user types, `completion.max_results` controls only the below-prompt panel row count, and bash/zsh real-terminal coverage proves completion behavior is owned by Aish rather than the backend shell. Fish backend coverage remains opt-in with `AISH_TEST_FISH=1` until cross-platform behavior is validated across macOS and Linux distributions.
-Update: completion now also uses configurable match-threshold filtering. `completion.match_threshold_percent` defaults to `50`, empty tokens stay quiet, and zero-position matches are not displayed.
+Update: completion now uses layered, non-blocking live discovery. Immediate candidates are shown first, structural history and typo-correction tiers arrive through versioned worker events, stale events are ignored, and encrypted-write completion events refresh the live UI. `completion.enabled` and `completion.fuzzy` default to `true` so low-performance environments can disable all completion or only typo-correction work. `completion.match_threshold_percent` defaults to `50` as a structural word-position threshold, and `completion.typo_threshold_percent` defaults to `80` for typo correction.
 
 ### Tasks
 
 - [x] Add completion config fields:
+  - [x] `completion.enabled = true` by default.
   - [x] `completion.inline = true` by default.
+  - [x] `completion.fuzzy = true` by default.
   - [x] `completion.tab_accept = "full"` by default.
   - [x] `completion.match_threshold_percent = 50` by default.
+  - [x] `completion.typo_threshold_percent = 80` by default.
   - [x] Valid `completion.tab_accept` values are `"full"` and `"word"`.
 - [x] Normalize invalid or empty completion config values without silently accepting unsupported modes.
 - [x] Persist and report inline completion settings through `#completion`, `#config`, and `#status`.
 - [x] Add private commands:
+  - [x] `#completion on|off`
   - [x] `#completion inline on|off`
+  - [x] `#completion fuzzy on|off`
   - [x] `#completion tab-accept full|word`
   - [x] `#completion match-threshold <0-100>`
+  - [x] `#completion typo-threshold <0-100>`
+- [x] Treat `completion.match_threshold_percent` as a structural word-position match rate, not typo correction.
+- [x] Keep typo correction separate behind `completion.typo_threshold_percent`.
+- [x] Keep live completion non-blocking by sending history work to a versioned worker and ignoring stale events.
+- [x] Do not run path fallback for empty non-first tokens after trailing whitespace.
+- [x] Keep `# ` AI prompts silent and restrict `#cmd` completion to Aish private commands.
 - [x] Split completion candidate discovery from panel row limiting so `completion.max_results` controls only below-prompt row count.
 - [x] Track the current inline suggestion separately from the draft buffer, cursor, history, persisted draft, and below-prompt panel state.
 - [x] Render the highest-ranked completion candidate as an inline ghost suffix in dim or light text while the user types when inline completion is enabled.

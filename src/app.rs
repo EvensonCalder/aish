@@ -3,6 +3,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
@@ -15,8 +16,10 @@ use crate::commands::{
 };
 use crate::completion::{
     CompletionCandidate, CompletionOptions, complete_first_token_with_options,
-    complete_non_first_token_for_line_with_options, current_token_context,
+    complete_non_first_token_for_line_with_options, complete_private_commands,
+    current_token_context, dedupe_completion_candidates, rank_completion_candidates,
 };
+use crate::completion_worker::{CompletionJob, CompletionWorker};
 use crate::config::{
     self, AiConfig, CompletionConfig, CompletionTabAccept, ContextConfig, EditorConfig,
     EncryptionConfig, PasteConfig, PromptConfig, SyncConfig,
@@ -151,6 +154,11 @@ pub struct AppState {
     pub pending_context: Option<PendingContextPrompt>,
     pub completion_panel: Vec<String>,
     pub completion_inline: Option<InlineCompletion>,
+    pub completion_worker: Option<CompletionWorker>,
+    pub completion_generation: u64,
+    pub pending_completion: Option<PendingCompletion>,
+    pub completion_history_snapshot: Arc<Vec<HistoryEntry>>,
+    pub completion_history_snapshot_len: usize,
     pub last_rendered_lines: usize,
     pub last_rendered_cursor_row: usize,
     pub continuation_prompt: Option<String>,
@@ -165,6 +173,14 @@ pub struct AppState {
 pub struct InlineCompletion {
     pub candidate: CompletionCandidate,
     pub suffix: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingCompletion {
+    pub id: u64,
+    pub line: String,
+    pub cursor: usize,
+    pub candidates: Vec<CompletionCandidate>,
 }
 
 impl Default for AppState {
@@ -210,6 +226,11 @@ impl Default for AppState {
             pending_context: None,
             completion_panel: Vec::new(),
             completion_inline: None,
+            completion_worker: None,
+            completion_generation: 0,
+            pending_completion: None,
+            completion_history_snapshot: Arc::new(Vec::new()),
+            completion_history_snapshot_len: 0,
             last_rendered_lines: 1,
             last_rendered_cursor_row: 0,
             continuation_prompt: None,
@@ -531,16 +552,32 @@ impl AppState {
         &self,
         max_results: usize,
     ) -> Result<Vec<CompletionCandidate>> {
-        if self.mode != Mode::Draft || self.draft_from_editor {
+        if !self.completion_config.enabled || self.mode != Mode::Draft || self.draft_from_editor {
             return Ok(Vec::new());
         }
-        let token = current_token_context(self.draft.as_str(), self.draft.cursor());
+        let line = self.draft.as_str();
+        let token = current_token_context(line, self.draft.cursor());
+        if let Some(private_or_prompt) = line.strip_prefix('#') {
+            if private_or_prompt
+                .chars()
+                .next()
+                .is_some_and(char::is_whitespace)
+            {
+                return Ok(Vec::new());
+            }
+            if token.is_first_token && token.text.starts_with('#') {
+                return Ok(complete_private_commands(&token.text, max_results));
+            }
+            return Ok(Vec::new());
+        }
         let templates = self.templates_for_completion()?;
         let history_newest_first: Vec<_> = self.regular_history.iter().rev().cloned().collect();
         let options = CompletionOptions {
             max_results,
             ignore_spaces: self.completion_config.ignore_spaces,
+            fuzzy_enabled: self.completion_config.fuzzy,
             match_threshold_percent: self.completion_config.match_threshold_percent,
+            typo_threshold_percent: self.completion_config.typo_threshold_percent,
         };
 
         if token.is_first_token && !token.path_like {
@@ -561,6 +598,187 @@ impl AppState {
                 options,
             ))
         }
+    }
+
+    pub fn start_live_completion_request(
+        &mut self,
+        max_results: usize,
+    ) -> Result<Vec<CompletionCandidate>> {
+        let line = self.draft.as_str().to_string();
+        let cursor = self.draft.cursor();
+        let candidates = self.immediate_completion_candidates_with_max_results(max_results)?;
+        self.pending_completion = None;
+        if self.should_enqueue_async_completion(&line, cursor) {
+            self.completion_generation = self.completion_generation.wrapping_add(1).max(1);
+            let id = self.completion_generation;
+            let history_newest_first = self.completion_history_snapshot();
+            let templates = Arc::new(self.templates_for_completion()?);
+            self.pending_completion = Some(PendingCompletion {
+                id,
+                line: line.clone(),
+                cursor,
+                candidates: candidates.clone(),
+            });
+            let job = CompletionJob {
+                id,
+                line,
+                cursor,
+                history_newest_first,
+                templates,
+                options: self.completion_options(usize::MAX),
+            };
+            self.ensure_completion_worker().enqueue(job)?;
+        }
+        Ok(candidates)
+    }
+
+    pub fn drain_live_completion_events(&mut self) -> Option<Vec<CompletionCandidate>> {
+        if !self.completion_config.enabled {
+            self.pending_completion = None;
+            return None;
+        }
+        let events = self
+            .completion_worker
+            .as_ref()
+            .map(|worker| worker.drain_events())
+            .unwrap_or_default();
+        if events.is_empty() {
+            return None;
+        }
+        let line = self.draft.as_str();
+        let cursor = self.draft.cursor();
+        let pending = self.pending_completion.as_mut()?;
+        if pending.line != line || pending.cursor != cursor {
+            return None;
+        }
+        let mut changed = false;
+        for event in events {
+            if event.id != pending.id {
+                continue;
+            }
+            let previous_candidates = pending.candidates.clone();
+            pending.candidates.extend(event.candidates);
+            dedupe_completion_candidates(&mut pending.candidates);
+            rank_completion_candidates(&mut pending.candidates);
+            changed |= pending.candidates != previous_candidates;
+        }
+        changed.then(|| pending.candidates.clone())
+    }
+
+    pub fn cached_live_completion_candidates_with_max_results(
+        &self,
+        max_results: usize,
+    ) -> Option<Vec<CompletionCandidate>> {
+        if !self.completion_config.enabled {
+            return None;
+        }
+        let pending = self.pending_completion.as_ref()?;
+        if pending.line != self.draft.as_str() || pending.cursor != self.draft.cursor() {
+            return None;
+        }
+        Some(crate::completion::limit_candidates(
+            pending.candidates.clone(),
+            max_results,
+        ))
+    }
+
+    pub fn live_completion_candidates_with_max_results(
+        &mut self,
+        max_results: usize,
+    ) -> Result<Vec<CompletionCandidate>> {
+        if let Some(candidates) =
+            self.cached_live_completion_candidates_with_max_results(max_results)
+        {
+            return Ok(candidates);
+        }
+        let candidates = self.start_live_completion_request(usize::MAX)?;
+        Ok(crate::completion::limit_candidates(candidates, max_results))
+    }
+
+    pub fn immediate_completion_candidates_with_max_results(
+        &self,
+        max_results: usize,
+    ) -> Result<Vec<CompletionCandidate>> {
+        if !self.completion_config.enabled || self.mode != Mode::Draft || self.draft_from_editor {
+            return Ok(Vec::new());
+        }
+        let line = self.draft.as_str();
+        let cursor = self.draft.cursor();
+        let token = current_token_context(line, cursor);
+        if let Some(private_or_prompt) = line.strip_prefix('#') {
+            if private_or_prompt
+                .chars()
+                .next()
+                .is_some_and(char::is_whitespace)
+            {
+                return Ok(Vec::new());
+            }
+            if token.is_first_token && token.text.starts_with('#') {
+                return Ok(complete_private_commands(&token.text, max_results));
+            }
+            return Ok(Vec::new());
+        }
+
+        let templates = self.templates_for_completion()?;
+        let options = self.completion_options(max_results);
+        if token.is_first_token && !token.path_like {
+            return Ok(complete_first_token_with_options(
+                &token.text,
+                &templates,
+                &[],
+                &path_dirs(),
+                options,
+            ));
+        }
+        Ok(complete_non_first_token_for_line_with_options(
+            line,
+            cursor,
+            &completion_cwd(&self.current_cwd),
+            &[],
+            &templates,
+            options,
+        ))
+    }
+
+    fn completion_options(&self, max_results: usize) -> CompletionOptions {
+        CompletionOptions {
+            max_results,
+            ignore_spaces: self.completion_config.ignore_spaces,
+            fuzzy_enabled: self.completion_config.fuzzy,
+            match_threshold_percent: self.completion_config.match_threshold_percent,
+            typo_threshold_percent: self.completion_config.typo_threshold_percent,
+        }
+    }
+
+    fn ensure_completion_worker(&mut self) -> &CompletionWorker {
+        if self.completion_worker.is_none() {
+            self.completion_worker = Some(CompletionWorker::start());
+        }
+        self.completion_worker.as_ref().unwrap()
+    }
+
+    fn should_enqueue_async_completion(&self, line: &str, cursor: usize) -> bool {
+        if !self.completion_config.enabled
+            || line.trim().is_empty()
+            || line.starts_with('#')
+            || cursor != line.len()
+        {
+            return false;
+        }
+        !current_token_context(line, cursor).path_like
+    }
+
+    fn completion_history_snapshot(&mut self) -> Arc<Vec<HistoryEntry>> {
+        if self.completion_history_snapshot_len != self.regular_history.len() {
+            self.completion_history_snapshot =
+                Arc::new(self.regular_history.iter().rev().cloned().collect());
+            self.completion_history_snapshot_len = self.regular_history.len();
+        }
+        Arc::clone(&self.completion_history_snapshot)
+    }
+
+    fn invalidate_completion_history_snapshot(&mut self) {
+        self.completion_history_snapshot_len = usize::MAX;
     }
 
     pub fn clear_completion_ui(&mut self) {
@@ -1445,6 +1663,7 @@ pub fn execute_draft(
                                 let loaded = trim_history_for_state(state, count)?;
                                 let keep_from = loaded.regular.items.len().saturating_sub(count);
                                 state.regular_history = loaded.regular.items[keep_from..].to_vec();
+                                state.invalidate_completion_history_snapshot();
                                 state.ai_sessions = load_ai_sessions_for_state(state)?;
                                 state.ai_command_indices = ai_command_indices(&state.ai_sessions);
                                 state.selected_history_index = None;
@@ -2272,6 +2491,11 @@ fn write_status_report(state: &AppState, out: &mut impl Write) -> Result<()> {
     writeln!(out, "context.max_bytes={}", state.context_config.max_bytes)?;
     writeln!(
         out,
+        "completion.enabled={}",
+        state.completion_config.enabled
+    )?;
+    writeln!(
+        out,
         "completion.max_results={}",
         state.completion_config.max_results
     )?;
@@ -2286,6 +2510,7 @@ fn write_status_report(state: &AppState, out: &mut impl Write) -> Result<()> {
         state.completion_config.template_first
     )?;
     writeln!(out, "completion.inline={}", state.completion_config.inline)?;
+    writeln!(out, "completion.fuzzy={}", state.completion_config.fuzzy)?;
     writeln!(
         out,
         "completion.tab_accept={}",
@@ -2295,6 +2520,11 @@ fn write_status_report(state: &AppState, out: &mut impl Write) -> Result<()> {
         out,
         "completion.match_threshold_percent={}",
         state.completion_config.match_threshold_percent
+    )?;
+    writeln!(
+        out,
+        "completion.typo_threshold_percent={}",
+        state.completion_config.typo_threshold_percent
     )?;
     writeln!(out, "keybindings={}", default_keybindings().len())?;
     Ok(())
@@ -2425,6 +2655,11 @@ fn write_config_report(state: &AppState, out: &mut impl Write) -> Result<()> {
     )?;
     writeln!(
         out,
+        "completion.enabled={}",
+        state.completion_config.enabled
+    )?;
+    writeln!(
+        out,
         "completion.max_results={}",
         state.completion_config.max_results
     )?;
@@ -2439,6 +2674,7 @@ fn write_config_report(state: &AppState, out: &mut impl Write) -> Result<()> {
         state.completion_config.template_first
     )?;
     writeln!(out, "completion.inline={}", state.completion_config.inline)?;
+    writeln!(out, "completion.fuzzy={}", state.completion_config.fuzzy)?;
     writeln!(
         out,
         "completion.tab_accept={}",
@@ -2448,6 +2684,11 @@ fn write_config_report(state: &AppState, out: &mut impl Write) -> Result<()> {
         out,
         "completion.match_threshold_percent={}",
         state.completion_config.match_threshold_percent
+    )?;
+    writeln!(
+        out,
+        "completion.typo_threshold_percent={}",
+        state.completion_config.typo_threshold_percent
     )?;
     writeln!(out, "ai.model={}", config_value(&state.ai_config.model))?;
     writeln!(
@@ -3610,6 +3851,13 @@ fn update_completion_config(state: &mut AppState, out: &mut impl Write, args: &s
     let mut parts = args.split_whitespace();
     match (parts.next(), parts.next(), parts.next()) {
         (None, None, None) => write_completion_config(out, &state.completion_config),
+        (Some(value @ ("on" | "off")), None, None) => {
+            let enabled = value == "on";
+            set_completion_config(state, out, |config| {
+                config.completion.enabled = enabled;
+                Ok(())
+            })
+        }
         (Some("max"), Some(count), None) => {
             let max_results = count.parse::<usize>();
             let Ok(max_results) = max_results else {
@@ -3632,6 +3880,16 @@ fn update_completion_config(state: &mut AppState, out: &mut impl Write, args: &s
             };
             set_completion_config(state, out, |config| {
                 config.completion.inline = inline;
+                Ok(())
+            })
+        }
+        (Some("fuzzy"), Some(value), None) => {
+            let Some(fuzzy) = parse_on_off(value) else {
+                writeln!(out, "usage: #completion fuzzy on|off")?;
+                return Ok(());
+            };
+            set_completion_config(state, out, |config| {
+                config.completion.fuzzy = fuzzy;
                 Ok(())
             })
         }
@@ -3659,9 +3917,23 @@ fn update_completion_config(state: &mut AppState, out: &mut impl Write, args: &s
                 Ok(())
             })
         }
+        (Some("typo-threshold"), Some(value), None) => {
+            let Ok(percent) = value.parse::<usize>() else {
+                writeln!(out, "usage: #completion typo-threshold <0-100>")?;
+                return Ok(());
+            };
+            if percent > 100 {
+                writeln!(out, "completion typo threshold must be between 0 and 100")?;
+                return Ok(());
+            }
+            set_completion_config(state, out, |config| {
+                config.completion.typo_threshold_percent = percent;
+                Ok(())
+            })
+        }
         _ => writeln!(
             out,
-            "usage: #completion max <count>|inline on|off|tab-accept full|word|match-threshold <0-100>"
+            "usage: #completion on|off|max <count>|inline on|off|fuzzy on|off|tab-accept full|word|match-threshold <0-100>|typo-threshold <0-100>"
         )
         .map_err(Into::into),
     }
@@ -3694,15 +3966,22 @@ fn set_completion_config(
 }
 
 fn write_completion_config(out: &mut impl Write, config: &CompletionConfig) -> Result<()> {
+    writeln!(out, "completion.enabled={}", config.enabled)?;
     writeln!(out, "completion.max_results={}", config.max_results)?;
     writeln!(out, "completion.ignore_spaces={}", config.ignore_spaces)?;
     writeln!(out, "completion.template_first={}", config.template_first)?;
     writeln!(out, "completion.inline={}", config.inline)?;
+    writeln!(out, "completion.fuzzy={}", config.fuzzy)?;
     writeln!(out, "completion.tab_accept={}", config.tab_accept.as_str())?;
     writeln!(
         out,
         "completion.match_threshold_percent={}",
         config.match_threshold_percent
+    )?;
+    writeln!(
+        out,
+        "completion.typo_threshold_percent={}",
+        config.typo_threshold_percent
     )?;
     Ok(())
 }
@@ -4102,12 +4381,15 @@ mod tests {
                 source: HistorySource::User,
             }],
             completion_config: CompletionConfig {
+                enabled: true,
                 max_results: 2,
                 ignore_spaces: true,
                 template_first: true,
                 inline: true,
+                fuzzy: true,
                 tab_accept: CompletionTabAccept::Full,
                 match_threshold_percent: 50,
+                typo_threshold_percent: 80,
             },
             ..AppState::default()
         };
@@ -4150,6 +4432,66 @@ mod tests {
     }
 
     #[test]
+    fn completion_candidates_offer_private_commands_after_hash_prefix() {
+        let mut state = AppState::default();
+        state.draft.insert_str("#sta");
+
+        let candidates = state.completion_candidates().unwrap();
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].display, "#status");
+        assert_eq!(
+            candidates[0].source,
+            crate::completion::CompletionSource::PrivateCommand
+        );
+    }
+
+    #[test]
+    fn completion_candidates_stay_quiet_for_hash_space_ai_prompts() {
+        let mut state = AppState {
+            regular_history: vec![HistoryEntry {
+                t: 1,
+                command: "git status".to_string(),
+                exit_code: Some(0),
+                source: HistorySource::User,
+            }],
+            ..AppState::default()
+        };
+        state.draft.insert_str("# ");
+
+        assert!(state.completion_candidates().unwrap().is_empty());
+
+        state.draft.insert_str("git");
+        assert!(state.completion_candidates().unwrap().is_empty());
+    }
+
+    #[test]
+    fn completion_candidates_use_structural_history_after_trailing_space() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("local-file"), "").unwrap();
+        let mut state = AppState {
+            current_cwd: Some(temp.path().to_path_buf()),
+            regular_history: vec![HistoryEntry {
+                t: 1,
+                command: "git status --short".to_string(),
+                exit_code: Some(0),
+                source: HistorySource::User,
+            }],
+            ..AppState::default()
+        };
+        state.draft.insert_str("git ");
+
+        let candidates = state.completion_candidates().unwrap();
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].display, "status --short");
+        assert_eq!(
+            candidates[0].source,
+            crate::completion::CompletionSource::History
+        );
+    }
+
+    #[test]
     fn completion_candidates_split_discovery_from_panel_row_limit() {
         let temp = tempfile::tempdir().unwrap();
         std::fs::write(temp.path().join("alpha-one.txt"), "").unwrap();
@@ -4181,6 +4523,33 @@ mod tests {
         state.draft_from_editor = false;
         state.mode = Mode::History;
         assert!(state.completion_candidates().unwrap().is_empty());
+    }
+
+    #[test]
+    fn completion_candidates_respect_global_enabled_switch() {
+        let mut state = AppState {
+            regular_history: vec![HistoryEntry {
+                t: 1,
+                command: "git status".to_string(),
+                exit_code: Some(0),
+                source: HistorySource::User,
+            }],
+            completion_config: CompletionConfig {
+                enabled: false,
+                ..CompletionConfig::default()
+            },
+            ..AppState::default()
+        };
+        state.draft.insert_str("git");
+
+        assert!(state.completion_candidates().unwrap().is_empty());
+        assert!(
+            state
+                .start_live_completion_request(usize::MAX)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(state.pending_completion.is_none());
     }
 
     #[test]
@@ -5464,6 +5833,8 @@ mod tests {
     fn subsystem_commands_report_current_state() {
         for (line, expected) in [
             ("#completion", "completion.max_results=5"),
+            ("#completion", "completion.enabled=true"),
+            ("#completion", "completion.fuzzy=true"),
             ("#editor", "editor temp directory is not configured"),
         ] {
             let mut state = AppState::default();
@@ -5501,12 +5872,20 @@ mod tests {
         let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
 
         for (line, expected) in [
+            ("#completion off", "completion.enabled=false"),
+            ("#completion on", "completion.enabled=true"),
             ("#completion max 2", "completion.max_results=2"),
             ("#completion inline off", "completion.inline=false"),
             ("#completion tab-accept word", "completion.tab_accept=word"),
+            ("#completion fuzzy off", "completion.fuzzy=false"),
+            ("#completion fuzzy on", "completion.fuzzy=true"),
             (
                 "#completion match-threshold 80",
                 "completion.match_threshold_percent=80",
+            ),
+            (
+                "#completion typo-threshold 85",
+                "completion.typo_threshold_percent=85",
             ),
             (
                 "#completion max 0",
@@ -5517,6 +5896,7 @@ mod tests {
                 "#completion inline maybe",
                 "usage: #completion inline on|off",
             ),
+            ("#completion fuzzy maybe", "usage: #completion fuzzy on|off"),
             (
                 "#completion tab-accept line",
                 "usage: #completion tab-accept full|word",
@@ -5528,6 +5908,14 @@ mod tests {
             (
                 "#completion match-threshold nope",
                 "usage: #completion match-threshold <0-100>",
+            ),
+            (
+                "#completion typo-threshold 101",
+                "completion typo threshold must be between 0 and 100",
+            ),
+            (
+                "#completion typo-threshold nope",
+                "usage: #completion typo-threshold <0-100>",
             ),
         ] {
             state.draft.insert_str(line);
@@ -5548,18 +5936,24 @@ mod tests {
             assert!(state.draft.is_empty());
         }
 
+        assert!(state.completion_config.enabled);
         assert_eq!(state.completion_config.max_results, 2);
         assert!(!state.completion_config.inline);
+        assert!(state.completion_config.fuzzy);
         assert_eq!(
             state.completion_config.tab_accept,
             CompletionTabAccept::Word
         );
         assert_eq!(state.completion_config.match_threshold_percent, 80);
+        assert_eq!(state.completion_config.typo_threshold_percent, 85);
         let loaded = config::load_config(&config_path).unwrap().completion;
+        assert!(loaded.enabled);
         assert_eq!(loaded.max_results, 2);
         assert!(!loaded.inline);
+        assert!(loaded.fuzzy);
         assert_eq!(loaded.tab_accept, CompletionTabAccept::Word);
         assert_eq!(loaded.match_threshold_percent, 80);
+        assert_eq!(loaded.typo_threshold_percent, 85);
     }
 
     #[test]
@@ -6905,12 +7299,15 @@ mod tests {
                 execute_after_save: false,
             },
             completion_config: CompletionConfig {
+                enabled: true,
                 max_results: 8,
                 ignore_spaces: false,
                 template_first: true,
                 inline: false,
+                fuzzy: true,
                 tab_accept: CompletionTabAccept::Word,
                 match_threshold_percent: 75,
+                typo_threshold_percent: 80,
             },
             ai_config: AiConfig {
                 model: "gpt-test".to_string(),
@@ -6947,12 +7344,15 @@ mod tests {
         assert!(output.contains("editor.command=nvim --clean"));
         assert!(output.contains("paste.multiline=editor"));
         assert!(output.contains("paste.confirm_execute=true"));
+        assert!(output.contains("completion.enabled=true"));
         assert!(output.contains("completion.max_results=8"));
         assert!(output.contains("completion.ignore_spaces=false"));
         assert!(output.contains("completion.template_first=true"));
         assert!(output.contains("completion.inline=false"));
+        assert!(output.contains("completion.fuzzy=true"));
         assert!(output.contains("completion.tab_accept=word"));
         assert!(output.contains("completion.match_threshold_percent=75"));
+        assert!(output.contains("completion.typo_threshold_percent=80"));
         assert!(output.contains("ai.model=gpt-test"));
         assert!(output.contains("ai.base_url=https://example.invalid/v1"));
         assert!(output.contains("ai.env_key=OPENAI_API_KEY"));
@@ -7154,8 +7554,11 @@ mod tests {
         assert!(output.contains("encryption=off"));
         assert!(output.contains("sync.enabled=false"));
         assert!(output.contains("context.enabled=true"));
+        assert!(output.contains("completion.enabled=true"));
         assert!(output.contains("completion.max_results=5"));
+        assert!(output.contains("completion.fuzzy=true"));
         assert!(output.contains("completion.match_threshold_percent=50"));
+        assert!(output.contains("completion.typo_threshold_percent=80"));
         assert!(output.contains("keybindings=22"));
         assert!(state.draft.is_empty());
     }

@@ -770,17 +770,27 @@ For non-first-token completion:
 
 For command completion:
 
+- `completion.enabled = false` disables all Aish completion candidates, live completion UI, and non-empty `Tab` acceptance.
+- `completion.fuzzy = false` disables typo-correction/fuzzy work while preserving fast prefix, path, template, and structural history completion.
 - Template candidates are shown before history candidates.
 - History candidates are ordered newest to oldest.
 - Matching ignores spaces when configured.
 - The below-prompt panel displays at most `completion.max_results` candidates.
 - Empty tokens and candidates with zero matching positions are not displayed.
-- Partial matches must exceed `completion.match_threshold_percent`; the default threshold is `50`.
+- `completion.match_threshold_percent` is a structural word-position match rate, not character-level typo correction. For example, `git stx` matches `git status --short` at one of two typed positions, so the default `50` threshold can show it.
+- Structural matches pass when the word-position match rate is greater than or equal to the configured threshold.
+- Typo correction is separate from structural matching and uses `completion.typo_threshold_percent`; the default threshold is `80`.
+- Generic prefix matching must not treat partial character overlap such as `stx` versus `status` as a match. That belongs to the typo tier.
+- A `# ` AI prompt must not trigger completion. A `#cmd` token may only show Aish private command candidates.
 
 ### 10.3 Live inline completion and Tab behavior
 
 - Empty draft `Tab` switches modes.
-- When inline suggestions are enabled, non-empty draft edits compute completion candidates for the current token and show the best candidate as an inline ghost suggestion in dim text on the active prompt line without requiring `Tab`.
+- When inline suggestions are enabled, non-empty draft edits start a layered completion request for the current token and show the best available candidate as an inline ghost suggestion in dim text on the active prompt line without requiring `Tab`.
+- Live completion must not scan regular history synchronously on every keypress. It sends a versioned background request using a cheap history snapshot reference.
+- Live completion is layered: immediate non-history candidates are shown first, structural history results can refresh the UI when the worker finishes, and slower typo-correction results can refresh the UI after that when `completion.fuzzy = true`.
+- Completion worker events carry the request id. Events for older input, different cursor positions, or stale request ids must be ignored.
+- Empty non-first tokens after trailing whitespace must not run path fallback. They may show structural template candidates immediately and structural history candidates when the worker returns.
 - Live inline completion also renders remaining candidates as below-prompt hints when they fit the configured display rules.
 - If the user presses `Tab` and there are no candidates, Aish leaves the completion UI empty and redraws the current draft unchanged.
 - The inline ghost suggestion is display-only. It must not modify the draft buffer, cursor position, history, or persisted draft until the user explicitly accepts it.
@@ -816,20 +826,27 @@ Config:
 
 ```toml
 [completion]
+enabled = true
 max_results = 5
 ignore_spaces = true
 template_first = true
 inline = true
+fuzzy = true
 tab_accept = "full" # "full" or "word"
 match_threshold_percent = 50
+typo_threshold_percent = 80
 ```
 
 Command:
 
 ```text
+#completion on|off
 #completion max 8
 #completion inline on|off
+#completion fuzzy on|off
 #completion tab-accept full|word
+#completion match-threshold <0-100>
+#completion typo-threshold <0-100>
 ```
 
 ### 10.5 Ghost suggestions
@@ -993,12 +1010,15 @@ confirm = true
 max_bytes = 65536
 
 [completion]
+enabled = true
 max_results = 5
 ignore_spaces = true
 template_first = true
 inline = true
+fuzzy = true
 tab_accept = "full" # "full" or "word"
 match_threshold_percent = 50
+typo_threshold_percent = 80
 
 [editor]
 command = ["nvim"]
@@ -1228,10 +1248,13 @@ Initial command set:
 #context <bytes>
 #context confirm on|off
 
+#completion on|off
 #completion max <count>
 #completion inline on|off
+#completion fuzzy on|off
 #completion tab-accept full|word
 #completion match-threshold <0-100>
+#completion typo-threshold <0-100>
 
 #history <count>
 #log <count>

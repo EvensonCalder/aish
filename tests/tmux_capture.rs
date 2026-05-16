@@ -385,6 +385,12 @@ fn tmux_status_command_is_visible_and_shell_recovers() {
     assert!(
         captured
             .lines()
+            .any(|line| line == "completion.enabled=true"),
+        "status completion enabled line was not visible: {captured:?}"
+    );
+    assert!(
+        captured
+            .lines()
             .any(|line| line == "completion.max_results=5"),
         "status completion config line was not visible: {captured:?}"
     );

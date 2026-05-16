@@ -186,8 +186,21 @@ fn persist_draft_and_flush_before_exit(state: &AppState) -> Result<()> {
 }
 
 fn refresh_after_background_events(state: &mut AppState, out: &mut impl Write) -> Result<()> {
+    let mut should_redraw = false;
+    if let Some(candidates) = state.drain_live_completion_events()
+        && should_refresh_live_completion(state)
+    {
+        state.clear_completion_ui();
+        if !candidates.is_empty() {
+            set_completion_ui_from_candidates(state, candidates, terminal_display_width());
+        }
+        should_redraw = true;
+    }
     if state.drain_encrypted_write_events() {
         refresh_live_completion_ui(state)?;
+        should_redraw = true;
+    }
+    if should_redraw {
         redraw(state, out)?;
     }
     Ok(())
@@ -895,7 +908,10 @@ pub fn redraw(state: &mut AppState, out: &mut impl Write) -> Result<()> {
 }
 
 pub fn write_completion_candidates(state: &AppState, out: &mut impl Write) -> Result<()> {
-    let candidates = state.completion_panel_candidates()?;
+    let candidates = state
+        .cached_live_completion_candidates_with_max_results(state.completion_config.max_results)
+        .map(Ok)
+        .unwrap_or_else(|| state.completion_panel_candidates())?;
     if candidates.is_empty() {
         return Ok(());
     }
@@ -920,7 +936,7 @@ pub fn complete_or_show_candidates_for_width(state: &mut AppState, width: usize)
         }
         let had_panel_without_inline =
             state.completion_inline.is_none() && !state.completion_panel.is_empty();
-        let candidates = state.completion_candidates()?;
+        let candidates = state.live_completion_candidates_with_max_results(usize::MAX)?;
         if candidates.is_empty() {
             state.clear_completion_ui();
             return Ok(());
@@ -954,7 +970,7 @@ fn refresh_live_completion_ui_for_width(state: &mut AppState, width: usize) -> R
     if !should_refresh_live_completion(state) {
         return Ok(());
     }
-    let candidates = state.completion_candidates()?;
+    let candidates = state.start_live_completion_request(usize::MAX)?;
     if !candidates.is_empty() {
         set_completion_ui_from_candidates(state, candidates, width);
     }
@@ -962,7 +978,8 @@ fn refresh_live_completion_ui_for_width(state: &mut AppState, width: usize) -> R
 }
 
 fn should_refresh_live_completion(state: &AppState) -> bool {
-    state.completion_config.inline
+    state.completion_config.enabled
+        && state.completion_config.inline
         && state.pending_context.is_none()
         && !state.ctrl_x_prefix
         && state.mode == crate::modes::Mode::Draft
@@ -1014,6 +1031,10 @@ fn inline_completion_from_candidate(
 }
 
 fn accept_inline_completion(state: &mut AppState) -> Result<bool> {
+    if !state.completion_config.enabled {
+        state.clear_completion_ui();
+        return Ok(false);
+    }
     let Some(inline) = state.completion_inline.clone() else {
         return Ok(false);
     };
@@ -1177,7 +1198,12 @@ pub fn accept_first_completion(state: &mut AppState) -> Result<bool> {
     if accept_inline_completion(state)? {
         return Ok(true);
     }
-    let Some(candidate) = state.completion_candidates()?.into_iter().next() else {
+    let candidates = if state.completion_config.inline {
+        state.live_completion_candidates_with_max_results(usize::MAX)?
+    } else {
+        state.completion_candidates()?
+    };
+    let Some(candidate) = candidates.into_iter().next() else {
         return Ok(false);
     };
     accept_completion_candidate(state, candidate)
@@ -1232,6 +1258,25 @@ mod tests {
 
     fn alt_key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::ALT)
+    }
+
+    fn wait_for_inline_suffix(state: &mut AppState, suffix: &str) {
+        let mut output = Vec::new();
+        for _ in 0..50 {
+            refresh_after_background_events(state, &mut output).unwrap();
+            if state
+                .completion_inline
+                .as_ref()
+                .is_some_and(|inline| inline.suffix == suffix)
+            {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!(
+            "missing inline suffix {suffix:?}; inline was {:?}, panel was {:?}",
+            state.completion_inline, state.completion_panel
+        );
     }
 
     #[cfg(unix)]
@@ -1330,8 +1375,17 @@ mod tests {
         assert!(state.completion_inline.is_none());
 
         let mut output = Vec::new();
-        refresh_after_background_events(&mut state, &mut output).unwrap();
-
+        for _ in 0..50 {
+            refresh_after_background_events(&mut state, &mut output).unwrap();
+            if state
+                .completion_inline
+                .as_ref()
+                .is_some_and(|inline| inline.suffix == " status")
+            {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
         assert_eq!(state.completion_inline.as_ref().unwrap().suffix, " status");
     }
 
@@ -1719,6 +1773,74 @@ mod tests {
     }
 
     #[test]
+    fn async_history_completion_updates_live_ui_after_request() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("local-file"), "").unwrap();
+        let mut state = AppState {
+            current_cwd: Some(temp.path().to_path_buf()),
+            regular_history: vec![crate::history::HistoryEntry {
+                t: 1,
+                command: "git status --short".to_string(),
+                exit_code: Some(0),
+                source: crate::history::HistorySource::User,
+            }],
+            ..AppState::default()
+        };
+        state.draft.insert_str("git ");
+
+        refresh_live_completion_ui_for_width(&mut state, 80).unwrap();
+        assert!(state.completion_inline.is_none());
+        assert!(state.completion_panel.is_empty());
+
+        let mut output = Vec::new();
+        for _ in 0..50 {
+            refresh_after_background_events(&mut state, &mut output).unwrap();
+            if state
+                .completion_inline
+                .as_ref()
+                .is_some_and(|inline| inline.suffix == "status --short")
+            {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        assert_eq!(
+            state.completion_inline.as_ref().unwrap().suffix,
+            "status --short"
+        );
+        assert!(state.completion_panel.is_empty());
+    }
+
+    #[test]
+    fn stale_async_completion_events_are_ignored_after_input_changes() {
+        let mut state = AppState {
+            regular_history: vec![crate::history::HistoryEntry {
+                t: 1,
+                command: "git status --short".to_string(),
+                exit_code: Some(0),
+                source: crate::history::HistorySource::User,
+            }],
+            ..AppState::default()
+        };
+        state.draft.insert_str("git ");
+        refresh_live_completion_ui_for_width(&mut state, 80).unwrap();
+
+        state.draft.clear();
+        state.draft.insert_str("# ");
+        refresh_live_completion_ui_for_width(&mut state, 80).unwrap();
+
+        let mut output = Vec::new();
+        for _ in 0..20 {
+            refresh_after_background_events(&mut state, &mut output).unwrap();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        assert!(state.completion_inline.is_none());
+        assert!(state.completion_panel.is_empty());
+    }
+
+    #[test]
     fn no_match_completion_leaves_completion_ui_empty() {
         let mut state = AppState {
             regular_history: vec![crate::history::HistoryEntry {
@@ -1727,6 +1849,10 @@ mod tests {
                 exit_code: Some(0),
                 source: crate::history::HistorySource::User,
             }],
+            completion_config: CompletionConfig {
+                inline: false,
+                ..CompletionConfig::default()
+            },
             ..AppState::default()
         };
         state.draft.insert_str("zzzzzz-no-match");
@@ -1824,6 +1950,57 @@ mod tests {
 
         assert!(state.completion_inline.is_none());
         assert!(state.completion_panel.is_empty());
+    }
+
+    #[test]
+    fn completion_enabled_false_disables_live_and_stale_inline_acceptance() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut state = AppState {
+            current_cwd: Some(temp.path().to_path_buf()),
+            ..AppState::default()
+        };
+        std::fs::write(temp.path().join("single.txt"), "").unwrap();
+        state.draft.insert_str("cat si");
+        refresh_live_completion_ui_for_width(&mut state, 80).unwrap();
+        assert!(state.completion_inline.is_some());
+
+        state.completion_config.enabled = false;
+        assert!(!accept_first_completion(&mut state).unwrap());
+        assert_eq!(state.draft.as_str(), "cat si");
+        assert!(state.completion_inline.is_none());
+        assert!(state.completion_panel.is_empty());
+
+        refresh_live_completion_ui_for_width(&mut state, 80).unwrap();
+        complete_or_show_candidates(&mut state).unwrap();
+        assert_eq!(state.draft.as_str(), "cat si");
+        assert!(state.completion_inline.is_none());
+        assert!(state.completion_panel.is_empty());
+    }
+
+    #[test]
+    fn completion_fuzzy_false_keeps_structural_history_completion() {
+        let mut state = AppState {
+            regular_history: vec![crate::history::HistoryEntry {
+                t: 1,
+                command: "git status --short".to_string(),
+                exit_code: Some(0),
+                source: crate::history::HistorySource::User,
+            }],
+            completion_config: CompletionConfig {
+                fuzzy: false,
+                ..CompletionConfig::default()
+            },
+            ..AppState::default()
+        };
+        state.draft.insert_str("git ");
+
+        refresh_live_completion_ui_for_width(&mut state, 80).unwrap();
+        wait_for_inline_suffix(&mut state, "status --short");
+
+        assert_eq!(
+            state.completion_inline.as_ref().unwrap().suffix,
+            "status --short"
+        );
     }
 
     #[test]
@@ -2077,6 +2254,10 @@ mod tests {
                 exit_code: Some(0),
                 source: crate::history::HistorySource::User,
             }],
+            completion_config: CompletionConfig {
+                inline: false,
+                ..CompletionConfig::default()
+            },
             ..AppState::default()
         };
         state.draft.insert_str("git sta");
@@ -2105,6 +2286,7 @@ mod tests {
         state.draft.insert_str("kub");
 
         complete_or_show_candidates(&mut state).unwrap();
+        wait_for_inline_suffix(&mut state, "ectl apply -f deployment.yaml");
         complete_or_show_candidates(&mut state).unwrap();
 
         assert_eq!(state.draft.as_str(), "kubectl");
@@ -2124,6 +2306,18 @@ mod tests {
         };
         state.draft.insert_str("git");
         complete_or_show_candidates(&mut state).unwrap();
+        let mut output = Vec::new();
+        for _ in 0..50 {
+            refresh_after_background_events(&mut state, &mut output).unwrap();
+            if state
+                .completion_inline
+                .as_ref()
+                .is_some_and(|inline| inline.suffix == " status")
+            {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
 
         assert!(accept_first_completion(&mut state).unwrap());
 
@@ -2262,7 +2456,9 @@ mod tests {
         };
         state.draft.insert_str("echo in");
         refresh_live_completion_ui_for_width(&mut state, 80).unwrap();
+        wait_for_inline_suffix(&mut state, "line-history seeded");
         complete_or_show_candidates(&mut state).unwrap();
+        wait_for_inline_suffix(&mut state, " seeded");
         assert_eq!(state.draft.as_str(), "echo inline-history");
         assert_eq!(state.completion_inline.as_ref().unwrap().suffix, " seeded");
         let mut backend = PtyBackend::spawn("/bin/bash").unwrap();

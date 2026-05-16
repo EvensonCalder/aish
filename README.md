@@ -127,44 +127,57 @@ Inline completion is enabled by default and refreshes while you type. The best c
 
 Important rules:
 
+- `completion.enabled=false` disables all Aish completion candidates and live completion UI.
+- `completion.fuzzy=false` keeps fast prefix/structural completion but disables typo-correction work.
 - The inline suggestion is display-only until accepted.
 - The below-prompt panel is advisory and never decides what `Tab` accepts.
 - `completion.max_results` controls only the number of below-prompt rows.
 - The panel skips the current inline candidate and shows remaining suffixes where possible.
 - Candidate rows are width-aware and elide with `...` instead of wrapping.
-- Candidates below the configured match threshold are hidden; empty tokens and zero-position matches stay quiet.
+- Structural history/template matches use `completion.match_threshold_percent` as a word-position match rate. The default is `50`, so one matching word out of two typed words is enough.
+- Typo correction is separate and uses `completion.typo_threshold_percent`; ordinary prefix matching does not treat `stx` as `status`.
+- `# ` AI prompts stay quiet. `#cmd` input only offers Aish private command names.
 - If `completion.inline=false`, non-empty `Tab` preserves the legacy behavior and accepts the first ranked candidate directly.
 
 Completion sources:
 
 - First token: templates, regular history, then PATH executables.
 - Non-first token: structural template matches, structural history suffixes, template placeholders, history arguments, and filesystem paths.
+- After a trailing space, Aish uses structural template/history matches and does not show unrelated filesystem entries for the empty token.
 - Template completions use newest stored templates first.
 - Paths preserve directory prefixes and mark directories with `/`.
-- Matching ignores spaces by default, and partial matches must exceed `completion.match_threshold_percent`.
+- Live completion is layered: immediate non-history candidates are shown first, structural history updates arrive from a background worker, and slower typo-correction results can update the same UI later. Stale worker results are ignored when the input changes.
 
 Configuration:
 
 ```toml
 [completion]
+enabled = true
 max_results = 5
 ignore_spaces = true
 template_first = true
 inline = true
+fuzzy = true
 tab_accept = "full" # "full" or "word"
 match_threshold_percent = 50
+typo_threshold_percent = 80
 ```
 
 Commands:
 
 ```text
 #completion
+#completion on
+#completion off
 #completion max 8
 #completion inline on
 #completion inline off
+#completion fuzzy on
+#completion fuzzy off
 #completion tab-accept full
 #completion tab-accept word
 #completion match-threshold 50
+#completion typo-threshold 80
 ```
 
 `tab_accept = "word"` accepts only through the next whitespace boundary in the untyped suffix. This is useful for long history completions such as `kubectl apply -f deployment.yaml`.
@@ -195,10 +208,13 @@ Completion:
 
 ```text
 #completion
+#completion on|off
 #completion max <count>
 #completion inline on|off
+#completion fuzzy on|off
 #completion tab-accept full|word
 #completion match-threshold <0-100>
+#completion typo-threshold <0-100>
 ```
 
 Context:

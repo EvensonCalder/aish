@@ -65,12 +65,15 @@ pub struct PasteConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct CompletionConfig {
+    pub enabled: bool,
     pub max_results: usize,
     pub ignore_spaces: bool,
     pub template_first: bool,
     pub inline: bool,
+    pub fuzzy: bool,
     pub tab_accept: CompletionTabAccept,
     pub match_threshold_percent: usize,
+    pub typo_threshold_percent: usize,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
@@ -204,12 +207,15 @@ impl Default for PasteConfig {
 impl Default for CompletionConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             max_results: 5,
             ignore_spaces: true,
             template_first: true,
             inline: true,
+            fuzzy: true,
             tab_accept: CompletionTabAccept::Full,
             match_threshold_percent: 50,
+            typo_threshold_percent: 80,
         }
     }
 }
@@ -382,6 +388,10 @@ pub fn normalize_config(config: &mut Config) {
         config.completion.match_threshold_percent =
             CompletionConfig::default().match_threshold_percent;
     }
+    if config.completion.typo_threshold_percent > 100 {
+        config.completion.typo_threshold_percent =
+            CompletionConfig::default().typo_threshold_percent;
+    }
     config.ai.model = config.ai.model.trim().to_string();
     config.ai.base_url = config.ai.base_url.trim().to_string();
     config.ai.env_key = config.ai.env_key.trim().to_string();
@@ -416,11 +426,14 @@ mod tests {
         assert_eq!(config.paste.multiline, "editor");
         assert!(config.paste.confirm_execute);
         assert_eq!(config.completion.max_results, 5);
+        assert!(config.completion.enabled);
         assert!(config.completion.ignore_spaces);
         assert!(config.completion.template_first);
         assert!(config.completion.inline);
+        assert!(config.completion.fuzzy);
         assert_eq!(config.completion.tab_accept, CompletionTabAccept::Full);
         assert_eq!(config.completion.match_threshold_percent, 50);
+        assert_eq!(config.completion.typo_threshold_percent, 80);
         assert_eq!(config.ai, AiConfig::default());
         assert_eq!(config.context, ContextConfig::default());
         assert_eq!(config.encryption, EncryptionConfig::default());
@@ -452,12 +465,15 @@ mod tests {
                 confirm_execute: true,
             },
             completion: CompletionConfig {
+                enabled: true,
                 max_results: 0,
                 ignore_spaces: true,
                 template_first: true,
                 inline: true,
+                fuzzy: true,
                 tab_accept: CompletionTabAccept::Full,
                 match_threshold_percent: 101,
+                typo_threshold_percent: 101,
             },
             ai: AiConfig {
                 model: "  gpt-test  ".to_string(),
@@ -507,6 +523,7 @@ mod tests {
             recipient: "test@example.invalid".to_string(),
         };
         expected.completion.match_threshold_percent = 50;
+        expected.completion.typo_threshold_percent = 80;
         expected.sync = SyncConfig {
             remote: "git@example.invalid:aish.git".to_string(),
             enabled: true,

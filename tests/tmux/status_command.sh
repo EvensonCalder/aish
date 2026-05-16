@@ -19,7 +19,9 @@ CAPTURE="$(tmux capture-pane -p -S - -t "$SESSION")"
 printf '%s\n' "$CAPTURE"
 
 printf '%s\n' "$CAPTURE" | rg -q '^last_status=none$'
+printf '%s\n' "$CAPTURE" | rg -q '^completion.enabled=true$'
 printf '%s\n' "$CAPTURE" | rg -q '^completion.max_results=5$'
 printf '%s\n' "$CAPTURE" | rg -q '^completion.inline=true$'
+printf '%s\n' "$CAPTURE" | rg -q '^completion.fuzzy=true$'
 printf '%s\n' "$CAPTURE" | rg -q '^completion.tab_accept=full$'
 printf '%s\n' "$CAPTURE" | rg -q '^after-status$'

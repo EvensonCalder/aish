@@ -2,6 +2,7 @@ pub mod ai;
 pub mod app;
 pub mod commands;
 pub mod completion;
+pub mod completion_worker;
 pub mod config;
 pub mod context;
 pub mod editor;

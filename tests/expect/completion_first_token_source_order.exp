@@ -1,8 +1,8 @@
 #!/usr/bin/env expect
 # First-token completion should rank template bodies before history commands
 # before PATH executables when all three sources match the same prefix. The
-# top template appears as inline suffix; lower-ranked rows show suffixes beyond
-# the typed prefix.
+# top template appears as a live inline suffix; lower-ranked rows update below
+# it as async history completion arrives.
 
 set timeout 10
 source [file dirname [info script]]/_lib.exp
@@ -30,7 +30,6 @@ aish_expect_template_stored
 aish_wait_prompt
 
 aish_send "aishexpectuniq"
-send -- "\t"
 
 aish_expect "-template-command"
 aish_expect "history\t-history"

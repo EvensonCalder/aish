@@ -13,10 +13,23 @@ aish_spawn
 
 aish_send "#completion"
 aish_enter
+aish_expect "completion.enabled=true"
 aish_expect "completion.max_results=5"
 aish_expect "completion.inline=true"
+aish_expect "completion.fuzzy=true"
 aish_expect "completion.tab_accept=full"
 aish_expect "completion.match_threshold_percent=50"
+aish_expect "completion.typo_threshold_percent=80"
+aish_wait_prompt
+
+aish_send "#completion off"
+aish_enter
+aish_expect "completion.enabled=false"
+aish_wait_prompt
+
+aish_send "#completion on"
+aish_enter
+aish_expect "completion.enabled=true"
 aish_wait_prompt
 
 aish_send "#completion max 2"
@@ -34,6 +47,16 @@ aish_enter
 aish_expect "completion.inline=true"
 aish_wait_prompt
 
+aish_send "#completion fuzzy off"
+aish_enter
+aish_expect "completion.fuzzy=false"
+aish_wait_prompt
+
+aish_send "#completion fuzzy on"
+aish_enter
+aish_expect "completion.fuzzy=true"
+aish_wait_prompt
+
 aish_send "#completion tab-accept word"
 aish_enter
 aish_expect "completion.tab_accept=word"
@@ -49,12 +72,20 @@ aish_enter
 aish_expect "completion.match_threshold_percent=80"
 aish_wait_prompt
 
+aish_send "#completion typo-threshold 85"
+aish_enter
+aish_expect "completion.typo_threshold_percent=85"
+aish_wait_prompt
+
 aish_send "#config"
 aish_enter
+aish_expect "completion.enabled=true"
 aish_expect "completion.max_results=2"
 aish_expect "completion.inline=true"
+aish_expect "completion.fuzzy=true"
 aish_expect "completion.tab_accept=full"
 aish_expect "completion.match_threshold_percent=80"
+aish_expect "completion.typo_threshold_percent=85"
 aish_wait_prompt
 
 aish_send "#completion max 0"
@@ -64,8 +95,11 @@ aish_wait_prompt
 
 aish_send "#config"
 aish_enter
+aish_expect "completion.enabled=true"
 aish_expect "completion.max_results=2"
+aish_expect "completion.fuzzy=true"
 aish_expect "completion.match_threshold_percent=80"
+aish_expect "completion.typo_threshold_percent=85"
 aish_wait_prompt
 
 aish_send "cd $work"
