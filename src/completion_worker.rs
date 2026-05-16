@@ -6,13 +6,14 @@ use std::thread::{self, JoinHandle};
 use anyhow::{Context, Result};
 
 use crate::completion::{
-    CompletionCandidate, CompletionOptions,
-    complete_first_token_executables_from_names_with_options,
-    complete_first_token_history_with_options, complete_first_token_templates_with_options,
-    complete_non_first_token_for_line_with_options,
-    complete_non_first_token_typos_for_line_with_options, current_token_context,
-    dedupe_completion_candidates, limit_candidates, rank_completion_candidates,
-    scan_path_executables,
+    CompletionCandidate, CompletionOptions, CompletionSource, IndexedHistoryEntry,
+    IndexedTemplateEntry, complete_first_token_executables_from_names_with_options,
+    complete_first_token_history_with_indexed_options,
+    complete_first_token_templates_with_indexed_options,
+    complete_non_first_token_for_line_with_indexed_options,
+    complete_non_first_token_typos_for_line_with_indexed_options, current_token_context,
+    dedupe_completion_candidates, index_history_entries, index_template_entries, limit_candidates,
+    matches_completion_prefix_with_threshold, rank_completion_candidates, scan_path_executables,
 };
 use crate::history::HistoryEntry;
 use crate::templates::TemplateEntry;
@@ -105,6 +106,8 @@ fn run_worker(
     latest_id: Arc<AtomicU64>,
 ) {
     let mut executable_index = ExecutableIndex::default();
+    let mut data_index = CompletionDataIndex::default();
+    let mut primary_cache = PrimaryTierCache::default();
     while let Ok(message) = receiver.recv() {
         let mut job = match message {
             CompletionWorkerMessage::Job(job) => job,
@@ -121,7 +124,12 @@ fn run_worker(
             continue;
         }
 
-        let history_candidates = complete_primary_tier(&job, &mut executable_index);
+        let history_candidates = complete_primary_tier(
+            &job,
+            &mut executable_index,
+            &mut data_index,
+            &mut primary_cache,
+        );
         if is_latest(job.id, &latest_id) {
             let _ = events.send(CompletionEvent {
                 id: job.id,
@@ -133,7 +141,7 @@ fn run_worker(
         if !job.options.fuzzy_enabled || !is_latest(job.id, &latest_id) {
             continue;
         }
-        let typo_candidates = complete_typo_tier(&job, &latest_id);
+        let typo_candidates = complete_typo_tier(&job, &latest_id, &mut data_index);
         if is_latest(job.id, &latest_id) {
             let _ = events.send(CompletionEvent {
                 id: job.id,
@@ -141,6 +149,43 @@ fn run_worker(
                 candidates: typo_candidates,
             });
         }
+    }
+}
+
+#[derive(Default)]
+struct CompletionDataIndex {
+    history_source: Option<Arc<Vec<HistoryEntry>>>,
+    history: Vec<IndexedHistoryEntry>,
+    template_source: Option<Arc<Vec<TemplateEntry>>>,
+    templates: Vec<IndexedTemplateEntry>,
+}
+
+impl CompletionDataIndex {
+    fn refresh_history(&mut self, history: &Arc<Vec<HistoryEntry>>) {
+        if self
+            .history_source
+            .as_ref()
+            .is_none_or(|source| !Arc::ptr_eq(source, history))
+        {
+            self.history = index_history_entries(history);
+            self.history_source = Some(Arc::clone(history));
+        }
+    }
+
+    fn refresh_templates(&mut self, templates: &Arc<Vec<TemplateEntry>>) {
+        if self
+            .template_source
+            .as_ref()
+            .is_none_or(|source| !Arc::ptr_eq(source, templates))
+        {
+            self.templates = index_template_entries(templates);
+            self.template_source = Some(Arc::clone(templates));
+        }
+    }
+
+    fn refresh_for_job(&mut self, job: &CompletionJob) {
+        self.refresh_history(&job.history_newest_first);
+        self.refresh_templates(&job.templates);
     }
 }
 
@@ -163,16 +208,24 @@ impl ExecutableIndex {
 fn complete_primary_tier(
     job: &CompletionJob,
     executable_index: &mut ExecutableIndex,
+    data_index: &mut CompletionDataIndex,
+    primary_cache: &mut PrimaryTierCache,
 ) -> Vec<CompletionCandidate> {
     let mut options = job.options;
     options.max_results = usize::MAX;
     let token = current_token_context(&job.line, job.cursor);
-    let mut candidates = if token.is_first_token && !token.path_like {
-        let mut candidates =
-            complete_first_token_templates_with_options(&token.text, &job.templates, options);
-        candidates.extend(complete_first_token_history_with_options(
+    let mut candidates = if let Some(candidates) = primary_cache.filtered_candidates(job) {
+        candidates
+    } else if token.is_first_token && !token.path_like {
+        data_index.refresh_for_job(job);
+        let mut candidates = complete_first_token_templates_with_indexed_options(
             &token.text,
-            &job.history_newest_first,
+            &data_index.templates,
+            options,
+        );
+        candidates.extend(complete_first_token_history_with_indexed_options(
+            &token.text,
+            &data_index.history,
             options,
         ));
         candidates.extend(complete_first_token_executables_from_names_with_options(
@@ -182,46 +235,148 @@ fn complete_primary_tier(
         ));
         candidates
     } else {
-        complete_non_first_token_for_line_with_options(
+        data_index.refresh_for_job(job);
+        complete_non_first_token_for_line_with_indexed_options(
             &job.line,
             job.cursor,
             &job.cwd,
-            &job.history_newest_first,
-            &job.templates,
+            &data_index.history,
+            &data_index.templates,
             options,
         )
     };
     dedupe_completion_candidates(&mut candidates);
     rank_completion_candidates(&mut candidates);
+    primary_cache.store(job, candidates.clone());
     limit_candidates(candidates, job.options.max_results)
 }
 
-fn complete_typo_tier(job: &CompletionJob, latest_id: &Arc<AtomicU64>) -> Vec<CompletionCandidate> {
+#[derive(Default)]
+struct PrimaryTierCache {
+    entry: Option<PrimaryTierCacheEntry>,
+}
+
+#[derive(Clone)]
+struct PrimaryTierCacheEntry {
+    line: String,
+    cursor: usize,
+    cwd: PathBuf,
+    path_dirs: Arc<Vec<PathBuf>>,
+    history: Arc<Vec<HistoryEntry>>,
+    templates: Arc<Vec<TemplateEntry>>,
+    options: CompletionOptions,
+    candidates: Vec<CompletionCandidate>,
+}
+
+impl PrimaryTierCache {
+    fn filtered_candidates(&self, job: &CompletionJob) -> Option<Vec<CompletionCandidate>> {
+        let entry = self.entry.as_ref()?;
+        if !can_filter_primary_cache(entry, job) {
+            return None;
+        }
+        let token = current_token_context(&job.line, job.cursor);
+        Some(
+            entry
+                .candidates
+                .iter()
+                .filter(|candidate| {
+                    first_token_candidate_matches(candidate, &token.text, job.options)
+                })
+                .cloned()
+                .collect(),
+        )
+    }
+
+    fn store(&mut self, job: &CompletionJob, candidates: Vec<CompletionCandidate>) {
+        self.entry = Some(PrimaryTierCacheEntry {
+            line: job.line.clone(),
+            cursor: job.cursor,
+            cwd: job.cwd.clone(),
+            path_dirs: Arc::clone(&job.path_dirs),
+            history: Arc::clone(&job.history_newest_first),
+            templates: Arc::clone(&job.templates),
+            options: job.options,
+            candidates,
+        });
+    }
+}
+
+fn can_filter_primary_cache(entry: &PrimaryTierCacheEntry, job: &CompletionJob) -> bool {
+    if entry.options != job.options
+        || entry.cwd != job.cwd
+        || entry.path_dirs.as_slice() != job.path_dirs.as_slice()
+        || !Arc::ptr_eq(&entry.history, &job.history_newest_first)
+        || !Arc::ptr_eq(&entry.templates, &job.templates)
+        || entry.cursor != entry.line.len()
+        || job.cursor != job.line.len()
+        || !job.line.starts_with(&entry.line)
+        || job.line.len() <= entry.line.len()
+    {
+        return false;
+    }
+    let previous = current_token_context(&entry.line, entry.cursor);
+    let current = current_token_context(&job.line, job.cursor);
+    previous.is_first_token
+        && current.is_first_token
+        && !previous.path_like
+        && !current.path_like
+        && previous.start == current.start
+        && !previous.text.is_empty()
+        && current.text.starts_with(&previous.text)
+}
+
+fn first_token_candidate_matches(
+    candidate: &CompletionCandidate,
+    prefix: &str,
+    options: CompletionOptions,
+) -> bool {
+    match candidate.source {
+        CompletionSource::Template | CompletionSource::History => {
+            matches_completion_prefix_with_threshold(
+                &candidate.replacement,
+                prefix,
+                options.ignore_spaces,
+                options.match_threshold_percent,
+            )
+        }
+        CompletionSource::Executable => candidate.replacement.starts_with(prefix),
+        _ => false,
+    }
+}
+
+fn complete_typo_tier(
+    job: &CompletionJob,
+    latest_id: &Arc<AtomicU64>,
+    data_index: &mut CompletionDataIndex,
+) -> Vec<CompletionCandidate> {
+    data_index.refresh_for_job(job);
+    let templates = &data_index.templates;
+    let history = &data_index.history;
     let parallelism = thread::available_parallelism()
         .map(usize::from)
         .unwrap_or(1)
         .max(1);
-    if parallelism == 1 || job.history_newest_first.len() < 256 {
-        return complete_non_first_token_typos_for_line_with_options(
+    if parallelism == 1 || history.len() < 256 {
+        return complete_non_first_token_typos_for_line_with_indexed_options(
             &job.line,
             job.cursor,
-            &job.history_newest_first,
-            &job.templates,
+            &history,
+            &templates,
             job.options,
         );
     }
 
-    let chunk_size = job.history_newest_first.len().div_ceil(parallelism);
-    let mut candidates = complete_non_first_token_typos_for_line_with_options(
+    let chunk_size = history.len().div_ceil(parallelism);
+    let mut candidates = complete_non_first_token_typos_for_line_with_indexed_options(
         &job.line,
         job.cursor,
         &[],
-        &job.templates,
+        &templates,
         job.options,
     );
     thread::scope(|scope| {
         let mut handles = Vec::new();
-        for chunk in job.history_newest_first.chunks(chunk_size) {
+        for chunk in history.chunks(chunk_size) {
             let line = job.line.clone();
             let options = job.options;
             let latest_id = Arc::clone(latest_id);
@@ -230,7 +385,7 @@ fn complete_typo_tier(job: &CompletionJob, latest_id: &Arc<AtomicU64>) -> Vec<Co
                 if !is_latest(id, &latest_id) {
                     return Vec::new();
                 }
-                complete_non_first_token_typos_for_line_with_options(
+                complete_non_first_token_typos_for_line_with_indexed_options(
                     &line,
                     job.cursor,
                     chunk,
@@ -254,4 +409,103 @@ fn complete_typo_tier(job: &CompletionJob, latest_id: &Arc<AtomicU64>) -> Vec<Co
 
 fn is_latest(id: u64, latest_id: &AtomicU64) -> bool {
     latest_id.load(Ordering::Relaxed) == id
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::history::HistorySource;
+    use std::path::PathBuf;
+
+    fn history(command: &str, t: i64) -> HistoryEntry {
+        HistoryEntry {
+            t,
+            command: command.to_string(),
+            exit_code: Some(0),
+            source: HistorySource::User,
+        }
+    }
+
+    fn job(
+        id: u64,
+        line: &str,
+        max_results: usize,
+        history_newest_first: Arc<Vec<HistoryEntry>>,
+    ) -> CompletionJob {
+        CompletionJob {
+            id,
+            line: line.to_string(),
+            cursor: line.len(),
+            cwd: PathBuf::from("/"),
+            path_dirs: Arc::new(Vec::new()),
+            history_newest_first,
+            templates: Arc::new(Vec::new()),
+            options: CompletionOptions {
+                max_results,
+                ..CompletionOptions::default()
+            },
+        }
+    }
+
+    #[test]
+    fn primary_cache_filters_full_candidate_set_not_display_limit() {
+        let history = Arc::new(vec![history("cargo build", 2), history("cat alpha", 1)]);
+        let mut executable_index = ExecutableIndex::default();
+        let mut data_index = CompletionDataIndex::default();
+        let mut primary_cache = PrimaryTierCache::default();
+
+        let first = complete_primary_tier(
+            &job(1, "c", 1, Arc::clone(&history)),
+            &mut executable_index,
+            &mut data_index,
+            &mut primary_cache,
+        );
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].replacement, "cargo build");
+
+        let second = complete_primary_tier(
+            &job(2, "cat", 1, Arc::clone(&history)),
+            &mut executable_index,
+            &mut data_index,
+            &mut primary_cache,
+        );
+        assert_eq!(
+            second,
+            [CompletionCandidate {
+                display: "cat alpha".to_string(),
+                replacement: "cat alpha".to_string(),
+                is_dir: false,
+                source: CompletionSource::History,
+            }]
+        );
+    }
+
+    #[test]
+    fn primary_cache_invalidates_on_deletion() {
+        let history = Arc::new(vec![history("cargo build", 2), history("cat alpha", 1)]);
+        let mut executable_index = ExecutableIndex::default();
+        let mut data_index = CompletionDataIndex::default();
+        let mut primary_cache = PrimaryTierCache::default();
+
+        let cat = complete_primary_tier(
+            &job(1, "cat", usize::MAX, Arc::clone(&history)),
+            &mut executable_index,
+            &mut data_index,
+            &mut primary_cache,
+        );
+        assert_eq!(cat[0].replacement, "cat alpha");
+
+        let c = complete_primary_tier(
+            &job(2, "c", usize::MAX, Arc::clone(&history)),
+            &mut executable_index,
+            &mut data_index,
+            &mut primary_cache,
+        );
+        assert_eq!(
+            c.iter()
+                .map(|candidate| candidate.replacement.as_str())
+                .collect::<Vec<_>>(),
+            ["cargo build", "cat alpha"]
+        );
+    }
 }
