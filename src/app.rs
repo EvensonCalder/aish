@@ -29,14 +29,16 @@ use crate::editor::{
     resolve_editor_command, run_editor_command,
 };
 use crate::encryption::{
-    append_encrypted_jsonl, atomic_gpg_encrypt_bytes, gpg_decrypt_file, gpg_program,
-    load_encrypted_jsonl, migrate_gpg_jsonl_to_plaintext, migrate_plaintext_jsonl_to_gpg,
-    plaintext_git_history_warning, rewrite_encrypted_jsonl,
+    append_encrypted_jsonl, atomic_gpg_encrypt_bytes, encrypted_path,
+    encryption_git_history_warning, gpg_decrypt_file, gpg_program, load_encrypted_jsonl,
+    migrate_gpg_jsonl_to_plaintext, migrate_plaintext_jsonl_to_gpg,
+    pause_terminal_raw_mode_for_gpg, prepare_gpg_terminal_env, reencrypt_gpg_jsonl,
+    resolve_gpg_key_fingerprint, rewrite_encrypted_jsonl,
 };
 use crate::history::{
     AiCommandIndex, AiItem, AiItemKind, AiSession, DraftEntry, HistoryEntry, HistorySource,
-    HistoryStore, NoteEntry, ai_command_indices, append_jsonl, load_jsonl, newest_first_indices,
-    trim_combined_history,
+    HistoryStore, JsonlLineError, JsonlLoad, NoteEntry, ai_command_indices, append_jsonl,
+    load_jsonl, newest_first_indices, trim_combined_history,
 };
 use crate::input::InputBuffer;
 use crate::keybindings::default_keybindings;
@@ -130,6 +132,8 @@ pub struct AppState {
     pub ai_sessions: Vec<AiSession>,
     pub ai_command_indices: Vec<AiCommandIndex>,
     pub selected_ai_index: Option<usize>,
+    pub templates: Vec<TemplateEntry>,
+    pub template_errors: Vec<JsonlLineError>,
     pub output_ring: VecDeque<OutputEntry>,
     pub prompt_templates: PromptTemplates,
     pub editor_config: EditorConfig,
@@ -185,6 +189,8 @@ impl Default for AppState {
             ai_sessions: Vec::new(),
             ai_command_indices: Vec::new(),
             selected_ai_index: None,
+            templates: Vec::new(),
+            template_errors: Vec::new(),
             output_ring: VecDeque::new(),
             prompt_templates: PromptTemplates::default(),
             editor_config: EditorConfig::default(),
@@ -524,7 +530,7 @@ impl AppState {
             return Ok(Vec::new());
         }
         let token = current_token_context(self.draft.as_str(), self.draft.cursor());
-        let templates = self.load_templates()?.items;
+        let templates = self.templates_for_completion()?;
         let history_newest_first: Vec<_> = self.regular_history.iter().rev().cloned().collect();
         let options = CompletionOptions {
             max_results,
@@ -555,6 +561,16 @@ impl AppState {
     pub fn clear_completion_ui(&mut self) {
         self.completion_panel.clear();
         self.completion_inline = None;
+    }
+
+    fn templates_for_completion(&self) -> Result<Vec<TemplateEntry>> {
+        if !self.templates.is_empty() || self.encryption_config.enabled {
+            return Ok(self.templates.clone());
+        }
+        let Some(path) = &self.template_store_path else {
+            return Ok(Vec::new());
+        };
+        Ok(load_templates(path)?.items)
     }
 
     pub fn apply_picker_selection(&mut self, value: &str, action: PickerAction) -> bool {
@@ -620,44 +636,49 @@ impl AppState {
         Ok(true)
     }
 
-    fn load_templates(&self) -> Result<crate::history::JsonlLoad<TemplateEntry>> {
+    fn load_templates(&self) -> Result<JsonlLoad<TemplateEntry>> {
         let Some(path) = &self.template_store_path else {
-            return Ok(crate::history::JsonlLoad {
+            return Ok(JsonlLoad {
                 items: Vec::new(),
                 errors: Vec::new(),
             });
         };
-        if self.encryption_config.enabled {
-            load_encrypted_jsonl::<TemplateEntry>(gpg_program(), path)
+        if !self.templates.is_empty() || self.encryption_config.enabled {
+            Ok(JsonlLoad {
+                items: self.templates.clone(),
+                errors: self.template_errors.clone(),
+            })
         } else {
             load_templates(path)
         }
     }
 
-    fn append_template(&self, entry: &TemplateEntry) -> Result<()> {
+    fn append_template(&mut self, entry: &TemplateEntry) -> Result<()> {
         let Some(path) = &self.template_store_path else {
             return Ok(());
         };
         if self.encryption_config.enabled {
             append_encrypted_jsonl(
                 gpg_program(),
-                self.encryption_config.recipient.as_str(),
+                configured_encryption_key(&self.encryption_config),
                 path,
                 entry,
-            )
+            )?;
         } else {
-            append_template(path, entry)
+            append_template(path, entry)?;
         }
+        self.templates.push(entry.clone());
+        Ok(())
     }
 
-    fn find_template_by_id(&self, id: &str) -> Result<crate::history::JsonlLoad<TemplateEntry>> {
+    fn find_template_by_id(&self, id: &str) -> Result<JsonlLoad<TemplateEntry>> {
         let Some(path) = &self.template_store_path else {
-            return Ok(crate::history::JsonlLoad {
+            return Ok(JsonlLoad {
                 items: Vec::new(),
                 errors: Vec::new(),
             });
         };
-        if self.encryption_config.enabled {
+        if !self.templates.is_empty() || self.encryption_config.enabled {
             let mut loaded = self.load_templates()?;
             loaded.items = loaded
                 .items
@@ -672,12 +693,15 @@ impl AppState {
         }
     }
 
-    fn remove_templates_by_id(&self, id: &str) -> Result<Option<TemplateRemoval>> {
+    fn remove_templates_by_id(&mut self, id: &str) -> Result<Option<TemplateRemoval>> {
         let Some(path) = &self.template_store_path else {
             return Ok(None);
         };
         if !self.encryption_config.enabled {
-            return remove_templates_by_id(path, id).map(Some);
+            let removal = remove_templates_by_id(path, id)?;
+            self.templates = removal.remaining.clone();
+            self.template_errors = removal.errors.clone();
+            return Ok(Some(removal));
         }
         let loaded = self.load_templates()?;
         let before = loaded.items.len();
@@ -689,19 +713,22 @@ impl AppState {
         let removed = before - remaining.len();
         rewrite_encrypted_jsonl(
             gpg_program(),
-            self.encryption_config.recipient.as_str(),
+            configured_encryption_key(&self.encryption_config),
             path,
             &remaining,
         )?;
-        Ok(Some(TemplateRemoval {
+        let removal = TemplateRemoval {
             removed,
             remaining,
             errors: loaded.errors,
-        }))
+        };
+        self.templates = removal.remaining.clone();
+        self.template_errors = removal.errors.clone();
+        Ok(Some(removal))
     }
 
     fn replace_template_by_id(
-        &self,
+        &mut self,
         existing_id: &str,
         entry: TemplateEntry,
     ) -> Result<Option<TemplateRemoval>> {
@@ -709,7 +736,10 @@ impl AppState {
             return Ok(None);
         };
         if !self.encryption_config.enabled {
-            return replace_template_by_id(path, existing_id, entry).map(Some);
+            let removal = replace_template_by_id(path, existing_id, entry)?;
+            self.templates = removal.remaining.clone();
+            self.template_errors = removal.errors.clone();
+            return Ok(Some(removal));
         }
         let loaded = self.load_templates()?;
         let before = loaded.items.len();
@@ -722,15 +752,18 @@ impl AppState {
         remaining.push(entry);
         rewrite_encrypted_jsonl(
             gpg_program(),
-            self.encryption_config.recipient.as_str(),
+            configured_encryption_key(&self.encryption_config),
             path,
             &remaining,
         )?;
-        Ok(Some(TemplateRemoval {
+        let removal = TemplateRemoval {
             removed,
             remaining,
             errors: loaded.errors,
-        }))
+        };
+        self.templates = removal.remaining.clone();
+        self.template_errors = removal.errors.clone();
+        Ok(Some(removal))
     }
 
     fn append_note(&self, entry: NoteEntry) -> Result<()> {
@@ -765,7 +798,7 @@ impl AppState {
         if self.encryption_config.enabled {
             append_encrypted_jsonl(
                 gpg_program(),
-                self.encryption_config.recipient.as_str(),
+                configured_encryption_key(&self.encryption_config),
                 path,
                 item,
             )
@@ -1066,6 +1099,7 @@ fn ai_editor_initial_text(text: &str) -> Option<String> {
 pub fn run() -> Result<()> {
     let (layout, config) = config::init_default_layout(config::runtime_aish_dir()?)?;
     let store = load_history_store(&layout, &config.encryption)?;
+    let templates = load_template_store(&layout, &config.encryption)?;
     let mut backend = PtyBackend::spawn(&config.shell.backend)?;
     let mut state = AppState {
         current_cwd: backend.initial_cwd().map(PathBuf::from),
@@ -1083,6 +1117,8 @@ pub fn run() -> Result<()> {
         regular_history: store.regular,
         ai_sessions: store.ai_sessions,
         ai_command_indices: store.ai_command_indices,
+        templates: templates.items,
+        template_errors: templates.errors,
         prompt_templates: config.prompt.into(),
         editor_config: config.editor,
         paste_config: config.paste,
@@ -1101,6 +1137,17 @@ pub fn run() -> Result<()> {
         &mut io::stdout(),
         Duration::from_secs(60),
     )
+}
+
+fn load_template_store(
+    layout: &config::DirectoryLayout,
+    encryption: &EncryptionConfig,
+) -> Result<JsonlLoad<TemplateEntry>> {
+    if encryption.enabled {
+        load_encrypted_jsonl::<TemplateEntry>(gpg_program(), &layout.template_store)
+    } else {
+        load_templates(&layout.template_store)
+    }
 }
 
 fn load_history_store(
@@ -2027,13 +2074,13 @@ fn trim_history_for_state(
 
     rewrite_encrypted_jsonl(
         gpg_program(),
-        state.encryption_config.recipient.as_str(),
+        configured_encryption_key(&state.encryption_config),
         regular_path,
         &trimmed_regular,
     )?;
     rewrite_encrypted_jsonl(
         gpg_program(),
-        state.encryption_config.recipient.as_str(),
+        configured_encryption_key(&state.encryption_config),
         ai_path,
         &trimmed_ai_sessions,
     )?;
@@ -2197,9 +2244,16 @@ fn write_encryption_sync_status(state: &AppState, out: &mut impl Write) -> Resul
     )?;
     writeln!(
         out,
-        "encryption.recipient={}",
-        config_value(&state.encryption_config.recipient)
+        "encryption.key_fingerprint={}",
+        config_value(&state.encryption_config.key_fingerprint)
     )?;
+    if !state.encryption_config.recipient.trim().is_empty() {
+        writeln!(
+            out,
+            "encryption.legacy_recipient={}",
+            config_value(&state.encryption_config.recipient)
+        )?;
+    }
     writeln!(out, "sync.enabled={}", state.sync_config.enabled)?;
     writeln!(
         out,
@@ -2219,12 +2273,21 @@ fn write_encryption_sync_status(state: &AppState, out: &mut impl Write) -> Resul
 }
 
 fn gpg_status(state: &AppState) -> &'static str {
-    if state.encryption_config.recipient.trim().is_empty() {
+    if configured_encryption_key(&state.encryption_config).is_empty() {
         return "not_configured";
     }
     match Command::new(gpg_program()).arg("--version").output() {
         Ok(output) if output.status.success() => "available",
         _ => "unavailable",
+    }
+}
+
+fn configured_encryption_key(config: &EncryptionConfig) -> &str {
+    let fingerprint = config.key_fingerprint.trim();
+    if !fingerprint.is_empty() {
+        fingerprint
+    } else {
+        config.recipient.trim()
     }
 }
 
@@ -2367,11 +2430,11 @@ fn set_stored_key(state: &mut AppState, out: &mut impl Write) -> Result<()> {
         writeln!(out, "key storage is not configured; no key stored")?;
         return Ok(());
     };
-    let recipient = state.encryption_config.recipient.trim();
-    if recipient.is_empty() {
+    let key = configured_encryption_key(&state.encryption_config);
+    if key.is_empty() {
         writeln!(
             out,
-            "encryption recipient is not configured; run #encrypt on <recipient> or set [encryption].recipient"
+            "encryption key is not configured; run #encrypt on <key-fingerprint>"
         )?;
         return Ok(());
     }
@@ -2388,7 +2451,7 @@ fn set_stored_key(state: &mut AppState, out: &mut impl Write) -> Result<()> {
     };
     let plaintext =
         serde_json::to_vec(&record).context("failed to serialize encrypted API key record")?;
-    atomic_gpg_encrypt_bytes(gpg_program(), recipient, path, &plaintext)?;
+    atomic_gpg_encrypt_bytes(gpg_program(), key, path, &plaintext)?;
     state.append_event(EventLevel::Info, "stored key encrypted")?;
     writeln!(out, "stored key encrypted")?;
     Ok(())
@@ -2442,43 +2505,93 @@ fn ai_config_for_request(state: &AppState) -> Result<AiConfig> {
 }
 
 fn update_encryption_config(state: &mut AppState, out: &mut impl Write, args: &str) -> Result<()> {
-    let mut parts = args.split_whitespace();
-    match (parts.next(), parts.next(), parts.next()) {
-        (Some("on"), recipient, None) => enable_encryption(state, out, recipient),
-        (Some("off"), None, None) => disable_encryption(state, out),
-        _ => writeln!(out, "usage: #encrypt on [recipient] | #encrypt off").map_err(Into::into),
+    let parts: Vec<_> = args.split_whitespace().collect();
+    match parts.as_slice() {
+        ["on"] => enable_encryption(state, out, None),
+        ["on", key_selector] => enable_encryption(state, out, Some(key_selector)),
+        ["rotate", key_selector] => rotate_encryption_key(state, out, Some(key_selector)),
+        ["rewrite-history", "plan"] => plan_encryption_history_rewrite(state, out),
+        ["rewrite-history", "run", key_selector, "--confirm-rewrite-history"] => {
+            run_encryption_history_rewrite(state, out, key_selector)
+        }
+        ["off"] => disable_encryption(state, out),
+        _ => writeln!(
+            out,
+            "usage: #encrypt on [key-fingerprint|unique-email] | #encrypt rotate <key-fingerprint|unique-email> | #encrypt rewrite-history plan | #encrypt rewrite-history run <key-fingerprint|unique-email> --confirm-rewrite-history | #encrypt off"
+        )
+        .map_err(Into::into),
     }
 }
 
 fn enable_encryption(
     state: &mut AppState,
     out: &mut impl Write,
-    recipient_arg: Option<&str>,
+    key_selector_arg: Option<&str>,
 ) -> Result<()> {
     if state.config_path.is_none() {
         writeln!(out, "config path is not configured; #encrypt not saved")?;
         return Ok(());
     }
-    let recipient = recipient_arg
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| state.encryption_config.recipient.trim())
-        .to_string();
-    if recipient.is_empty() {
+    let selector = encryption_key_selector(state, key_selector_arg);
+    if selector.is_empty() {
         writeln!(
             out,
-            "encryption recipient is not configured; run #encrypt on <recipient> or set [encryption].recipient"
+            "encryption key is not configured; run #encrypt on <key-fingerprint>"
         )?;
         return Ok(());
     }
 
-    migrate_storage_to_encrypted(state, &recipient)?;
+    let fingerprint = resolve_gpg_key_fingerprint(gpg_program(), &selector)?;
+    let current_key = configured_encryption_key(&state.encryption_config).to_string();
+    let summary = rewrite_storage_for_encryption_key(state, &current_key, &fingerprint)?;
     set_encryption_config(state, |config| {
         config.encryption.enabled = true;
-        config.encryption.recipient = recipient;
+        config.encryption.key_fingerprint = fingerprint.clone();
+        config.encryption.recipient.clear();
     })?;
-    writeln!(out, "{}", plaintext_git_history_warning())?;
+    writeln!(out, "{}", encryption_git_history_warning())?;
     writeln!(out, "encryption=on")?;
+    writeln!(out, "encryption.key_fingerprint={fingerprint}")?;
+    write_encryption_rewrite_summary(out, &summary)?;
+    Ok(())
+}
+
+fn encryption_key_selector(state: &AppState, key_selector_arg: Option<&str>) -> String {
+    key_selector_arg
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| configured_encryption_key(&state.encryption_config))
+        .to_string()
+}
+
+fn rotate_encryption_key(
+    state: &mut AppState,
+    out: &mut impl Write,
+    key_selector_arg: Option<&str>,
+) -> Result<()> {
+    if state.config_path.is_none() {
+        writeln!(out, "config path is not configured; #encrypt not saved")?;
+        return Ok(());
+    }
+    let Some(selector) = key_selector_arg
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        writeln!(out, "usage: #encrypt rotate <key-fingerprint|unique-email>")?;
+        return Ok(());
+    };
+
+    let fingerprint = resolve_gpg_key_fingerprint(gpg_program(), selector)?;
+    let current_key = configured_encryption_key(&state.encryption_config).to_string();
+    let summary = rewrite_storage_for_encryption_key(state, &current_key, &fingerprint)?;
+    set_encryption_config(state, |config| {
+        config.encryption.enabled = true;
+        config.encryption.key_fingerprint = fingerprint.clone();
+        config.encryption.recipient.clear();
+    })?;
+    writeln!(out, "encryption=on")?;
+    writeln!(out, "encryption.key_fingerprint={fingerprint}")?;
+    write_encryption_rewrite_summary(out, &summary)?;
     Ok(())
 }
 
@@ -2525,11 +2638,335 @@ fn set_encryption_config(
     Ok(())
 }
 
-fn migrate_storage_to_encrypted(state: &AppState, recipient: &str) -> Result<()> {
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct EncryptionRewriteSummary {
+    plaintext_encrypted: usize,
+    reencrypted: usize,
+    already_encrypted: usize,
+    missing: usize,
+}
+
+fn rewrite_storage_for_encryption_key(
+    state: &AppState,
+    old_key: &str,
+    new_key: &str,
+) -> Result<EncryptionRewriteSummary> {
+    let mut summary = EncryptionRewriteSummary::default();
     for path in encrypted_storage_paths(state) {
-        migrate_plaintext_jsonl_to_gpg(gpg_program(), recipient, path)?;
+        let encrypted = encrypted_path(&path);
+        match (path.exists(), encrypted.exists()) {
+            (true, true) => {
+                anyhow::bail!(
+                    "both plaintext and encrypted storage exist for {}; resolve this before changing encryption keys",
+                    path.display()
+                );
+            }
+            (true, false) => {
+                if migrate_plaintext_jsonl_to_gpg(gpg_program(), new_key, &path)? {
+                    summary.plaintext_encrypted += 1;
+                }
+            }
+            (false, true) if old_key != new_key => {
+                if reencrypt_gpg_jsonl(gpg_program(), new_key, &path)? {
+                    summary.reencrypted += 1;
+                }
+            }
+            (false, true) => {
+                summary.already_encrypted += 1;
+            }
+            (false, false) => {
+                summary.missing += 1;
+            }
+        }
     }
+    Ok(summary)
+}
+
+fn write_encryption_rewrite_summary(
+    out: &mut impl Write,
+    summary: &EncryptionRewriteSummary,
+) -> Result<()> {
+    writeln!(
+        out,
+        "encrypted_plaintext_files={}",
+        summary.plaintext_encrypted
+    )?;
+    writeln!(out, "reencrypted_files={}", summary.reencrypted)?;
+    writeln!(out, "already_encrypted_files={}", summary.already_encrypted)?;
     Ok(())
+}
+
+fn plan_encryption_history_rewrite(state: &AppState, out: &mut impl Write) -> Result<()> {
+    let Some(config_path) = &state.config_path else {
+        writeln!(
+            out,
+            "config path is not configured; cannot plan history rewrite"
+        )?;
+        return Ok(());
+    };
+    let Some(root) = config_path.parent() else {
+        writeln!(
+            out,
+            "config path has no parent; cannot plan history rewrite"
+        )?;
+        return Ok(());
+    };
+    let key = configured_encryption_key(&state.encryption_config);
+    if key.is_empty() {
+        writeln!(
+            out,
+            "encryption key is not configured; run #encrypt on <key-fingerprint>"
+        )?;
+        return Ok(());
+    }
+
+    writeln!(out, "history rewrite plan")?;
+    writeln!(out, "repo={}", root.display())?;
+    writeln!(out, "target_key_fingerprint={key}")?;
+    writeln!(
+        out,
+        "risk=rewrites commit ids and requires a force push for any shared remote"
+    )?;
+    writeln!(
+        out,
+        "scope=current branch; managed history, draft, note, AI, and template storage paths"
+    )?;
+    writeln!(
+        out,
+        "next=#encrypt rewrite-history run <key-fingerprint> --confirm-rewrite-history"
+    )?;
+    writeln!(
+        out,
+        "note=the run command must decrypt old encrypted blobs with the old private key, then encrypt each rewritten blob for the target key"
+    )?;
+    Ok(())
+}
+
+fn run_encryption_history_rewrite(
+    state: &mut AppState,
+    out: &mut impl Write,
+    key_selector: &str,
+) -> Result<()> {
+    let Some(config_path) = &state.config_path else {
+        writeln!(out, "config path is not configured; cannot rewrite history")?;
+        return Ok(());
+    };
+    let Some(root) = config_path.parent().map(Path::to_path_buf) else {
+        writeln!(out, "config path has no parent; cannot rewrite history")?;
+        return Ok(());
+    };
+    if !root.join(".git").is_dir() {
+        writeln!(
+            out,
+            "git repository is not initialized; run #push before rewriting history"
+        )?;
+        return Ok(());
+    }
+    let current_key = configured_encryption_key(&state.encryption_config).to_string();
+    if current_key.is_empty() {
+        writeln!(
+            out,
+            "encryption key is not configured; run #encrypt on <key-fingerprint>"
+        )?;
+        return Ok(());
+    }
+
+    let clean = run_git_command(
+        &root,
+        &GitCommandPlan {
+            program: "git".to_string(),
+            args: vec!["status".to_string(), "--porcelain".to_string()],
+        },
+    )?;
+    if !clean.success || !clean.stdout.trim().is_empty() {
+        writeln!(
+            out,
+            "history rewrite requires a clean git worktree; commit, stash, or discard changes first"
+        )?;
+        return Ok(());
+    }
+
+    let fingerprint = resolve_gpg_key_fingerprint(gpg_program(), key_selector)?;
+    let script_path = write_history_rewrite_script(&root, state)?;
+    let backup_ref = format!(
+        "aish/rewrite-backup/{}-{}",
+        (state.clock)(),
+        std::process::id()
+    );
+    let backup = run_git_command(
+        &root,
+        &GitCommandPlan {
+            program: "git".to_string(),
+            args: vec!["branch".to_string(), backup_ref.clone(), "HEAD".to_string()],
+        },
+    )?;
+    if !backup.success {
+        let _ = fs::remove_file(&script_path);
+        anyhow::bail!(
+            "failed to create rewrite backup branch: {}",
+            backup.combined_output()
+        );
+    }
+
+    let filter_result = run_git_filter_branch_reencrypt(&root, &script_path, &fingerprint);
+    let _ = fs::remove_file(&script_path);
+    let filter_result = filter_result?;
+    if !filter_result.success {
+        anyhow::bail!(
+            "git history rewrite failed: {}",
+            filter_result.combined_output()
+        );
+    }
+
+    let untracked =
+        rewrite_untracked_storage_for_encryption_key(state, &root, &current_key, &fingerprint)?;
+    set_encryption_config(state, |config| {
+        config.encryption.enabled = true;
+        config.encryption.key_fingerprint = fingerprint.clone();
+        config.encryption.recipient.clear();
+    })?;
+    writeln!(out, "history rewrite completed")?;
+    writeln!(out, "backup_branch={backup_ref}")?;
+    writeln!(out, "encryption.key_fingerprint={fingerprint}")?;
+    write_encryption_rewrite_summary(out, &untracked)?;
+    writeln!(
+        out,
+        "next=verify the rewritten history, push with --force-with-lease if appropriate, then remove backup refs and expire reflogs only after an external backup"
+    )?;
+    Ok(())
+}
+
+fn write_history_rewrite_script(root: &Path, state: &AppState) -> Result<PathBuf> {
+    let script_dir = root.join("cache/runtime");
+    fs::create_dir_all(&script_dir).with_context(|| {
+        format!(
+            "failed to create rewrite script directory {}",
+            script_dir.display()
+        )
+    })?;
+    let script_path = script_dir.join("encrypt-rewrite-history.sh");
+    let mut script = String::from(
+        "#!/bin/sh\nset -eu\ngpg_program=${AISH_REWRITE_GPG:-gpg}\nrecipient=${AISH_REWRITE_RECIPIENT:?}\nreencrypt_file() {\n  plain=$1\n  enc=$plain.gpg\n  if [ -f \"$plain\" ] && [ -f \"$enc\" ]; then\n    printf '%s\\n' \"both plaintext and encrypted files exist: $plain\" >&2\n    exit 3\n  fi\n  if [ -f \"$plain\" ]; then\n    \"$gpg_program\" --batch --yes --no-tty --trust-model always --encrypt --recipient \"$recipient\" --output \"$enc.tmp\" \"$plain\"\n    mv \"$enc.tmp\" \"$enc\"\n    rm -f \"$plain\"\n  elif [ -f \"$enc\" ]; then\n    tmp=\"$enc.plain.$$\"\n    \"$gpg_program\" --yes --decrypt \"$enc\" > \"$tmp\"\n    \"$gpg_program\" --batch --yes --no-tty --trust-model always --encrypt --recipient \"$recipient\" --output \"$enc.tmp\" \"$tmp\"\n    rm -f \"$tmp\"\n    mv \"$enc.tmp\" \"$enc\"\n  fi\n}\n",
+    );
+    for relative in managed_relative_storage_paths(root, state)? {
+        script.push_str("reencrypt_file ");
+        script.push_str(&shell_single_quote(&relative));
+        script.push('\n');
+    }
+    fs::write(&script_path, script)
+        .with_context(|| format!("failed to write rewrite script {}", script_path.display()))?;
+    Ok(script_path)
+}
+
+fn run_git_filter_branch_reencrypt(
+    root: &Path,
+    script_path: &Path,
+    fingerprint: &str,
+) -> Result<GitStepResult> {
+    let filter_command = format!(
+        "sh {}",
+        shell_single_quote(&script_path.display().to_string())
+    );
+    let _raw_mode_pause = pause_terminal_raw_mode_for_gpg()?;
+    let mut command = Command::new("git");
+    command
+        .args([
+            "filter-branch",
+            "-f",
+            "--tree-filter",
+            &filter_command,
+            "--",
+            "HEAD",
+        ])
+        .current_dir(root)
+        .env("FILTER_BRANCH_SQUELCH_WARNING", "1")
+        .env("AISH_REWRITE_GPG", gpg_program())
+        .env("AISH_REWRITE_RECIPIENT", fingerprint);
+    prepare_gpg_terminal_env(&mut command);
+    let output = command
+        .output()
+        .context("failed to run git filter-branch")?;
+    Ok(GitStepResult {
+        success: output.status.success(),
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+    })
+}
+
+fn rewrite_untracked_storage_for_encryption_key(
+    state: &AppState,
+    root: &Path,
+    old_key: &str,
+    new_key: &str,
+) -> Result<EncryptionRewriteSummary> {
+    let mut summary = EncryptionRewriteSummary::default();
+    for path in encrypted_storage_paths(state) {
+        let relative = match path.strip_prefix(root) {
+            Ok(relative) => relative,
+            Err(_) => continue,
+        };
+        if git_path_is_tracked(root, relative)? {
+            continue;
+        }
+        let encrypted = encrypted_path(&path);
+        match (path.exists(), encrypted.exists()) {
+            (true, true) => {
+                anyhow::bail!(
+                    "both plaintext and encrypted storage exist for {}; resolve this before changing encryption keys",
+                    path.display()
+                );
+            }
+            (true, false) => {
+                if migrate_plaintext_jsonl_to_gpg(gpg_program(), new_key, &path)? {
+                    summary.plaintext_encrypted += 1;
+                }
+            }
+            (false, true) if old_key != new_key => {
+                if reencrypt_gpg_jsonl(gpg_program(), new_key, &path)? {
+                    summary.reencrypted += 1;
+                }
+            }
+            (false, true) => summary.already_encrypted += 1,
+            (false, false) => summary.missing += 1,
+        }
+    }
+    Ok(summary)
+}
+
+fn git_path_is_tracked(root: &Path, relative: &Path) -> Result<bool> {
+    let result = run_git_command(
+        root,
+        &GitCommandPlan {
+            program: "git".to_string(),
+            args: vec![
+                "ls-files".to_string(),
+                "--error-unmatch".to_string(),
+                "--".to_string(),
+                relative.display().to_string(),
+            ],
+        },
+    )?;
+    Ok(result.success)
+}
+
+fn managed_relative_storage_paths(root: &Path, state: &AppState) -> Result<Vec<String>> {
+    let mut paths = Vec::new();
+    for path in encrypted_storage_paths(state) {
+        let relative = path.strip_prefix(root).with_context(|| {
+            format!(
+                "managed storage path is outside git root: {}",
+                path.display()
+            )
+        })?;
+        paths.push(relative.display().to_string());
+    }
+    paths.sort();
+    paths.dedup();
+    Ok(paths)
+}
+
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn migrate_storage_to_plaintext(state: &AppState) -> Result<()> {
@@ -3333,7 +3770,7 @@ mod tests {
         let fake_gpg = temp.path().join("fake-gpg");
         fs::write(
             &fake_gpg,
-            "#!/bin/sh\nmode=encrypt\nout=\"\"\ninput=\"\"\nwhile [ \"$#\" -gt 0 ]; do\n  case \"$1\" in\n    --version) printf 'fake gpg\\n'; exit 0 ;;\n    --decrypt) mode=decrypt ;;\n    --output) shift; out=\"$1\" ;;\n    --recipient|--trust-model) shift ;;\n    --batch|--yes|--no-tty|--encrypt) ;;\n    *) input=\"$1\" ;;\n  esac\n  shift\ndone\nif [ \"$mode\" = decrypt ]; then\n  cat \"$input\"\nelse\n  cp \"$input\" \"$out\"\nfi\n",
+            "#!/bin/sh\nmode=encrypt\nout=\"\"\ninput=\"\"\nrecipient=\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"\nlast=\"\"\nfor arg in \"$@\"; do\n  last=\"$arg\"\n  if [ \"$arg\" = \"--version\" ]; then printf 'fake gpg\\n'; exit 0; fi\ndone\nfor arg in \"$@\"; do\n  if [ \"$arg\" = \"--list-keys\" ]; then\n    fpr='AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'\n    uid='Test User <test@example.invalid>'\n    case \"$last\" in\n      *BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB*|second@example.invalid) fpr='BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB'; uid='Second User <second@example.invalid>' ;;\n    esac\n    printf '%s\\n' 'pub:u:255:22:1111111111111111:1:::u:::scESC::::::23::0:'\n    printf 'fpr:::::::::%s:\\n' \"$fpr\"\n    printf 'uid:u::::1::hash::%s:::::::::0:\\n' \"$uid\"\n    exit 0\n  fi\ndone\nwhile [ \"$#\" -gt 0 ]; do\n  case \"$1\" in\n    --decrypt) mode=decrypt ;;\n    --output) shift; out=\"$1\" ;;\n    --recipient) shift; recipient=\"$1\" ;;\n    --trust-model) shift ;;\n    --batch|--yes|--no-tty|--encrypt|--with-colons|--fingerprint) ;;\n    *) input=\"$1\" ;;\n  esac\n  shift\ndone\nif [ \"$mode\" = decrypt ]; then\n  sed '1{/^recipient:/d;}' \"$input\"\nelse\n  { printf 'recipient:%s\\n' \"$recipient\"; cat \"$input\"; } > \"$out\"\nfi\n",
         )
         .unwrap();
         fs::set_permissions(&fake_gpg, fs::Permissions::from_mode(0o755)).unwrap();
@@ -5496,10 +5933,18 @@ mod tests {
         assert!(output.contains("Encryption is now enabled for future writes."));
         assert!(output.contains("encryption=on"));
         assert!(state.encryption_config.enabled);
-        assert_eq!(state.encryption_config.recipient, "test@example.invalid");
+        assert_eq!(
+            state.encryption_config.key_fingerprint,
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        );
+        assert_eq!(state.encryption_config.recipient, "");
         let loaded = config::load_config(&config_path).unwrap();
         assert!(loaded.encryption.enabled);
-        assert_eq!(loaded.encryption.recipient, "test@example.invalid");
+        assert_eq!(
+            loaded.encryption.key_fingerprint,
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        );
+        assert_eq!(loaded.encryption.recipient, "");
         for path in [
             &regular_path,
             &ai_path,
@@ -5518,6 +5963,177 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
+    fn encrypt_rotate_reencrypts_existing_storage_and_persists_fingerprint() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let fake_gpg = write_fake_gpg(&temp);
+        unsafe {
+            std::env::set_var("AISH_GPG", &fake_gpg);
+        }
+        let config_path = temp.path().join("config.toml");
+        let regular_path = temp.path().join("history/regular.jsonl");
+        let mut config = config::Config::default();
+        config.encryption.enabled = true;
+        config.encryption.key_fingerprint = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string();
+        config::save_config(&config_path, &config).unwrap();
+        rewrite_encrypted_jsonl(
+            fake_gpg.display().to_string(),
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            &regular_path,
+            &[HistoryEntry {
+                t: 1,
+                command: "pwd".to_string(),
+                exit_code: Some(0),
+                source: HistorySource::User,
+            }],
+        )
+        .unwrap();
+        let mut state = AppState {
+            config_path: Some(config_path.clone()),
+            regular_history_path: Some(regular_path.clone()),
+            encryption_config: config.encryption,
+            ..AppState::default()
+        };
+        state
+            .draft
+            .insert_str("#encrypt rotate second@example.invalid");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        unsafe {
+            std::env::remove_var("AISH_GPG");
+        }
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("reencrypted_files=1"));
+        assert_eq!(
+            state.encryption_config.key_fingerprint,
+            "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+        );
+        let loaded = config::load_config(&config_path).unwrap();
+        assert_eq!(
+            loaded.encryption.key_fingerprint,
+            "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+        );
+        let encrypted =
+            fs::read_to_string(crate::encryption::encrypted_path(&regular_path)).unwrap();
+        assert!(encrypted.starts_with("recipient:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\n"));
+        assert!(!regular_path.exists());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn encrypted_completion_uses_cached_templates_without_gpg_on_keypress() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let fake_gpg = temp.path().join("fail-gpg");
+        fs::write(
+            &fake_gpg,
+            "#!/bin/sh\nprintf 'unexpected gpg call\\n' >&2\nexit 9\n",
+        )
+        .unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&fake_gpg, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        unsafe {
+            std::env::set_var("AISH_GPG", &fake_gpg);
+        }
+        let mut state = AppState {
+            encryption_config: EncryptionConfig {
+                enabled: true,
+                key_fingerprint: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
+                recipient: String::new(),
+            },
+            templates: vec![TemplateEntry::new("git add . && git commit")],
+            ..AppState::default()
+        };
+        state.draft.insert_str("git");
+
+        let candidates = state.completion_candidates().unwrap();
+
+        unsafe {
+            std::env::remove_var("AISH_GPG");
+        }
+        assert_eq!(candidates[0].display, "git add . && git commit");
+    }
+
+    #[test]
+    fn encrypt_rewrite_history_plan_reports_manual_confirmed_flow() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("config.toml");
+        let mut state = AppState {
+            config_path: Some(config_path),
+            encryption_config: EncryptionConfig {
+                enabled: true,
+                key_fingerprint: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
+                recipient: String::new(),
+            },
+            ..AppState::default()
+        };
+        state.draft.insert_str("#encrypt rewrite-history plan");
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("history rewrite plan"));
+        assert!(output.contains("risk=rewrites commit ids"));
+        assert!(output.contains(
+            "next=#encrypt rewrite-history run <key-fingerprint> --confirm-rewrite-history"
+        ));
+    }
+
+    #[test]
+    fn encrypt_rewrite_history_run_requires_clean_git_worktree() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        run_test_git(root, ["init"]);
+        fs::write(root.join("dirty.txt"), "uncommitted").unwrap();
+        let config_path = root.join("config.toml");
+        let mut state = AppState {
+            config_path: Some(config_path),
+            encryption_config: EncryptionConfig {
+                enabled: true,
+                key_fingerprint: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
+                recipient: String::new(),
+            },
+            ..AppState::default()
+        };
+        state.draft.insert_str(
+            "#encrypt rewrite-history run BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB --confirm-rewrite-history",
+        );
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("history rewrite requires a clean git worktree"));
+    }
+
+    #[test]
+    #[cfg(unix)]
     fn encrypted_writes_use_gpg_files_without_plaintext_jsonl() {
         let _guard = ENV_LOCK.lock().unwrap();
         let temp = tempfile::tempdir().unwrap();
@@ -5532,7 +6148,8 @@ mod tests {
             template_store_path: Some(template_path.clone()),
             encryption_config: EncryptionConfig {
                 enabled: true,
-                recipient: "test@example.invalid".to_string(),
+                key_fingerprint: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
+                recipient: String::new(),
             },
             ..AppState::default()
         };
@@ -5595,7 +6212,8 @@ mod tests {
             },
             encryption_config: EncryptionConfig {
                 enabled: false,
-                recipient: "test@example.invalid".to_string(),
+                key_fingerprint: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
+                recipient: String::new(),
             },
             ..AppState::default()
         };
@@ -5649,7 +6267,8 @@ mod tests {
             ai_requester: ai_requester_requires_stored_key,
             encryption_config: EncryptionConfig {
                 enabled: false,
-                recipient: "test@example.invalid".to_string(),
+                key_fingerprint: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
+                recipient: String::new(),
             },
             ..AppState::default()
         };
@@ -5698,7 +6317,7 @@ mod tests {
         let regular_path = temp.path().join("history/regular.jsonl");
         let mut config = config::Config::default();
         config.encryption.enabled = true;
-        config.encryption.recipient = "test@example.invalid".to_string();
+        config.encryption.key_fingerprint = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string();
         config::save_config(&config_path, &config).unwrap();
         rewrite_encrypted_jsonl(
             fake_gpg.display().to_string(),

@@ -9,7 +9,7 @@ aish_spawn
 
 aish_send "#key set"
 aish_enter
-aish_expect {encryption recipient is not configured; run #encrypt on <recipient> or set [encryption].recipient}
+aish_expect {encryption key is not configured; run #encrypt on <key-fingerprint>}
 aish_wait_prompt
 
 aish_send "#key clear"
@@ -19,7 +19,7 @@ aish_wait_prompt
 
 aish_send "#encrypt on"
 aish_enter
-aish_expect {encryption recipient is not configured; run #encrypt on <recipient> or set [encryption].recipient}
+aish_expect {encryption key is not configured; run #encrypt on <key-fingerprint>}
 aish_wait_prompt
 
 aish_send "#push"

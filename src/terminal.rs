@@ -961,13 +961,20 @@ fn set_completion_ui_from_candidates(
     width: usize,
 ) {
     let token = current_token_context(state.draft.as_str(), state.draft.cursor());
-    let inline_completion = candidates
-        .first()
-        .and_then(|candidate| inline_completion_from_candidate(&token, candidate));
-    let skip_inline_candidate = inline_completion.is_some();
-    state.completion_inline = inline_completion;
-    let panel_candidates = if skip_inline_candidate {
-        candidates.into_iter().skip(1).collect()
+    let inline_index = candidates
+        .iter()
+        .position(|candidate| inline_completion_from_candidate(&token, candidate).is_some());
+    state.completion_inline = inline_index.and_then(|index| {
+        candidates
+            .get(index)
+            .and_then(|candidate| inline_completion_from_candidate(&token, candidate))
+    });
+    let panel_candidates: Vec<_> = if let Some(inline_index) = inline_index {
+        candidates
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, candidate)| (index != inline_index).then_some(candidate))
+            .collect()
     } else {
         candidates
     };
@@ -1592,6 +1599,34 @@ mod tests {
 
         assert_eq!(state.completion_inline.as_ref().unwrap().suffix, "ne.txt");
         assert_eq!(state.completion_panel, vec!["file\tnly.log".to_string()]);
+    }
+
+    #[test]
+    fn inline_completion_uses_first_prefix_candidate_when_earlier_candidate_is_panel_only() {
+        let mut state = AppState::default();
+        state.draft.insert_str("cat al");
+        let candidates = vec![
+            CompletionCandidate {
+                display: "beta-alpha".to_string(),
+                replacement: "beta-alpha".to_string(),
+                is_dir: false,
+                source: crate::completion::CompletionSource::History,
+            },
+            CompletionCandidate {
+                display: "alpha.txt".to_string(),
+                replacement: "alpha.txt".to_string(),
+                is_dir: false,
+                source: crate::completion::CompletionSource::Path,
+            },
+        ];
+
+        set_completion_ui_from_candidates(&mut state, candidates, 80);
+
+        assert_eq!(state.completion_inline.as_ref().unwrap().suffix, "pha.txt");
+        assert_eq!(
+            state.completion_panel,
+            vec!["history\tbeta-alpha".to_string()]
+        );
     }
 
     #[test]

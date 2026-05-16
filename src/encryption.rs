@@ -1,15 +1,16 @@
 use std::fs;
 use std::io::{BufRead, BufReader, Cursor, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, bail};
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode, is_raw_mode_enabled};
 use serde::{Serialize, de::DeserializeOwned};
 
 use crate::history::{JsonlLineError, JsonlLoad};
 
-pub fn plaintext_git_history_warning() -> &'static str {
-    "Encryption is now enabled for future writes.\nAish will sync encrypted files from now on.\nIf plaintext files were already tracked by git, they may still exist in git history.\nAish will not rewrite git history or remove tracked files automatically."
+pub fn encryption_git_history_warning() -> &'static str {
+    "Encryption is now enabled for future writes.\nAish will sync encrypted files from now on.\nGit history may still contain plaintext data or encrypted data written for an older key.\nAish will not rewrite git history automatically; history rewrite requires an explicit backup and old-key re-encryption flow."
 }
 
 pub fn gpg_program() -> String {
@@ -30,6 +31,131 @@ pub fn encrypted_path(path: impl AsRef<Path>) -> PathBuf {
         .unwrap_or_else(|| "gpg".to_string());
     encrypted.set_extension(next_extension);
     encrypted
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GpgPublicKey {
+    pub fingerprint: String,
+    pub user_ids: Vec<String>,
+}
+
+pub fn resolve_gpg_key_fingerprint(gpg_program: impl AsRef<str>, selector: &str) -> Result<String> {
+    let selector = selector.trim();
+    if selector.is_empty() {
+        bail!("GPG key selector is empty; use a key fingerprint or a unique email/user ID");
+    }
+
+    let keys = list_matching_gpg_public_keys(gpg_program, selector)?;
+    if keys.is_empty() {
+        bail!("GPG key not found for selector: {selector}");
+    }
+
+    let normalized_selector = normalize_fingerprint(selector);
+    let exact_matches: Vec<&GpgPublicKey> = keys
+        .iter()
+        .filter(|key| normalize_fingerprint(&key.fingerprint) == normalized_selector)
+        .collect();
+    if exact_matches.len() == 1 {
+        return Ok(exact_matches[0].fingerprint.clone());
+    }
+
+    if keys.len() == 1 {
+        return Ok(keys[0].fingerprint.clone());
+    }
+
+    let matches = keys
+        .iter()
+        .map(|key| key.fingerprint.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    bail!(
+        "GPG key selector is ambiguous; use a full fingerprint. Matching fingerprints: {matches}"
+    );
+}
+
+pub fn list_matching_gpg_public_keys(
+    gpg_program: impl AsRef<str>,
+    selector: &str,
+) -> Result<Vec<GpgPublicKey>> {
+    let program = gpg_program.as_ref();
+    let output = Command::new(program)
+        .args([
+            "--batch",
+            "--with-colons",
+            "--fingerprint",
+            "--list-keys",
+            selector,
+        ])
+        .output()
+        .with_context(|| format!("failed to run GPG command: {program}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let summary = stderr
+            .lines()
+            .next()
+            .unwrap_or("GPG key lookup failed")
+            .trim();
+        bail!("GPG key lookup failed: {summary}");
+    }
+    Ok(parse_gpg_public_keys(&String::from_utf8_lossy(
+        &output.stdout,
+    )))
+}
+
+fn parse_gpg_public_keys(output: &str) -> Vec<GpgPublicKey> {
+    let mut keys = Vec::new();
+    let mut current: Option<GpgPublicKey> = None;
+
+    for line in output.lines() {
+        let record_type = colon_field(line, 0);
+        match record_type {
+            "pub" => {
+                push_key_if_complete(&mut keys, current.take());
+                current = Some(GpgPublicKey {
+                    fingerprint: String::new(),
+                    user_ids: Vec::new(),
+                });
+            }
+            "fpr" => {
+                if let Some(key) = current.as_mut()
+                    && key.fingerprint.is_empty()
+                {
+                    key.fingerprint = colon_field(line, 9).to_string();
+                }
+            }
+            "uid" => {
+                if let Some(key) = current.as_mut() {
+                    let user_id = colon_field(line, 9);
+                    if !user_id.is_empty() {
+                        key.user_ids.push(user_id.to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    push_key_if_complete(&mut keys, current);
+    keys
+}
+
+fn push_key_if_complete(keys: &mut Vec<GpgPublicKey>, key: Option<GpgPublicKey>) {
+    if let Some(key) = key
+        && !key.fingerprint.is_empty()
+    {
+        keys.push(key);
+    }
+}
+
+fn colon_field(line: &str, index: usize) -> &str {
+    line.split(':').nth(index).unwrap_or("")
+}
+
+fn normalize_fingerprint(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| !ch.is_ascii_whitespace())
+        .flat_map(char::to_uppercase)
+        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,8 +211,17 @@ pub fn gpg_decrypt_file(gpg_program: impl AsRef<str>, input: impl AsRef<Path>) -
     let input = input.as_ref();
     let program = gpg_program.as_ref();
     let input_arg = input.display().to_string();
-    let output = Command::new(program)
-        .args(["--batch", "--yes", "--no-tty", "--decrypt", &input_arg])
+    let _raw_mode_pause = pause_terminal_raw_mode_for_gpg()?;
+    let gpg_tty = resolve_gpg_tty();
+    if let Some(tty) = gpg_tty.as_deref() {
+        update_gpg_agent_tty(tty);
+    }
+    let mut command = Command::new(program);
+    command.args(["--yes", "--decrypt", &input_arg]);
+    if let Some(tty) = gpg_tty {
+        command.env("GPG_TTY", tty);
+    }
+    let output = command
         .output()
         .with_context(|| format!("failed to run GPG command: {program}"))?;
 
@@ -101,6 +236,66 @@ pub fn gpg_decrypt_file(gpg_program: impl AsRef<str>, input: impl AsRef<Path>) -
     }
 
     Ok(output.stdout)
+}
+
+pub struct RawModePause {
+    was_enabled: bool,
+}
+
+impl RawModePause {
+    fn new() -> Result<Self> {
+        let was_enabled = is_raw_mode_enabled().unwrap_or(false);
+        if was_enabled {
+            disable_raw_mode().context("failed to leave raw mode for GPG pinentry")?;
+        }
+        Ok(Self { was_enabled })
+    }
+}
+
+pub fn pause_terminal_raw_mode_for_gpg() -> Result<RawModePause> {
+    RawModePause::new()
+}
+
+pub fn prepare_gpg_terminal_env(command: &mut Command) {
+    if let Some(tty) = resolve_gpg_tty() {
+        update_gpg_agent_tty(&tty);
+        command.env("GPG_TTY", tty);
+    }
+}
+
+impl Drop for RawModePause {
+    fn drop(&mut self) {
+        if self.was_enabled {
+            let _ = enable_raw_mode();
+        }
+    }
+}
+
+fn resolve_gpg_tty() -> Option<String> {
+    std::env::var("GPG_TTY")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(current_tty)
+}
+
+fn current_tty() -> Option<String> {
+    let output = Command::new("tty").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let tty = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (tty.starts_with('/')).then_some(tty)
+}
+
+fn update_gpg_agent_tty(tty: &str) {
+    let _ = Command::new("gpg-connect-agent")
+        .args(["updatestartuptty", "/bye"])
+        .env("GPG_TTY", tty)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -254,6 +449,22 @@ pub fn migrate_plaintext_jsonl_to_gpg(
     Ok(true)
 }
 
+pub fn reencrypt_gpg_jsonl(
+    gpg_program: impl AsRef<str>,
+    recipient: &str,
+    plaintext_path: impl AsRef<Path>,
+) -> Result<bool> {
+    let plaintext_path = plaintext_path.as_ref();
+    let path = encrypted_path(plaintext_path);
+    if !path.exists() {
+        return Ok(false);
+    }
+    let program = gpg_program.as_ref();
+    let bytes = gpg_decrypt_file(program, &path)?;
+    atomic_gpg_encrypt_bytes(program.to_string(), recipient, &path, &bytes)?;
+    Ok(true)
+}
+
 pub fn migrate_gpg_jsonl_to_plaintext(
     gpg_program: impl AsRef<str>,
     plaintext_path: impl AsRef<Path>,
@@ -404,11 +615,74 @@ mod tests {
     }
     #[test]
     fn plaintext_git_history_warning_is_conservative() {
-        let warning = plaintext_git_history_warning();
+        let warning = encryption_git_history_warning();
 
-        assert!(warning.contains("plaintext files were already tracked by git"));
+        assert!(warning.contains("plaintext data"));
+        assert!(warning.contains("older key"));
         assert!(warning.contains("will not rewrite git history"));
-        assert!(warning.contains("will not"));
+    }
+
+    #[test]
+    fn parse_gpg_public_keys_reads_primary_fingerprints_and_uids() {
+        let keys = parse_gpg_public_keys(
+            "tru::1:0:0:0:0:0:0:0::\n\
+             pub:u:255:22:1111111111111111:1:::u:::scESC::::::23::0:\n\
+             fpr:::::::::AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA:\n\
+             uid:u::::1::hash::Test User <test@example.invalid>::::::::::0:\n\
+             sub:u:255:18:2222222222222222:1::::::e::::::23:\n\
+             fpr:::::::::BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB:\n\
+             pub:u:255:22:3333333333333333:1:::u:::scESC::::::23::0:\n\
+             fpr:::::::::CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC:\n",
+        );
+
+        assert_eq!(
+            keys,
+            vec![
+                GpgPublicKey {
+                    fingerprint: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
+                    user_ids: vec!["Test User <test@example.invalid>".to_string()],
+                },
+                GpgPublicKey {
+                    fingerprint: "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC".to_string(),
+                    user_ids: Vec::new(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn resolve_gpg_key_fingerprint_accepts_unique_selector() {
+        let temp = tempfile::tempdir().unwrap();
+        let fake_gpg = temp.path().join("fake-gpg");
+        write_executable(
+            &fake_gpg,
+            "#!/bin/sh\nif [ \"$1\" = \"--batch\" ]; then\n  printf '%s\\n' 'pub:u:255:22:1111111111111111:1:::u:::scESC::::::23::0:'\n  printf '%s\\n' 'fpr:::::::::AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA:'\n  printf '%s\\n' 'uid:u::::1::hash::Test User <test@example.invalid>::::::::::0:'\n  exit 0\nfi\nexit 2\n",
+        );
+
+        let fingerprint =
+            resolve_gpg_key_fingerprint(fake_gpg.display().to_string(), "test@example.invalid")
+                .unwrap();
+
+        assert_eq!(fingerprint, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+    }
+
+    #[test]
+    fn resolve_gpg_key_fingerprint_rejects_ambiguous_selector() {
+        let temp = tempfile::tempdir().unwrap();
+        let fake_gpg = temp.path().join("fake-gpg");
+        write_executable(
+            &fake_gpg,
+            "#!/bin/sh\nprintf '%s\\n' 'pub:u:255:22:1111111111111111:1:::u:::scESC::::::23::0:'\nprintf '%s\\n' 'fpr:::::::::AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA:'\nprintf '%s\\n' 'pub:u:255:22:2222222222222222:1:::u:::scESC::::::23::0:'\nprintf '%s\\n' 'fpr:::::::::BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB:'\n",
+        );
+
+        let err =
+            resolve_gpg_key_fingerprint(fake_gpg.display().to_string(), "test@example.invalid")
+                .unwrap_err()
+                .to_string();
+
+        assert!(err.contains("ambiguous"));
+        assert!(err.contains("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
+        assert!(err.contains("BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"));
     }
 
     #[test]

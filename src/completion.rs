@@ -287,6 +287,10 @@ pub fn complete_non_first_token_for_line_with_options(
     if token.text.is_empty() {
         return Vec::new();
     }
+    let path_candidates = complete_path(&token.text, cwd);
+    if token.path_like {
+        return limit_candidates(path_candidates, options.max_results);
+    }
     let structural_template_candidates = complete_structural_templates_for_line(
         line,
         cursor,
@@ -319,7 +323,7 @@ pub fn complete_non_first_token_for_line_with_options(
         options.ignore_spaces,
         options.match_threshold_percent,
     ));
-    candidates.extend(complete_path(&token.text, cwd));
+    candidates.extend(path_candidates);
     dedupe_completion_candidates(&mut candidates);
     limit_candidates(candidates, options.max_results)
 }

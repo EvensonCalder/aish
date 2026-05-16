@@ -27,6 +27,12 @@ input=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --version) printf 'fake gpg\n'; exit 0 ;;
+    --list-keys)
+      printf '%s\n' 'pub:u:255:22:1111111111111111:1:::u:::scESC::::::23::0:'
+      printf '%s\n' 'fpr:::::::::AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA:'
+      printf '%s\n' 'uid:u::::1::hash::Test User <test@example.invalid>::::::::::0:'
+      exit 0
+      ;;
     --decrypt) mode=decrypt ;;
     --output) shift; out="$1" ;;
     --recipient|--trust-model) shift ;;
@@ -71,7 +77,7 @@ aish_wait_prompt
 aish_send "#status"
 aish_enter
 aish_expect "encryption=on"
-aish_expect "encryption.recipient=test@example.invalid"
+aish_expect "encryption.key_fingerprint=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 aish_wait_prompt
 
 aish_quit
@@ -120,7 +126,7 @@ aish_spawn_without_aish_home
 aish_send "#status"
 aish_enter
 aish_expect "encryption=on"
-aish_expect "encryption.recipient=test@example.invalid"
+aish_expect "encryption.key_fingerprint=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 aish_wait_prompt
 aish_quit
 

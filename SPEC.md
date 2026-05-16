@@ -1014,6 +1014,7 @@ sync = false
 
 [encryption]
 enabled = false
+key_fingerprint = ""
 recipient = ""
 
 [sync]
@@ -1055,7 +1056,7 @@ Commands:
 Priority:
 
 1. Environment variable named by `#env-key`.
-2. GPG-stored key from `#key set`. `#key set` encrypts the current environment key value for `[encryption].recipient`.
+2. GPG-stored key from `#key set`. `#key set` encrypts the current environment key value for `[encryption].key_fingerprint`.
 3. Common fallback environment variables if configured later.
 
 ---
@@ -1066,27 +1067,37 @@ Commands:
 
 ```text
 #encrypt on
-#encrypt on <recipient>
+#encrypt on <key-fingerprint|unique-email>
+#encrypt rotate <key-fingerprint|unique-email>
+#encrypt rewrite-history plan
+#encrypt rewrite-history run <key-fingerprint|unique-email> --confirm-rewrite-history
 #encrypt off
 ```
 
 Behavior:
 
-- `[encryption].recipient` supplies the GPG recipient. `#encrypt on <recipient>` may set and persist it before migration.
+- `[encryption].key_fingerprint` supplies the stable GPG encryption key. `[encryption].recipient` is a deprecated compatibility field.
+- A full fingerprint is the preferred key selector. An email or user ID is accepted only when `gpg --list-keys --with-colons --fingerprint <selector>` resolves to exactly one public key.
+- `#encrypt on <key>` may set and persist the resolved fingerprint before migration.
+- If encryption is already enabled and the resolved fingerprint differs from the stored fingerprint, Aish decrypts existing managed encrypted files with GPG and re-encrypts them for the new fingerprint.
+- `#encrypt rotate <key>` explicitly performs the same current-storage key rotation.
 - Encrypt regular history, AI history, draft history, notes, and templates.
 - Encrypt template payload metadata as well as bodies. User-facing template names are not part of the product model; template IDs are stable content-hash handles used for exact operations, and no plaintext template search/list index should be persisted when encryption is enabled.
 - Secrets are always stored encrypted.
 - When encryption is enabled, do not store plaintext search indexes.
+- Live completion must not run GPG on each keypress. Encrypted template data should be loaded into an in-memory snapshot during unlock/startup and refreshed only by explicit template mutations or reload flows.
 - Decrypt asynchronously on startup so the shell is usable before history/template unlock completes.
 - While unlock is pending, completion/history features can show `history is still unlocking...`.
+- `#encrypt rewrite-history plan` prints the risk and exact confirmed command for rewriting Git history.
+- `#encrypt rewrite-history run <key> --confirm-rewrite-history` is destructive by design: it requires a clean worktree, creates a backup branch, rewrites the current branch's managed storage blobs by encrypting plaintext blobs and re-encrypting old-key blobs for the target fingerprint, and never pushes automatically.
 
 Safety message when enabling encryption:
 
 ```text
 Encryption is now enabled for future writes.
 Aish will sync encrypted files from now on.
-If plaintext files were already tracked by git, they may still exist in git history.
-Aish will not rewrite git history or remove tracked files automatically.
+Git history may still contain plaintext data or encrypted data written for an older key.
+Aish will not rewrite git history automatically; history rewrite requires an explicit backup and old-key re-encryption flow.
 ```
 
 Aish should use atomic writes for encrypted files:
@@ -1230,7 +1241,7 @@ Initial command set:
 
 #editor <command...>
 
-#encrypt on|off
+#encrypt on|rotate|rewrite-history|off
 
 #set-remote <git-url>
 #push

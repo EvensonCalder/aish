@@ -129,6 +129,9 @@ pub struct ContextConfig {
 #[serde(default, deny_unknown_fields)]
 pub struct EncryptionConfig {
     pub enabled: bool,
+    pub key_fingerprint: String,
+    /// Deprecated compatibility field. New writes should persist
+    /// `key_fingerprint` after resolving any user-facing key selector.
     pub recipient: String,
 }
 
@@ -386,6 +389,7 @@ pub fn normalize_config(config: &mut Config) {
     if config.context.max_bytes == 0 {
         config.context.max_bytes = ContextConfig::default().max_bytes;
     }
+    config.encryption.key_fingerprint = config.encryption.key_fingerprint.trim().to_string();
     config.encryption.recipient = config.encryption.recipient.trim().to_string();
     config.sync.remote = config.sync.remote.trim().to_string();
     config.sync.schedule = config.sync.schedule.trim().to_string();
@@ -468,6 +472,7 @@ mod tests {
             },
             encryption: EncryptionConfig {
                 enabled: true,
+                key_fingerprint: "  ABCDEF0123456789ABCDEF0123456789ABCDEF01  ".to_string(),
                 recipient: "  test@example.invalid  ".to_string(),
             },
             sync: SyncConfig {
@@ -498,6 +503,7 @@ mod tests {
         };
         expected.encryption = EncryptionConfig {
             enabled: true,
+            key_fingerprint: "ABCDEF0123456789ABCDEF0123456789ABCDEF01".to_string(),
             recipient: "test@example.invalid".to_string(),
         };
         expected.completion.match_threshold_percent = 50;

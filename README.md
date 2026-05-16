@@ -28,7 +28,7 @@ Explicitly incomplete:
 
 - Configurable key rebinding is not implemented yet.
 - Fish support is opt-in until behavior is validated across macOS and representative Linux distributions.
-- Async encrypted-history unlock and terminal passthrough for passphrase entry remain future work.
+- Async encrypted-history unlock remains future work; direct GPG decrypt operations temporarily yield the terminal to `gpg-agent`/pinentry for passphrase entry.
 - Full automatic passthrough for arbitrary interactive programs remains future work; Aish currently uses an allowlist and tested stdin-command handling.
 
 ## Quickstart
@@ -239,7 +239,10 @@ Encryption:
 ```text
 #key set
 #key clear
-#encrypt on [recipient]
+#encrypt on [key-fingerprint|unique-email]
+#encrypt rotate <key-fingerprint|unique-email>
+#encrypt rewrite-history plan
+#encrypt rewrite-history run <key-fingerprint|unique-email> --confirm-rewrite-history
 #encrypt off
 ```
 
@@ -403,27 +406,52 @@ Aish uses the `gpg` command-line tool for encrypted local storage.
 
 Current behavior:
 
-- Configure `[encryption].recipient` in `config.toml`, or pass it once with `#encrypt on <recipient>`.
+- Configure `[encryption].key_fingerprint` in `config.toml`, or pass a key selector once with `#encrypt on <key-fingerprint>`.
+- A full GPG key fingerprint is the stable key identity. An email/user ID is accepted only when GPG resolves it to exactly one public key.
 - `#encrypt on` migrates managed history, notes, drafts, AI history, and templates to `*.jsonl.gpg` files and removes the plaintext JSONL files after successful encryption.
+- If encryption is already enabled and the target fingerprint changes, Aish decrypts the existing managed encrypted files and re-encrypts them for the new fingerprint.
+- `#encrypt rotate <key>` explicitly re-encrypts current managed storage for a new fingerprint.
 - Future writes go to encrypted JSONL files while encryption is enabled.
 - `#encrypt off` decrypts managed encrypted JSONL files back to plaintext and disables encrypted writes.
 - `#key set` encrypts the API key currently available through `#env-key <ENV_NAME>` into `secrets/key.json.gpg`.
 - `#key clear` removes the encrypted key file if present.
-- `#status`, `#config`, and `#doctor` report encryption state, recipient configuration, and GPG availability.
+- `#status`, `#config`, and `#doctor` report encryption state, key fingerprint configuration, and GPG availability.
 
 Typical setup:
 
 ```sh
-gpg --list-keys
+gpg --list-keys --fingerprint
 ```
 
-Choose a recipient from the listed key IDs or email addresses, then enable encryption inside Aish:
+Choose a full fingerprint from the listed keys, then enable encryption inside Aish:
 
 ```text
-#encrypt on you@example.com
+#encrypt on ABCDEF0123456789ABCDEF0123456789ABCDEF01
 ```
 
-After that, history, notes, drafts, AI history, and templates are written as encrypted `*.jsonl.gpg` files. `config.toml` remains plaintext because Aish needs it to find the recipient and startup settings.
+After that, history, notes, drafts, AI history, and templates are written as encrypted `*.jsonl.gpg` files. `config.toml` remains plaintext because Aish needs it to find the key fingerprint and startup settings.
+
+To rotate to a new key:
+
+```text
+#encrypt rotate FEDCBA9876543210FEDCBA9876543210FEDCBA98
+```
+
+This rewrites current managed storage by decrypting with the available old private key and encrypting to the new fingerprint. Git history is not rewritten automatically.
+
+To inspect the manual Git history rewrite flow:
+
+```text
+#encrypt rewrite-history plan
+```
+
+To run it, first make a separate backup and ensure the Aish storage Git worktree is clean. Then run:
+
+```text
+#encrypt rewrite-history run FEDCBA9876543210FEDCBA9876543210FEDCBA98 --confirm-rewrite-history
+```
+
+This rewrites the current branch for managed storage paths, creates a local backup branch, and re-encrypts historical plaintext or old-key encrypted blobs for the target fingerprint. Rewritten commit IDs require a deliberate `git push --force-with-lease` if the storage repository is shared.
 
 To store an AI API key with GPG, make the key available in the environment before starting Aish:
 
@@ -453,7 +481,7 @@ To decrypt managed storage back to plaintext and write plaintext files from then
 #encrypt off
 ```
 
-Known limits: encrypted startup loading is synchronous, and passphrase entry depends on `gpg-agent` rather than an Aish unlock passthrough flow. Aish still warns that plaintext already tracked by Git can remain in repository history; it does not rewrite Git history or run `git rm --cached` automatically.
+Known limits: encrypted startup loading is synchronous. Direct decrypt operations temporarily leave raw mode so `gpg-agent`/pinentry can prompt for passphrases; a fully async unlock UI is still future work. Aish warns that Git history can contain plaintext data or data encrypted for an older key; history rewrite is available only through the explicit confirmed command above.
 
 ## Files And Storage
 
