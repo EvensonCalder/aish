@@ -51,6 +51,8 @@ sleep 1
 tmux send-keys -t "$SESSION" 'cat unique-tar'
 tmux send-keys -t "$SESSION" Tab
 sleep 1
+tmux send-keys -t "$SESSION" Tab
+sleep 1
 tmux send-keys -t "$SESSION" Enter
 sleep 2
 
@@ -109,6 +111,7 @@ test "$MAX_COUNT" = "1"
 printf '%s\n' "$WIDE_CAPTURE" | rg -q '^completion max results must be greater than 0$'
 printf '%s\n' "$WIDE_CAPTURE" | rg -q '^usage: #completion inline on\|off$'
 printf '%s\n' "$WIDE_CAPTURE" | rg -q '^usage: #completion tab-accept full\|word$'
+printf '%s\n' "$WIDE_CAPTURE" | rg -q '^completion.mode=tab$'
 printf '%s\n' "$WIDE_CAPTURE" | rg -q '^completion.inline=false$'
 printf '%s\n' "$WIDE_CAPTURE" | rg -q '^completion.tab_accept=word$'
 printf '%s\n' "$PANEL_WORD" | rg -q 'tmuxword-one tmuxword-two'

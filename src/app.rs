@@ -16,13 +16,13 @@ use crate::commands::{
 };
 use crate::completion::{
     CompletionCandidate, CompletionOptions, CompletionSource, complete_first_token_with_options,
-    complete_non_first_token_for_line_with_options, complete_private_commands,
+    complete_non_first_token_for_line_with_options, complete_private_command_line,
     current_token_context, dedupe_completion_candidates, rank_completion_candidates,
 };
 use crate::completion_worker::{CompletionJob, CompletionTier, CompletionWorker};
 use crate::config::{
-    self, AiConfig, CompletionConfig, CompletionTabAccept, ContextConfig, EditorConfig,
-    EncryptionConfig, PasteConfig, PromptConfig, SyncConfig,
+    self, AiConfig, CompletionConfig, CompletionMode, CompletionTabAccept, ContextConfig,
+    EditorConfig, EncryptionConfig, PasteConfig, PromptConfig, SyncConfig,
 };
 use crate::context::{
     build_contextual_ai_prompt, is_dangerous_context_command, run_context_command,
@@ -571,18 +571,12 @@ impl AppState {
         }
         let line = self.draft.as_str();
         let token = current_token_context(line, self.draft.cursor());
-        if let Some(private_or_prompt) = line.strip_prefix('#') {
-            if private_or_prompt
-                .chars()
-                .next()
-                .is_some_and(char::is_whitespace)
-            {
-                return Ok(Vec::new());
-            }
-            if token.is_first_token && token.text.starts_with('#') {
-                return Ok(complete_private_commands(&token.text, max_results));
-            }
-            return Ok(Vec::new());
+        if line.starts_with('#') {
+            return Ok(complete_private_command_line(
+                line,
+                self.draft.cursor(),
+                max_results,
+            ));
         }
         let templates = self.templates_for_completion()?;
         let history_newest_first: Vec<_> = self.regular_history.iter().rev().cloned().collect();
@@ -823,18 +817,8 @@ impl AppState {
         let line = self.draft.as_str();
         let cursor = self.draft.cursor();
         let token = current_token_context(line, cursor);
-        if let Some(private_or_prompt) = line.strip_prefix('#') {
-            if private_or_prompt
-                .chars()
-                .next()
-                .is_some_and(char::is_whitespace)
-            {
-                return Ok(Vec::new());
-            }
-            if token.is_first_token && token.text.starts_with('#') {
-                return Ok(complete_private_commands(&token.text, max_results));
-            }
-            return Ok(Vec::new());
+        if line.starts_with('#') {
+            return Ok(complete_private_command_line(line, cursor, max_results));
         }
 
         let templates = self.templates_for_completion()?;
@@ -2626,6 +2610,11 @@ fn write_status_report(state: &AppState, out: &mut impl Write) -> Result<()> {
     writeln!(out, "context.max_bytes={}", state.context_config.max_bytes)?;
     writeln!(
         out,
+        "completion.mode={}",
+        state.completion_config.mode().as_str()
+    )?;
+    writeln!(
+        out,
         "completion.enabled={}",
         state.completion_config.enabled
     )?;
@@ -2792,6 +2781,11 @@ fn write_config_report(state: &AppState, out: &mut impl Write) -> Result<()> {
         out,
         "paste.confirm_execute={}",
         state.paste_config.confirm_execute
+    )?;
+    writeln!(
+        out,
+        "completion.mode={}",
+        state.completion_config.mode().as_str()
     )?;
     writeln!(
         out,
@@ -3997,9 +3991,23 @@ fn update_completion_config(state: &mut AppState, out: &mut impl Write, args: &s
     match (parts.next(), parts.next(), parts.next()) {
         (None, None, None) => write_completion_config(out, &state.completion_config),
         (Some(value @ ("on" | "off")), None, None) => {
-            let enabled = value == "on";
+            let mode = if value == "on" {
+                CompletionMode::Auto
+            } else {
+                CompletionMode::Off
+            };
             set_completion_config(state, out, |config| {
-                config.completion.enabled = enabled;
+                config.completion.set_mode(mode);
+                Ok(())
+            })
+        }
+        (Some("mode"), Some(value), None) => {
+            let Some(mode) = parse_completion_mode(value) else {
+                writeln!(out, "usage: #completion mode auto|tab|off")?;
+                return Ok(());
+            };
+            set_completion_config(state, out, |config| {
+                config.completion.set_mode(mode);
                 Ok(())
             })
         }
@@ -4038,7 +4046,11 @@ fn update_completion_config(state: &mut AppState, out: &mut impl Write, args: &s
                 return Ok(());
             };
             set_completion_config(state, out, |config| {
-                config.completion.inline = inline;
+                config.completion.set_mode(if inline {
+                    CompletionMode::Auto
+                } else {
+                    CompletionMode::Tab
+                });
                 Ok(())
             })
         }
@@ -4092,7 +4104,7 @@ fn update_completion_config(state: &mut AppState, out: &mut impl Write, args: &s
         }
         _ => writeln!(
             out,
-            "usage: #completion on|off|max <count>|coalesce-ms <0-1000>|inline on|off|fuzzy on|off|tab-accept full|word|match-threshold <0-100>|typo-threshold <0-100>"
+            "usage: #completion on|off|mode auto|tab|off|max <count>|coalesce-ms <0-1000>|inline on|off|fuzzy on|off|tab-accept full|word|match-threshold <0-100>|typo-threshold <0-100>"
         )
         .map_err(Into::into),
     }
@@ -4125,6 +4137,7 @@ fn set_completion_config(
 }
 
 fn write_completion_config(out: &mut impl Write, config: &CompletionConfig) -> Result<()> {
+    writeln!(out, "completion.mode={}", config.mode().as_str())?;
     writeln!(out, "completion.enabled={}", config.enabled)?;
     writeln!(out, "completion.max_results={}", config.max_results)?;
     writeln!(out, "completion.coalesce_ms={}", config.coalesce_ms)?;
@@ -4144,6 +4157,15 @@ fn write_completion_config(out: &mut impl Write, config: &CompletionConfig) -> R
         config.typo_threshold_percent
     )?;
     Ok(())
+}
+
+fn parse_completion_mode(value: &str) -> Option<CompletionMode> {
+    match value {
+        "auto" => Some(CompletionMode::Auto),
+        "tab" => Some(CompletionMode::Tab),
+        "off" => Some(CompletionMode::Off),
+        _ => None,
+    }
 }
 
 fn parse_completion_tab_accept(value: &str) -> Option<CompletionTabAccept> {
@@ -4546,6 +4568,7 @@ mod tests {
                 source: HistorySource::User,
             }],
             completion_config: CompletionConfig {
+                mode: None,
                 enabled: true,
                 max_results: 2,
                 coalesce_ms: 50,
@@ -6133,6 +6156,7 @@ mod tests {
     #[test]
     fn subsystem_commands_report_current_state() {
         for (line, expected) in [
+            ("#completion", "completion.mode=auto"),
             ("#completion", "completion.max_results=5"),
             ("#completion", "completion.enabled=true"),
             ("#completion", "completion.coalesce_ms=50"),
@@ -6174,12 +6198,14 @@ mod tests {
         let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
 
         for (line, expected) in [
-            ("#completion off", "completion.enabled=false"),
-            ("#completion on", "completion.enabled=true"),
+            ("#completion off", "completion.mode=off"),
+            ("#completion on", "completion.mode=auto"),
+            ("#completion mode tab", "completion.mode=tab"),
+            ("#completion mode auto", "completion.mode=auto"),
             ("#completion max 2", "completion.max_results=2"),
             ("#completion coalesce-ms 75", "completion.coalesce_ms=75"),
             ("#completion coalesce 50", "completion.coalesce_ms=50"),
-            ("#completion inline off", "completion.inline=false"),
+            ("#completion inline off", "completion.mode=tab"),
             ("#completion tab-accept word", "completion.tab_accept=word"),
             ("#completion fuzzy off", "completion.fuzzy=false"),
             ("#completion fuzzy on", "completion.fuzzy=true"),
@@ -6207,6 +6233,10 @@ mod tests {
             (
                 "#completion inline maybe",
                 "usage: #completion inline on|off",
+            ),
+            (
+                "#completion mode manual",
+                "usage: #completion mode auto|tab|off",
             ),
             ("#completion fuzzy maybe", "usage: #completion fuzzy on|off"),
             (
@@ -6249,6 +6279,7 @@ mod tests {
         }
 
         assert!(state.completion_config.enabled);
+        assert_eq!(state.completion_config.mode(), CompletionMode::Tab);
         assert_eq!(state.completion_config.max_results, 2);
         assert_eq!(state.completion_config.coalesce_ms, 50);
         assert!(!state.completion_config.inline);
@@ -6261,6 +6292,7 @@ mod tests {
         assert_eq!(state.completion_config.typo_threshold_percent, 85);
         let loaded = config::load_config(&config_path).unwrap().completion;
         assert!(loaded.enabled);
+        assert_eq!(loaded.mode(), CompletionMode::Tab);
         assert_eq!(loaded.max_results, 2);
         assert_eq!(loaded.coalesce_ms, 50);
         assert!(!loaded.inline);
@@ -7613,6 +7645,7 @@ mod tests {
                 execute_after_save: false,
             },
             completion_config: CompletionConfig {
+                mode: None,
                 enabled: true,
                 max_results: 8,
                 coalesce_ms: 50,
@@ -7660,6 +7693,7 @@ mod tests {
         assert!(output.contains("paste.multiline=editor"));
         assert!(output.contains("paste.confirm_execute=true"));
         assert!(output.contains("completion.enabled=true"));
+        assert!(output.contains("completion.mode=tab"));
         assert!(output.contains("completion.max_results=8"));
         assert!(output.contains("completion.coalesce_ms=50"));
         assert!(output.contains("completion.ignore_spaces=false"));
@@ -7871,6 +7905,7 @@ mod tests {
         assert!(output.contains("sync.enabled=false"));
         assert!(output.contains("context.enabled=true"));
         assert!(output.contains("completion.enabled=true"));
+        assert!(output.contains("completion.mode=auto"));
         assert!(output.contains("completion.max_results=5"));
         assert!(output.contains("completion.coalesce_ms=50"));
         assert!(output.contains("completion.fuzzy=true"));

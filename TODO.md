@@ -1078,11 +1078,12 @@ enum AiItemKind {
 ## Phase 28: Inline completion UX
 
 Status: implemented. Inline completion is enabled by default and refreshes while the user types, `completion.max_results` controls only the below-prompt panel row count, and bash/zsh real-terminal coverage proves completion behavior is owned by Aish rather than the backend shell. Fish backend coverage remains opt-in with `AISH_TEST_FISH=1` until cross-platform behavior is validated across macOS and Linux distributions.
-Update: completion now uses layered, non-blocking live discovery. Immediate candidates are shown first, structural history and typo-correction tiers arrive through versioned worker events, stale events are ignored, encrypted-write completion events refresh the live UI, async UI refreshes are coalesced for up to `completion.coalesce_ms`, and first-token executable-only live hints can wait for the same window so higher-priority history can arrive before lower-priority PATH matches are drawn. `completion.enabled` and `completion.fuzzy` default to `true` so low-performance environments can disable all completion or only typo-correction work. `completion.match_threshold_percent` defaults to `50` as a structural word-position threshold, and `completion.typo_threshold_percent` defaults to `80` for typo correction.
+Update: completion now uses layered, non-blocking live discovery. Immediate candidates are shown first, structural history and typo-correction tiers arrive through versioned worker events, stale events are ignored, encrypted-write completion events refresh the live UI, async UI refreshes are coalesced for up to `completion.coalesce_ms`, and first-token executable-only live hints can wait for the same window so higher-priority history can arrive before lower-priority PATH matches are drawn. `completion.mode` supports `auto`, `tab`, and `off`; `completion.enabled`/`completion.inline` remain legacy compatibility fields. `completion.fuzzy` defaults to `true` so low-performance environments can disable only typo-correction work. `completion.match_threshold_percent` defaults to `50` as a structural word-position threshold, and `completion.typo_threshold_percent` defaults to `80` for typo correction.
 
 ### Tasks
 
 - [x] Add completion config fields:
+  - [x] `completion.mode = "auto"` by default, with `auto`, `tab`, and `off` modes.
   - [x] `completion.enabled = true` by default.
   - [x] `completion.inline = true` by default.
   - [x] `completion.fuzzy = true` by default.
@@ -1092,9 +1093,10 @@ Update: completion now uses layered, non-blocking live discovery. Immediate cand
   - [x] `completion.typo_threshold_percent = 80` by default.
   - [x] Valid `completion.tab_accept` values are `"full"` and `"word"`.
 - [x] Normalize invalid or empty completion config values without silently accepting unsupported modes.
-- [x] Persist and report inline completion settings through `#completion`, `#config`, and `#status`.
+- [x] Persist and report completion mode/settings through `#completion`, `#config`, and `#status`.
 - [x] Add private commands:
   - [x] `#completion on|off`
+  - [x] `#completion mode auto|tab|off`
   - [x] `#completion inline on|off`
   - [x] `#completion fuzzy on|off`
   - [x] `#completion coalesce-ms <0-1000>`
@@ -1103,18 +1105,21 @@ Update: completion now uses layered, non-blocking live discovery. Immediate cand
   - [x] `#completion typo-threshold <0-100>`
 - [x] Treat `completion.match_threshold_percent` as a structural word-position match rate, not typo correction.
 - [x] Keep typo correction separate behind `completion.typo_threshold_percent`.
+- [x] Accepting a typo-correction candidate replaces the mistyped command with the corrected template/history command.
 - [x] Keep live completion non-blocking by sending history work to a versioned worker and ignoring stale events.
 - [x] Coalesce layered completion UI refreshes until the final tier arrives or the configured coalescing window expires.
 - [x] Defer first-token executable-only live hints during the coalescing window so they do not flash before history results.
 - [x] Do not run path fallback for empty non-first tokens after trailing whitespace.
 - [x] Keep `# ` AI prompts silent and restrict `#cmd` completion to Aish private commands.
+- [x] Complete private command arguments and nested subcommands through the same completion UI.
 - [x] Split completion candidate discovery from panel row limiting so `completion.max_results` controls only below-prompt row count.
 - [x] Track the current inline suggestion separately from the draft buffer, cursor, history, persisted draft, and below-prompt panel state.
 - [x] Render the highest-ranked completion candidate as an inline ghost suffix in dim or light text while the user types when inline completion is enabled.
 - [x] Render remaining candidates as live below-prompt hints while keeping the inline suggestion as the only `Tab` acceptance target.
 - [x] Ensure editing, cursor movement, mode switching, prompt redraw, and command execution clear stale inline suggestions.
-- [x] Make the first `Tab` accept the already-visible inline suggestion when inline completion is enabled.
-- [x] Preserve legacy first-candidate acceptance when inline completion is disabled.
+- [x] In `auto` mode, make the first `Tab` accept the already-visible inline suggestion.
+- [x] In `tab` mode, make the first `Tab` display candidates and the next `Tab` accept the visible suggestion or first ranked candidate.
+- [x] In `off` mode, make non-empty `Tab` do nothing.
 - [x] Implement `completion.tab_accept = "full"` to accept the complete untyped suffix.
 - [x] Implement `completion.tab_accept = "word"` to accept only through the next whitespace boundary in the untyped suffix, or the full suffix when no boundary remains.
 - [x] Keep `Right` at end-of-line aligned with the configured inline accept amount; keep `Right` inside the line as ordinary cursor movement.
@@ -1123,10 +1128,11 @@ Update: completion now uses layered, non-blocking live discovery. Immediate cand
 
 ### Required tests
 
-- [x] Config default, roundtrip, normalization, and invalid-value tests for `completion.inline` and `completion.tab_accept`.
-- [x] Private-command tests proving `#completion inline on|off` and `#completion tab-accept full|word` persist, report, and reject invalid input without changing config.
+- [x] Config default, roundtrip, normalization, and invalid-value tests for `completion.mode`, legacy `completion.inline`, and `completion.tab_accept`.
+- [x] Private-command tests proving `#completion mode auto|tab|off`, `#completion inline on|off`, and `#completion tab-accept full|word` persist, report, and reject invalid input without changing config.
 - [x] Pure completion tests for computing an inline suffix from history, templates, executables, paths, and non-first-token arguments.
 - [x] Pure and terminal tests for structural template completion where typing a placeholder name without braces accepts the raw `{placeholder}` form.
+- [x] Pure tests for private command nested argument completion and typo-correction acceptance.
 - [x] Pure acceptance tests for full-suggestion and word-boundary acceptance, including quoted arguments and candidates with spaces.
 - [x] Terminal rendering tests proving the inline ghost is display-only, refreshes while typing, uses subdued styling, does not move the real cursor, and does not mutate draft text.
 - [x] Terminal state tests proving stale inline suggestions clear after editing, cursor movement, mode changes, command execution, and no-match completion.

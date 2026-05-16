@@ -56,7 +56,9 @@ pub struct AcceptedCompletion {
 pub enum CompletionSource {
     Path,
     Template,
+    TemplateTypo,
     History,
+    HistoryTypo,
     Executable,
     TemplatePlaceholder,
     PrivateCommand,
@@ -256,6 +258,82 @@ pub fn complete_private_commands(prefix: &str, max_results: usize) -> Vec<Comple
         })
         .collect();
     limit_candidates(candidates, max_results)
+}
+
+pub fn complete_private_command_line(
+    line: &str,
+    cursor: usize,
+    max_results: usize,
+) -> Vec<CompletionCandidate> {
+    let cursor = previous_char_boundary(line, cursor.min(line.len()));
+    let before_cursor = &line[..cursor];
+    let Some(rest) = before_cursor.strip_prefix('#') else {
+        return Vec::new();
+    };
+    if rest.chars().next().is_some_and(char::is_whitespace) {
+        return Vec::new();
+    }
+
+    let token = current_token_context(line, cursor);
+    if token.is_first_token && token.text.starts_with('#') {
+        return complete_private_commands(&token.text, max_results);
+    }
+
+    let words = split_shell_like_words(&line[..token.start]);
+    let Some(command) = words
+        .first()
+        .and_then(|word| word.strip_prefix('#'))
+        .filter(|command| IMPLEMENTED_PRIVATE_COMMANDS.contains(command))
+    else {
+        return Vec::new();
+    };
+    let args = words.iter().skip(1).map(String::as_str).collect::<Vec<_>>();
+    let candidates = private_command_argument_candidates(command, &args, &token.text);
+    let candidates = candidates.into_iter().map(|candidate| CompletionCandidate {
+        display: candidate.to_string(),
+        replacement: candidate.to_string(),
+        is_dir: false,
+        source: CompletionSource::PrivateCommand,
+    });
+    limit_candidates(candidates.collect(), max_results)
+}
+
+fn private_command_argument_candidates(
+    command: &str,
+    args_before_cursor: &[&str],
+    prefix: &str,
+) -> Vec<&'static str> {
+    let candidates: &[&str] = match (command, args_before_cursor) {
+        ("completion", []) => &[
+            "on",
+            "off",
+            "mode",
+            "max",
+            "coalesce-ms",
+            "inline",
+            "fuzzy",
+            "tab-accept",
+            "match-threshold",
+            "typo-threshold",
+        ],
+        ("completion", ["mode"]) => &["auto", "tab", "off"],
+        ("completion", ["inline" | "fuzzy"]) => &["on", "off"],
+        ("completion", ["tab-accept"]) => &["full", "word"],
+        ("key", []) => &["set", "clear"],
+        ("context", []) => &["on", "off", "confirm"],
+        ("context", ["confirm"]) => &["on", "off"],
+        ("template", []) => &["find", "list", "rm", "replace", "show", "use"],
+        ("encrypt", []) => &["on", "off", "rotate", "rewrite-history"],
+        ("encrypt", ["rewrite-history"]) => &["plan", "run"],
+        ("sync", []) => &["off", "ai", "history", "templates", "drafts"],
+        ("sync", ["ai" | "history" | "templates" | "drafts"]) => &["on", "off"],
+        _ => &[],
+    };
+    candidates
+        .iter()
+        .copied()
+        .filter(|candidate| prefix.is_empty() || candidate.starts_with(prefix))
+        .collect()
 }
 
 pub fn complete_non_first_token(
@@ -576,7 +654,7 @@ pub fn complete_first_token_typos_with_options(
                 display: template.body.clone(),
                 replacement: template.body.clone(),
                 is_dir: false,
-                source: CompletionSource::Template,
+                source: CompletionSource::TemplateTypo,
             });
         }
     }
@@ -596,7 +674,7 @@ pub fn complete_first_token_typos_with_options(
                 display: entry.command.clone(),
                 replacement: entry.command.clone(),
                 is_dir: false,
-                source: CompletionSource::History,
+                source: CompletionSource::HistoryTypo,
             });
         }
     }
@@ -778,21 +856,15 @@ pub fn complete_typo_candidates_for_line_with_options(
         ) {
             continue;
         }
-        let replacement = template_replacement_for_index(
-            &template_words,
-            current_word_index,
-            &token,
-            options.ignore_spaces,
-            options.match_threshold_percent,
-        );
-        if replacement == token.text || !seen_templates.insert(replacement.clone()) {
+        let replacement = template.body.clone();
+        if replacement == line || !seen_templates.insert(template.id()) {
             continue;
         }
         candidates.push(CompletionCandidate {
             display: template.body.clone(),
             replacement,
             is_dir: false,
-            source: CompletionSource::Template,
+            source: CompletionSource::TemplateTypo,
         });
     }
 
@@ -811,15 +883,15 @@ pub fn complete_typo_candidates_for_line_with_options(
         ) {
             continue;
         }
-        let replacement = join_words(&history_words[current_word_index..]);
-        if replacement == token.text || !seen_history.insert(replacement.clone()) {
+        let replacement = entry.command.clone();
+        if replacement == line || !seen_history.insert(entry.command.as_str()) {
             continue;
         }
         candidates.push(CompletionCandidate {
-            display: replacement.clone(),
+            display: entry.command.clone(),
             replacement,
             is_dir: false,
-            source: CompletionSource::History,
+            source: CompletionSource::HistoryTypo,
         });
     }
 
@@ -875,7 +947,9 @@ fn completion_source_rank(source: CompletionSource) -> u8 {
     match source {
         CompletionSource::PrivateCommand => 0,
         CompletionSource::Template => 10,
+        CompletionSource::TemplateTypo => 11,
         CompletionSource::History => 20,
+        CompletionSource::HistoryTypo => 21,
         CompletionSource::Executable => 30,
         CompletionSource::TemplatePlaceholder => 40,
         CompletionSource::Path => 50,
@@ -1019,6 +1093,12 @@ pub fn accept_completion_with_mode(
     candidate: &CompletionCandidate,
     mode: CompletionTabAccept,
 ) -> AcceptedCompletion {
+    if completion_candidate_replaces_whole_line(candidate) {
+        return AcceptedCompletion {
+            line: candidate.replacement.clone(),
+            cursor: candidate.replacement.len(),
+        };
+    }
     let replacement = accepted_replacement(token, candidate, mode);
     let mut accepted =
         String::with_capacity(line.len() - (token.end - token.start) + replacement.len());
@@ -1030,6 +1110,13 @@ pub fn accept_completion_with_mode(
         line: accepted,
         cursor,
     }
+}
+
+fn completion_candidate_replaces_whole_line(candidate: &CompletionCandidate) -> bool {
+    matches!(
+        candidate.source,
+        CompletionSource::TemplateTypo | CompletionSource::HistoryTypo
+    )
 }
 
 pub fn truncate_with_ellipsis(value: &str, width: usize) -> String {
@@ -1174,7 +1261,9 @@ fn completion_source_label(source: CompletionSource) -> &'static str {
     match source {
         CompletionSource::Path => "file",
         CompletionSource::Template => "template",
+        CompletionSource::TemplateTypo => "template",
         CompletionSource::History => "history",
+        CompletionSource::HistoryTypo => "history",
         CompletionSource::Executable => "exec",
         CompletionSource::TemplatePlaceholder => "placeholder",
         CompletionSource::PrivateCommand => "aish",
@@ -2289,6 +2378,64 @@ mod tests {
     }
 
     #[test]
+    fn private_command_completion_includes_nested_arguments() {
+        let candidates =
+            complete_private_command_line("#completion ", "#completion ".len(), usize::MAX);
+
+        assert!(
+            candidates
+                .iter()
+                .any(|candidate| candidate.replacement == "mode")
+        );
+        assert!(
+            candidates
+                .iter()
+                .any(|candidate| candidate.replacement == "tab-accept")
+        );
+
+        let mode_candidates = complete_private_command_line(
+            "#completion mode ",
+            "#completion mode ".len(),
+            usize::MAX,
+        );
+
+        assert_eq!(
+            mode_candidates
+                .iter()
+                .map(|candidate| candidate.replacement.as_str())
+                .collect::<Vec<_>>(),
+            ["auto", "tab", "off"]
+        );
+
+        let partial_arg_candidates =
+            complete_private_command_line("#completion m", "#completion m".len(), usize::MAX);
+
+        assert_eq!(
+            partial_arg_candidates
+                .iter()
+                .map(|candidate| candidate.replacement.as_str())
+                .collect::<Vec<_>>(),
+            ["mode", "max", "match-threshold"]
+        );
+
+        let partial_nested_candidates = complete_private_command_line(
+            "#completion mode t",
+            "#completion mode t".len(),
+            usize::MAX,
+        );
+
+        assert_eq!(
+            partial_nested_candidates
+                .iter()
+                .map(|candidate| candidate.replacement.as_str())
+                .collect::<Vec<_>>(),
+            ["tab"]
+        );
+
+        assert!(complete_private_command_line("# ", "# ".len(), usize::MAX).is_empty());
+    }
+
+    #[test]
     fn complete_non_first_token_for_line_matches_template_placeholder_name_without_braces() {
         let templates = vec![TemplateEntry::new("echo {something}")];
 
@@ -2465,12 +2612,31 @@ mod tests {
         assert_eq!(
             candidates.first(),
             Some(&CompletionCandidate {
-                display: "status --short".to_string(),
-                replacement: "status --short".to_string(),
+                display: "git status --short".to_string(),
+                replacement: "git status --short".to_string(),
                 is_dir: false,
-                source: CompletionSource::History,
+                source: CompletionSource::HistoryTypo,
             })
         );
+
+        let token = current_token_context("git statuz", "git statuz".len());
+        let accepted = accept_completion("git statuz", &token, &candidates[0]);
+        assert_eq!(accepted.line, "git status --short");
+
+        let previous_word_typo_candidates = complete_non_first_token_typos_for_line_with_options(
+            "git statuz --",
+            "git statuz --".len(),
+            &history,
+            &[],
+            CompletionOptions::default(),
+        );
+        let token = current_token_context("git statuz --", "git statuz --".len());
+        let accepted = accept_completion(
+            "git statuz --",
+            &token,
+            previous_word_typo_candidates.first().unwrap(),
+        );
+        assert_eq!(accepted.line, "git status --short");
 
         let strict_candidates = complete_non_first_token_typos_for_line_with_options(
             "git statuz",
@@ -2495,6 +2661,46 @@ mod tests {
             },
         );
         assert!(disabled_candidates.is_empty());
+    }
+
+    #[test]
+    fn first_token_typo_candidates_replace_whole_command() {
+        let history = vec![HistoryEntry {
+            t: 1,
+            command: "kubectl get pods".to_string(),
+            exit_code: Some(0),
+            source: crate::history::HistorySource::User,
+        }];
+        let templates = vec![TemplateEntry::new("kubectl apply -f {file}")];
+
+        let candidates = complete_first_token_typos_with_options(
+            "kubectx",
+            &history,
+            &templates,
+            CompletionOptions::default(),
+        );
+
+        assert_eq!(
+            candidates,
+            [
+                CompletionCandidate {
+                    display: "kubectl apply -f {file}".to_string(),
+                    replacement: "kubectl apply -f {file}".to_string(),
+                    is_dir: false,
+                    source: CompletionSource::TemplateTypo,
+                },
+                CompletionCandidate {
+                    display: "kubectl get pods".to_string(),
+                    replacement: "kubectl get pods".to_string(),
+                    is_dir: false,
+                    source: CompletionSource::HistoryTypo,
+                },
+            ]
+        );
+
+        let token = current_token_context("kubectx", "kubectx".len());
+        let accepted = accept_completion("kubectx", &token, &candidates[0]);
+        assert_eq!(accepted.line, "kubectl apply -f {file}");
     }
 
     #[test]

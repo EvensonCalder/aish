@@ -770,7 +770,10 @@ For non-first-token completion:
 
 For command completion:
 
-- `completion.enabled = false` disables all Aish completion candidates, live completion UI, and non-empty `Tab` acceptance.
+- `completion.mode = "auto"` enables live completion hints while the user types.
+- `completion.mode = "tab"` disables live hints while typing; the first non-empty `Tab` starts completion and displays hints, and the next `Tab` accepts the visible inline suggestion or first ranked displayed/cached candidate.
+- `completion.mode = "off"` disables all Aish completion candidates, live completion UI, and non-empty `Tab` acceptance.
+- `completion.enabled` and `completion.inline` remain legacy compatibility fields. When `completion.mode` is absent, `enabled=false` maps to `off`, `enabled=true` with `inline=true` maps to `auto`, and `enabled=true` with `inline=false` maps to `tab`. When `completion.mode` is present, it is authoritative and Aish normalizes the legacy fields to match it.
 - `completion.fuzzy = false` disables typo-correction/fuzzy work while preserving fast prefix, path, template, and structural history completion.
 - Template candidates are shown before history candidates.
 - History candidates are ordered newest to oldest.
@@ -780,14 +783,15 @@ For command completion:
 - Empty tokens and candidates with zero matching positions are not displayed.
 - `completion.match_threshold_percent` is a structural word-position match rate, not character-level typo correction. For example, `git stx` matches `git status --short` at one of two typed positions, so the default `50` threshold can show it.
 - Structural matches pass when the word-position match rate is greater than or equal to the configured threshold.
-- Typo correction is separate from structural matching and uses `completion.typo_threshold_percent`; the default threshold is `80`.
+- Typo correction is separate from structural matching and uses `completion.typo_threshold_percent`; the default threshold is `80`. Accepting a typo candidate replaces the whole mistyped command with the corrected template/history command.
 - Generic prefix matching must not treat partial character overlap such as `stx` versus `status` as a match. That belongs to the typo tier.
-- A `# ` AI prompt must not trigger completion. A `#cmd` token may only show Aish private command candidates.
+- A `# ` AI prompt must not trigger completion. A `#cmd` token may only show Aish private command candidates. Private command arguments and nested subcommands should use the same completion display and accept path as ordinary completion.
 
 ### 10.3 Live inline completion and Tab behavior
 
 - Empty draft `Tab` switches modes.
-- When inline suggestions are enabled, non-empty draft edits start a layered completion request for the current token and show the best available candidate as an inline ghost suggestion in dim text on the active prompt line without requiring `Tab`.
+- In `auto` mode, non-empty draft edits start a layered completion request for the current token and show the best available candidate as an inline ghost suggestion in dim text on the active prompt line without requiring `Tab`.
+- In `tab` mode, ordinary typing clears any stale completion UI and does not start a live completion request. Pressing `Tab` starts the same layered request explicitly; background history and typo tiers may update the displayed hints for that request without accepting anything.
 - Live completion must not scan regular history synchronously on every keypress. It sends a versioned background request using a cheap history snapshot reference.
 - Live completion is layered: immediate non-history candidates are shown first, structural history results can refresh the UI when the worker finishes, and slower typo-correction results can refresh the UI after that when `completion.fuzzy = true`.
 - Layered live completion refreshes may be coalesced until the final background tier arrives or `completion.coalesce_ms` elapses, whichever comes first, to avoid visible flicker while preserving non-blocking input.
@@ -797,9 +801,9 @@ For command completion:
 - Live inline completion also renders remaining candidates as below-prompt hints when they fit the configured display rules.
 - If the user presses `Tab` and there are no candidates, Aish leaves the completion UI empty and redraws the current draft unchanged.
 - The inline ghost suggestion is display-only. It must not modify the draft buffer, cursor position, history, or persisted draft until the user explicitly accepts it.
-- Pressing `Tab` with an inline ghost suggestion accepts the inline suggestion, not an arbitrary first row from the below-prompt panel. In normal typing flows this means the first `Tab` accepts the already-visible inline suggestion.
+- In `auto` mode, pressing `Tab` with an inline ghost suggestion accepts the inline suggestion, not an arbitrary first row from the below-prompt panel. In normal typing flows this means the first `Tab` accepts the already-visible inline suggestion.
 - Some valid ranked candidates, such as replacing `something` with the template placeholder `{something}`, cannot be rendered as an unambiguous suffix. In that case Aish may show the candidate in the live below-prompt panel; pressing `Tab` accepts the first ranked candidate rather than requiring the user to type braces manually.
-- If inline suggestions are disabled, non-empty `Tab` accepts the first ranked candidate directly, preserving the legacy behavior.
+- In `tab` mode, the first `Tab` displays candidates without editing the draft; a later `Tab` accepts the visible inline suggestion or first ranked displayed/cached candidate.
 - `completion.tab_accept = "full"` accepts the complete selected suggestion.
 - `completion.tab_accept = "word"` accepts only through the next whitespace boundary in the untyped suffix. If no whitespace boundary remains, it accepts the full suffix.
 - `Right` at end-of-line may also accept the inline suggestion according to the configured accept amount. `Right` inside the line keeps ordinary cursor movement.
@@ -830,8 +834,10 @@ Config:
 
 ```toml
 [completion]
+mode = "auto" # "auto", "tab", or "off"
 enabled = true
 max_results = 5
+coalesce_ms = 50
 ignore_spaces = true
 template_first = true
 inline = true
@@ -845,6 +851,7 @@ Command:
 
 ```text
 #completion on|off
+#completion mode auto|tab|off
 #completion max 8
 #completion coalesce-ms <0-1000>
 #completion inline on|off
@@ -1015,8 +1022,10 @@ confirm = true
 max_bytes = 65536
 
 [completion]
+mode = "auto"
 enabled = true
 max_results = 5
+coalesce_ms = 50
 ignore_spaces = true
 template_first = true
 inline = true
@@ -1254,6 +1263,7 @@ Initial command set:
 #context confirm on|off
 
 #completion on|off
+#completion mode auto|tab|off
 #completion max <count>
 #completion coalesce-ms <0-1000>
 #completion inline on|off

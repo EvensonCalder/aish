@@ -65,6 +65,8 @@ pub struct PasteConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct CompletionConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<CompletionMode>,
     pub enabled: bool,
     pub max_results: usize,
     pub coalesce_ms: u64,
@@ -75,6 +77,56 @@ pub struct CompletionConfig {
     pub tab_accept: CompletionTabAccept,
     pub match_threshold_percent: usize,
     pub typo_threshold_percent: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CompletionMode {
+    Auto,
+    Tab,
+    Off,
+}
+
+impl CompletionMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Tab => "tab",
+            Self::Off => "off",
+        }
+    }
+}
+
+impl CompletionConfig {
+    pub fn mode(&self) -> CompletionMode {
+        if let Some(mode) = self.mode {
+            mode
+        } else if !self.enabled {
+            CompletionMode::Off
+        } else if self.inline {
+            CompletionMode::Auto
+        } else {
+            CompletionMode::Tab
+        }
+    }
+
+    pub fn set_mode(&mut self, mode: CompletionMode) {
+        self.mode = Some(mode);
+        match mode {
+            CompletionMode::Auto => {
+                self.enabled = true;
+                self.inline = true;
+            }
+            CompletionMode::Tab => {
+                self.enabled = true;
+                self.inline = false;
+            }
+            CompletionMode::Off => {
+                self.enabled = false;
+                self.inline = false;
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
@@ -208,6 +260,7 @@ impl Default for PasteConfig {
 impl Default for CompletionConfig {
     fn default() -> Self {
         Self {
+            mode: None,
             enabled: true,
             max_results: 5,
             coalesce_ms: 50,
@@ -397,6 +450,9 @@ pub fn normalize_config(config: &mut Config) {
         config.completion.typo_threshold_percent =
             CompletionConfig::default().typo_threshold_percent;
     }
+    if let Some(mode) = config.completion.mode {
+        config.completion.set_mode(mode);
+    }
     config.ai.model = config.ai.model.trim().to_string();
     config.ai.base_url = config.ai.base_url.trim().to_string();
     config.ai.env_key = config.ai.env_key.trim().to_string();
@@ -437,6 +493,7 @@ mod tests {
         assert!(config.completion.template_first);
         assert!(config.completion.inline);
         assert!(config.completion.fuzzy);
+        assert_eq!(config.completion.mode(), CompletionMode::Auto);
         assert_eq!(config.completion.tab_accept, CompletionTabAccept::Full);
         assert_eq!(config.completion.match_threshold_percent, 50);
         assert_eq!(config.completion.typo_threshold_percent, 80);
@@ -471,6 +528,7 @@ mod tests {
                 confirm_execute: true,
             },
             completion: CompletionConfig {
+                mode: None,
                 enabled: true,
                 max_results: 0,
                 coalesce_ms: 1_001,
@@ -598,6 +656,38 @@ mod tests {
         assert!(err.contains("invalid value"));
         assert!(err.contains("full"));
         assert!(err.contains("word"));
+    }
+
+    #[test]
+    fn completion_mode_overrides_legacy_enabled_inline_fields() {
+        let raw = r#"
+            [completion]
+            mode = "tab"
+            enabled = false
+            inline = true
+        "#;
+
+        let mut config: Config = toml::from_str(raw).unwrap();
+        normalize_config(&mut config);
+
+        assert_eq!(config.completion.mode(), CompletionMode::Tab);
+        assert!(config.completion.enabled);
+        assert!(!config.completion.inline);
+    }
+
+    #[test]
+    fn completion_mode_rejects_unknown_values() {
+        let raw = r#"
+            [completion]
+            mode = "manual"
+        "#;
+
+        let err = toml::from_str::<Config>(raw).unwrap_err().to_string();
+
+        assert!(err.contains("unknown variant"));
+        assert!(err.contains("auto"));
+        assert!(err.contains("tab"));
+        assert!(err.contains("off"));
     }
 
     #[test]

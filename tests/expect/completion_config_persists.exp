@@ -13,6 +13,7 @@ aish_spawn
 
 aish_send "#completion"
 aish_enter
+aish_expect "completion.mode=auto"
 aish_expect "completion.enabled=true"
 aish_expect "completion.max_results=5"
 aish_expect "completion.coalesce_ms=50"
@@ -25,12 +26,26 @@ aish_wait_prompt
 
 aish_send "#completion off"
 aish_enter
+aish_expect "completion.mode=off"
 aish_expect "completion.enabled=false"
 aish_wait_prompt
 
 aish_send "#completion on"
 aish_enter
+aish_expect "completion.mode=auto"
 aish_expect "completion.enabled=true"
+aish_wait_prompt
+
+aish_send "#completion mode tab"
+aish_enter
+aish_expect "completion.mode=tab"
+aish_expect "completion.inline=false"
+aish_wait_prompt
+
+aish_send "#completion mode auto"
+aish_enter
+aish_expect "completion.mode=auto"
+aish_expect "completion.inline=true"
 aish_wait_prompt
 
 aish_send "#completion max 2"
@@ -50,11 +65,13 @@ aish_wait_prompt
 
 aish_send "#completion inline off"
 aish_enter
+aish_expect "completion.mode=tab"
 aish_expect "completion.inline=false"
 aish_wait_prompt
 
 aish_send "#completion inline on"
 aish_enter
+aish_expect "completion.mode=auto"
 aish_expect "completion.inline=true"
 aish_wait_prompt
 
@@ -90,6 +107,7 @@ aish_wait_prompt
 
 aish_send "#config"
 aish_enter
+aish_expect "completion.mode=auto"
 aish_expect "completion.enabled=true"
 aish_expect "completion.max_results=2"
 aish_expect "completion.coalesce_ms=50"

@@ -127,7 +127,10 @@ Inline completion is enabled by default and refreshes while you type. The best c
 
 Important rules:
 
-- `completion.enabled=false` disables all Aish completion candidates and live completion UI.
+- `completion.mode="auto"` shows live completion hints while you type.
+- `completion.mode="tab"` keeps typing quiet; the first `Tab` shows hints and the next `Tab` accepts the visible suggestion or first ranked candidate.
+- `completion.mode="off"` disables all Aish completion candidates and makes non-empty `Tab` do nothing.
+- `completion.enabled=false` and `completion.inline=false` remain compatibility fields for older configs. Aish reports the derived `completion.mode` and keeps these fields consistent when changed through `#completion`.
 - `completion.fuzzy=false` keeps fast prefix/structural completion but disables typo-correction work.
 - The inline suggestion is display-only until accepted.
 - The below-prompt panel is advisory and never decides what `Tab` accepts.
@@ -136,9 +139,8 @@ Important rules:
 - The panel skips the current inline candidate and shows the full command that would result from accepting each remaining candidate.
 - Candidate rows are width-aware, align command text with the prompt input column when space permits, and left-elide long commands with `...` at word boundaries instead of wrapping.
 - Structural history/template matches use `completion.match_threshold_percent` as a word-position match rate. The default is `50`, so one matching word out of two typed words is enough.
-- Typo correction is separate and uses `completion.typo_threshold_percent`; ordinary prefix matching does not treat `stx` as `status`.
-- `# ` AI prompts stay quiet. `#cmd` input only offers Aish private command names.
-- If `completion.inline=false`, non-empty `Tab` preserves the legacy behavior and accepts the first ranked candidate directly.
+- Typo correction is separate and uses `completion.typo_threshold_percent`; accepting a typo candidate replaces the mistyped command with the corrected command.
+- `# ` AI prompts stay quiet. `#cmd` input only offers Aish private command names, and private command arguments use the same completion UI for nested subcommands such as `#completion mode tab` or `#encrypt rewrite-history plan`.
 
 Completion sources:
 
@@ -153,6 +155,7 @@ Configuration:
 
 ```toml
 [completion]
+mode = "auto" # "auto", "tab", or "off"
 enabled = true
 max_results = 5
 coalesce_ms = 50
@@ -171,6 +174,9 @@ Commands:
 #completion
 #completion on
 #completion off
+#completion mode auto
+#completion mode tab
+#completion mode off
 #completion max 8
 #completion coalesce-ms 50
 #completion inline on
@@ -212,6 +218,7 @@ Completion:
 ```text
 #completion
 #completion on|off
+#completion mode auto|tab|off
 #completion max <count>
 #completion coalesce-ms <0-1000>
 #completion inline on|off

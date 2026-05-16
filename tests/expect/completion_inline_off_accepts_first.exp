@@ -1,6 +1,6 @@
 #!/usr/bin/env expect
-# With inline completion disabled, Tab keeps the legacy direct first-candidate
-# acceptance behavior.
+# With inline completion disabled, completion runs in Tab mode: the first Tab
+# displays the candidate and the second Tab accepts it.
 
 set timeout 10
 source [file dirname [info script]]/_lib.exp
@@ -9,10 +9,14 @@ aish_spawn
 
 aish_send "#completion inline off"
 aish_enter
+aish_expect "completion.mode=tab"
 aish_expect "completion.inline=false"
 aish_wait_prompt
 
 aish_send "cat Cargo.t"
+aish_send "\t"
+aish_expect "> cat Cargo.t"
+aish_expect "cat Cargo.toml"
 aish_send "\t"
 aish_expect "> cat Cargo.toml"
 
