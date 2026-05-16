@@ -411,6 +411,48 @@ Current behavior:
 - `#key clear` removes the encrypted key file if present.
 - `#status`, `#config`, and `#doctor` report encryption state, recipient configuration, and GPG availability.
 
+Typical setup:
+
+```sh
+gpg --list-keys
+```
+
+Choose a recipient from the listed key IDs or email addresses, then enable encryption inside Aish:
+
+```text
+#encrypt on you@example.com
+```
+
+After that, history, notes, drafts, AI history, and templates are written as encrypted `*.jsonl.gpg` files. `config.toml` remains plaintext because Aish needs it to find the recipient and startup settings.
+
+To store an AI API key with GPG, make the key available in the environment before starting Aish:
+
+```sh
+export OPENAI_API_KEY=...
+./target/debug/aish
+```
+
+Then configure and store it inside Aish:
+
+```text
+#env-key OPENAI_API_KEY
+#key set
+```
+
+On later launches, Aish first uses the current environment variable if it exists. If that variable is missing, Aish falls back to the encrypted key in `secrets/key.json.gpg`.
+
+To stop using the stored key:
+
+```text
+#key clear
+```
+
+To decrypt managed storage back to plaintext and write plaintext files from then on:
+
+```text
+#encrypt off
+```
+
 Known limits: encrypted startup loading is synchronous, and passphrase entry depends on `gpg-agent` rather than an Aish unlock passthrough flow. Aish still warns that plaintext already tracked by Git can remain in repository history; it does not rewrite Git history or run `git rm --cached` automatically.
 
 ## Files And Storage
