@@ -5,6 +5,7 @@ pub mod completion;
 pub mod completion_worker;
 pub mod config;
 pub mod context;
+mod display_width;
 pub mod editor;
 pub mod encrypted_writer;
 pub mod encryption;

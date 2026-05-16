@@ -4,6 +4,9 @@ use std::path::{Path, PathBuf};
 
 use crate::commands::IMPLEMENTED_PRIVATE_COMMANDS;
 use crate::config::CompletionTabAccept;
+use crate::display_width::{
+    display_width, truncate_end_with_ellipsis, truncate_start_with_ellipsis,
+};
 use crate::history::HistoryEntry;
 use crate::templates::TemplateEntry;
 
@@ -1120,18 +1123,7 @@ fn completion_candidate_replaces_whole_line(candidate: &CompletionCandidate) -> 
 }
 
 pub fn truncate_with_ellipsis(value: &str, width: usize) -> String {
-    let len = value.chars().count();
-    if len <= width {
-        return value.to_string();
-    }
-    if width == 0 {
-        return String::new();
-    }
-    if width <= 3 {
-        return ".".repeat(width);
-    }
-    let prefix: String = value.chars().take(width - 3).collect();
-    format!("{prefix}...")
+    truncate_end_with_ellipsis(value, width)
 }
 
 fn render_completion_candidate_for_width(
@@ -1145,7 +1137,7 @@ fn render_completion_candidate_for_width(
         return String::new();
     }
     let label = completion_candidate_label(candidate);
-    let label_width = label.chars().count();
+    let label_width = display_width(&label);
     if width <= label_width {
         return truncate_with_ellipsis(label, width);
     }
@@ -1168,7 +1160,7 @@ fn render_completion_candidate_for_width(
 }
 
 fn left_elide_words(value: &str, width: usize) -> String {
-    if value.chars().count() <= width {
+    if display_width(value) <= width {
         return value.to_string();
     }
     if width == 0 {
@@ -1187,7 +1179,7 @@ fn left_elide_words(value: &str, width: usize) -> String {
     let mut selected = Vec::new();
     let mut selected_width = 0;
     for word in words.iter().rev() {
-        let word_width = word.chars().count();
+        let word_width = display_width(word);
         let next_width = if selected.is_empty() {
             word_width
         } else {
@@ -1207,24 +1199,7 @@ fn left_elide_words(value: &str, width: usize) -> String {
 }
 
 fn left_truncate_with_ellipsis(value: &str, width: usize) -> String {
-    if value.chars().count() <= width {
-        return value.to_string();
-    }
-    if width == 0 {
-        return String::new();
-    }
-    if width <= 3 {
-        return ".".repeat(width);
-    }
-    let suffix: String = value
-        .chars()
-        .rev()
-        .take(width - 3)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect();
-    format!("...{suffix}")
+    truncate_start_with_ellipsis(value, width)
 }
 
 fn accepted_replacement(
@@ -2763,7 +2738,23 @@ mod tests {
             render_completion_candidates_for_width(&candidates, "cat very-long", &token, 5, 24);
 
         assert_eq!(rows, ["file ...will-not-fit.txt"]);
-        assert!(rows[0].chars().count() <= 24);
+        assert!(display_width(&rows[0]) <= 24);
+    }
+
+    #[test]
+    fn render_completion_candidates_for_width_elides_cjk_by_display_width() {
+        let token = current_token_context("echo", "echo".len());
+        let candidates = vec![CompletionCandidate {
+            display: "echo alpha 中文路径 beta".to_string(),
+            replacement: "echo alpha 中文路径 beta".to_string(),
+            is_dir: false,
+            source: CompletionSource::History,
+        }];
+
+        let rows = render_completion_candidates_for_width(&candidates, "echo", &token, 8, 18);
+
+        assert_eq!(rows, ["history ... beta"]);
+        assert!(display_width(&rows[0]) <= 18);
     }
 
     #[test]

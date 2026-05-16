@@ -27,6 +27,7 @@ use crate::config::{
 use crate::context::{
     build_contextual_ai_prompt, is_dangerous_context_command, run_context_command,
 };
+use crate::display_width::display_width;
 use crate::editor::{
     EditorCommand, EditorRunResult, PreparedEditorSession, prepare_editor_file, read_editor_file,
     resolve_editor_command, run_editor_command,
@@ -1321,7 +1322,8 @@ impl AppState {
             };
             return (
                 0,
-                (self.prompt_prefix().len() + marker.len()).min(u16::MAX as usize) as u16,
+                display_width(&format!("{}{}", self.prompt_prefix(), marker)).min(u16::MAX as usize)
+                    as u16,
             );
         }
         let rendered_before_cursor = match self.mode {
@@ -1362,7 +1364,7 @@ impl AppState {
         let row = rendered_before_cursor.split('\n').count().saturating_sub(1);
         (
             row.min(u16::MAX as usize) as u16,
-            last.len().min(u16::MAX as usize) as u16,
+            display_width(last).min(u16::MAX as usize) as u16,
         )
     }
 
@@ -1371,12 +1373,9 @@ impl AppState {
     }
 
     pub fn rendered_last_line_column(&self) -> u16 {
-        self.rendered_text()
-            .rsplit('\n')
-            .next()
-            .unwrap_or_default()
-            .len()
-            .min(u16::MAX as usize) as u16
+        let rendered = self.rendered_text();
+        display_width(rendered.rsplit('\n').next().unwrap_or_default()).min(u16::MAX as usize)
+            as u16
     }
 
     pub(crate) fn editor_draft_summary_for_terminal(&self) -> String {
@@ -4546,7 +4545,7 @@ mod tests {
         );
         assert_eq!(
             state.terminal_cursor_column(),
-            state.render_prompt_line().len() as u16
+            display_width(&state.render_prompt_line()) as u16
         );
     }
 
@@ -5209,6 +5208,20 @@ mod tests {
     }
 
     #[test]
+    fn terminal_cursor_column_counts_cjk_as_full_width() {
+        let mut state = AppState::default();
+        state.draft.insert_str("a中b");
+
+        assert_eq!(state.terminal_cursor_column(), 6);
+
+        state.draft.move_left();
+        assert_eq!(state.terminal_cursor_column(), 5);
+
+        state.draft.move_left();
+        assert_eq!(state.terminal_cursor_column(), 3);
+    }
+
+    #[test]
     fn history_mode_selects_and_renders_regular_history_newest_first() {
         let mut state = AppState {
             regular_history: vec![
@@ -5494,7 +5507,7 @@ mod tests {
         );
         assert_eq!(
             state.terminal_cursor_column(),
-            state.render_prompt_line().len() as u16
+            display_width(&state.render_prompt_line()) as u16
         );
     }
 

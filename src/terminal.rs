@@ -22,6 +22,7 @@ use crate::completion::{
     truncate_with_ellipsis,
 };
 use crate::config::CompletionMode;
+use crate::display_width::{visual_line_count, visual_position};
 use crate::editor::resolve_editor_command;
 use crate::picker::{
     PickerAction, PickerRunResult, env_var_picker_candidates, file_picker_candidates,
@@ -1289,35 +1290,6 @@ fn rendered_text_before_cursor(state: &AppState) -> String {
     }
 }
 
-fn visual_line_count(text: &str, width: usize) -> usize {
-    text.split('\n')
-        .map(|line| visual_rows_for_line(line, width))
-        .sum::<usize>()
-        .max(1)
-}
-
-fn visual_position(text: &str, width: usize) -> (usize, u16) {
-    let width = width.max(1);
-    let mut row = 0;
-    let mut lines = text.split('\n').peekable();
-    while let Some(line) = lines.next() {
-        let len = line.chars().count();
-        let line_row = len / width;
-        let col = len % width;
-        if lines.peek().is_none() {
-            return (row + line_row, col.min(u16::MAX as usize) as u16);
-        }
-        row += visual_rows_for_line(line, width);
-    }
-    (0, 0)
-}
-
-fn visual_rows_for_line(line: &str, width: usize) -> usize {
-    let width = width.max(1);
-    let len = line.chars().count();
-    (len / width) + 1
-}
-
 fn render_multiline_for_terminal(
     prompt_prefix: &str,
     continuation_prefix: &str,
@@ -2286,6 +2258,22 @@ mod tests {
 
         let output = String::from_utf8(output).unwrap();
         assert!(output.contains("> ab"), "output was {output:?}");
+        assert!(
+            output.ends_with("\u{1b}8\u{1b}[1B\u{1b}[1G"),
+            "output was {output:?}"
+        );
+    }
+
+    #[test]
+    fn redraw_positions_cursor_from_anchor_at_cjk_wrap_boundary() {
+        let mut state = AppState::default();
+        state.draft.insert_str("a中b");
+        let mut output = Vec::new();
+
+        redraw_for_width(&mut state, &mut output, 6).unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("> a中b"), "output was {output:?}");
         assert!(
             output.ends_with("\u{1b}8\u{1b}[1B\u{1b}[1G"),
             "output was {output:?}"

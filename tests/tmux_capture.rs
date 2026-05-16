@@ -498,6 +498,14 @@ fn tmux_wrap_boundary_cursor_moves_to_next_line() {
 }
 
 #[test]
+fn tmux_cjk_cursor_wrap_moves_to_next_line() {
+    let Some(captured) = run_tmux_script("cjk_cursor_wrap.sh") else {
+        return;
+    };
+    assert_line_present(&captured, "cursor=0 1");
+}
+
+#[test]
 fn tmux_editor_and_paste_review_render_cleanly() {
     let Some(captured) = run_tmux_script("editor_paste_review_rendering.sh") else {
         return;
