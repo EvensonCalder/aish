@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use crossterm::cursor::{
-    MoveDown, MoveTo, MoveToColumn, MoveToPreviousLine, MoveUp, RestorePosition, SavePosition,
+    MoveDown, MoveTo, MoveToColumn, MoveToPreviousLine, RestorePosition, SavePosition,
 };
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
@@ -896,6 +896,10 @@ fn expand_template_draft_if_inside_placeholder(state: &mut AppState) {
 }
 
 pub fn redraw(state: &mut AppState, out: &mut impl Write) -> Result<()> {
+    redraw_for_width(state, out, terminal_display_width())
+}
+
+fn redraw_for_width(state: &mut AppState, out: &mut impl Write, width: usize) -> Result<()> {
     move_to_rendered_start(state, out)?;
     execute!(
         out,
@@ -903,7 +907,6 @@ pub fn redraw(state: &mut AppState, out: &mut impl Write) -> Result<()> {
         Clear(ClearType::FromCursorDown),
         SavePosition
     )?;
-    let width = terminal_display_width();
     let rendered = state.rendered_text();
     write!(out, "{}", rendered.replace('\n', "\r\n"))?;
     let inline_suffix = render_inline_completion_suffix(state, width);
@@ -918,10 +921,7 @@ pub fn redraw(state: &mut AppState, out: &mut impl Write) -> Result<()> {
     let full_render = full_rendered_text_for_width(&rendered, inline_suffix.as_deref(), state);
     let final_row = visual_line_count(&full_render, width).saturating_sub(1);
     let (cursor_row, cursor_col) = terminal_cursor_position_for_width(state, width);
-    if final_row > cursor_row {
-        execute!(out, MoveUp((final_row - cursor_row) as u16))?;
-    }
-    execute!(out, MoveToColumn(cursor_col))?;
+    move_to_rendered_position(out, cursor_row, cursor_col)?;
     state.last_rendered_lines = final_row + 1;
     state.last_rendered_cursor_row = cursor_row;
     state.render_anchor_saved = true;
@@ -1143,6 +1143,15 @@ fn move_to_rendered_start(state: &AppState, out: &mut impl Write) -> Result<()> 
         )?;
     }
     execute!(out, MoveToColumn(0))?;
+    Ok(())
+}
+
+fn move_to_rendered_position(out: &mut impl Write, row: usize, col: u16) -> Result<()> {
+    execute!(out, RestorePosition)?;
+    if row > 0 {
+        execute!(out, MoveDown(row.min(u16::MAX as usize) as u16))?;
+    }
+    execute!(out, MoveToColumn(col))?;
     Ok(())
 }
 
@@ -2157,8 +2166,25 @@ mod tests {
 
         let output = String::from_utf8(output).unwrap();
         assert!(output.contains("> git\r\nexec\tgit\r\nexec\tgit-shell"));
-        assert!(output.contains("\u{1b}[2A"), "output was {output:?}");
+        assert!(output.contains("\u{1b}7"), "output was {output:?}");
+        assert!(output.contains("\u{1b}8"), "output was {output:?}");
         assert!(output.ends_with("\u{1b}[6G"), "output was {output:?}");
+    }
+
+    #[test]
+    fn redraw_positions_cursor_from_anchor_at_wrap_boundary() {
+        let mut state = AppState::default();
+        state.draft.insert_str("ab");
+        let mut output = Vec::new();
+
+        redraw_for_width(&mut state, &mut output, 4).unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("> ab"), "output was {output:?}");
+        assert!(
+            output.ends_with("\u{1b}8\u{1b}[1B\u{1b}[1G"),
+            "output was {output:?}"
+        );
     }
 
     #[test]

@@ -490,6 +490,14 @@ fn tmux_narrow_long_input_redraw_does_not_duplicate_prompt() {
 }
 
 #[test]
+fn tmux_wrap_boundary_cursor_moves_to_next_line() {
+    let Some(captured) = run_tmux_script("wrap_boundary_cursor.sh") else {
+        return;
+    };
+    assert_line_present(&captured, "cursor=0 1");
+}
+
+#[test]
 fn tmux_editor_and_paste_review_render_cleanly() {
     let Some(captured) = run_tmux_script("editor_paste_review_rendering.sh") else {
         return;

@@ -54,10 +54,11 @@ proc aish_spawn_without_aish_home {} {
 }
 
 # Wait for any draft prompt, allowing optional editor or multi-line draft text
-# before the ANSI cursor-positioning codes.
+# before the terminal cursor-positioning codes. Redraw may restore a saved
+# cursor anchor with ESC 7/8 before emitting CSI cursor movement.
 proc aish_wait_any_prompt {} {
     expect {
-        -re {> ([^\x1b]*)\x1b\[}     { set ::aish_last_draft $expect_out(1,string) }
+        -re {> ([^\x1b]*)(\x1b[78])*\x1b\[}     { set ::aish_last_draft $expect_out(1,string) }
         timeout            { puts stderr "no prompt"; exit 2 }
         eof                { puts stderr "eof before prompt"; exit 2 }
     }
@@ -79,7 +80,7 @@ proc aish_wait_prompt_without {forbidden} {
     while {1} {
         expect {
             -ex $forbidden     { puts stderr "found forbidden before prompt: $forbidden"; exit 5 }
-            -re {> ([^\x1b]*)\x1b\[}     { set ::aish_last_draft $expect_out(1,string) }
+            -re {> ([^\x1b]*)(\x1b[78])*\x1b\[}     { set ::aish_last_draft $expect_out(1,string) }
             timeout            { puts stderr "no prompt"; exit 2 }
             eof                { puts stderr "eof before prompt"; exit 2 }
         }
