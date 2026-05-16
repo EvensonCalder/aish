@@ -54,7 +54,7 @@ aish_wait_prompt
 
 aish_send "cat home-completion-"
 aish_send "\t"
-aish_expect "file\ttwo.txt"
+aish_expect "two.txt"
 aish_send "\x03"
 aish_wait_prompt
 

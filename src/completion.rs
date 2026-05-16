@@ -981,20 +981,15 @@ pub fn render_completion_candidates(candidates: &[CompletionCandidate]) -> Vec<S
 
 pub fn render_completion_candidates_for_width(
     candidates: &[CompletionCandidate],
+    line: &str,
     token: &TokenContext,
+    content_start_col: usize,
     width: usize,
 ) -> Vec<String> {
     candidates
         .iter()
         .map(|candidate| {
-            truncate_with_ellipsis(
-                &format!(
-                    "{}\t{}",
-                    completion_candidate_label(candidate),
-                    anchored_candidate_display(token, candidate)
-                ),
-                width,
-            )
+            render_completion_candidate_for_width(candidate, line, token, content_start_col, width)
         })
         .collect()
 }
@@ -1052,13 +1047,97 @@ pub fn truncate_with_ellipsis(value: &str, width: usize) -> String {
     format!("{prefix}...")
 }
 
-fn anchored_candidate_display(token: &TokenContext, candidate: &CompletionCandidate) -> String {
-    if let Some(suffix) = candidate.replacement.strip_prefix(&token.text)
-        && !suffix.is_empty()
-    {
-        return suffix.to_string();
+fn render_completion_candidate_for_width(
+    candidate: &CompletionCandidate,
+    line: &str,
+    token: &TokenContext,
+    content_start_col: usize,
+    width: usize,
+) -> String {
+    if width == 0 {
+        return String::new();
     }
-    candidate.replacement.clone()
+    let label = completion_candidate_label(candidate);
+    let label_width = label.chars().count();
+    if width <= label_width {
+        return truncate_with_ellipsis(label, width);
+    }
+    let preferred_content_col = content_start_col.max(label_width + 1);
+    let content_col = if preferred_content_col < width {
+        preferred_content_col
+    } else {
+        label_width + 1
+    };
+    if content_col >= width {
+        return truncate_with_ellipsis(label, width);
+    }
+    let display = accept_completion(line, token, candidate).line;
+    let display = left_elide_words(&display, width - content_col);
+    let mut row = String::with_capacity(width.min(label.len() + display.len() + 8));
+    row.push_str(label);
+    row.extend(std::iter::repeat_n(' ', content_col - label_width));
+    row.push_str(&display);
+    row
+}
+
+fn left_elide_words(value: &str, width: usize) -> String {
+    if value.chars().count() <= width {
+        return value.to_string();
+    }
+    if width == 0 {
+        return String::new();
+    }
+    if width <= 3 {
+        return ".".repeat(width);
+    }
+
+    let words: Vec<&str> = value.split_whitespace().collect();
+    if words.len() <= 1 {
+        return left_truncate_with_ellipsis(value, width);
+    }
+
+    let available = width - 4;
+    let mut selected = Vec::new();
+    let mut selected_width = 0;
+    for word in words.iter().rev() {
+        let word_width = word.chars().count();
+        let next_width = if selected.is_empty() {
+            word_width
+        } else {
+            selected_width + 1 + word_width
+        };
+        if next_width > available {
+            break;
+        }
+        selected.push(*word);
+        selected_width = next_width;
+    }
+    if selected.is_empty() {
+        return left_truncate_with_ellipsis(value, width);
+    }
+    selected.reverse();
+    format!("... {}", selected.join(" "))
+}
+
+fn left_truncate_with_ellipsis(value: &str, width: usize) -> String {
+    if value.chars().count() <= width {
+        return value.to_string();
+    }
+    if width == 0 {
+        return String::new();
+    }
+    if width <= 3 {
+        return ".".repeat(width);
+    }
+    let suffix: String = value
+        .chars()
+        .rev()
+        .take(width - 3)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    format!("...{suffix}")
 }
 
 fn accepted_replacement(
@@ -2474,9 +2553,10 @@ mod tests {
             source: CompletionSource::Path,
         }];
 
-        let rows = render_completion_candidates_for_width(&candidates, &token, 24);
+        let rows =
+            render_completion_candidates_for_width(&candidates, "cat very-long", &token, 5, 24);
 
-        assert_eq!(rows, ["file\t-file-name-that-..."]);
+        assert_eq!(rows, ["file ...will-not-fit.txt"]);
         assert!(rows[0].chars().count() <= 24);
     }
 
@@ -2490,9 +2570,9 @@ mod tests {
             source: CompletionSource::History,
         }];
 
-        let rows = render_completion_candidates_for_width(&candidates, &token, 80);
+        let rows = render_completion_candidates_for_width(&candidates, "git", &token, 8, 80);
 
-        assert_eq!(rows, ["history\t status --short"]);
+        assert_eq!(rows, ["history git status --short"]);
     }
 
     #[test]
@@ -2505,9 +2585,30 @@ mod tests {
             source: CompletionSource::Template,
         }];
 
-        let rows = render_completion_candidates_for_width(&candidates, &token, 80);
+        let rows = render_completion_candidates_for_width(
+            &candidates,
+            "echo {a} {something}",
+            &token,
+            9,
+            80,
+        );
 
-        assert_eq!(rows, ["template\t{b} {c}"]);
+        assert_eq!(rows, ["template echo {a} {b} {c}"]);
+    }
+
+    #[test]
+    fn render_completion_candidates_for_width_left_elides_by_words() {
+        let token = current_token_context("kubectl", "kubectl".len());
+        let candidates = vec![CompletionCandidate {
+            display: "kubectl apply -f deployment.yaml --namespace production".to_string(),
+            replacement: "kubectl apply -f deployment.yaml --namespace production".to_string(),
+            is_dir: false,
+            source: CompletionSource::History,
+        }];
+
+        let rows = render_completion_candidates_for_width(&candidates, "kubectl", &token, 8, 34);
+
+        assert_eq!(rows, ["history ... --namespace production"]);
     }
 
     #[test]

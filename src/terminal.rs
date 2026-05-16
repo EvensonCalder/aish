@@ -3,7 +3,9 @@ use std::panic;
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::cursor::{MoveDown, MoveTo, MoveToColumn, MoveToPreviousLine, MoveUp};
+use crossterm::cursor::{
+    MoveDown, MoveTo, MoveToColumn, MoveToPreviousLine, MoveUp, RestorePosition, SavePosition,
+};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
@@ -248,6 +250,7 @@ fn handle_key(
             run_env_var_picker(state, backend, &mut display_out)?;
         }
         KeyAction::AdvancedKeyPlaceholder(name) => {
+            invalidate_render_anchor(state);
             let mut display_out = CrLfWriter::new(out);
             writeln!(display_out, "{name} is not implemented yet")?;
         }
@@ -279,6 +282,7 @@ fn handle_key(
                 run_external_editor(state, backend, &mut display_out, command_timeout)?;
             } else {
                 move_to_rendered_end(state, out, terminal_display_width())?;
+                invalidate_render_anchor(state);
                 write!(out, "\r\n")?;
                 let mut display_out = CrLfWriter::new(out);
                 execute_draft(state, backend, &mut display_out, command_timeout)?;
@@ -289,6 +293,7 @@ fn handle_key(
         }
         KeyAction::ConfirmContext(accepted) => {
             move_to_rendered_end(state, out, terminal_display_width())?;
+            invalidate_render_anchor(state);
             write!(out, "\r\n")?;
             let mut display_out = CrLfWriter::new(out);
             answer_context_confirmation(state, accepted, &mut display_out, command_timeout)?;
@@ -307,8 +312,7 @@ fn handle_key(
 }
 
 fn clear_screen_for_redraw(state: &mut AppState, out: &mut impl Write) -> Result<()> {
-    state.last_rendered_lines = 0;
-    state.last_rendered_cursor_row = 0;
+    invalidate_render_anchor(state);
     execute!(
         out,
         MoveTo(0, 0),
@@ -326,10 +330,12 @@ pub fn run_external_editor(
     command_timeout: Duration,
 ) -> Result<()> {
     let Some(command) = resolve_editor_command(&state.editor_config) else {
+        invalidate_render_anchor(state);
         writeln!(out, "editor.resolved=unavailable")?;
         return Ok(());
     };
     let Some(temp_root) = state.editor_temp_root.clone() else {
+        invalidate_render_anchor(state);
         writeln!(out, "editor temp directory is not configured")?;
         return Ok(());
     };
@@ -352,6 +358,7 @@ pub fn run_external_editor(
 
     let result = result?;
     if result.exit_code == Some(0) {
+        invalidate_render_anchor(state);
         if state.draft_from_editor {
             writeln!(out, "editor saved draft")?;
         } else {
@@ -364,6 +371,7 @@ pub fn run_external_editor(
             execute_draft(state, backend, out, command_timeout)?;
         }
     } else {
+        invalidate_render_anchor(state);
         writeln!(
             out,
             "editor exited without saving draft: status={}",
@@ -383,6 +391,7 @@ pub fn run_file_picker(state: &mut AppState, out: &mut impl Write) -> Result<()>
         .unwrap_or(std::env::current_dir()?);
     let candidates = file_picker_candidates(&root)?;
     if candidates.is_empty() {
+        invalidate_render_anchor(state);
         writeln!(out, "file picker has no candidates")?;
         return Ok(());
     }
@@ -394,6 +403,7 @@ pub fn run_file_picker(state: &mut AppState, out: &mut impl Write) -> Result<()>
 pub fn run_history_picker(state: &mut AppState, out: &mut impl Write) -> Result<()> {
     let candidates = state.history_picker_candidates();
     if candidates.is_empty() {
+        invalidate_render_anchor(state);
         writeln!(out, "history search has no candidates")?;
         return Ok(());
     }
@@ -405,6 +415,7 @@ pub fn run_history_picker(state: &mut AppState, out: &mut impl Write) -> Result<
 pub fn run_template_picker(state: &mut AppState, out: &mut impl Write) -> Result<()> {
     let candidates = state.template_picker_candidates()?;
     if candidates.is_empty() {
+        invalidate_render_anchor(state);
         writeln!(out, "template picker has no candidates")?;
         return Ok(());
     }
@@ -420,6 +431,7 @@ pub fn run_git_branch_picker(state: &mut AppState, out: &mut impl Write) -> Resu
         .unwrap_or(std::env::current_dir()?);
     let candidates = git_branch_picker_candidates(&root)?;
     if candidates.is_empty() {
+        invalidate_render_anchor(state);
         writeln!(out, "git branch picker has no candidates")?;
         return Ok(());
     }
@@ -435,6 +447,7 @@ pub fn run_env_var_picker(
 ) -> Result<()> {
     let candidates = env_var_picker_candidates_from_backend(backend);
     if candidates.is_empty() {
+        invalidate_render_anchor(state);
         writeln!(out, "environment variable picker has no candidates")?;
         return Ok(());
     }
@@ -463,11 +476,13 @@ fn apply_env_var_picker_result(
     out: &mut impl Write,
 ) -> Result<()> {
     let Some(selected) = result.selected else {
+        invalidate_render_anchor(state);
         writeln!(out)?;
         writeln!(out, "environment variable picker cancelled")?;
         return Ok(());
     };
     let Some(reference) = shell_env_var_reference(&selected) else {
+        invalidate_render_anchor(state);
         writeln!(
             out,
             "environment variable picker rejected invalid name: {selected}"
@@ -476,6 +491,7 @@ fn apply_env_var_picker_result(
     };
 
     if !state.apply_raw_picker_selection(&reference, PickerAction::ReplaceCurrentToken) {
+        invalidate_render_anchor(state);
         writeln!(out, "environment variable picker could not update draft")?;
     }
     Ok(())
@@ -487,12 +503,14 @@ fn apply_git_branch_picker_result(
     out: &mut impl Write,
 ) -> Result<()> {
     let Some(selected) = result.selected else {
+        invalidate_render_anchor(state);
         writeln!(out)?;
         writeln!(out, "git branch picker cancelled")?;
         return Ok(());
     };
 
     if !state.apply_picker_selection(&selected, PickerAction::ReplaceCurrentToken) {
+        invalidate_render_anchor(state);
         writeln!(out, "git branch picker could not update draft")?;
     }
     Ok(())
@@ -504,6 +522,7 @@ fn apply_template_picker_result(
     out: &mut impl Write,
 ) -> Result<()> {
     let Some(selected) = result.selected else {
+        invalidate_render_anchor(state);
         writeln!(out)?;
         writeln!(out, "template picker cancelled")?;
         return Ok(());
@@ -514,8 +533,10 @@ fn apply_template_picker_result(
         .next()
         .unwrap_or(selected.as_str());
     if state.replace_draft_from_template_picker(&selected)? {
+        invalidate_render_anchor(state);
         writeln!(out, "template copied to draft: {id}")?;
     } else {
+        invalidate_render_anchor(state);
         writeln!(out, "template not found: {id}")?;
     }
     Ok(())
@@ -527,6 +548,7 @@ fn apply_history_picker_result(
     out: &mut impl Write,
 ) -> Result<()> {
     let Some(selected) = result.selected else {
+        invalidate_render_anchor(state);
         writeln!(out)?;
         writeln!(out, "history search cancelled")?;
         return Ok(());
@@ -542,12 +564,14 @@ fn apply_file_picker_result(
     out: &mut impl Write,
 ) -> Result<()> {
     let Some(selected) = result.selected else {
+        invalidate_render_anchor(state);
         writeln!(out)?;
         writeln!(out, "file picker cancelled")?;
         return Ok(());
     };
 
     if !state.apply_picker_selection(&selected, PickerAction::ReplaceCurrentToken) {
+        invalidate_render_anchor(state);
         writeln!(out, "file picker could not update draft")?;
     }
     Ok(())
@@ -872,13 +896,13 @@ fn expand_template_draft_if_inside_placeholder(state: &mut AppState) {
 }
 
 pub fn redraw(state: &mut AppState, out: &mut impl Write) -> Result<()> {
-    if state.last_rendered_cursor_row > 0 {
-        execute!(
-            out,
-            MoveToPreviousLine(state.last_rendered_cursor_row as u16)
-        )?;
-    }
-    execute!(out, MoveToColumn(0), Clear(ClearType::FromCursorDown))?;
+    move_to_rendered_start(state, out)?;
+    execute!(
+        out,
+        MoveToColumn(0),
+        Clear(ClearType::FromCursorDown),
+        SavePosition
+    )?;
     let width = terminal_display_width();
     let rendered = state.rendered_text();
     write!(out, "{}", rendered.replace('\n', "\r\n"))?;
@@ -900,6 +924,7 @@ pub fn redraw(state: &mut AppState, out: &mut impl Write) -> Result<()> {
     execute!(out, MoveToColumn(cursor_col))?;
     state.last_rendered_lines = final_row + 1;
     state.last_rendered_cursor_row = cursor_row;
+    state.render_anchor_saved = true;
     out.flush()?;
     Ok(())
 }
@@ -913,9 +938,15 @@ pub fn write_completion_candidates(state: &AppState, out: &mut impl Write) -> Re
         return Ok(());
     }
     let token = current_token_context(state.draft.as_str(), state.draft.cursor());
-    for line in
-        render_completion_candidates_for_width(&candidates, &token, terminal_display_width())
-    {
+    let width = terminal_display_width();
+    let content_start_col = completion_panel_content_start_col(state, width);
+    for line in render_completion_candidates_for_width(
+        &candidates,
+        state.draft.as_str(),
+        &token,
+        content_start_col,
+        width,
+    ) {
         writeln!(out, "{line}")?;
     }
     Ok(())
@@ -1013,8 +1044,14 @@ fn set_completion_ui_from_candidates(
         .filter(|candidate| candidate.replacement != token.text)
         .collect();
     let panel_candidates = limit_candidates(panel_candidates, state.completion_config.max_results);
-    state.completion_panel =
-        render_completion_candidates_for_width(&panel_candidates, &token, width);
+    let content_start_col = completion_panel_content_start_col(state, width);
+    state.completion_panel = render_completion_candidates_for_width(
+        &panel_candidates,
+        state.draft.as_str(),
+        &token,
+        content_start_col,
+        width,
+    );
 }
 
 fn replace_completion_ui_from_candidates(
@@ -1078,22 +1115,52 @@ fn write_inline_completion_suffix(out: &mut impl Write, suffix: &str) -> Result<
 
 fn terminal_display_width() -> usize {
     match size() {
-        Ok((columns, _)) if columns >= 20 => columns as usize,
+        Ok((columns, _)) if columns > 0 => columns as usize,
         _ => 80,
     }
 }
 
+fn completion_panel_content_start_col(state: &AppState, width: usize) -> usize {
+    let prefix = if state.draft.as_str()[..state.draft.cursor()].contains('\n') {
+        state
+            .continuation_prompt
+            .as_deref()
+            .unwrap_or(".. ")
+            .to_string()
+    } else {
+        state.prompt_prefix()
+    };
+    visual_position(&prefix, width).1 as usize
+}
+
+fn move_to_rendered_start(state: &AppState, out: &mut impl Write) -> Result<()> {
+    if state.render_anchor_saved {
+        execute!(out, RestorePosition)?;
+    } else if state.last_rendered_cursor_row > 0 {
+        execute!(
+            out,
+            MoveToPreviousLine(state.last_rendered_cursor_row as u16)
+        )?;
+    }
+    execute!(out, MoveToColumn(0))?;
+    Ok(())
+}
+
 fn move_to_rendered_end(state: &AppState, out: &mut impl Write, width: usize) -> Result<()> {
-    let (cursor_row, _) = terminal_cursor_position_for_width(state, width);
+    move_to_rendered_start(state, out)?;
     let rendered = state.rendered_text();
     let (end_row, end_col) = visual_position(&rendered, width);
-    if end_row > cursor_row {
-        execute!(out, MoveDown((end_row - cursor_row) as u16))?;
-    } else if cursor_row > end_row {
-        execute!(out, MoveUp((cursor_row - end_row) as u16))?;
+    if end_row > 0 {
+        execute!(out, MoveDown(end_row as u16))?;
     }
     execute!(out, MoveToColumn(end_col))?;
     Ok(())
+}
+
+fn invalidate_render_anchor(state: &mut AppState) {
+    state.last_rendered_lines = 0;
+    state.last_rendered_cursor_row = 0;
+    state.render_anchor_saved = false;
 }
 
 fn full_rendered_text_for_width(
@@ -1894,7 +1961,10 @@ mod tests {
         refresh_live_completion_ui_for_width(&mut state, 80).unwrap();
 
         assert_eq!(state.completion_inline.as_ref().unwrap().suffix, "ne.txt");
-        assert_eq!(state.completion_panel, vec!["file\tnly.log".to_string()]);
+        assert_eq!(
+            state.completion_panel,
+            vec!["file cat only.log".to_string()]
+        );
     }
 
     #[test]
@@ -1921,7 +1991,7 @@ mod tests {
         assert_eq!(state.completion_inline.as_ref().unwrap().suffix, "pha.txt");
         assert_eq!(
             state.completion_panel,
-            vec!["history\tbeta-alpha".to_string()]
+            vec!["history cat beta-alpha".to_string()]
         );
     }
 
@@ -2048,7 +2118,10 @@ mod tests {
 
         complete_or_show_candidates(&mut state).unwrap();
 
-        assert_eq!(state.completion_panel, vec!["file\tnly.log".to_string()]);
+        assert_eq!(
+            state.completion_panel,
+            vec!["file cat only.log".to_string()]
+        );
         assert_eq!(state.draft.as_str(), "cat o");
     }
 
@@ -2070,7 +2143,7 @@ mod tests {
         complete_or_show_candidates(&mut state).unwrap();
 
         assert_eq!(state.completion_panel.len(), 1);
-        assert!(state.completion_panel[0].starts_with("file\t"));
+        assert!(state.completion_panel[0].starts_with("file "));
     }
 
     #[test]
@@ -2226,7 +2299,7 @@ mod tests {
         write_completion_candidates(&state, &mut output).unwrap();
 
         let output = String::from_utf8(output).unwrap();
-        assert!(output.contains("template\t add . && git commit"));
+        assert!(output.contains("template git add . && git commit"));
     }
 
     #[test]
@@ -3076,6 +3149,7 @@ mod tests {
         rows: Vec<Vec<char>>,
         row: usize,
         col: usize,
+        saved_position: Option<(usize, usize)>,
     }
 
     impl TestScreen {
@@ -3084,6 +3158,7 @@ mod tests {
                 rows: vec![Vec::new(); 8],
                 row: 0,
                 col: 0,
+                saved_position: None,
             };
             let chars: Vec<char> = output.chars().collect();
             let mut i = 0;
@@ -3091,6 +3166,18 @@ mod tests {
                 match chars[i] {
                     '\x1b' if chars.get(i + 1) == Some(&'[') => {
                         i = screen.apply_csi(&chars, i + 2);
+                    }
+                    '\x1b' if chars.get(i + 1) == Some(&'7') => {
+                        screen.saved_position = Some((screen.row, screen.col));
+                        i += 2;
+                    }
+                    '\x1b' if chars.get(i + 1) == Some(&'8') => {
+                        if let Some((row, col)) = screen.saved_position {
+                            screen.row = row;
+                            screen.col = col;
+                            screen.ensure_row();
+                        }
+                        i += 2;
                     }
                     '\r' => {
                         screen.col = 0;

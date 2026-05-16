@@ -486,7 +486,7 @@ fn tmux_narrow_long_input_redraw_does_not_duplicate_prompt() {
     let Some(captured) = run_tmux_script("narrow_long_input_redraw.sh") else {
         return;
     };
-    assert_line_present(&captured, "after-narrow-redraw");
+    assert_line_present(&captured, "ok");
 }
 
 #[test]

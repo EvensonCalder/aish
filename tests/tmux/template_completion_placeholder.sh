@@ -56,6 +56,6 @@ printf '%s\n' "$STRUCTURAL_BLOCK_CAPTURE"
 printf '%s\n' "$PANEL_CAPTURE" | rg -q '\{something\}'
 printf '%s\n' "$ACCEPT_CAPTURE" | rg -q 'echo \{something\}'
 printf '%s\n' "$BLOCK_CAPTURE" | rg -q '^cannot execute unresolved template placeholders: something$'
-printf '%s\n' "$STRUCTURAL_PANEL_CAPTURE" | rg -q 'template[[:space:]]+\{b\} \{c\}'
+printf '%s\n' "$STRUCTURAL_PANEL_CAPTURE" | rg -q 'template[[:space:]]+echo \{a\} \{b\} \{c\}'
 printf '%s\n' "$STRUCTURAL_ACCEPT_CAPTURE" | rg -q 'echo \{a\} \{b\} \{c\}'
 printf '%s\n' "$STRUCTURAL_BLOCK_CAPTURE" | rg -q '^cannot execute unresolved template placeholders: a, b, c$'

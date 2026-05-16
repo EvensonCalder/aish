@@ -1119,7 +1119,7 @@ Update: completion now uses layered, non-blocking live discovery. Immediate cand
 - [x] Implement `completion.tab_accept = "word"` to accept only through the next whitespace boundary in the untyped suffix, or the full suffix when no boundary remains.
 - [x] Keep `Right` at end-of-line aligned with the configured inline accept amount; keep `Right` inside the line as ordinary cursor movement.
 - [x] Render below-prompt candidate rows within the current terminal width without wrapping.
-- [x] Use the user's current command text as the overlap anchor for panel rows, show as much untyped candidate text as possible, and elide right-edge overflow with ASCII `...`.
+- [x] Show full accepted commands in panel rows, align command text with the prompt input column when space permits, and left-elide overflow with ASCII `...` at word boundaries.
 
 ### Required tests
 
@@ -1130,9 +1130,9 @@ Update: completion now uses layered, non-blocking live discovery. Immediate cand
 - [x] Pure acceptance tests for full-suggestion and word-boundary acceptance, including quoted arguments and candidates with spaces.
 - [x] Terminal rendering tests proving the inline ghost is display-only, refreshes while typing, uses subdued styling, does not move the real cursor, and does not mutate draft text.
 - [x] Terminal state tests proving stale inline suggestions clear after editing, cursor movement, mode changes, command execution, and no-match completion.
-- [x] Panel rendering tests for `completion.max_results`, narrow terminal widths, overlap anchoring, source labels, no wrapping, and `...` elision.
+- [x] Panel rendering tests for `completion.max_results`, narrow terminal widths, full-command rows, input-column alignment, source labels, no wrapping, and word-boundary `...` elision.
 - [x] Expect scenarios for live inline visibility, disabled legacy mode, `Tab` full accept, `Tab` word accept, `Right` accept at end-of-line, and `Right` cursor movement inside a line.
-- [x] Tmux screen-capture tests for narrow-width panel elision and no-wrap behavior in a real terminal.
+- [x] Tmux screen-capture tests for narrow-width panel elision, no-wrap behavior, and narrow long-input redraw stability in a real terminal.
 - [x] Backend independence coverage for bash and zsh by default, plus opt-in fish coverage after cross-platform validation, proving inline completion behavior is owned by Aish and not by backend-shell completion.
 
 ### Acceptance criteria

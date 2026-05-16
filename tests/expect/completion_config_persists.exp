@@ -121,11 +121,11 @@ aish_wait_prompt
 
 aish_send "cat aish-complete-t"
 aish_expect "> cat aish-complete-three.txt"
-aish_expect "file\two.txt"
+aish_expect "cat aish-complete-two.txt"
 set old_timeout $timeout
 set timeout 1
 expect {
-    -ex "file\three.txt" { puts stderr "inline completion duplicated in candidate panel"; exit 5 }
+    -re {file[[:space:]]+cat aish-complete-three\.txt} { puts stderr "inline completion duplicated in candidate panel"; exit 5 }
     timeout {}
     eof { puts stderr "eof while checking completion limit"; exit 5 }
 }

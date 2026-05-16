@@ -820,8 +820,9 @@ Below-prompt candidate panel:
 - `completion.max_results` controls only the number of rows displayed in the below-prompt panel.
 - When inline suggestions are enabled, the panel may update live while the user types and should skip the current inline candidate so the panel remains advisory.
 - Candidate rows must fit within the current terminal width and must not wrap.
-- Candidate rows should use the user's current command text as the overlap anchor and show as much of the untyped candidate text as possible.
-- When a row cannot fit, Aish should elide at the right edge with ASCII `...`.
+- Candidate rows should show the full command that would result from accepting the candidate.
+- Candidate row command text should align with the prompt input column when there is room for the source label before that column.
+- When a row cannot fit, Aish should elide from the left with ASCII `...`, preferring to keep whole whitespace-separated words visible.
 - The panel may include source labels, but labels must not consume so much width that the useful untyped candidate portion disappears when there is still room to show it.
 
 

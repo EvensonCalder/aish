@@ -32,8 +32,8 @@ aish_wait_prompt
 aish_send "aishexpectuniq"
 
 aish_expect "-template-command"
-aish_expect "history\t-history"
-aish_expect "exec\t-exec"
+aish_expect "aishexpectuniq-history"
+aish_expect "aishexpectuniq-exec"
 
 send -- "\u001b"
 aish_wait_prompt

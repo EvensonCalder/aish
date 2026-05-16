@@ -8,7 +8,7 @@ source [file dirname [info script]]/_lib.exp
 aish_spawn
 
 aish_send "cat Cargo."
-aish_expect "file\ttoml"
+aish_expect "cat Cargo.toml"
 
 aish_send "\t"
 aish_expect "> cat Cargo.lock"
