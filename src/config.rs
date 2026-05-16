@@ -67,6 +67,7 @@ pub struct PasteConfig {
 pub struct CompletionConfig {
     pub enabled: bool,
     pub max_results: usize,
+    pub coalesce_ms: u64,
     pub ignore_spaces: bool,
     pub template_first: bool,
     pub inline: bool,
@@ -209,6 +210,7 @@ impl Default for CompletionConfig {
         Self {
             enabled: true,
             max_results: 5,
+            coalesce_ms: 50,
             ignore_spaces: true,
             template_first: true,
             inline: true,
@@ -384,6 +386,9 @@ pub fn normalize_config(config: &mut Config) {
     if config.completion.max_results == 0 {
         config.completion.max_results = CompletionConfig::default().max_results;
     }
+    if config.completion.coalesce_ms > 1_000 {
+        config.completion.coalesce_ms = CompletionConfig::default().coalesce_ms;
+    }
     if config.completion.match_threshold_percent > 100 {
         config.completion.match_threshold_percent =
             CompletionConfig::default().match_threshold_percent;
@@ -427,6 +432,7 @@ mod tests {
         assert!(config.paste.confirm_execute);
         assert_eq!(config.completion.max_results, 5);
         assert!(config.completion.enabled);
+        assert_eq!(config.completion.coalesce_ms, 50);
         assert!(config.completion.ignore_spaces);
         assert!(config.completion.template_first);
         assert!(config.completion.inline);
@@ -467,6 +473,7 @@ mod tests {
             completion: CompletionConfig {
                 enabled: true,
                 max_results: 0,
+                coalesce_ms: 1_001,
                 ignore_spaces: true,
                 template_first: true,
                 inline: true,
@@ -524,6 +531,7 @@ mod tests {
         };
         expected.completion.match_threshold_percent = 50;
         expected.completion.typo_threshold_percent = 80;
+        expected.completion.coalesce_ms = 50;
         expected.sync = SyncConfig {
             remote: "git@example.invalid:aish.git".to_string(),
             enabled: true,

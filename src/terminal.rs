@@ -190,11 +190,8 @@ fn refresh_after_background_events(state: &mut AppState, out: &mut impl Write) -
     if let Some(candidates) = state.drain_live_completion_events()
         && should_refresh_live_completion(state)
     {
-        state.clear_completion_ui();
-        if !candidates.is_empty() {
-            set_completion_ui_from_candidates(state, candidates, terminal_display_width());
-        }
-        should_redraw = true;
+        should_redraw |=
+            replace_completion_ui_from_candidates(state, candidates, terminal_display_width());
     }
     if state.drain_encrypted_write_events() {
         refresh_live_completion_ui(state)?;
@@ -1018,6 +1015,20 @@ fn set_completion_ui_from_candidates(
     let panel_candidates = limit_candidates(panel_candidates, state.completion_config.max_results);
     state.completion_panel =
         render_completion_candidates_for_width(&panel_candidates, &token, width);
+}
+
+fn replace_completion_ui_from_candidates(
+    state: &mut AppState,
+    candidates: Vec<CompletionCandidate>,
+    width: usize,
+) -> bool {
+    let previous_inline = state.completion_inline.clone();
+    let previous_panel = state.completion_panel.clone();
+    state.clear_completion_ui();
+    if !candidates.is_empty() {
+        set_completion_ui_from_candidates(state, candidates, width);
+    }
+    state.completion_inline != previous_inline || state.completion_panel != previous_panel
 }
 
 fn inline_completion_from_candidate(

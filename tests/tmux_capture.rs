@@ -394,6 +394,12 @@ fn tmux_status_command_is_visible_and_shell_recovers() {
             .any(|line| line == "completion.max_results=5"),
         "status completion config line was not visible: {captured:?}"
     );
+    assert!(
+        captured
+            .lines()
+            .any(|line| line == "completion.coalesce_ms=50"),
+        "status completion coalesce config line was not visible: {captured:?}"
+    );
     assert_adjacent_output(&captured, "echo after-status", "after-status");
 }
 

@@ -132,6 +132,7 @@ Important rules:
 - The inline suggestion is display-only until accepted.
 - The below-prompt panel is advisory and never decides what `Tab` accepts.
 - `completion.max_results` controls only the number of below-prompt rows.
+- `completion.coalesce_ms` controls how long Aish may wait for the next background completion tier before refreshing the live UI. The default is `50` ms; `0` restores immediate tier-by-tier refreshes.
 - The panel skips the current inline candidate and shows remaining suffixes where possible.
 - Candidate rows are width-aware and elide with `...` instead of wrapping.
 - Structural history/template matches use `completion.match_threshold_percent` as a word-position match rate. The default is `50`, so one matching word out of two typed words is enough.
@@ -154,6 +155,7 @@ Configuration:
 [completion]
 enabled = true
 max_results = 5
+coalesce_ms = 50
 ignore_spaces = true
 template_first = true
 inline = true
@@ -170,6 +172,7 @@ Commands:
 #completion on
 #completion off
 #completion max 8
+#completion coalesce-ms 50
 #completion inline on
 #completion inline off
 #completion fuzzy on
@@ -210,6 +213,7 @@ Completion:
 #completion
 #completion on|off
 #completion max <count>
+#completion coalesce-ms <0-1000>
 #completion inline on|off
 #completion fuzzy on|off
 #completion tab-accept full|word

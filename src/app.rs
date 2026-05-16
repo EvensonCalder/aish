@@ -4,7 +4,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use crossterm::event::{self, Event};
@@ -19,7 +19,7 @@ use crate::completion::{
     complete_non_first_token_for_line_with_options, complete_private_commands,
     current_token_context, dedupe_completion_candidates, rank_completion_candidates,
 };
-use crate::completion_worker::{CompletionJob, CompletionWorker};
+use crate::completion_worker::{CompletionJob, CompletionTier, CompletionWorker};
 use crate::config::{
     self, AiConfig, CompletionConfig, CompletionTabAccept, ContextConfig, EditorConfig,
     EncryptionConfig, PasteConfig, PromptConfig, SyncConfig,
@@ -157,6 +157,7 @@ pub struct AppState {
     pub completion_worker: Option<CompletionWorker>,
     pub completion_generation: u64,
     pub pending_completion: Option<PendingCompletion>,
+    pub pending_completion_update: Option<PendingCompletionUpdate>,
     pub completion_history_snapshot: Arc<Vec<HistoryEntry>>,
     pub completion_history_snapshot_len: usize,
     pub last_rendered_lines: usize,
@@ -181,6 +182,16 @@ pub struct PendingCompletion {
     pub line: String,
     pub cursor: usize,
     pub candidates: Vec<CompletionCandidate>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PendingCompletionUpdate {
+    pub id: u64,
+    pub line: String,
+    pub cursor: usize,
+    pub candidates: Vec<CompletionCandidate>,
+    pub first_seen: Instant,
+    pub final_tier_seen: bool,
 }
 
 impl Default for AppState {
@@ -229,6 +240,7 @@ impl Default for AppState {
             completion_worker: None,
             completion_generation: 0,
             pending_completion: None,
+            pending_completion_update: None,
             completion_history_snapshot: Arc::new(Vec::new()),
             completion_history_snapshot_len: 0,
             last_rendered_lines: 1,
@@ -608,6 +620,7 @@ impl AppState {
         let cursor = self.draft.cursor();
         let candidates = self.immediate_completion_candidates_with_max_results(max_results)?;
         self.pending_completion = None;
+        self.pending_completion_update = None;
         if self.should_enqueue_async_completion(&line, cursor) {
             self.completion_generation = self.completion_generation.wrapping_add(1).max(1);
             let id = self.completion_generation;
@@ -635,6 +648,7 @@ impl AppState {
     pub fn drain_live_completion_events(&mut self) -> Option<Vec<CompletionCandidate>> {
         if !self.completion_config.enabled {
             self.pending_completion = None;
+            self.pending_completion_update = None;
             return None;
         }
         let events = self
@@ -642,27 +656,112 @@ impl AppState {
             .as_ref()
             .map(|worker| worker.drain_events())
             .unwrap_or_default();
-        if events.is_empty() {
-            return None;
-        }
-        let line = self.draft.as_str();
+        let now = Instant::now();
+        let line = self.draft.as_str().to_string();
         let cursor = self.draft.cursor();
-        let pending = self.pending_completion.as_mut()?;
+        let fuzzy_enabled = self.completion_config.fuzzy;
+        let Some(pending) = self.pending_completion.as_mut() else {
+            self.pending_completion_update = None;
+            return None;
+        };
         if pending.line != line || pending.cursor != cursor {
+            self.pending_completion = None;
+            self.pending_completion_update = None;
             return None;
         }
         let mut changed = false;
+        let mut final_tier_seen = false;
         for event in events {
             if event.id != pending.id {
                 continue;
             }
+            final_tier_seen |= completion_tier_is_final(event.tier, fuzzy_enabled);
             let previous_candidates = pending.candidates.clone();
             pending.candidates.extend(event.candidates);
             dedupe_completion_candidates(&mut pending.candidates);
             rank_completion_candidates(&mut pending.candidates);
             changed |= pending.candidates != previous_candidates;
         }
-        changed.then(|| pending.candidates.clone())
+        let pending_id = pending.id;
+        let pending_line = pending.line.clone();
+        let pending_cursor = pending.cursor;
+        let pending_candidates = pending.candidates.clone();
+        if changed {
+            self.queue_completion_update(
+                pending_id,
+                pending_line,
+                pending_cursor,
+                pending_candidates,
+                final_tier_seen,
+                now,
+            );
+        } else if final_tier_seen
+            && let Some(update) = self.pending_completion_update.as_mut()
+            && update.id == pending_id
+            && update.line == pending_line
+            && update.cursor == pending_cursor
+        {
+            update.final_tier_seen = true;
+        }
+        self.ready_completion_update(now)
+    }
+
+    fn queue_completion_update(
+        &mut self,
+        id: u64,
+        line: String,
+        cursor: usize,
+        candidates: Vec<CompletionCandidate>,
+        final_tier_seen: bool,
+        now: Instant,
+    ) {
+        match self.pending_completion_update.as_mut() {
+            Some(update) if update.id == id && update.line == line && update.cursor == cursor => {
+                update.candidates = candidates;
+                update.final_tier_seen |= final_tier_seen;
+            }
+            _ => {
+                self.pending_completion_update = Some(PendingCompletionUpdate {
+                    id,
+                    line,
+                    cursor,
+                    candidates,
+                    first_seen: now,
+                    final_tier_seen,
+                });
+            }
+        }
+    }
+
+    fn ready_completion_update(&mut self, now: Instant) -> Option<Vec<CompletionCandidate>> {
+        let (update_id, update_line, update_cursor, first_seen, final_tier_seen) = {
+            let update = self.pending_completion_update.as_ref()?;
+            (
+                update.id,
+                update.line.clone(),
+                update.cursor,
+                update.first_seen,
+                update.final_tier_seen,
+            )
+        };
+        let current_line = self.draft.as_str();
+        let current_cursor = self.draft.cursor();
+        let pending_matches = self.pending_completion.as_ref().is_some_and(|pending| {
+            pending.id == update_id
+                && pending.line == update_line
+                && pending.cursor == update_cursor
+                && update_line == current_line
+                && update_cursor == current_cursor
+        });
+        if !pending_matches {
+            self.pending_completion_update = None;
+            return None;
+        }
+        let coalesce_ms = self.completion_config.coalesce_ms;
+        let ready = coalesce_ms == 0
+            || final_tier_seen
+            || now.saturating_duration_since(first_seen) >= Duration::from_millis(coalesce_ms);
+        ready.then(|| self.pending_completion_update.take().unwrap().candidates)
     }
 
     pub fn cached_live_completion_candidates_with_max_results(
@@ -2501,6 +2600,11 @@ fn write_status_report(state: &AppState, out: &mut impl Write) -> Result<()> {
     )?;
     writeln!(
         out,
+        "completion.coalesce_ms={}",
+        state.completion_config.coalesce_ms
+    )?;
+    writeln!(
+        out,
         "completion.ignore_spaces={}",
         state.completion_config.ignore_spaces
     )?;
@@ -2662,6 +2766,11 @@ fn write_config_report(state: &AppState, out: &mut impl Write) -> Result<()> {
         out,
         "completion.max_results={}",
         state.completion_config.max_results
+    )?;
+    writeln!(
+        out,
+        "completion.coalesce_ms={}",
+        state.completion_config.coalesce_ms
     )?;
     writeln!(
         out,
@@ -3873,6 +3982,20 @@ fn update_completion_config(state: &mut AppState, out: &mut impl Write, args: &s
                 Ok(())
             })
         }
+        (Some("coalesce" | "coalesce-ms"), Some(value), None) => {
+            let Ok(coalesce_ms) = value.parse::<u64>() else {
+                writeln!(out, "usage: #completion coalesce-ms <0-1000>")?;
+                return Ok(());
+            };
+            if coalesce_ms > 1_000 {
+                writeln!(out, "completion coalesce ms must be between 0 and 1000")?;
+                return Ok(());
+            }
+            set_completion_config(state, out, |config| {
+                config.completion.coalesce_ms = coalesce_ms;
+                Ok(())
+            })
+        }
         (Some("inline"), Some(value), None) => {
             let Some(inline) = parse_on_off(value) else {
                 writeln!(out, "usage: #completion inline on|off")?;
@@ -3933,7 +4056,7 @@ fn update_completion_config(state: &mut AppState, out: &mut impl Write, args: &s
         }
         _ => writeln!(
             out,
-            "usage: #completion on|off|max <count>|inline on|off|fuzzy on|off|tab-accept full|word|match-threshold <0-100>|typo-threshold <0-100>"
+            "usage: #completion on|off|max <count>|coalesce-ms <0-1000>|inline on|off|fuzzy on|off|tab-accept full|word|match-threshold <0-100>|typo-threshold <0-100>"
         )
         .map_err(Into::into),
     }
@@ -3968,6 +4091,7 @@ fn set_completion_config(
 fn write_completion_config(out: &mut impl Write, config: &CompletionConfig) -> Result<()> {
     writeln!(out, "completion.enabled={}", config.enabled)?;
     writeln!(out, "completion.max_results={}", config.max_results)?;
+    writeln!(out, "completion.coalesce_ms={}", config.coalesce_ms)?;
     writeln!(out, "completion.ignore_spaces={}", config.ignore_spaces)?;
     writeln!(out, "completion.template_first={}", config.template_first)?;
     writeln!(out, "completion.inline={}", config.inline)?;
@@ -4000,6 +4124,11 @@ fn parse_on_off(value: &str) -> Option<bool> {
         "off" => Some(false),
         _ => None,
     }
+}
+
+fn completion_tier_is_final(tier: CompletionTier, fuzzy_enabled: bool) -> bool {
+    matches!(tier, CompletionTier::Typo)
+        || !fuzzy_enabled && matches!(tier, CompletionTier::History)
 }
 
 fn parse_template_body(args: &str) -> Option<&str> {
@@ -4383,6 +4512,7 @@ mod tests {
             completion_config: CompletionConfig {
                 enabled: true,
                 max_results: 2,
+                coalesce_ms: 50,
                 ignore_spaces: true,
                 template_first: true,
                 inline: true,
@@ -4550,6 +4680,87 @@ mod tests {
                 .is_empty()
         );
         assert!(state.pending_completion.is_none());
+    }
+
+    #[test]
+    fn pending_completion_update_waits_for_coalesce_window_without_final_tier() {
+        let candidate = CompletionCandidate {
+            display: "status --short".to_string(),
+            replacement: "status --short".to_string(),
+            is_dir: false,
+            source: crate::completion::CompletionSource::History,
+        };
+        let first_seen = Instant::now();
+        let mut state = AppState {
+            completion_config: CompletionConfig {
+                coalesce_ms: 50,
+                ..CompletionConfig::default()
+            },
+            pending_completion: Some(PendingCompletion {
+                id: 7,
+                line: "git ".to_string(),
+                cursor: 4,
+                candidates: vec![candidate.clone()],
+            }),
+            pending_completion_update: Some(PendingCompletionUpdate {
+                id: 7,
+                line: "git ".to_string(),
+                cursor: 4,
+                candidates: vec![candidate.clone()],
+                first_seen,
+                final_tier_seen: false,
+            }),
+            ..AppState::default()
+        };
+        state.draft.insert_str("git ");
+
+        assert!(
+            state
+                .ready_completion_update(first_seen + Duration::from_millis(49))
+                .is_none()
+        );
+        assert_eq!(
+            state.ready_completion_update(first_seen + Duration::from_millis(50)),
+            Some(vec![candidate])
+        );
+    }
+
+    #[test]
+    fn pending_completion_update_flushes_immediately_on_final_tier() {
+        let candidate = CompletionCandidate {
+            display: "status --short".to_string(),
+            replacement: "status --short".to_string(),
+            is_dir: false,
+            source: crate::completion::CompletionSource::History,
+        };
+        let first_seen = Instant::now();
+        let mut state = AppState {
+            completion_config: CompletionConfig {
+                coalesce_ms: 1_000,
+                ..CompletionConfig::default()
+            },
+            pending_completion: Some(PendingCompletion {
+                id: 8,
+                line: "git ".to_string(),
+                cursor: 4,
+                candidates: vec![candidate.clone()],
+            }),
+            pending_completion_update: Some(PendingCompletionUpdate {
+                id: 8,
+                line: "git ".to_string(),
+                cursor: 4,
+                candidates: vec![candidate.clone()],
+                first_seen,
+                final_tier_seen: true,
+            }),
+            ..AppState::default()
+        };
+        state.draft.insert_str("git ");
+
+        assert_eq!(
+            state.ready_completion_update(first_seen),
+            Some(vec![candidate])
+        );
     }
 
     #[test]
@@ -5834,6 +6045,7 @@ mod tests {
         for (line, expected) in [
             ("#completion", "completion.max_results=5"),
             ("#completion", "completion.enabled=true"),
+            ("#completion", "completion.coalesce_ms=50"),
             ("#completion", "completion.fuzzy=true"),
             ("#editor", "editor temp directory is not configured"),
         ] {
@@ -5875,6 +6087,8 @@ mod tests {
             ("#completion off", "completion.enabled=false"),
             ("#completion on", "completion.enabled=true"),
             ("#completion max 2", "completion.max_results=2"),
+            ("#completion coalesce-ms 75", "completion.coalesce_ms=75"),
+            ("#completion coalesce 50", "completion.coalesce_ms=50"),
             ("#completion inline off", "completion.inline=false"),
             ("#completion tab-accept word", "completion.tab_accept=word"),
             ("#completion fuzzy off", "completion.fuzzy=false"),
@@ -5892,6 +6106,14 @@ mod tests {
                 "completion max results must be greater than 0",
             ),
             ("#completion max nope", "usage: #completion max <count>"),
+            (
+                "#completion coalesce-ms 1001",
+                "completion coalesce ms must be between 0 and 1000",
+            ),
+            (
+                "#completion coalesce-ms nope",
+                "usage: #completion coalesce-ms <0-1000>",
+            ),
             (
                 "#completion inline maybe",
                 "usage: #completion inline on|off",
@@ -5938,6 +6160,7 @@ mod tests {
 
         assert!(state.completion_config.enabled);
         assert_eq!(state.completion_config.max_results, 2);
+        assert_eq!(state.completion_config.coalesce_ms, 50);
         assert!(!state.completion_config.inline);
         assert!(state.completion_config.fuzzy);
         assert_eq!(
@@ -5949,6 +6172,7 @@ mod tests {
         let loaded = config::load_config(&config_path).unwrap().completion;
         assert!(loaded.enabled);
         assert_eq!(loaded.max_results, 2);
+        assert_eq!(loaded.coalesce_ms, 50);
         assert!(!loaded.inline);
         assert!(loaded.fuzzy);
         assert_eq!(loaded.tab_accept, CompletionTabAccept::Word);
@@ -7301,6 +7525,7 @@ mod tests {
             completion_config: CompletionConfig {
                 enabled: true,
                 max_results: 8,
+                coalesce_ms: 50,
                 ignore_spaces: false,
                 template_first: true,
                 inline: false,
@@ -7346,6 +7571,7 @@ mod tests {
         assert!(output.contains("paste.confirm_execute=true"));
         assert!(output.contains("completion.enabled=true"));
         assert!(output.contains("completion.max_results=8"));
+        assert!(output.contains("completion.coalesce_ms=50"));
         assert!(output.contains("completion.ignore_spaces=false"));
         assert!(output.contains("completion.template_first=true"));
         assert!(output.contains("completion.inline=false"));
@@ -7556,6 +7782,7 @@ mod tests {
         assert!(output.contains("context.enabled=true"));
         assert!(output.contains("completion.enabled=true"));
         assert!(output.contains("completion.max_results=5"));
+        assert!(output.contains("completion.coalesce_ms=50"));
         assert!(output.contains("completion.fuzzy=true"));
         assert!(output.contains("completion.match_threshold_percent=50"));
         assert!(output.contains("completion.typo_threshold_percent=80"));
