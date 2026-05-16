@@ -1078,7 +1078,7 @@ enum AiItemKind {
 ## Phase 28: Inline completion UX
 
 Status: implemented. Inline completion is enabled by default and refreshes while the user types, `completion.max_results` controls only the below-prompt panel row count, and bash/zsh real-terminal coverage proves completion behavior is owned by Aish rather than the backend shell. Fish backend coverage remains opt-in with `AISH_TEST_FISH=1` until cross-platform behavior is validated across macOS and Linux distributions.
-Update: completion now uses layered, non-blocking live discovery. Cheap local path candidates can be found immediately, template/history/PATH executable and typo-correction tiers arrive through versioned worker events, stale events are ignored, encrypted-write completion events refresh the live UI, async UI refreshes are coalesced for up to `completion.coalesce_ms`, and auto-mode display is debounced by `completion.display_delay_ms` after the latest edit while matching continues in the background. Ordinary auto-mode refreshes are inline-only; the below-prompt panel is reserved for explicit completion display such as `Tab` so frequent background refreshes cannot pollute terminal scrollback. `completion.mode` supports `auto`, `tab`, and `off`; `completion.enabled`/`completion.inline` remain legacy compatibility fields. `completion.fuzzy` defaults to `true` so low-performance environments can disable only typo-correction work. `completion.match_threshold_percent` defaults to `50` as a structural word-position threshold, and `completion.typo_threshold_percent` defaults to `80` for typo correction.
+Update: completion now uses layered, non-blocking live discovery. Cheap local path candidates can be found immediately, template/history/PATH executable and typo-correction tiers arrive through versioned worker events, stale events are ignored, encrypted-write completion events refresh the live UI, async UI refreshes are coalesced for up to `completion.coalesce_ms`, and auto-mode display is debounced by `completion.display_delay_ms` after the latest edit while matching continues in the background. Ordinary auto-mode refreshes can show the below-prompt panel after debounce/coalescing, while frequent prompt redraws must not pollute terminal scrollback. `completion.mode` supports `auto`, `tab`, and `off`; `completion.enabled`/`completion.inline` remain legacy compatibility fields. `completion.fuzzy` defaults to `true` so low-performance environments can disable only typo-correction work. `completion.match_threshold_percent` defaults to `50` as a structural word-position threshold, and `completion.typo_threshold_percent` defaults to `80` for typo correction.
 
 ### Tasks
 
@@ -1117,7 +1117,7 @@ Update: completion now uses layered, non-blocking live discovery. Cheap local pa
 - [x] Split completion candidate discovery from panel row limiting so `completion.max_results` controls only below-prompt row count.
 - [x] Track the current inline suggestion separately from the draft buffer, cursor, history, persisted draft, and below-prompt panel state.
 - [x] Render the highest-ranked completion candidate as an inline ghost suffix in dim or light text while the user types when inline completion is enabled.
-- [x] Render remaining candidates as below-prompt hints after explicit completion display while keeping ordinary auto-mode refresh inline-only.
+- [x] Render remaining candidates as live below-prompt hints while keeping the inline suggestion as the only `Tab` acceptance target.
 - [x] Ensure editing, cursor movement, mode switching, prompt redraw, and command execution clear stale inline suggestions.
 - [x] In `auto` mode, make the first `Tab` accept the already-visible inline suggestion.
 - [x] In `tab` mode, make the first `Tab` display candidates and the next `Tab` accept the visible suggestion or first ranked candidate.
@@ -1141,7 +1141,7 @@ Update: completion now uses layered, non-blocking live discovery. Cheap local pa
 - [x] Panel rendering tests for `completion.max_results`, narrow terminal widths, full-command rows, input-column alignment, source labels, no wrapping, and word-boundary `...` elision.
 - [x] Expect scenarios for live inline visibility, disabled legacy mode, `Tab` full accept, `Tab` word accept, `Right` accept at end-of-line, and `Right` cursor movement inside a line.
 - [x] Tmux screen-capture tests for narrow-width panel elision, no-wrap behavior, and narrow long-input redraw stability in a real terminal.
-- [x] Tmux scrollback regression coverage proving ordinary auto-mode completion does not draw below-prompt panel rows during typing and `Enter` clears pending hidden completion before command output.
+- [x] Tmux scrollback regression coverage proving ordinary auto-mode completion displays below-prompt panel rows without leaking repeated prompt redraws, and `Enter` clears pending hidden completion before command output.
 - [x] Backend independence coverage for bash and zsh by default, plus opt-in fish coverage after cross-platform validation, proving inline completion behavior is owned by Aish and not by backend-shell completion.
 
 ### Acceptance criteria

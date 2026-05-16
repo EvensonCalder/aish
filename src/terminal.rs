@@ -233,7 +233,7 @@ fn should_apply_completion_event_update(state: &AppState) -> bool {
 }
 
 fn should_show_completion_panel_for_event_update(state: &AppState) -> bool {
-    state.completion_config.mode() == CompletionMode::Tab || !state.completion_panel.is_empty()
+    state.completion_config.mode() != CompletionMode::Off
 }
 
 fn sync_backend_pty_size(backend: &mut PtyBackend) -> Result<()> {
@@ -1160,7 +1160,7 @@ fn refresh_live_completion_ui_for_width(state: &mut AppState, width: usize) -> R
     }
     let candidates = state.start_live_completion_request(usize::MAX)?;
     if !candidates.is_empty() {
-        set_completion_ui_from_candidates_without_panel(state, candidates, width);
+        set_completion_ui_from_candidates(state, candidates, width);
     }
     Ok(())
 }
@@ -1223,14 +1223,6 @@ fn set_completion_ui_from_candidates(
     width: usize,
 ) {
     set_completion_ui_from_candidates_with_panel(state, candidates, width, true);
-}
-
-fn set_completion_ui_from_candidates_without_panel(
-    state: &mut AppState,
-    candidates: Vec<CompletionCandidate>,
-    width: usize,
-) {
-    set_completion_ui_from_candidates_with_panel(state, candidates, width, false);
 }
 
 fn set_completion_ui_from_candidates_with_panel(
@@ -1357,9 +1349,7 @@ fn completion_panel_content_start_col(state: &AppState, width: usize) -> usize {
 }
 
 fn move_to_rendered_start(state: &AppState, out: &mut impl Write) -> Result<()> {
-    if state.render_anchor_saved {
-        execute!(out, RestorePosition)?;
-    } else if state.last_rendered_cursor_row > 0 {
+    if state.last_rendered_cursor_row > 0 {
         execute!(
             out,
             MoveToPreviousLine(state.last_rendered_cursor_row as u16)
@@ -1560,24 +1550,21 @@ mod tests {
         );
     }
 
-    fn wait_for_cached_completion_contains(state: &mut AppState, needle: &str) {
+    fn wait_for_visible_completion_panel_contains(state: &mut AppState, needle: &str) {
         let mut output = Vec::new();
         for _ in 0..50 {
             refresh_after_background_events(state, &mut output).unwrap();
             if state
-                .cached_live_completion_candidates_with_max_results(usize::MAX)
-                .unwrap_or_default()
+                .completion_panel
                 .iter()
-                .any(|candidate| {
-                    candidate.display.contains(needle) || candidate.replacement.contains(needle)
-                })
+                .any(|row| row.contains(needle))
             {
                 return;
             }
             std::thread::sleep(Duration::from_millis(10));
         }
         panic!(
-            "missing cached completion containing {needle:?}; inline was {:?}, panel was {:?}",
+            "missing visible completion panel containing {needle:?}; inline was {:?}, panel was {:?}",
             state.completion_inline, state.completion_panel
         );
     }
@@ -2267,7 +2254,7 @@ mod tests {
     }
 
     #[test]
-    fn live_inline_completion_keeps_remaining_candidates_hidden_until_tab() {
+    fn auto_live_completion_shows_remaining_candidates_as_panel_hints() {
         let temp = tempfile::tempdir().unwrap();
         let mut state = AppState {
             current_cwd: Some(temp.path().to_path_buf()),
@@ -2280,7 +2267,10 @@ mod tests {
         refresh_live_completion_ui_for_width(&mut state, 80).unwrap();
 
         assert_eq!(state.completion_inline.as_ref().unwrap().suffix, "ne.txt");
-        assert!(state.completion_panel.is_empty());
+        assert_eq!(
+            state.completion_panel,
+            vec!["file cat only.log".to_string()]
+        );
     }
 
     #[test]
@@ -2804,9 +2794,7 @@ mod tests {
         refresh_live_completion_ui_for_width(&mut state, 80).unwrap();
         assert!(state.completion_inline.is_none());
         assert!(state.completion_panel.is_empty());
-        wait_for_cached_completion_contains(&mut state, "{something}");
-
-        complete_or_show_candidates_for_width(&mut state, 80).unwrap();
+        wait_for_visible_completion_panel_contains(&mut state, "{something}");
 
         assert!(state.completion_inline.is_none());
         assert!(

@@ -19,13 +19,19 @@ sleep 1
 CAPTURE="$(tmux capture-pane -p -S - -t "$SESSION")"
 printf '%s\n' "$CAPTURE"
 
-if printf '%s\n' "$CAPTURE" | rg -q '^(file|history|template|exec)[[:space:]]+cat alpha-(one|two|three)\.txt$'; then
-  echo "auto completion panel was drawn during ordinary typing" >&2
-  exit 1
-fi
+printf '%s\n' "$CAPTURE" | rg -q '^(file|history|template|exec)[[:space:]]+cat alpha-(one|two|three)\.txt$'
 
 PROMPT_REDRAWS="$(printf '%s\n' "$CAPTURE" | rg -c '> cat( |$| alpha)')"
 if [ "$PROMPT_REDRAWS" -gt 2 ]; then
   printf 'ordinary typing leaked %s prompt redraws into scrollback\n' "$PROMPT_REDRAWS" >&2
   exit 1
 fi
+
+tmux send-keys -t "$SESSION" C-c
+sleep 1
+
+CLEARED_CAPTURE="$(tmux capture-pane -p -S - -t "$SESSION")"
+printf '%s\n' "$CLEARED_CAPTURE"
+
+LAST_NON_EMPTY="$(printf '%s\n' "$CLEARED_CAPTURE" | awk 'NF { line=$0 } END { print line }')"
+printf '%s\n' "$LAST_NON_EMPTY" | rg -q '> *$'

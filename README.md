@@ -14,7 +14,7 @@ Implemented and covered:
 - Draft, history, and AI browsing modes.
 - Readline-style draft editing.
 - Shell continuation drafts for unfinished quotes and trailing backslashes.
-- Live inline completion with Tab-triggered below-prompt hints.
+- Live inline completion with below-prompt hints.
 - External editor and multiline paste review.
 - History, notes, templates, and event log storage.
 - Safe AI request plumbing and context pseudo-pipe flow.
@@ -123,11 +123,11 @@ Tools:
 
 ## Completion
 
-Inline completion is enabled by default and refreshes while you type. The best candidate appears as dim ghost text on the active prompt line. Remaining candidates appear below the prompt only when completion is explicitly displayed, such as with `Tab`.
+Inline completion is enabled by default and refreshes while you type. The best candidate appears as dim ghost text on the active prompt line. Remaining candidates can appear below the prompt as informational hints.
 
 Important rules:
 
-- `completion.mode="auto"` shows a live inline ghost suggestion while you type.
+- `completion.mode="auto"` shows live completion hints while you type.
 - `completion.mode="tab"` keeps typing quiet; the first `Tab` shows hints and the next `Tab` accepts the visible suggestion or first ranked candidate.
 - `completion.mode="off"` disables all Aish completion candidates and makes non-empty `Tab` do nothing.
 - `completion.enabled=false` and `completion.inline=false` remain compatibility fields for older configs. Aish reports the derived `completion.mode` and keeps these fields consistent when changed through `#completion`.
@@ -137,7 +137,7 @@ Important rules:
 - `completion.max_results` controls only the number of below-prompt rows.
 - `completion.coalesce_ms` controls how long Aish may wait for the next background completion tier before refreshing the live UI. The default is `50` ms; `0` restores immediate tier-by-tier refreshes. First-token executable-only live hints may also wait for this window so history can replace lower-priority PATH matches before anything is drawn.
 - `completion.display_delay_ms` controls how long auto mode waits after the latest edit before drawing completion UI. Matching still runs in the background while the display is delayed. The default is `120` ms; `0` draws as soon as candidates are ready.
-- The explicit candidate panel skips the current inline candidate and shows the full command that would result from accepting each remaining candidate.
+- The panel skips the current inline candidate and shows the full command that would result from accepting each remaining candidate.
 - Candidate rows are width-aware, align command text with the prompt input column when space permits, and left-elide long commands with `...` at word boundaries instead of wrapping.
 - Structural history/template matches use `completion.match_threshold_percent` as a word-position match rate. The default is `50`, so one matching word out of two typed words is enough.
 - Typo correction is separate and uses `completion.typo_threshold_percent`; accepting a typo candidate replaces the mistyped command with the corrected command.

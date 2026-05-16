@@ -770,7 +770,7 @@ For non-first-token completion:
 
 For command completion:
 
-- `completion.mode = "auto"` enables live inline completion hints while the user types.
+- `completion.mode = "auto"` enables live completion hints while the user types.
 - `completion.mode = "tab"` disables live hints while typing; the first non-empty `Tab` starts completion and displays hints, and the next `Tab` accepts the visible inline suggestion or first ranked displayed/cached candidate.
 - `completion.mode = "off"` disables all Aish completion candidates, live completion UI, and non-empty `Tab` acceptance.
 - `completion.enabled` and `completion.inline` remain legacy compatibility fields. When `completion.mode` is absent, `enabled=false` maps to `off`, `enabled=true` with `inline=true` maps to `auto`, and `enabled=true` with `inline=false` maps to `tab`. When `completion.mode` is present, it is authoritative and Aish normalizes the legacy fields to match it.
@@ -792,7 +792,7 @@ For command completion:
 
 - Empty draft `Tab` switches modes.
 - In `auto` mode, non-empty draft edits start a layered completion request for the current token and show the best available candidate as an inline ghost suggestion in dim text on the active prompt line without requiring `Tab`.
-- Ordinary auto-mode refreshes must not render the below-prompt candidate panel. The panel is reserved for explicit completion display, such as `Tab`, so frequent background refreshes cannot pollute terminal scrollback or flicker over SSH.
+- Ordinary auto-mode refreshes may also render below-prompt candidate hints after the configured display debounce and coalescing windows. Frequent refreshes must not pollute terminal scrollback or flicker over SSH.
 - In `tab` mode, ordinary typing clears any stale completion UI and does not start a live completion request. Pressing `Tab` starts the same layered request explicitly; background history and typo tiers may update the displayed hints for that request without accepting anything.
 - Live completion must not scan regular history, stored templates, or PATH executables synchronously on every keypress. It sends a versioned background request using cheap cached snapshot references.
 - Live completion is layered: cheap local path candidates can be found immediately, template/history/PATH executable results can refresh the UI when the worker finishes, and slower typo-correction results can refresh the UI after that when `completion.fuzzy = true`.
@@ -801,11 +801,11 @@ For command completion:
 - If the first-token immediate result set contains only PATH executable candidates and an async history tier is pending, Aish may defer drawing those executable candidates until the coalescing window resolves.
 - Completion worker events carry the request id. Events for older input, different cursor positions, or stale request ids must be ignored.
 - Empty non-first tokens after trailing whitespace must not run path fallback. They may show structural template candidates immediately and structural history candidates when the worker returns.
-- Explicit completion display renders remaining candidates as below-prompt hints when they fit the configured display rules.
+- Live inline completion also renders remaining candidates as below-prompt hints when they fit the configured display rules.
 - If the user presses `Tab` and there are no candidates, Aish leaves the completion UI empty and redraws the current draft unchanged.
 - The inline ghost suggestion is display-only. It must not modify the draft buffer, cursor position, history, or persisted draft until the user explicitly accepts it.
 - In `auto` mode, pressing `Tab` with an inline ghost suggestion accepts the inline suggestion, not an arbitrary first row from the below-prompt panel. In normal typing flows this means the first `Tab` accepts the already-visible inline suggestion.
-- Some valid ranked candidates, such as replacing `something` with the template placeholder `{something}`, cannot be rendered as an unambiguous suffix. In that case Aish may show the candidate in the explicit below-prompt panel; pressing `Tab` accepts the first ranked candidate rather than requiring the user to type braces manually.
+- Some valid ranked candidates, such as replacing `something` with the template placeholder `{something}`, cannot be rendered as an unambiguous suffix. In that case Aish may show the candidate in the live below-prompt panel; pressing `Tab` accepts the first ranked candidate rather than requiring the user to type braces manually.
 - In `tab` mode, the first `Tab` displays candidates without editing the draft; a later `Tab` accepts the visible inline suggestion or first ranked displayed/cached candidate.
 - `completion.tab_accept = "full"` accepts the complete selected suggestion.
 - `completion.tab_accept = "word"` accepts only through the next whitespace boundary in the untyped suffix. If no whitespace boundary remains, it accepts the full suffix.
@@ -825,7 +825,7 @@ Inline suggestions:
 Below-prompt candidate panel:
 
 - `completion.max_results` controls only the number of rows displayed in the below-prompt panel.
-- When the panel is explicitly visible, it may update from background completion events and should skip the current inline candidate so the panel remains advisory.
+- When inline suggestions are enabled, the panel may update live while the user types and should skip the current inline candidate so the panel remains advisory.
 - Candidate rows must fit within the current terminal width and must not wrap.
 - Candidate rows should show the full command that would result from accepting the candidate.
 - Candidate row command text should align with the prompt input column when there is room for the source label before that column.
