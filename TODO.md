@@ -9,7 +9,7 @@ Status as of the latest full review:
 - Core interactive shell wrapper is implemented: PTY backend, raw terminal input, draft editing, continuation handling, history/AI modes, private command parsing, editor/paste flows, templates, completion, picker boundaries, AI request plumbing, context pseudo-pipe, event log, and diagnostics.
 - Rust unit/integration coverage and expect-driven real terminal coverage both exist for the implemented interactive behaviors. New user-facing terminal behavior should continue to receive both Rust-level and expect-level coverage.
 - Large intentionally incomplete areas remain: configurable key rebinding, async encrypted-history unlock UI, independent PTY/timer event-loop sources, and robust automatic passthrough for arbitrary interactive commands.
-- GPG-backed secrets and encrypted history/template storage are implemented synchronously; direct GPG decrypt operations temporarily leave raw mode for pinentry, but they should not be marked complete for async unlock behavior until Phase 18 async unlock work lands.
+- GPG-backed secrets and encrypted history/template storage are implemented. Startup decrypt is still synchronous; normal encrypted JSONL appends now use a serialized background writer, and direct GPG decrypt operations temporarily leave raw mode for pinentry until Phase 18 async unlock work lands.
 - The remaining unchecked items below are the source of truth for future work; do not skip them just because adjacent scaffolding exists.
 
 ---
@@ -102,7 +102,8 @@ Status as of the latest full review:
     - [x] Route all backend shells through one streaming display path, including fish with stateful repaint filtering.
   - [ ] timer/background events
     - [x] Add a no-op frontend tick event so future timers have a stable event-loop hook.
-    - [ ] Attach real background work to tick events.
+    - [x] Attach encrypted-write completion/failure events to tick-driven frontend refresh.
+    - [ ] Attach future scheduled background work to tick events.
 - [x] Fix real-terminal backend output visibility regressions that old expect byte-stream tests missed.
 - [x] Add persistent `tmux`-driven end-to-end screen-capture scripts for real terminal verification.
 - [x] Add redraw function for prompt/input line.
@@ -652,6 +653,9 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 - [x] Temporarily leave raw mode for direct GPG/pinentry decrypt operations.
 - [ ] Handle GPG/pinentry through the future async UnlockPassthrough state.
 - [x] Add atomic encrypted-write helper.
+- [x] Add serialized async encrypted JSONL append/rewrite worker for normal foreground writes.
+- [x] Flush pending encrypted writes before exit, sync, history trim, encryption changes, and confirmed history rewrite.
+- [x] Refresh live completion UI when encrypted-write completion events are drained.
 - [x] Add GPG decrypt/load helpers for encrypted JSONL.
 - [x] Warn about existing plaintext or older-key encrypted data in git history.
 
@@ -663,6 +667,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 - No plaintext index is written when encrypted.
 - Enabling encryption prints the git-history warning.
 - Live completion does not invoke GPG on every keypress.
+- Normal command completion and prompt redraw do not wait for encrypted persistence; required durability boundaries flush pending writes explicitly.
 
 ---
 

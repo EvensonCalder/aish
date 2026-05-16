@@ -369,16 +369,27 @@ pub fn load_encrypted_jsonl<T: DeserializeOwned>(
     gpg_program: impl AsRef<str>,
     plaintext_path: impl AsRef<Path>,
 ) -> Result<JsonlLoad<T>> {
+    load_encrypted_jsonl_with_bytes(gpg_program, plaintext_path).map(|(loaded, _bytes)| loaded)
+}
+
+pub fn load_encrypted_jsonl_with_bytes<T: DeserializeOwned>(
+    gpg_program: impl AsRef<str>,
+    plaintext_path: impl AsRef<Path>,
+) -> Result<(JsonlLoad<T>, Vec<u8>)> {
     let plaintext_path = plaintext_path.as_ref();
     let path = encrypted_path(plaintext_path);
     if !path.exists() {
-        return Ok(JsonlLoad {
-            items: Vec::new(),
-            errors: Vec::new(),
-        });
+        return Ok((
+            JsonlLoad {
+                items: Vec::new(),
+                errors: Vec::new(),
+            },
+            Vec::new(),
+        ));
     }
     let bytes = gpg_decrypt_file(gpg_program, &path)?;
-    load_jsonl_bytes(&path, &bytes)
+    let loaded = load_jsonl_bytes(&path, &bytes)?;
+    Ok((loaded, bytes))
 }
 
 pub fn append_encrypted_jsonl<T: Serialize>(
@@ -389,16 +400,29 @@ pub fn append_encrypted_jsonl<T: Serialize>(
 ) -> Result<()> {
     let gpg_program = gpg_program.into();
     let plaintext_path = plaintext_path.as_ref();
-    let mut bytes = existing_jsonl_bytes(&gpg_program, plaintext_path)?;
-    if !bytes.is_empty() && !bytes.ends_with(b"\n") {
-        bytes.push(b'\n');
-    }
-    serde_json::to_writer(&mut bytes, item).with_context(|| {
+    let mut line = Vec::new();
+    serde_json::to_writer(&mut line, item).with_context(|| {
         format!(
             "failed to serialize encrypted JSONL item for {}",
             encrypted_path(plaintext_path).display()
         )
     })?;
+    append_encrypted_jsonl_bytes(gpg_program, recipient, plaintext_path, &line)
+}
+
+pub fn append_encrypted_jsonl_bytes(
+    gpg_program: impl Into<String>,
+    recipient: &str,
+    plaintext_path: impl AsRef<Path>,
+    item_json: &[u8],
+) -> Result<()> {
+    let gpg_program = gpg_program.into();
+    let plaintext_path = plaintext_path.as_ref();
+    let mut bytes = existing_jsonl_bytes(&gpg_program, plaintext_path)?;
+    if !bytes.is_empty() && !bytes.ends_with(b"\n") {
+        bytes.push(b'\n');
+    }
+    bytes.extend_from_slice(item_json);
     bytes.push(b'\n');
     atomic_gpg_encrypt_bytes(
         &gpg_program,
@@ -418,11 +442,21 @@ pub fn rewrite_encrypted_jsonl<T: Serialize>(
 ) -> Result<()> {
     let plaintext_path = plaintext_path.as_ref();
     let bytes = jsonl_bytes(items, plaintext_path)?;
+    rewrite_encrypted_jsonl_bytes(gpg_program, recipient, plaintext_path, &bytes)
+}
+
+pub fn rewrite_encrypted_jsonl_bytes(
+    gpg_program: impl Into<String>,
+    recipient: &str,
+    plaintext_path: impl AsRef<Path>,
+    bytes: &[u8],
+) -> Result<()> {
+    let plaintext_path = plaintext_path.as_ref();
     atomic_gpg_encrypt_bytes(
         gpg_program,
         recipient,
         encrypted_path(plaintext_path),
-        &bytes,
+        bytes,
     )?;
     remove_plaintext_if_present(plaintext_path)?;
     Ok(())
@@ -481,7 +515,7 @@ pub fn migrate_gpg_jsonl_to_plaintext(
     Ok(true)
 }
 
-fn existing_jsonl_bytes(gpg_program: &str, plaintext_path: &Path) -> Result<Vec<u8>> {
+pub(crate) fn existing_jsonl_bytes(gpg_program: &str, plaintext_path: &Path) -> Result<Vec<u8>> {
     let encrypted = encrypted_path(plaintext_path);
     if encrypted.exists() {
         return gpg_decrypt_file(gpg_program, encrypted);
@@ -494,7 +528,7 @@ fn existing_jsonl_bytes(gpg_program: &str, plaintext_path: &Path) -> Result<Vec<
     }
 }
 
-fn jsonl_bytes<T: Serialize>(items: &[T], path: &Path) -> Result<Vec<u8>> {
+pub(crate) fn jsonl_bytes<T: Serialize>(items: &[T], path: &Path) -> Result<Vec<u8>> {
     let mut bytes = Vec::new();
     for item in items {
         serde_json::to_writer(&mut bytes, item)

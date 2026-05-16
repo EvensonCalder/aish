@@ -411,11 +411,12 @@ Current behavior:
 - `#encrypt on` migrates managed history, notes, drafts, AI history, and templates to `*.jsonl.gpg` files and removes the plaintext JSONL files after successful encryption.
 - If encryption is already enabled and the target fingerprint changes, Aish decrypts the existing managed encrypted files and re-encrypts them for the new fingerprint.
 - `#encrypt rotate <key>` explicitly re-encrypts current managed storage for a new fingerprint.
-- Future writes go to encrypted JSONL files while encryption is enabled.
+- Future writes go to encrypted JSONL files while encryption is enabled. Normal history, draft, note, AI, and template appends are queued through a serialized background encrypted writer so command output and prompt redraws do not wait for GPG.
+- Aish flushes pending encrypted writes before exit, `#push`, `#history`, `#encrypt off`, key rotation, and confirmed history rewrite. A background write completion wakes the frontend tick path and refreshes live completion UI.
 - `#encrypt off` decrypts managed encrypted JSONL files back to plaintext and disables encrypted writes.
 - `#key set` encrypts the API key currently available through `#env-key <ENV_NAME>` into `secrets/key.json.gpg`.
 - `#key clear` removes the encrypted key file if present.
-- `#status`, `#config`, and `#doctor` report encryption state, key fingerprint configuration, and GPG availability.
+- `#status`, `#config`, and `#doctor` report encryption state, key fingerprint configuration, async writer state, the last encrypted-write error if any, and GPG availability.
 
 Typical setup:
 

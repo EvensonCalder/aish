@@ -5,6 +5,7 @@ pub mod completion;
 pub mod config;
 pub mod context;
 pub mod editor;
+pub mod encrypted_writer;
 pub mod encryption;
 pub mod history;
 pub mod input;

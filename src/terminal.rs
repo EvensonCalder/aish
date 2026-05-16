@@ -151,7 +151,7 @@ pub fn run(
         match read_frontend_event(FRONTEND_TICK_INTERVAL)? {
             TerminalEvent::Key(key) => {
                 if handle_key(key, state, backend, out, command_timeout)? {
-                    let _ = save_draft_if_configured(state)?;
+                    persist_draft_and_flush_before_exit(state)?;
                     break;
                 }
             }
@@ -160,6 +160,7 @@ pub fn run(
                     let mut display_out = CrLfWriter::new(out);
                     execute_draft(state, backend, &mut display_out, command_timeout)?;
                     if state.exit_requested {
+                        persist_draft_and_flush_before_exit(state)?;
                         return Ok(());
                     }
                 }
@@ -170,10 +171,25 @@ pub fn run(
                 backend.resize(pty_size(cols, rows))?;
                 redraw(state, out)?;
             }
-            TerminalEvent::Tick | TerminalEvent::Ignore => {}
+            TerminalEvent::Tick | TerminalEvent::Ignore => {
+                refresh_after_background_events(state, out)?;
+            }
         }
     }
 
+    Ok(())
+}
+
+fn persist_draft_and_flush_before_exit(state: &AppState) -> Result<()> {
+    let _ = save_draft_if_configured(state)?;
+    state.flush_encrypted_writes()
+}
+
+fn refresh_after_background_events(state: &mut AppState, out: &mut impl Write) -> Result<()> {
+    if state.drain_encrypted_write_events() {
+        refresh_live_completion_ui(state)?;
+        redraw(state, out)?;
+    }
     Ok(())
 }
 
@@ -1195,8 +1211,12 @@ fn accept_completion_candidate(
 mod tests {
     use super::*;
     use crate::config::{CompletionConfig, CompletionTabAccept, EditorConfig};
+    use crate::encrypted_writer::EncryptedWriteQueue;
+    use crate::history::{DraftEntry, HistoryEntry, HistorySource};
     use crate::modes::Mode;
+    use std::collections::HashMap;
     use std::path::Path;
+    use std::time::Instant;
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
@@ -1212,6 +1232,42 @@ mod tests {
 
     fn alt_key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::ALT)
+    }
+
+    #[cfg(unix)]
+    fn write_copying_fake_gpg(temp: &tempfile::TempDir) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let fake_gpg = temp.path().join("copy-gpg");
+        std::fs::write(
+            &fake_gpg,
+            "#!/bin/sh\nmode=encrypt\nout=\"\"\ninput=\"\"\nwhile [ \"$#\" -gt 0 ]; do\n  case \"$1\" in\n    --decrypt) mode=decrypt ;;\n    --output) shift; out=\"$1\" ;;\n    --recipient|--trust-model) shift ;;\n    --batch|--yes|--no-tty|--encrypt|always) ;;\n    *) input=\"$1\" ;;\n  esac\n  shift\ndone\nif [ \"$mode\" = decrypt ]; then\n  cat \"$input\"\nelse\n  cp \"$input\" \"$out\"\nfi\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake_gpg, std::fs::Permissions::from_mode(0o755)).unwrap();
+        fake_gpg
+    }
+
+    #[cfg(unix)]
+    fn write_blocking_fake_gpg(
+        temp: &tempfile::TempDir,
+        started_path: &Path,
+        release_path: &Path,
+    ) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let fake_gpg = temp.path().join("blocking-gpg");
+        std::fs::write(
+            &fake_gpg,
+            format!(
+                "#!/bin/sh\nmode=encrypt\nout=\"\"\ninput=\"\"\nwhile [ \"$#\" -gt 0 ]; do\n  case \"$1\" in\n    --decrypt) mode=decrypt ;;\n    --output) shift; out=\"$1\" ;;\n    --recipient|--trust-model) shift ;;\n    --batch|--yes|--no-tty|--encrypt|always) ;;\n    *) input=\"$1\" ;;\n  esac\n  shift\ndone\nif [ \"$mode\" = decrypt ]; then\n  cat \"$input\"\nelse\n  : > '{}'\n  while [ ! -f '{}' ]; do sleep 0.02; done\n  cp \"$input\" \"$out\"\nfi\n",
+                started_path.display(),
+                release_path.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake_gpg, std::fs::Permissions::from_mode(0o755)).unwrap();
+        fake_gpg
     }
 
     #[test]
@@ -1232,6 +1288,109 @@ mod tests {
             terminal_event_from_crossterm(Event::FocusGained),
             TerminalEvent::Ignore
         );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn encrypted_write_completion_event_refreshes_live_completion() {
+        let temp = tempfile::tempdir().unwrap();
+        let fake_gpg = write_copying_fake_gpg(&temp);
+        let history_path = temp.path().join("history/regular.jsonl");
+        let mut cache = HashMap::new();
+        cache.insert(history_path.clone(), Vec::new());
+        let entry = HistoryEntry {
+            t: 1,
+            command: "git status".to_string(),
+            exit_code: Some(0),
+            source: HistorySource::User,
+        };
+        let mut state = AppState {
+            regular_history_path: Some(history_path.clone()),
+            regular_history: vec![entry.clone()],
+            encryption_config: crate::config::EncryptionConfig {
+                enabled: true,
+                key_fingerprint: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
+                recipient: String::new(),
+            },
+            encrypted_writer: Some(EncryptedWriteQueue::start(
+                fake_gpg.display().to_string(),
+                "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
+                cache,
+            )),
+            ..AppState::default()
+        };
+        state.draft.insert_str("git");
+        state
+            .encrypted_writer
+            .as_ref()
+            .unwrap()
+            .enqueue_append_jsonl(&history_path, &entry)
+            .unwrap();
+        state.flush_encrypted_writes().unwrap();
+        assert!(state.completion_inline.is_none());
+
+        let mut output = Vec::new();
+        refresh_after_background_events(&mut state, &mut output).unwrap();
+
+        assert_eq!(state.completion_inline.as_ref().unwrap().suffix, " status");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn exit_persistence_boundary_flushes_pending_encrypted_draft() {
+        let temp = tempfile::tempdir().unwrap();
+        let started_path = temp.path().join("gpg-started");
+        let release_path = temp.path().join("release-gpg");
+        let fake_gpg = write_blocking_fake_gpg(&temp, &started_path, &release_path);
+        let draft_path = temp.path().join("history/draft.jsonl");
+        let mut cache = HashMap::new();
+        cache.insert(draft_path.clone(), Vec::new());
+        let mut state = AppState {
+            draft_history_path: Some(draft_path.clone()),
+            draft_persist: true,
+            encryption_config: crate::config::EncryptionConfig {
+                enabled: true,
+                key_fingerprint: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
+                recipient: String::new(),
+            },
+            encrypted_writer: Some(EncryptedWriteQueue::start(
+                fake_gpg.display().to_string(),
+                "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
+                cache,
+            )),
+            ..AppState::default()
+        };
+        state.draft.insert_str("echo pending-draft");
+        let release_for_thread = release_path.clone();
+        let started_for_thread = started_path.clone();
+        let releaser = std::thread::spawn(move || {
+            for _ in 0..200 {
+                if started_for_thread.exists() {
+                    std::thread::sleep(Duration::from_millis(120));
+                    std::fs::write(&release_for_thread, b"go\n").unwrap();
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            panic!("fake gpg did not start");
+        });
+
+        let started = Instant::now();
+        persist_draft_and_flush_before_exit(&state).unwrap();
+        let elapsed = started.elapsed();
+        releaser.join().unwrap();
+
+        assert!(
+            elapsed >= Duration::from_millis(100),
+            "exit returned before pending encrypted write was released"
+        );
+        let loaded = crate::encryption::load_encrypted_jsonl::<DraftEntry>(
+            fake_gpg.display().to_string(),
+            &draft_path,
+        )
+        .unwrap();
+        assert_eq!(loaded.items.len(), 1);
+        assert_eq!(loaded.items[0].text, "echo pending-draft");
     }
 
     fn fixed_clock() -> i64 {

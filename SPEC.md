@@ -1086,6 +1086,10 @@ Behavior:
 - Secrets are always stored encrypted.
 - When encryption is enabled, do not store plaintext search indexes.
 - Live completion must not run GPG on each keypress. Encrypted template data should be loaded into an in-memory snapshot during unlock/startup and refreshed only by explicit template mutations or reload flows.
+- Normal encrypted JSONL appends should be serialized through a background writer. Foreground command execution updates in-memory state and enqueues persistence work; command output and prompt redraw must not wait for GPG encryption.
+- The background encrypted writer must preserve write order per Aish process, use atomic encrypted file replacement, and fail closed after a write failure until the error is surfaced and pending writes are flushed or the process is restarted.
+- Operations that need durable storage or rewrite storage globally must flush pending encrypted writes first. This includes exit, `#push`, `#history`, `#encrypt off`, key rotation, and confirmed history rewrite.
+- Encrypted-write completion and failure events are frontend background events. Draining those events should refresh live completion and redraw the prompt when needed.
 - Decrypt asynchronously on startup so the shell is usable before history/template unlock completes.
 - While unlock is pending, completion/history features can show `history is still unlocking...`.
 - `#encrypt rewrite-history plan` prints the risk and exact confirmed command for rewriting Git history.
