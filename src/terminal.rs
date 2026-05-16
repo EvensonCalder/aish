@@ -32,7 +32,7 @@ use crate::pty::{PtyBackend, pty_size};
 use crate::shell_integration::passthrough_key_bytes;
 use crate::templates::template_placeholder_spans;
 
-const FRONTEND_TICK_INTERVAL: Duration = Duration::from_millis(50);
+const FRONTEND_TICK_INTERVAL: Duration = Duration::from_millis(10);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KeyAction {
@@ -152,7 +152,14 @@ pub fn run(
     redraw(state, out)?;
 
     loop {
-        match read_frontend_event(FRONTEND_TICK_INTERVAL)? {
+        let event = match read_frontend_event(Duration::from_millis(0))? {
+            TerminalEvent::Tick => {
+                refresh_after_background_events(state, out)?;
+                read_frontend_event(FRONTEND_TICK_INTERVAL)?
+            }
+            event => event,
+        };
+        match event {
             TerminalEvent::Key(key) => {
                 if handle_key(key, state, backend, out, command_timeout)? {
                     persist_draft_and_flush_before_exit(state)?;
