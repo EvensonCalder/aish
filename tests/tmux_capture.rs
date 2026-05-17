@@ -579,6 +579,16 @@ fn tmux_sudo_password_prompt_waits_for_user_input() {
     assert_line_present(&captured, "after-sudo");
 }
 
+#[test]
+fn tmux_rm_write_protected_prompt_waits_for_user_input() {
+    let Some(captured) = run_tmux_script("rm_write_protected_prompt.sh") else {
+        return;
+    };
+    assert!(captured.contains("remove"), "{captured:?}");
+    assert!(captured.contains("1.t"), "{captured:?}");
+    assert_line_present(&captured, "rm-declined");
+}
+
 fn run_tmux_script(name: &str) -> Option<String> {
     run_tmux_script_with_env(name, &[])
 }

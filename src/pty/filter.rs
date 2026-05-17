@@ -6,6 +6,7 @@ pub(super) struct PtyOutputFilter {
     deferred_separator: Vec<u8>,
     fish: Option<FishOutputFilter>,
     command_complete: bool,
+    ready_completes_command: bool,
 }
 
 struct FishOutputFilter {
@@ -33,6 +34,7 @@ impl PtyOutputFilter {
             deferred_separator: Vec::new(),
             fish: None,
             command_complete: false,
+            ready_completes_command: false,
         }
     }
 
@@ -47,6 +49,7 @@ impl PtyOutputFilter {
                 held_segment: None,
             }),
             command_complete: false,
+            ready_completes_command: true,
         }
     }
 
@@ -57,6 +60,17 @@ impl PtyOutputFilter {
             let segment: Vec<u8> = self.pending.drain(..end).collect();
             self.push_segment(segment, &mut output);
         }
+        output
+    }
+
+    pub(super) fn flush_pending(&mut self) -> Vec<u8> {
+        if self.pending.is_empty() || self.command_complete || self.pending_may_be_internal_marker()
+        {
+            return Vec::new();
+        }
+        let segment = std::mem::take(&mut self.pending);
+        let mut output = Vec::new();
+        self.push_segment(segment, &mut output);
         output
     }
 
@@ -117,6 +131,15 @@ impl PtyOutputFilter {
         None
     }
 
+    fn pending_may_be_internal_marker(&self) -> bool {
+        let text = String::from_utf8_lossy(&self.pending);
+        let cleaned = strip_terminal_control_sequences(&text);
+        let line = cleaned.trim_start_matches([' ', '\t']);
+        line_starts_or_could_be_prefix(line, START_MARKER)
+            || line_starts_or_could_be_prefix(line, READY_MARKER)
+            || !self.marker.is_empty() && line_starts_or_could_be_prefix(line, &self.marker)
+    }
+
     fn handle_internal_marker(&mut self, marker: InternalMarker, output: &mut Vec<u8>) {
         match marker {
             InternalMarker::Start(command) => {
@@ -132,7 +155,9 @@ impl PtyOutputFilter {
                     fish.command_active = false;
                     fish.held_segment = None;
                 }
-                self.command_complete = true;
+                if self.ready_completes_command {
+                    self.command_complete = true;
+                }
             }
             InternalMarker::Status => {
                 self.command_complete = true;
@@ -234,6 +259,10 @@ fn next_terminal_line_end(bytes: &[u8]) -> Option<usize> {
 
 fn terminal_separator_only(segment: &[u8]) -> bool {
     segment.iter().all(|byte| matches!(*byte, b'\r' | b'\n'))
+}
+
+fn line_starts_or_could_be_prefix(line: &str, marker: &str) -> bool {
+    line.starts_with(marker) || marker.starts_with(line)
 }
 
 pub(super) fn clean_fish_repaint_lines(

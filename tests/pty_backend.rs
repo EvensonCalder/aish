@@ -230,6 +230,50 @@ fn pty_backend_command_events_include_output_poll_and_idle_ticks() {
 }
 
 #[test]
+fn pty_backend_streams_partial_prompt_and_accepts_stdin_reply() {
+    let _guard = pty_test_guard();
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut displayed = Vec::new();
+    let mut answered = false;
+
+    let result = backend
+        .run_command_with_event_callback(
+            "printf 'confirm-remove? '; IFS= read -r answer; printf 'answer=%s\\n' \"$answer\"",
+            Duration::from_secs(5),
+            |backend, event| {
+                if let PtyCommandEvent::Output(chunk) = event {
+                    displayed.extend_from_slice(chunk);
+                    let visible = String::from_utf8_lossy(&displayed);
+                    if !answered && visible.contains("confirm-remove? ") {
+                        answered = true;
+                        backend.write_raw("no\r")?;
+                    }
+                }
+                Ok(false)
+            },
+        )
+        .unwrap();
+
+    assert!(
+        answered,
+        "partial prompt was not streamed before stdin reply"
+    );
+    assert_eq!(result.exit_code, 0);
+    assert_eq!(
+        result.started_command.as_deref(),
+        Some("printf 'confirm-remove? '; IFS= read -r answer; printf 'answer=%s\\n' \"$answer\"")
+    );
+    assert!(
+        result.output.contains("confirm-remove? answer=no"),
+        "{result:?}"
+    );
+    let displayed = String::from_utf8(displayed).unwrap();
+    assert!(displayed.contains("confirm-remove? "), "{displayed:?}");
+    assert!(!displayed.contains("__AISH_STATUS__"), "{displayed:?}");
+    assert!(!result.output.contains("__AISH_STATUS__"), "{result:?}");
+}
+
+#[test]
 fn fish_pty_backend_streams_output_before_command_completion_when_available() {
     let _guard = pty_test_guard();
     if !fish_backend_tests_enabled() {
@@ -354,6 +398,34 @@ fn pty_backend_runs_multiline_commands_before_marker() {
     assert_eq!(result.exit_code, 0);
     assert!(result.output.contains("paste-one"), "{:?}", result.output);
     assert!(result.output.contains("paste-two"), "{:?}", result.output);
+}
+
+#[test]
+fn pty_backend_streams_all_multiline_command_output() {
+    let _guard = pty_test_guard();
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut displayed = Vec::new();
+
+    let result = backend
+        .run_command_streaming_with_wait_callback(
+            "printf 'multi-one\\n'\nprintf 'multi-two\\n'",
+            Duration::from_secs(5),
+            |_| Ok(false),
+            |chunk| {
+                displayed.extend_from_slice(chunk);
+                Ok(())
+            },
+        )
+        .unwrap();
+
+    assert_eq!(result.exit_code, 0);
+    assert!(result.output.contains("multi-one"), "{:?}", result.output);
+    assert!(result.output.contains("multi-two"), "{:?}", result.output);
+    let displayed = String::from_utf8(displayed).unwrap();
+    assert!(displayed.contains("multi-one"), "{displayed:?}");
+    assert!(displayed.contains("multi-two"), "{displayed:?}");
+    assert!(!displayed.contains("__AISH_READY__"), "{displayed:?}");
+    assert!(!displayed.contains("__AISH_STATUS__"), "{displayed:?}");
 }
 
 #[test]

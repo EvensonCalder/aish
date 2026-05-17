@@ -18,7 +18,7 @@ pub use launch::resolve_shell;
 use launch::{ShellLaunch, shell_command_builder, shell_launch};
 use parser::{
     marker_status_is_complete, parse_marker_output, parse_ready_cwd, parse_ready_status_output,
-    start_marker_command,
+    parse_ready_status_output_with_prompt_separator, start_marker_command,
 };
 use syntax::{
     ends_with_shell_line_continuation, is_incomplete_shell_syntax, shell_continuation_prompt,
@@ -63,6 +63,7 @@ pub struct ContinuationCheck {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ShellIntegration {
     MarkerCommand,
+    BashPromptCommand,
     ZshHooks,
     FishEvents,
 }
@@ -258,11 +259,8 @@ impl PtyBackend {
     where
         F: FnMut(&mut Self) -> Result<bool>,
     {
-        if matches!(
-            self.integration,
-            ShellIntegration::ZshHooks | ShellIntegration::FishEvents
-        ) {
-            if self.integration == ShellIntegration::ZshHooks && command.contains('\n') {
+        if self.uses_shell_events() {
+            if self.shell_events_require_marker_for(command) {
                 return self.run_command_with_marker(command, timeout, &mut on_wait);
             }
             return self.run_command_with_shell_events(command, timeout, &mut on_wait);
@@ -300,17 +298,31 @@ impl PtyBackend {
     where
         F: FnMut(&mut Self, PtyCommandEvent<'_>) -> Result<bool>,
     {
-        if matches!(
-            self.integration,
-            ShellIntegration::ZshHooks | ShellIntegration::FishEvents
-        ) {
-            if self.integration == ShellIntegration::ZshHooks && command.contains('\n') {
+        if self.uses_shell_events() {
+            if self.shell_events_require_marker_for(command) {
                 return self.run_command_with_marker_events(command, timeout, &mut on_event);
             }
             return self.run_command_with_shell_events_streaming(command, timeout, &mut on_event);
         }
 
         self.run_command_with_marker_events(command, timeout, &mut on_event)
+    }
+
+    fn uses_shell_events(&self) -> bool {
+        matches!(
+            self.integration,
+            ShellIntegration::BashPromptCommand
+                | ShellIntegration::ZshHooks
+                | ShellIntegration::FishEvents
+        )
+    }
+
+    fn shell_events_require_marker_for(&self, command: &str) -> bool {
+        command.contains('\n')
+            && matches!(
+                self.integration,
+                ShellIntegration::BashPromptCommand | ShellIntegration::ZshHooks
+            )
     }
 
     fn run_command_with_marker<F>(
@@ -437,6 +449,11 @@ impl PtyBackend {
                         marker_needs_reissue |= on_event(backend, PtyCommandEvent::PollInput)?;
                     }
                     PtyReadEvent::Idle => {
+                        let display = output_filter.flush_pending();
+                        if !display.is_empty() {
+                            marker_needs_reissue |=
+                                on_event(backend, PtyCommandEvent::Output(&display))?;
+                        }
                         marker_needs_reissue |= on_event(backend, PtyCommandEvent::Idle)?;
                         if marker_needs_reissue {
                             std::thread::sleep(Duration::from_millis(100));
@@ -502,11 +519,16 @@ impl PtyBackend {
         }
 
         let raw = self.read_until_ready(timeout, on_wait)?;
-        let parsed =
-            parse_ready_status_output(&raw, self.integration == ShellIntegration::FishEvents)?;
+        let parsed = if self.integration == ShellIntegration::BashPromptCommand {
+            parse_ready_status_output_with_prompt_separator(&raw, false)?
+        } else {
+            parse_ready_status_output(&raw, self.integration == ShellIntegration::FishEvents)?
+        };
         Ok(CommandResult {
             command: command.trim_end_matches('\n').to_string(),
-            started_command: parsed.started_command,
+            started_command: parsed
+                .started_command
+                .or_else(|| Some(command.trim_end_matches('\n').to_string())),
             output: parsed.output,
             exit_code: parsed.exit_code,
             cwd: Some(parsed.cwd),
@@ -529,11 +551,16 @@ impl PtyBackend {
         }
 
         let raw = self.read_until_ready_streaming(timeout, on_event)?;
-        let parsed =
-            parse_ready_status_output(&raw, self.integration == ShellIntegration::FishEvents)?;
+        let parsed = if self.integration == ShellIntegration::BashPromptCommand {
+            parse_ready_status_output_with_prompt_separator(&raw, false)?
+        } else {
+            parse_ready_status_output(&raw, self.integration == ShellIntegration::FishEvents)?
+        };
         Ok(CommandResult {
             command: command.trim_end_matches('\n').to_string(),
-            started_command: parsed.started_command,
+            started_command: parsed
+                .started_command
+                .or_else(|| Some(command.trim_end_matches('\n').to_string())),
             output: parsed.output,
             exit_code: parsed.exit_code,
             cwd: Some(parsed.cwd),
@@ -572,6 +599,10 @@ impl PtyBackend {
                     let _ = on_event(backend, PtyCommandEvent::PollInput)?;
                 }
                 PtyReadEvent::Idle => {
+                    let display = output_filter.flush_pending();
+                    if !display.is_empty() {
+                        let _ = on_event(backend, PtyCommandEvent::Output(&display))?;
+                    }
                     let _ = on_event(backend, PtyCommandEvent::Idle)?;
                 }
             }

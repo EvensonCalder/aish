@@ -29,11 +29,17 @@ fn bash_launch_uses_clean_startup_flags() {
     let launch = shell_launch("/bin/bash");
     assert_eq!(launch.program, "/bin/bash");
     assert_eq!(launch.args, ["-i"]);
+    assert_eq!(launch.integration, ShellIntegration::BashPromptCommand);
     assert!(launch.init_command.contains(READY_MARKER));
     assert!(launch.init_command.contains("HISTCONTROL=ignorespace"));
     assert!(launch.init_command.contains("enable-bracketed-paste off"));
     assert!(launch.init_command.contains("__aish_run_prompt_command"));
-    assert!(launch.init_command.contains("PROMPT_COMMAND="));
+    assert!(launch.init_command.contains("__aish_emit_ready"));
+    assert!(
+        launch
+            .init_command
+            .contains("PROMPT_COMMAND=__aish_emit_ready")
+    );
     assert!(launch.init_command.contains("trap - DEBUG"));
 }
 
@@ -181,6 +187,26 @@ fn clean_marker_echo_hides_ready_marker_lines() {
     );
 
     assert_eq!(output, "echoed\nvisible");
+}
+
+#[test]
+fn clean_marker_echo_removes_prompt_ready_separators() {
+    let output = clean_marker_echo(
+        &format!("one\n\n{READY_MARKER}\t0\t/tmp/aish\ntwo\n\n{READY_MARKER}\t0\t/tmp/aish\n"),
+        "__AISH_STATUS__1__",
+    );
+
+    assert_eq!(output, "one\ntwo\n");
+}
+
+#[test]
+fn clean_marker_echo_preserves_user_blank_before_prompt_separator() {
+    let output = clean_marker_echo(
+        &format!("one\n\n\n{READY_MARKER}\t0\t/tmp/aish\n"),
+        "__AISH_STATUS__1__",
+    );
+
+    assert_eq!(output, "one\n\n");
 }
 
 #[test]

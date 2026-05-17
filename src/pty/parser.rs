@@ -115,6 +115,21 @@ pub(super) fn parse_ready_status_output(
     raw: &str,
     strip_terminal_repaint: bool,
 ) -> Result<HookCommandResult> {
+    parse_ready_status_output_inner(raw, strip_terminal_repaint, false)
+}
+
+pub(super) fn parse_ready_status_output_with_prompt_separator(
+    raw: &str,
+    strip_terminal_repaint: bool,
+) -> Result<HookCommandResult> {
+    parse_ready_status_output_inner(raw, strip_terminal_repaint, true)
+}
+
+fn parse_ready_status_output_inner(
+    raw: &str,
+    strip_terminal_repaint: bool,
+    ready_leading_newline_is_separator: bool,
+) -> Result<HookCommandResult> {
     let raw = normalize_pty_newlines(raw);
     let mut ready = None;
     let mut current_started_command = None;
@@ -167,6 +182,11 @@ pub(super) fn parse_ready_status_output(
     if strip_terminal_repaint {
         output_lines = clean_fish_repaint_lines(output_lines, started_command.as_deref());
     }
+    let output_ended_with_newline = if ready_leading_newline_is_separator {
+        output_lines.last().is_some_and(|line| line.is_empty())
+    } else {
+        !output_lines.is_empty()
+    };
     while output_lines.first().is_some_and(|line| line.is_empty()) {
         output_lines.remove(0);
     }
@@ -175,8 +195,10 @@ pub(super) fn parse_ready_status_output(
     }
     let output = if output_lines.is_empty() {
         String::new()
-    } else {
+    } else if output_ended_with_newline {
         format!("{}\n", output_lines.join("\n"))
+    } else {
+        output_lines.join("\n")
     };
 
     Ok(HookCommandResult {
@@ -234,13 +256,29 @@ pub(super) fn complete_normalized_lines(normalized: &str) -> Vec<&str> {
 }
 
 pub(super) fn clean_marker_echo(output: &str, marker: &str) -> String {
-    output
-        .split_inclusive('\n')
-        .filter(|line| {
-            let text = line.trim_end_matches('\n');
-            !(text.contains(READY_MARKER)
-                || text.contains(START_MARKER)
-                || text.contains("__aish_status=$?") && text.contains(marker))
-        })
-        .collect()
+    let mut lines: Vec<&str> = Vec::new();
+    for line in output.split_inclusive('\n') {
+        if is_internal_marker_echo_line(line, marker) {
+            if lines
+                .last()
+                .is_some_and(|previous| terminal_separator_only(previous))
+            {
+                lines.pop();
+            }
+            continue;
+        }
+        lines.push(line);
+    }
+    lines.concat()
+}
+
+fn is_internal_marker_echo_line(line: &str, marker: &str) -> bool {
+    let text = line.trim_end_matches('\n');
+    text.contains(READY_MARKER)
+        || text.contains(START_MARKER)
+        || text.contains("__aish_status=$?") && text.contains(marker)
+}
+
+fn terminal_separator_only(line: &str) -> bool {
+    !line.is_empty() && line.chars().all(|ch| matches!(ch, '\r' | '\n'))
 }
