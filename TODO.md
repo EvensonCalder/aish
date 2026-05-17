@@ -1089,7 +1089,7 @@ Update: completion now uses layered, non-blocking live discovery. Cheap local pa
   - [x] `completion.fuzzy = true` by default.
   - [x] `completion.coalesce_ms = 50` by default.
   - [x] `completion.display_delay_ms = 120` by default.
-  - [x] `completion.tab_accept = "full"` by default.
+  - [x] `completion.tab_accept = "word"` by default.
   - [x] `completion.match_threshold_percent = 50` by default.
   - [x] `completion.typo_threshold_percent = 80` by default.
   - [x] Valid `completion.tab_accept` values are `"full"` and `"word"`.
@@ -1148,6 +1148,6 @@ Update: completion now uses layered, non-blocking live discovery. Cheap local pa
 
 - Inline suggestions behave like fish-style ghost text: visible while typing, clear enough to guide the user, but never part of the command until accepted.
 - `completion.max_results` controls only the below-prompt panel row count.
-- `Tab` acceptance is predictable and configurable between full-suggestion and next-word behavior.
+- `Tab` acceptance defaults to next-word behavior and is configurable between full-suggestion and next-word behavior.
 - The below-prompt panel remains readable in narrow terminals and never wraps candidate rows.
 - The feature passes pure Rust, expect, and tmux coverage before any Phase 28 checklist item is marked complete.

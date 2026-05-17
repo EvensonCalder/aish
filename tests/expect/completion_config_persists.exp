@@ -20,7 +20,7 @@ aish_expect "completion.coalesce_ms=50"
 aish_expect "completion.display_delay_ms=120"
 aish_expect "completion.inline=true"
 aish_expect "completion.fuzzy=true"
-aish_expect "completion.tab_accept=full"
+aish_expect "completion.tab_accept=word"
 aish_expect "completion.match_threshold_percent=50"
 aish_expect "completion.typo_threshold_percent=80"
 aish_wait_prompt

@@ -34,6 +34,11 @@ aish_enter
 aish_expect_template_stored
 aish_wait_prompt
 
+aish_send "#completion tab-accept full"
+aish_enter
+aish_expect "completion.tab_accept=full"
+aish_wait_prompt
+
 aish_send "echo {a} {something}"
 aish_expect "echo {a} {b} {c}"
 aish_send "\t"

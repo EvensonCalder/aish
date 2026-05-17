@@ -1,0 +1,30 @@
+#!/usr/bin/env expect
+# Typo candidates replace the whole command, even when a lower-priority suffix
+# candidate could complete the current token and leave an earlier typo intact.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "echo typo-target --flag"
+aish_enter
+aish_expect "typo-target --flag"
+aish_wait_prompt
+
+aish_send "#completion mode tab"
+aish_enter
+aish_expect "completion.mode=tab"
+aish_wait_prompt
+
+aish_send "echo typo-targte --"
+aish_send "\t"
+aish_expect "history"
+aish_expect "echo typo-target --flag"
+aish_send "\t"
+aish_expect "> echo typo-target --flag"
+aish_enter
+aish_expect "typo-target --flag"
+aish_wait_prompt
+
+aish_quit

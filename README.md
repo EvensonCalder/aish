@@ -93,7 +93,7 @@ Core keys:
 
 - `Enter`: submit the current draft or selected read-only item. Executed commands are copied into regular history, and the active prompt returns to a new blank draft. Saved drafts remain browsable with `Up` / `Down`.
 - Empty `Tab`: cycle `>` / `$` / `%` modes. History opens at the newest item, draft opens blank, and AI resumes the current AI pointer.
-- Non-empty `Tab`: accept the current inline completion, or directly accept the first candidate when inline completion is disabled.
+- Non-empty `Tab`: in `auto` mode, accept the visible inline completion when one is already shown; in `tab` mode, first show completion hints, then accept on a later `Tab`.
 - `Right` at end of line: accept completion using the configured accept mode.
 - `Up` / `Down` in draft mode: browse saved drafts. `Up` from a blank draft restores the newest saved draft; `Down` from the newest saved draft opens a blank draft.
 - `Down` from a non-empty new draft: save the current draft and open a blank draft without executing it.
@@ -130,7 +130,7 @@ Important rules:
 - `completion.mode="auto"` shows live completion hints while you type.
 - `completion.mode="tab"` keeps typing quiet; the first `Tab` shows hints and the next `Tab` accepts the visible suggestion or first ranked candidate.
 - `completion.mode="off"` disables all Aish completion candidates and makes non-empty `Tab` do nothing.
-- `completion.enabled=false` and `completion.inline=false` remain compatibility fields for older configs. Aish reports the derived `completion.mode` and keeps these fields consistent when changed through `#completion`.
+- `completion.enabled=false` and `completion.inline=false` remain compatibility fields for older configs. Without an explicit `completion.mode`, `inline=false` selects `tab` mode; it does not disable the inline hint that can appear after pressing `Tab`.
 - `completion.fuzzy=false` keeps fast prefix/structural completion but disables typo-correction work.
 - The inline suggestion is display-only until accepted.
 - The below-prompt panel is advisory and never decides what `Tab` accepts.
@@ -149,7 +149,8 @@ Completion sources:
 - Non-first token: structural template matches, structural history suffixes, template placeholders, history arguments, and filesystem paths.
 - After a trailing space, Aish uses structural template/history matches and does not show unrelated filesystem entries for the empty token.
 - Template completions use newest stored templates first.
-- Paths preserve directory prefixes and mark directories with `/`.
+- Paths preserve directory prefixes and mark directories with `/`. Matching local directories are kept ahead of lower-priority argument/history fallbacks, and recent directory scans are cached briefly while typing.
+- With `completion.fuzzy=true`, Aish can also correct local directory typos such as `./srd` to `./src/`.
 - Live completion is layered: cheap local path candidates can be found immediately, template/history/PATH executable matching arrives from a background worker, and slower typo-correction results can update the same UI later. Stale worker results are ignored when the input changes.
 
 Configuration:
@@ -165,7 +166,7 @@ ignore_spaces = true
 template_first = true
 inline = true
 fuzzy = true
-tab_accept = "full" # "full" or "word"
+tab_accept = "word" # "full" or "word"
 match_threshold_percent = 50
 typo_threshold_percent = 80
 ```
@@ -192,7 +193,7 @@ Commands:
 #completion typo-threshold 80
 ```
 
-`tab_accept = "word"` accepts only through the next whitespace boundary in the untyped suffix. This is useful for long history completions such as `kubectl apply -f deployment.yaml`.
+`tab_accept = "word"` is the default. It accepts only through the next whitespace boundary in the untyped suffix. Use `tab_accept = "full"` to accept the whole suggestion in one step.
 
 ## Private Commands
 
@@ -414,7 +415,7 @@ Aish uses shell markers to detect command completion and cwd, filters those mark
 
 ## Interactive And Stdin Passthrough
 
-Aish foregrounds allowlisted interactive commands so they can own the terminal until they return. This includes common shells, editors, pagers, SSH-like tools, REPLs, database CLIs, `tmux`/`screen`, `gpg`/`pinentry`, and similar programs.
+Aish foregrounds allowlisted interactive commands so they can own the terminal until they return. This includes common shells, editors, pagers, SSH-like tools, REPLs, database CLIs, `tmux`/`screen`, `gpg`/`pinentry`, privilege/password prompt tools such as `sudo`, `doas`, `sudoedit`, `su`, and `passwd`, and similar programs.
 
 Common stdin-oriented commands such as `cat`, `grep`, `sed`, `awk`, `sort`, `uniq`, `wc`, `tee`, `base64`, and `openssl` are also foregrounded when they are not wrapped in shell control syntax. This prevents commands that wait for stdin from wedging the Aish prompt.
 

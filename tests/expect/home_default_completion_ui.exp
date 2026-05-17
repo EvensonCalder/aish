@@ -52,8 +52,11 @@ aish_expect "home-unique-target.txt"
 aish_send "\x03"
 aish_wait_prompt
 
+# Auto mode shows the remaining path candidate without requiring Tab. Pressing
+# Tab here would accept the visible inline candidate instead of only displaying
+# the panel. The row may be left-elided in the expect PTY, so assert the stable
+# file-name suffix.
 aish_send "cat home-completion-"
-aish_send "\t"
 aish_expect "two.txt"
 aish_send "\x03"
 aish_wait_prompt

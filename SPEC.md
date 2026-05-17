@@ -158,7 +158,7 @@ Entered after a command is submitted to the backend shell.
 
 #### Passthrough mode
 
-Used for interactive programs launched by the backend shell, such as `vim`, `nvim`, `ssh`, `top`, `less`, `fzf`, `python`, `node`, `psql`, or similar.
+Used for interactive programs that need to own terminal input, such as `vim`, `nvim`, `ssh`, `top`, `less`, `fzf`, `python`, `node`, `psql`, `sudo`/`doas` password prompts, or similar.
 
 - Keyboard input is forwarded to the PTY.
 - Output is displayed as-is.
@@ -761,12 +761,14 @@ For non-first-token completion:
 - Structural template candidates are shown before structural history candidates.
 - Structural template candidates are ordered newest template first.
 - When a structural template candidate exists, lower-priority generic placeholder, history-argument, and path fallbacks should not be mixed into that completion result set.
+- Matching directory candidates are shown before lower-priority generic argument/history fallbacks so local navigation remains easy to trigger.
 - Template placeholders can be matched by typing the placeholder name without braces; accepting the candidate inserts the raw `{placeholder}` form.
-- History argument candidates are shown before file/path candidates after structural and placeholder candidates.
+- History argument candidates are shown before file path candidates after structural and placeholder candidates.
 - History argument candidates are ordered newest to oldest.
 - File/path candidates must accurately represent the underlying filesystem entry.
 - Regular files must not be presented as directories.
 - Directory candidates should use a trailing `/` so users can distinguish them from files.
+- Directory scans may be cached briefly while the user types, but cache staleness must be bounded and filesystem changes must eventually be observed.
 
 ### 10.2 Template/history matching
 
@@ -775,7 +777,7 @@ For command completion:
 - `completion.mode = "auto"` enables live completion hints while the user types.
 - `completion.mode = "tab"` disables live hints while typing; the first non-empty `Tab` starts completion and displays hints, and the next `Tab` accepts the visible inline suggestion or first ranked displayed/cached candidate.
 - `completion.mode = "off"` disables all Aish completion candidates, live completion UI, and non-empty `Tab` acceptance.
-- `completion.enabled` and `completion.inline` remain legacy compatibility fields. When `completion.mode` is absent, `enabled=false` maps to `off`, `enabled=true` with `inline=true` maps to `auto`, and `enabled=true` with `inline=false` maps to `tab`. When `completion.mode` is present, it is authoritative and Aish normalizes the legacy fields to match it.
+- `completion.enabled` and `completion.inline` remain legacy compatibility fields. When `completion.mode` is absent, `enabled=false` maps to `off`, `enabled=true` with `inline=true` maps to `auto`, and `enabled=true` with `inline=false` maps to `tab`. The legacy `inline=false` field selects tab-triggered completion; it does not disable the inline hint that can be shown after an explicit `Tab`. When `completion.mode` is present, it is authoritative and Aish normalizes the legacy fields to match it.
 - `completion.fuzzy = false` disables typo-correction/fuzzy work while preserving fast prefix, path, template, and structural history completion.
 - Template candidates are shown before history candidates.
 - History candidates are ordered newest to oldest.
@@ -786,7 +788,7 @@ For command completion:
 - Empty tokens and candidates with zero matching positions are not displayed.
 - `completion.match_threshold_percent` is a structural word-position match rate, not character-level typo correction. For example, `git stx` matches `git status --short` at one of two typed positions, so the default `50` threshold can show it.
 - Structural matches pass when the word-position match rate is greater than or equal to the configured threshold.
-- Typo correction is separate from structural matching and uses `completion.typo_threshold_percent`; the default threshold is `80`. Accepting a typo candidate replaces the whole mistyped command with the corrected template/history command.
+- Typo correction is separate from structural matching and uses `completion.typo_threshold_percent`; the default threshold is `80`. Accepting a typo candidate replaces the mistyped command with the corrected template/history command, or replaces the current path token with a corrected local directory path.
 - Generic prefix matching must not treat partial character overlap such as `stx` versus `status` as a match. That belongs to the typo tier.
 - A `# ` AI prompt must not trigger completion. A `#cmd` token may only show Aish private command candidates. Private command arguments and nested subcommands should use the same completion display and accept path as ordinary completion.
 
@@ -829,7 +831,7 @@ Inline suggestions:
 Below-prompt candidate panel:
 
 - `completion.max_results` controls only the number of rows displayed in the below-prompt panel.
-- When inline suggestions are enabled, the panel may update live while the user types and should skip the current inline candidate so the panel remains advisory.
+- When an inline suggestion is visible, the panel may update live while the user types and should skip the current inline candidate so the panel remains advisory.
 - Candidate rows must fit within the current terminal width and must not wrap.
 - Candidate rows should show the full command that would result from accepting the candidate.
 - Candidate row command text should align with the prompt input column when there is room for the source label before that column.
@@ -850,7 +852,7 @@ ignore_spaces = true
 template_first = true
 inline = true
 fuzzy = true
-tab_accept = "full" # "full" or "word"
+tab_accept = "word" # "full" or "word"
 match_threshold_percent = 50
 typo_threshold_percent = 80
 ```
@@ -1040,7 +1042,7 @@ ignore_spaces = true
 template_first = true
 inline = true
 fuzzy = true
-tab_accept = "full" # "full" or "word"
+tab_accept = "word" # "full" or "word"
 match_threshold_percent = 50
 typo_threshold_percent = 80
 

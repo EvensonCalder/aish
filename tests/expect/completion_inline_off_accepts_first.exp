@@ -1,6 +1,6 @@
 #!/usr/bin/env expect
-# With inline completion disabled, completion runs in Tab mode: the first Tab
-# displays the candidate and the second Tab accepts it.
+# With the legacy inline field disabled, completion runs in Tab mode: the first
+# Tab displays the candidate hint and the second Tab accepts it.
 
 set timeout 10
 source [file dirname [info script]]/_lib.exp
@@ -15,12 +15,19 @@ aish_wait_prompt
 
 aish_send "cat Cargo.t"
 aish_send "\t"
-aish_expect "> cat Cargo.t"
-aish_expect "cat Cargo.toml"
+aish_expect "> cat Cargo.toml"
+aish_send "X"
+aish_expect "> cat Cargo.tX"
+aish_send "\x03"
+aish_wait_prompt
+
+aish_send "cat Cargo.t"
 aish_send "\t"
 aish_expect "> cat Cargo.toml"
-
-aish_send "\x03"
+aish_send "\t"
+aish_expect "> cat Cargo.toml"
+aish_enter
+aish_expect "name = \"aish\""
 aish_wait_prompt
 
 aish_quit

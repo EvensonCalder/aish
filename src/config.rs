@@ -133,8 +133,8 @@ impl CompletionConfig {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CompletionTabAccept {
-    #[default]
     Full,
+    #[default]
     Word,
 }
 
@@ -154,7 +154,8 @@ impl<'de> Deserialize<'de> for CompletionTabAccept {
     {
         let value = String::deserialize(deserializer)?;
         match value.trim() {
-            "" | "full" => Ok(Self::Full),
+            "" => Ok(Self::Word),
+            "full" => Ok(Self::Full),
             "word" => Ok(Self::Word),
             other => Err(de::Error::invalid_value(
                 Unexpected::Str(other),
@@ -270,7 +271,7 @@ impl Default for CompletionConfig {
             template_first: true,
             inline: true,
             fuzzy: true,
-            tab_accept: CompletionTabAccept::Full,
+            tab_accept: CompletionTabAccept::Word,
             match_threshold_percent: 50,
             typo_threshold_percent: 80,
         }
@@ -500,7 +501,7 @@ mod tests {
         assert!(config.completion.inline);
         assert!(config.completion.fuzzy);
         assert_eq!(config.completion.mode(), CompletionMode::Auto);
-        assert_eq!(config.completion.tab_accept, CompletionTabAccept::Full);
+        assert_eq!(config.completion.tab_accept, CompletionTabAccept::Word);
         assert_eq!(config.completion.match_threshold_percent, 50);
         assert_eq!(config.completion.typo_threshold_percent, 80);
         assert_eq!(config.ai, AiConfig::default());
@@ -598,6 +599,7 @@ mod tests {
         expected.completion.typo_threshold_percent = 80;
         expected.completion.coalesce_ms = 50;
         expected.completion.display_delay_ms = 120;
+        expected.completion.tab_accept = CompletionTabAccept::Full;
         expected.sync = SyncConfig {
             remote: "git@example.invalid:aish.git".to_string(),
             enabled: true,
@@ -649,7 +651,7 @@ mod tests {
 
         let config: Config = toml::from_str(raw).unwrap();
 
-        assert_eq!(config.completion.tab_accept, CompletionTabAccept::Full);
+        assert_eq!(config.completion.tab_accept, CompletionTabAccept::Word);
     }
 
     #[test]

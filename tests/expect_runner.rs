@@ -284,6 +284,16 @@ fn completion_inline_off_accepts_first() {
 }
 
 #[test]
+fn completion_typo_correction_accepts_whole_command() {
+    run_script("completion_typo_correction_accepts_whole_command.exp");
+}
+
+#[test]
+fn completion_directory_typo_accepts_local_directory() {
+    run_script("completion_directory_typo_accepts_local_directory.exp");
+}
+
+#[test]
 fn completion_tab_accept_word() {
     run_script("completion_tab_accept_word.exp");
 }

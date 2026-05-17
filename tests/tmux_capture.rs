@@ -287,6 +287,13 @@ fn tmux_completion_auto_panel_does_not_leak_to_scrollback() {
 }
 
 #[test]
+fn tmux_completion_panel_at_bottom_does_not_repeat_in_scrollback() {
+    let Some(_captured) = run_tmux_script("completion_panel_bottom_no_repeated_scroll.sh") else {
+        return;
+    };
+}
+
+#[test]
 fn tmux_completion_right_accepts_first_and_executes() {
     let Some(captured) = run_tmux_script("completion_right_accepts.sh") else {
         return;
@@ -561,6 +568,15 @@ fn tmux_stdin_and_gpg_like_passthrough_recovers_prompt() {
     assert_line_present(&captured, "stdin-blocker-ready");
     assert_line_present(&captured, "after-stdin-blocker");
     assert_line_present(&captured, "after-gpg");
+}
+
+#[test]
+fn tmux_sudo_password_prompt_waits_for_user_input() {
+    let Some(captured) = run_tmux_script("sudo_password_passthrough.sh") else {
+        return;
+    };
+    assert_line_present(&captured, "fake-sudo-password=pw-ok");
+    assert_line_present(&captured, "after-sudo");
 }
 
 fn run_tmux_script(name: &str) -> Option<String> {

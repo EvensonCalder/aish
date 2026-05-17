@@ -4,7 +4,8 @@ const INTERACTIVE_ALLOWLIST: &[&str] = &[
     "vi", "vim", "nvim", "nano", "emacs", "hx", "helix", "kak", "less", "more", "man", "top",
     "htop", "btop", "ssh", "mosh", "sftp", "ftp", "telnet", "fzf", "tmux", "screen", "sh", "bash",
     "zsh", "fish", "python", "python3", "ipython", "node", "psql", "mysql", "sqlite3", "irb",
-    "pry", "ruby", "php", "perl", "lua", "R", "gdb", "lldb", "gpg", "gpg2", "pinentry",
+    "pry", "ruby", "php", "perl", "lua", "R", "gdb", "lldb", "gpg", "gpg2", "pinentry", "sudoedit",
+    "su", "passwd",
 ];
 
 const STDIN_FOREGROUND_COMMANDS: &[&str] = &[
@@ -18,13 +19,17 @@ pub fn is_interactive_passthrough_command(command: &str) -> bool {
 pub fn interactive_command_name(command: &str) -> Option<String> {
     let words = shell_words(command);
     let mut index = skip_assignments(&words, 0);
+    let mut privileged_fallback = None;
     loop {
-        let word = words.get(index)?;
+        let Some(word) = words.get(index) else {
+            return privileged_fallback;
+        };
         match basename(word).as_str() {
             "env" => {
                 index = skip_env_prefix(&words, index + 1);
             }
             "sudo" | "doas" => {
+                privileged_fallback = Some(basename(word));
                 index = skip_sudo_prefix(&words, index + 1);
             }
             "command" | "exec" => {
@@ -34,7 +39,7 @@ pub fn interactive_command_name(command: &str) -> Option<String> {
             name if should_foreground_stdin_command(name, command) => {
                 return Some(name.to_string());
             }
-            _ => return None,
+            _ => return privileged_fallback,
         }
     }
 }
@@ -281,6 +286,28 @@ mod tests {
         assert_eq!(
             interactive_command_name("exec nvim"),
             Some("nvim".to_string())
+        );
+    }
+
+    #[test]
+    fn sudo_and_doas_fallback_to_foreground_for_password_prompts() {
+        for (command, expected) in [
+            ("sudo whoami", "sudo"),
+            ("sudo -E true", "sudo"),
+            ("sudo -u root whoami", "sudo"),
+            ("sudo", "sudo"),
+            ("env PATH=/bin sudo true", "sudo"),
+            ("doas whoami", "doas"),
+        ] {
+            assert_eq!(
+                interactive_command_name(command),
+                Some(expected.to_string()),
+                "{command}"
+            );
+        }
+        assert_eq!(
+            interactive_command_name("sudo -E vim file"),
+            Some("vim".to_string())
         );
     }
 

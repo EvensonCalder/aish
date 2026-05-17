@@ -1,0 +1,35 @@
+#!/usr/bin/env expect
+# Directory typo completion must work in the real PTY path, not only in pure
+# completion helpers.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set workdir "/tmp/aish-dir-typo-[pid]-[clock clicks]"
+file delete -force $workdir
+file mkdir $workdir
+file mkdir "$workdir/src"
+
+aish_spawn
+
+aish_send "cd $workdir"
+aish_enter
+aish_wait_prompt
+
+aish_send "#completion mode tab"
+aish_enter
+aish_expect "completion.mode=tab"
+aish_wait_prompt
+
+aish_send "cat ./srd"
+aish_send "\t"
+aish_expect "dir"
+aish_expect "cat ./src/"
+aish_send "\t"
+aish_expect "> cat ./src/"
+aish_send "\x03"
+aish_wait_prompt
+
+aish_quit
+
+file delete -force $workdir
