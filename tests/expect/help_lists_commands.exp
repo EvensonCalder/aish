@@ -15,12 +15,22 @@ aish_expect {#help [topic]}
 aish_expect "Private commands:"
 aish_expect "#status"
 aish_expect "#doctor"
+aish_expect {#paste [subcommand]}
 aish_expect {#completion [subcommand]}
 aish_expect "Keybindings:"
 aish_expect "Tab - empty draft cycles modes"
 aish_expect "AI and notes:"
 aish_expect "# <prompt> - send an AI prompt"
+aish_expect "Paste help"
 aish_expect "Completion help"
+aish_wait_prompt
+
+aish_send "#help paste"
+aish_enter
+
+aish_expect "Paste help"
+aish_expect "#paste preview on|off"
+aish_expect "#paste preview-lines <1-20>"
 aish_wait_prompt
 
 aish_send "#help completion"

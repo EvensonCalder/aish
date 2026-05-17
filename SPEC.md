@@ -450,7 +450,7 @@ Multi-line paste:
 - Must not execute by default.
 - Default behavior creates an opaque editor draft using the pasted content.
 - Alternative behavior can be direct execution after warning.
-- Paste preview is future work. It should show bounded preview content before execution without placing raw multi-line paste inline in the draft prompt.
+- Paste preview shows bounded, escaped preview content below the opaque draft summary without placing raw multi-line paste inline in the draft prompt.
 
 Config:
 
@@ -458,6 +458,9 @@ Config:
 [paste]
 multiline = "editor"       # editor | execute | discard
 confirm_execute = true
+preview = true
+preview_lines = 3
+preview_bytes = 240
 ```
 
 `multiline = "editor"`:
@@ -467,6 +470,7 @@ confirm_execute = true
 3. `Ctrl-X Ctrl-E` can reopen the content in the external editor.
 4. `Enter` submits the raw editor draft to the backend shell.
 5. Do not auto-execute on paste.
+6. If `preview = true`, show an escaped preview capped by `preview_lines` and `preview_bytes`.
 
 `multiline = "execute"`:
 
@@ -1268,7 +1272,7 @@ Behavior:
 Initial command set:
 
 ```text
-#help [commands|keys|ai|completion|templates|sync|encryption|config]
+#help [commands|keys|ai|paste|completion|templates|sync|encryption|config]
 #status
 #config
 #doctor
@@ -1288,6 +1292,12 @@ Initial command set:
 #context on|off
 #context <bytes>
 #context confirm on|off
+
+#paste multiline editor|execute|discard
+#paste confirm on|off
+#paste preview on|off
+#paste preview-lines <1-20>
+#paste preview-bytes <1-4096>
 
 #completion on|off
 #completion mode auto|tab|off
@@ -1325,7 +1335,7 @@ Initial command set:
 ```
 
 `#help` must print grouped in-terminal help for private commands, keybindings,
-AI prompt forms, notes, completion, templates, sync, encryption, and
+AI prompt forms, notes, paste review, completion, templates, sync, encryption, and
 configuration/diagnostics. `#help <topic>` prints only that topic. Unknown help
 topics must show a usage line and must not reach the backend shell.
 

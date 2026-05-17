@@ -21,7 +21,9 @@ mod reports;
 mod sync_commands;
 mod template_args;
 
-use config_commands::{update_ai_config_field, update_completion_config, update_context_config};
+use config_commands::{
+    update_ai_config_field, update_completion_config, update_context_config, update_paste_config,
+};
 use encryption_commands::{
     ai_config_for_request, clear_stored_key, configured_encryption_key, parse_key_command,
     set_stored_key, update_encryption_config,

@@ -60,6 +60,9 @@ pub struct EditorConfig {
 pub struct PasteConfig {
     pub multiline: String,
     pub confirm_execute: bool,
+    pub preview: bool,
+    pub preview_lines: usize,
+    pub preview_bytes: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -255,6 +258,9 @@ impl Default for PasteConfig {
         Self {
             multiline: "editor".to_string(),
             confirm_execute: true,
+            preview: true,
+            preview_lines: 3,
+            preview_bytes: 240,
         }
     }
 }

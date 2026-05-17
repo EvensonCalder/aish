@@ -31,7 +31,6 @@ Explicitly incomplete:
 - Async encrypted-history unlock and dedicated GPG/pinentry unlock passthrough remain future work; direct GPG decrypt operations temporarily yield the terminal to `gpg-agent`/pinentry for passphrase entry.
 - Future scheduled background events are not implemented yet; current background work is limited to tick-driven refresh and serialized encrypted writes.
 - Full automatic passthrough for arbitrary interactive programs remains future work; Aish currently uses an allowlist and tested stdin-command handling.
-- Paste preview remains future work; multiline paste currently uses the editor-review flow described below.
 
 ## Quickstart
 
@@ -201,7 +200,7 @@ Commands:
 
 Line-leading `#` is handled by Aish and is not accidentally sent to the backend shell.
 
-Use `#help` for grouped in-terminal help, or `#help commands|keys|ai|completion|templates|sync|encryption|config` for a specific topic.
+Use `#help` for grouped in-terminal help, or `#help commands|keys|ai|paste|completion|templates|sync|encryption|config` for a specific topic.
 
 Diagnostics and status:
 
@@ -248,6 +247,17 @@ Completion:
 #completion tab-accept full|word
 #completion match-threshold <0-100>
 #completion typo-threshold <0-100>
+```
+
+Paste review:
+
+```text
+#paste
+#paste multiline editor|execute|discard
+#paste confirm on|off
+#paste preview on|off
+#paste preview-lines <1-20>
+#paste preview-bytes <1-4096>
 ```
 
 Context:
@@ -352,7 +362,18 @@ Saved editor content returns as an opaque editor draft. It is not executed until
 
 For AI prompts, type `# ` and press `Enter` to open the editor for a multi-line AI instruction. `Ctrl-X Ctrl-E` on an existing `# ...` prompt opens the same AI prompt editor and preserves the current prompt body. The returned draft shows an AI prompt summary; pressing `Enter` sends it to the AI pipeline rather than to the backend shell.
 
-Multiline paste defaults to editor-review behavior. Aish shows a compact draft summary instead of rendering the full pasted content inline. This prevents accidental execution and keeps the prompt usable. Editor-returned content is submitted as raw shell input when explicitly executed, even if it contains line-leading `#`.
+Multiline paste defaults to editor-review behavior. Aish shows a compact draft summary and a bounded escaped preview instead of rendering the full pasted content inline. This prevents accidental execution and keeps the prompt usable. `Ctrl-X Ctrl-E` opens the full pasted content in the editor, and `Enter` submits the raw editor draft as shell input even if it contains line-leading `#`.
+
+Paste preview is controlled by:
+
+```toml
+[paste]
+multiline = "editor"       # editor | execute | discard
+confirm_execute = true
+preview = true
+preview_lines = 3
+preview_bytes = 240
+```
 
 ## Templates
 
@@ -565,7 +586,7 @@ The app module root in `src/app.rs` wires together focused runtime modules:
 - `src/app/state.rs`: `AppState`, output ring state, draft/history/template state transitions, and encrypted writer lifecycle.
 - `src/app/bootstrap.rs`: startup layout/config/history/template loading and terminal launch.
 - `src/app/completion_runtime.rs`: AppState completion request/cache orchestration.
-- `src/app/config_commands.rs`: `#model`, `#base-url`, `#env-key`, `#context`, and `#completion` config mutations.
+- `src/app/config_commands.rs`: `#model`, `#base-url`, `#env-key`, `#context`, `#paste`, and `#completion` config mutations.
 - `src/app/context_prompt.rs`: AI prompt submission, context collection confirmation, and contextual prompt building.
 - `src/app/encryption_commands.rs`: GPG key storage, `#encrypt`, current-storage rotation, and confirmed history rewrite.
 - `src/app/execution.rs`: draft submission, command execution, foreground passthrough, PTY output forwarding, and command recording.

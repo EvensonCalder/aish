@@ -41,6 +41,9 @@ mod tests {
         assert!(!config.editor.execute_after_save);
         assert_eq!(config.paste.multiline, "editor");
         assert!(config.paste.confirm_execute);
+        assert!(config.paste.preview);
+        assert_eq!(config.paste.preview_lines, 3);
+        assert_eq!(config.paste.preview_bytes, 240);
         assert_eq!(config.completion.max_results, 5);
         assert!(config.completion.enabled);
         assert_eq!(config.completion.coalesce_ms, 50);
@@ -82,6 +85,9 @@ mod tests {
             paste: PasteConfig {
                 multiline: "unknown".to_string(),
                 confirm_execute: true,
+                preview: true,
+                preview_lines: 0,
+                preview_bytes: 4_097,
             },
             completion: CompletionConfig {
                 mode: None,

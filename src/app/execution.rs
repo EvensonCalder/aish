@@ -174,6 +174,7 @@ pub(crate) fn record_completed_command(
         state.draft_from_editor = false;
         state.draft_from_ai_editor = false;
         state.draft_from_template = false;
+        state.draft_has_paste_preview = false;
     } else {
         state.clear_draft_for_new_draft();
     }

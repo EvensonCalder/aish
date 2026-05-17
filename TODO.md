@@ -8,7 +8,7 @@ Status as of the latest full review:
 
 - Core interactive shell wrapper is implemented: PTY backend, raw terminal input, draft editing, continuation handling, history/AI modes, private command parsing, editor/paste flows, templates, completion, picker boundaries, AI request plumbing, context pseudo-pipe, event log, and diagnostics.
 - Rust unit/integration coverage and expect-driven real terminal coverage both exist for the implemented interactive behaviors. New user-facing terminal behavior should continue to receive both Rust-level and expect-level coverage.
-- Large intentionally incomplete areas remain: configurable key rebinding, async encrypted-history unlock UI, dedicated GPG/pinentry unlock passthrough, future scheduled background event sources, robust automatic passthrough for arbitrary interactive commands, and paste preview.
+- Large intentionally incomplete areas remain: configurable key rebinding, async encrypted-history unlock UI, dedicated GPG/pinentry unlock passthrough, future scheduled background event sources, and robust automatic passthrough for arbitrary interactive commands.
 - GPG-backed secrets and encrypted history/template storage are implemented. Startup decrypt is still synchronous; normal encrypted JSONL appends now use a serialized background writer, and direct GPG decrypt operations temporarily leave raw mode for pinentry until the future dedicated UnlockPassthrough work lands.
 - The remaining unchecked items below are the source of truth for future work; do not skip them just because adjacent scaffolding exists.
 
@@ -396,10 +396,12 @@ Status as of the latest full review:
   - [x] `execute`
   - [x] `discard`
 - [x] Represent paste review as opaque editor draft.
-- [ ] Add paste preview UI.
-  - [ ] Preview pasted content before execution without placing the raw content inline.
-  - [ ] Keep preview rendering bounded for large pastes.
-  - [ ] Preserve the current safe default: no silent multi-line execution.
+- [x] Add paste preview UI.
+  - [x] Preview pasted content before execution without placing the raw content inline.
+  - [x] Keep preview rendering bounded for large pastes.
+  - [x] Preserve the current safe default: no silent multi-line execution.
+  - [x] Escape control characters in preview output so pasted bytes cannot control the terminal.
+  - [x] Add `#paste` commands for preview and multiline paste configuration.
 - [x] Add safe execute confirmation behavior using editor draft when configured.
 - [x] Ensure multi-line paste enters opaque editor draft by default without execution.
 - [x] Implement raw submission to backend shell.
@@ -808,7 +810,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 
 - A new user can run `#doctor` and understand setup problems.
 - `#status` shows final request URL and key source without leaking the key.
-- `#help` lists private commands, keybindings, AI forms, notes, completion, templates, sync, encryption, and config/diagnostic topics.
+- `#help` lists private commands, keybindings, AI forms, notes, paste review, completion, templates, sync, encryption, and config/diagnostic topics.
 
 ---
 

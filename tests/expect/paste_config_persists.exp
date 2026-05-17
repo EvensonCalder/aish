@@ -1,0 +1,40 @@
+#!/usr/bin/env expect
+# #paste should persist multiline paste preview settings and affect real paste UI.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "#paste"
+aish_enter
+aish_expect "paste.preview=true"
+aish_expect "paste.preview_lines=3"
+aish_expect "paste.preview_bytes=240"
+aish_wait_prompt
+
+aish_send "#paste preview-lines 1"
+aish_enter
+aish_expect "paste.preview_lines=1"
+aish_wait_prompt
+
+aish_send "#paste preview-bytes 16"
+aish_enter
+aish_expect "paste.preview_bytes=16"
+aish_wait_prompt
+
+aish_send "\x1b\[200~echo paste-preview-one\necho paste-preview-two\x1b\[201~"
+aish_expect "paste preview:"
+aish_expect "echo paste-previ"
+aish_expect "preview truncated"
+aish_enter
+aish_expect "paste-preview-one"
+aish_expect "paste-preview-two"
+aish_wait_prompt
+
+aish_send "#paste preview off"
+aish_enter
+aish_expect "paste.preview=false"
+aish_wait_prompt
+
+aish_quit

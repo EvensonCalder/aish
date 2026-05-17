@@ -23,6 +23,12 @@ pub fn normalize_config(config: &mut Config) {
     ) {
         config.paste.multiline = PasteConfig::default().multiline;
     }
+    if config.paste.preview_lines == 0 || config.paste.preview_lines > 20 {
+        config.paste.preview_lines = PasteConfig::default().preview_lines;
+    }
+    if config.paste.preview_bytes == 0 || config.paste.preview_bytes > 4_096 {
+        config.paste.preview_bytes = PasteConfig::default().preview_bytes;
+    }
     if config.completion.max_results == 0 {
         config.completion.max_results = CompletionConfig::default().max_results;
     }

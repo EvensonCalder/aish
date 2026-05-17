@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use crate::config::PromptConfig;
 use crate::display_width::display_width;
 use crate::modes::Mode;
+use crate::paste;
 
 use super::AppState;
 
@@ -88,11 +89,16 @@ impl AppState {
             Mode::History => self.selected_history_command().unwrap_or(""),
             Mode::Ai => self.selected_ai_command().unwrap_or(""),
             Mode::Draft if self.draft_from_editor => {
-                return format!(
+                let mut rendered = format!(
                     "{}{}",
                     self.prompt_prefix(),
                     self.editor_draft_summary_for_terminal()
                 );
+                if let Some(preview) = self.paste_preview_for_terminal() {
+                    rendered.push('\n');
+                    rendered.push_str(&preview);
+                }
+                return rendered;
             }
             _ => self.draft.as_str(),
         };
@@ -194,6 +200,33 @@ impl AppState {
         } else {
             format!("[draft: {lines} {line_label}, {bytes} bytes; Enter run, Ctrl-X Ctrl-E edit]")
         }
+    }
+
+    fn paste_preview_for_terminal(&self) -> Option<String> {
+        if !self.draft_has_paste_preview
+            || !self.paste_config.preview
+            || self.draft_from_ai_editor
+            || self.draft.is_empty()
+        {
+            return None;
+        }
+
+        let lines = paste::preview_lines(
+            self.draft.as_str(),
+            self.paste_config.preview_lines,
+            self.paste_config.preview_bytes,
+        );
+        if lines.is_empty() {
+            return None;
+        }
+
+        let mut rendered = String::from("paste preview:");
+        for line in lines {
+            rendered.push('\n');
+            rendered.push_str("  ");
+            rendered.push_str(&line);
+        }
+        Some(rendered)
     }
 }
 

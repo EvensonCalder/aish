@@ -1381,7 +1381,10 @@ fn private_help_prints_available_commands() {
     assert!(output.contains("Usage:"));
     assert!(output.contains("#help [topic]"));
     assert!(output.contains("Topics:"));
-    assert!(output.contains("commands, keys, ai, completion, templates, sync, encryption, config"));
+    assert!(
+        output
+            .contains("commands, keys, ai, paste, completion, templates, sync, encryption, config")
+    );
     assert!(output.contains("Private commands:"));
     assert!(output.contains("#help"));
     assert!(output.contains("#status"));
@@ -1393,6 +1396,7 @@ fn private_help_prints_available_commands() {
     assert!(output.contains("#env-key"));
     assert!(output.contains("#key"));
     assert!(output.contains("#context"));
+    assert!(output.contains("#paste"));
     assert!(output.contains("#completion"));
     assert!(output.contains("#log"));
     assert!(output.contains("#editor"));
@@ -1459,11 +1463,9 @@ fn private_help_rejects_unknown_topic_without_running_shell() {
 
     let output = String::from_utf8(output).unwrap();
     assert!(output.contains("unknown help topic: unknown-topic"));
-    assert!(
-        output.contains(
-            "usage: #help [commands|keys|ai|completion|templates|sync|encryption|config]"
-        )
-    );
+    assert!(output.contains(
+        "usage: #help [commands|keys|ai|paste|completion|templates|sync|encryption|config]"
+    ));
     assert!(state.draft.is_empty());
 }
 
@@ -1561,6 +1563,136 @@ fn private_context_rejects_invalid_usage_without_persisting() {
     assert_eq!(
         config::load_config(&config_path).unwrap().context,
         ContextConfig::default()
+    );
+}
+
+#[test]
+fn private_paste_reports_current_config() {
+    let mut state = AppState::default();
+    state.draft.insert_str("#paste");
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.contains("paste.multiline=editor"));
+    assert!(output.contains("paste.confirm_execute=true"));
+    assert!(output.contains("paste.preview=true"));
+    assert!(output.contains("paste.preview_lines=3"));
+    assert!(output.contains("paste.preview_bytes=240"));
+    assert_eq!(state.last_status, None);
+    assert!(state.draft.is_empty());
+}
+
+#[test]
+fn private_paste_commands_persist_config() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.toml");
+    config::save_config(&config_path, &config::Config::default()).unwrap();
+    let mut state = AppState {
+        config_path: Some(config_path.clone()),
+        ..AppState::default()
+    };
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+
+    for (line, expected) in [
+        ("#paste multiline execute", "paste.multiline=execute"),
+        ("#paste confirm off", "paste.confirm_execute=false"),
+        ("#paste preview off", "paste.preview=false"),
+        ("#paste preview-lines 5", "paste.preview_lines=5"),
+        ("#paste preview-bytes 512", "paste.preview_bytes=512"),
+        ("#paste confirm-execute on", "paste.confirm_execute=true"),
+    ] {
+        state.draft.insert_str(line);
+        let mut output = Vec::new();
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(
+            output.contains(expected),
+            "missing {expected:?} in {output:?}"
+        );
+        assert!(state.draft.is_empty());
+    }
+
+    assert_eq!(state.paste_config.multiline, "execute");
+    assert!(state.paste_config.confirm_execute);
+    assert!(!state.paste_config.preview);
+    assert_eq!(state.paste_config.preview_lines, 5);
+    assert_eq!(state.paste_config.preview_bytes, 512);
+    let loaded = config::load_config(&config_path).unwrap();
+    assert_eq!(loaded.paste, state.paste_config);
+}
+
+#[test]
+fn private_paste_rejects_invalid_usage_without_persisting() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.toml");
+    config::save_config(&config_path, &config::Config::default()).unwrap();
+    let mut state = AppState {
+        config_path: Some(config_path.clone()),
+        ..AppState::default()
+    };
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+
+    for (line, expected) in [
+        (
+            "#paste multiline raw",
+            "usage: #paste multiline editor|execute|discard",
+        ),
+        ("#paste preview maybe", "usage: #paste preview on|off"),
+        (
+            "#paste preview-lines 0",
+            "paste preview lines must be between 1 and 20",
+        ),
+        (
+            "#paste preview-lines nope",
+            "usage: #paste preview-lines <1-20>",
+        ),
+        (
+            "#paste preview-bytes 4097",
+            "paste preview bytes must be between 1 and 4096",
+        ),
+        (
+            "#paste preview-bytes nope",
+            "usage: #paste preview-bytes <1-4096>",
+        ),
+    ] {
+        state.draft.insert_str(line);
+        let mut output = Vec::new();
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(
+            output.contains(expected),
+            "missing {expected:?} in {output:?}"
+        );
+        assert!(state.draft.is_empty());
+    }
+
+    assert_eq!(state.paste_config, config::PasteConfig::default());
+    assert_eq!(
+        config::load_config(&config_path).unwrap().paste,
+        config::PasteConfig::default()
     );
 }
 
@@ -3655,6 +3787,9 @@ fn private_config_prints_read_only_runtime_config() {
     assert!(output.contains("editor.command=nvim --clean"));
     assert!(output.contains("paste.multiline=editor"));
     assert!(output.contains("paste.confirm_execute=true"));
+    assert!(output.contains("paste.preview=true"));
+    assert!(output.contains("paste.preview_lines=3"));
+    assert!(output.contains("paste.preview_bytes=240"));
     assert!(output.contains("completion.enabled=true"));
     assert!(output.contains("completion.mode=tab"));
     assert!(output.contains("completion.max_results=8"));

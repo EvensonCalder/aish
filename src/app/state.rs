@@ -114,6 +114,7 @@ pub struct AppState {
     pub draft_from_editor: bool,
     pub draft_from_ai_editor: bool,
     pub draft_from_template: bool,
+    pub draft_has_paste_preview: bool,
     pub ctrl_x_prefix: bool,
     pub clock: fn() -> i64,
 }
@@ -201,6 +202,7 @@ impl Default for AppState {
             draft_from_editor: false,
             draft_from_ai_editor: false,
             draft_from_template: false,
+            draft_has_paste_preview: false,
             ctrl_x_prefix: false,
             clock: unix_timestamp,
         }
@@ -266,6 +268,7 @@ impl AppState {
         self.draft_from_editor = false;
         self.draft_from_ai_editor = false;
         self.draft_from_template = false;
+        self.draft_has_paste_preview = false;
         self.mode = Mode::Draft;
         true
     }
@@ -320,6 +323,7 @@ impl AppState {
         self.draft_from_editor = false;
         self.draft_from_ai_editor = false;
         self.draft_from_template = false;
+        self.draft_has_paste_preview = false;
         self.mode = Mode::Draft;
         true
     }
@@ -343,6 +347,7 @@ impl AppState {
         self.draft_from_editor = false;
         self.draft_from_ai_editor = false;
         self.draft_from_template = false;
+        self.draft_has_paste_preview = false;
         self.selected_draft_index = None;
         self.clear_completion_ui();
     }
@@ -409,6 +414,7 @@ impl AppState {
         self.draft_from_editor = false;
         self.draft_from_ai_editor = false;
         self.draft_from_template = false;
+        self.draft_has_paste_preview = false;
         self.mode = Mode::Draft;
         self.clear_completion_ui();
         Ok(true)
@@ -445,11 +451,13 @@ impl AppState {
         session: &PreparedEditorSession,
     ) -> Result<()> {
         let content = normalize_editor_draft_content(&read_editor_file(session)?);
+        let keep_paste_preview = self.draft_has_paste_preview;
         self.draft = InputBuffer::from(content);
         self.selected_draft_index = None;
         self.draft_from_editor = !self.draft.is_empty();
         self.draft_from_ai_editor = false;
         self.draft_from_template = false;
+        self.draft_has_paste_preview = keep_paste_preview && self.draft_from_editor;
         self.mode = Mode::Draft;
         Ok(())
     }
@@ -464,6 +472,7 @@ impl AppState {
         self.draft_from_editor = !self.draft.is_empty();
         self.draft_from_ai_editor = !self.draft.is_empty();
         self.draft_from_template = false;
+        self.draft_has_paste_preview = false;
         self.mode = Mode::Draft;
         Ok(())
     }
@@ -501,6 +510,18 @@ impl AppState {
         self.draft_from_editor = !self.draft.is_empty();
         self.draft_from_ai_editor = false;
         self.draft_from_template = false;
+        self.draft_has_paste_preview = false;
+        self.mode = Mode::Draft;
+    }
+
+    pub fn replace_draft_from_paste_text(&mut self, content: impl Into<String>) {
+        let content = normalize_editor_draft_content(&content.into());
+        self.draft = InputBuffer::from(content);
+        self.selected_draft_index = None;
+        self.draft_from_editor = !self.draft.is_empty();
+        self.draft_from_ai_editor = false;
+        self.draft_from_template = false;
+        self.draft_has_paste_preview = self.draft_from_editor;
         self.mode = Mode::Draft;
     }
 
@@ -544,6 +565,7 @@ impl AppState {
         self.draft_from_editor = false;
         self.draft_from_ai_editor = false;
         self.draft_from_template = false;
+        self.draft_has_paste_preview = false;
         self.mode = Mode::Draft;
     }
 
@@ -563,6 +585,7 @@ impl AppState {
         self.draft_from_editor = false;
         self.draft_from_ai_editor = false;
         self.draft_from_template = true;
+        self.draft_has_paste_preview = false;
         self.mode = Mode::Draft;
         Ok(true)
     }

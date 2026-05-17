@@ -3,7 +3,9 @@ use std::io::Write;
 use anyhow::Result;
 
 use crate::ai::normalize_chat_completions_url;
-use crate::config::{self, CompletionConfig, CompletionMode, CompletionTabAccept, ContextConfig};
+use crate::config::{
+    self, CompletionConfig, CompletionMode, CompletionTabAccept, ContextConfig, PasteConfig,
+};
 use crate::log::EventLevel;
 
 use super::AppState;
@@ -136,6 +138,115 @@ fn write_context_config(out: &mut impl Write, config: &ContextConfig) -> Result<
         "context.enabled={} context.confirm={} context.max_bytes={}",
         config.enabled, config.confirm, config.max_bytes
     )?;
+    Ok(())
+}
+
+pub(super) fn update_paste_config(
+    state: &mut AppState,
+    out: &mut impl Write,
+    args: &str,
+) -> Result<()> {
+    let mut parts = args.split_whitespace();
+    match (parts.next(), parts.next(), parts.next()) {
+        (None, None, None) => write_paste_config(out, &state.paste_config),
+        (Some("multiline"), Some(value), None) => {
+            if !matches!(value, "editor" | "execute" | "discard") {
+                writeln!(out, "usage: #paste multiline editor|execute|discard")?;
+                return Ok(());
+            }
+            set_paste_config(state, out, |config| {
+                config.paste.multiline = value.to_string();
+                Ok(())
+            })
+        }
+        (Some("confirm" | "confirm-execute"), Some(value), None) => {
+            let Some(confirm) = parse_on_off(value) else {
+                writeln!(out, "usage: #paste confirm on|off")?;
+                return Ok(());
+            };
+            set_paste_config(state, out, |config| {
+                config.paste.confirm_execute = confirm;
+                Ok(())
+            })
+        }
+        (Some("preview"), Some(value), None) => {
+            let Some(preview) = parse_on_off(value) else {
+                writeln!(out, "usage: #paste preview on|off")?;
+                return Ok(());
+            };
+            set_paste_config(state, out, |config| {
+                config.paste.preview = preview;
+                Ok(())
+            })
+        }
+        (Some("preview-lines"), Some(value), None) => {
+            let Ok(lines) = value.parse::<usize>() else {
+                writeln!(out, "usage: #paste preview-lines <1-20>")?;
+                return Ok(());
+            };
+            if !(1..=20).contains(&lines) {
+                writeln!(out, "paste preview lines must be between 1 and 20")?;
+                return Ok(());
+            }
+            set_paste_config(state, out, |config| {
+                config.paste.preview_lines = lines;
+                Ok(())
+            })
+        }
+        (Some("preview-bytes"), Some(value), None) => {
+            let Ok(bytes) = value.parse::<usize>() else {
+                writeln!(out, "usage: #paste preview-bytes <1-4096>")?;
+                return Ok(());
+            };
+            if !(1..=4_096).contains(&bytes) {
+                writeln!(out, "paste preview bytes must be between 1 and 4096")?;
+                return Ok(());
+            }
+            set_paste_config(state, out, |config| {
+                config.paste.preview_bytes = bytes;
+                Ok(())
+            })
+        }
+        _ => writeln!(
+            out,
+            "usage: #paste multiline editor|execute|discard|confirm on|off|preview on|off|preview-lines <1-20>|preview-bytes <1-4096>"
+        )
+        .map_err(Into::into),
+    }
+}
+
+fn set_paste_config(
+    state: &mut AppState,
+    out: &mut impl Write,
+    update: impl FnOnce(&mut config::Config) -> Result<()>,
+) -> Result<()> {
+    let Some(path) = &state.config_path else {
+        writeln!(out, "config path is not configured; #paste not saved")?;
+        return Ok(());
+    };
+    let mut config = match config::load_config(path) {
+        Ok(config) => config,
+        Err(err) => {
+            state.append_event(EventLevel::Error, "config error")?;
+            return Err(err);
+        }
+    };
+    update(&mut config)?;
+    config::normalize_config(&mut config);
+    if let Err(err) = config::save_config(path, &config) {
+        state.append_event(EventLevel::Error, "config error")?;
+        return Err(err);
+    }
+    state.paste_config = config.paste;
+    write_paste_config(out, &state.paste_config)
+}
+
+fn write_paste_config(out: &mut impl Write, config: &PasteConfig) -> Result<()> {
+    writeln!(out, "paste.multiline={}", config.multiline)?;
+    writeln!(out, "paste.confirm_execute={}", config.confirm_execute)?;
+    writeln!(out, "paste.preview={}", config.preview)?;
+    writeln!(out, "paste.preview_lines={}", config.preview_lines)?;
+    writeln!(out, "paste.preview_bytes={}", config.preview_bytes)?;
     Ok(())
 }
 

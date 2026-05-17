@@ -853,6 +853,31 @@ fn private_command_completion_includes_nested_arguments() {
             .any(|candidate| candidate.replacement == "display-delay-ms")
     );
 
+    let paste_candidates = complete_private_command_line("#paste ", "#paste ".len(), usize::MAX);
+    assert_eq!(
+        paste_candidates
+            .iter()
+            .map(|candidate| candidate.replacement.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "multiline",
+            "confirm",
+            "confirm-execute",
+            "preview",
+            "preview-lines",
+            "preview-bytes"
+        ]
+    );
+    let paste_preview_candidates =
+        complete_private_command_line("#paste preview ", "#paste preview ".len(), usize::MAX);
+    assert_eq!(
+        paste_preview_candidates
+            .iter()
+            .map(|candidate| candidate.replacement.as_str())
+            .collect::<Vec<_>>(),
+        ["on", "off"]
+    );
+
     let prompt_candidates = complete_private_command_line("#prompt ", "#prompt ".len(), usize::MAX);
     assert_eq!(
         prompt_candidates
@@ -905,6 +930,7 @@ fn private_command_completion_includes_nested_arguments() {
             "commands",
             "keys",
             "ai",
+            "paste",
             "completion",
             "templates",
             "sync",

@@ -11,6 +11,9 @@ aish_send "\x1b\[200~echo paste-one\necho paste-two\x1b\[201~"
 aish_expect "\[draft: 2 lines"
 aish_expect "Enter run"
 aish_expect "Ctrl-X Ctrl-E edit"
+aish_expect "paste preview:"
+aish_expect "echo paste-one"
+aish_expect "echo paste-two"
 
 aish_enter
 aish_expect "paste-one"

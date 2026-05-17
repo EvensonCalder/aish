@@ -14,8 +14,8 @@ use super::{
     parse_template_values, prompt_command, run_manual_sync_push, set_stored_key, set_sync_remote,
     set_sync_schedule, show_event_log, template_usage, trim_history_for_state,
     update_ai_config_field, update_completion_config, update_context_config,
-    update_encryption_config, write_config_report, write_doctor_report, write_editor_report,
-    write_status_report,
+    update_encryption_config, update_paste_config, write_config_report, write_doctor_report,
+    write_editor_report, write_status_report,
 };
 
 pub(super) fn execute_private_command(
@@ -42,6 +42,7 @@ pub(super) fn execute_private_command(
             _ => writeln!(out, "usage: #key set | #key clear")?,
         },
         "context" => update_context_config(state, out, args)?,
+        "paste" => update_paste_config(state, out, args)?,
         "completion" => update_completion_config(state, out, args)?,
         "log" => show_event_log(state, out, args)?,
         "editor" => write_editor_report(state, out)?,
@@ -240,6 +241,7 @@ fn template_use_command(state: &mut AppState, out: &mut impl Write, args: &str) 
                     state.draft_from_editor = false;
                     state.draft_from_ai_editor = false;
                     state.draft_from_template = true;
+                    state.draft_has_paste_preview = false;
                     writeln!(out, "template copied to draft: {}", template.id())?;
                     let placeholders = template_placeholders(&template.body);
                     if !placeholders.is_empty() {

@@ -163,6 +163,17 @@ pub(super) fn write_config_report(state: &AppState, out: &mut impl Write) -> Res
         "paste.confirm_execute={}",
         state.paste_config.confirm_execute
     )?;
+    writeln!(out, "paste.preview={}", state.paste_config.preview)?;
+    writeln!(
+        out,
+        "paste.preview_lines={}",
+        state.paste_config.preview_lines
+    )?;
+    writeln!(
+        out,
+        "paste.preview_bytes={}",
+        state.paste_config.preview_bytes
+    )?;
     write_prompt_config(out, &state.prompt_templates)?;
     write_completion_config_lines(out, &state.completion_config)?;
     writeln!(out, "ai.model={}", config_value(&state.ai_config.model))?;

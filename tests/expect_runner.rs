@@ -579,6 +579,11 @@ fn multiline_paste_editor_review() {
 }
 
 #[test]
+fn paste_config_persists() {
+    run_script("paste_config_persists.exp");
+}
+
+#[test]
 fn home_default_multiline_paste_editor_review() {
     run_script("home_default_multiline_paste_editor_review.exp");
 }

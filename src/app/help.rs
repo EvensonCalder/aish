@@ -12,7 +12,7 @@ struct HelpEntry {
 }
 
 const HELP_USAGE: &str =
-    "usage: #help [commands|keys|ai|completion|templates|sync|encryption|config]";
+    "usage: #help [commands|keys|ai|paste|completion|templates|sync|encryption|config]";
 
 const COMMAND_HELP: &[HelpEntry] = &[
     HelpEntry {
@@ -54,6 +54,10 @@ const COMMAND_HELP: &[HelpEntry] = &[
     HelpEntry {
         usage: "#context [on|off|confirm on|confirm off|<bytes>]",
         description: "show or update context capture settings",
+    },
+    HelpEntry {
+        usage: "#paste [subcommand]",
+        description: "show or update multiline paste review and preview settings",
     },
     HelpEntry {
         usage: "#completion [subcommand]",
@@ -203,6 +207,33 @@ const COMPLETION_HELP: &[HelpEntry] = &[
     },
 ];
 
+const PASTE_HELP: &[HelpEntry] = &[
+    HelpEntry {
+        usage: "#paste",
+        description: "show paste settings",
+    },
+    HelpEntry {
+        usage: "#paste multiline editor|execute|discard",
+        description: "choose how multiline paste is handled",
+    },
+    HelpEntry {
+        usage: "#paste confirm on|off",
+        description: "require explicit Enter before execute-mode paste runs",
+    },
+    HelpEntry {
+        usage: "#paste preview on|off",
+        description: "show or hide bounded multiline paste preview",
+    },
+    HelpEntry {
+        usage: "#paste preview-lines <1-20>",
+        description: "set maximum preview lines",
+    },
+    HelpEntry {
+        usage: "#paste preview-bytes <1-4096>",
+        description: "set maximum preview bytes",
+    },
+];
+
 const TEMPLATE_HELP: &[HelpEntry] = &[
     HelpEntry {
         usage: "#mt <template-body>",
@@ -322,6 +353,7 @@ pub(super) fn write_help(out: &mut impl Write, args: &str) -> Result<()> {
         (Some("commands"), None) => write_commands_help(out),
         (Some("keys"), None) => write_keys_help(out),
         (Some("ai"), None) => write_ai_help(out),
+        (Some("paste"), None) => write_paste_help(out),
         (Some("completion"), None) => write_completion_help(out),
         (Some("templates"), None) => write_templates_help(out),
         (Some("sync"), None) => write_sync_help(out),
@@ -351,6 +383,8 @@ fn write_full_help(out: &mut impl Write) -> Result<()> {
     write_keys_help(out)?;
     writeln!(out)?;
     write_ai_help(out)?;
+    writeln!(out)?;
+    write_paste_help(out)?;
     writeln!(out)?;
     write_completion_help(out)?;
     writeln!(out)?;
@@ -385,6 +419,11 @@ fn write_ai_help(out: &mut impl Write) -> Result<()> {
 fn write_completion_help(out: &mut impl Write) -> Result<()> {
     writeln!(out, "Completion help")?;
     write_entries(out, COMPLETION_HELP)
+}
+
+fn write_paste_help(out: &mut impl Write) -> Result<()> {
+    writeln!(out, "Paste help")?;
+    write_entries(out, PASTE_HELP)
 }
 
 fn write_templates_help(out: &mut impl Write) -> Result<()> {

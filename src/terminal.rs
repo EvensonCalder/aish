@@ -734,7 +734,9 @@ pub fn apply_paste_to_state(text: &str, state: &mut AppState) -> PasteAction {
         state.copy_read_only_selection_to_draft();
         if state.draft.is_empty() {
             state.draft_from_editor = false;
+            state.draft_from_ai_editor = false;
             state.draft_from_template = false;
+            state.draft_has_paste_preview = false;
         }
         state.draft.insert_str(&text);
         return PasteAction::Continue;
@@ -742,11 +744,11 @@ pub fn apply_paste_to_state(text: &str, state: &mut AppState) -> PasteAction {
 
     match state.paste_config.multiline.as_str() {
         "editor" | "execute" if state.paste_config.confirm_execute => {
-            state.replace_draft_from_editor_text(text);
+            state.replace_draft_from_paste_text(text);
             PasteAction::Continue
         }
         "execute" => {
-            state.replace_draft_from_editor_text(text);
+            state.replace_draft_from_paste_text(text);
             PasteAction::Submit
         }
         _ => PasteAction::Continue,
@@ -977,6 +979,7 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
                 state.draft_from_editor = false;
                 state.draft_from_ai_editor = false;
                 state.draft_from_template = false;
+                state.draft_has_paste_preview = false;
             }
             expand_template_draft_if_inside_placeholder(state);
             state.draft.insert_char(ch);
@@ -992,6 +995,7 @@ fn clear_draft_metadata_if_empty(state: &mut AppState) {
         state.draft_from_editor = false;
         state.draft_from_ai_editor = false;
         state.draft_from_template = false;
+        state.draft_has_paste_preview = false;
     }
 }
 

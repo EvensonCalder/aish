@@ -1,5 +1,6 @@
 use super::*;
 use crate::config::{CompletionConfig, CompletionMode, CompletionTabAccept, EditorConfig};
+use crate::display_width::display_width;
 use crate::encrypted_writer::EncryptedWriteQueue;
 use crate::history::{DraftEntry, HistoryEntry, HistorySource};
 use crate::modes::Mode;
@@ -2784,8 +2785,57 @@ fn multiline_paste_creates_opaque_editor_draft() {
 
     assert_eq!(state.mode, Mode::Draft);
     assert!(state.draft_from_editor);
+    assert!(state.draft_has_paste_preview);
     assert_eq!(state.draft.as_str(), "echo one\necho two");
     assert!(state.render_prompt_line().contains("[draft: 2 lines"));
+    assert!(state.render_prompt_line().contains("paste preview:"));
+    assert!(state.render_prompt_line().contains("  echo one"));
+    assert!(state.render_prompt_line().contains("  echo two"));
+}
+
+#[test]
+fn multiline_paste_preview_escapes_control_bytes_and_keeps_cursor_on_summary() {
+    let mut state = AppState {
+        paste_config: crate::config::PasteConfig {
+            preview_lines: 2,
+            preview_bytes: 100,
+            ..crate::config::PasteConfig::default()
+        },
+        ..AppState::default()
+    };
+
+    assert_eq!(
+        apply_paste_to_state("printf '\x1b[31m'\tred\nnext", &mut state),
+        PasteAction::Continue
+    );
+
+    let rendered = state.render_prompt_line();
+    assert!(rendered.contains("  printf '\\x1b[31m'\\tred"));
+    assert!(!rendered.contains('\x1b'));
+    let summary = format!("> {}", state.editor_draft_summary_for_terminal());
+    assert_eq!(
+        state.terminal_cursor_column(),
+        display_width(&summary) as u16
+    );
+}
+
+#[test]
+fn multiline_paste_preview_can_be_disabled() {
+    let mut state = AppState {
+        paste_config: crate::config::PasteConfig {
+            preview: false,
+            ..crate::config::PasteConfig::default()
+        },
+        ..AppState::default()
+    };
+
+    assert_eq!(
+        apply_paste_to_state("echo one\necho two", &mut state),
+        PasteAction::Continue
+    );
+
+    assert!(state.draft_has_paste_preview);
+    assert!(!state.render_prompt_line().contains("paste preview:"));
 }
 
 #[test]
@@ -2807,6 +2857,7 @@ fn multiline_paste_discard_config_ignores_content() {
         paste_config: crate::config::PasteConfig {
             multiline: "discard".to_string(),
             confirm_execute: true,
+            ..crate::config::PasteConfig::default()
         },
         ..AppState::default()
     };
@@ -2828,6 +2879,7 @@ fn multiline_paste_execute_with_confirm_creates_editor_draft() {
         paste_config: crate::config::PasteConfig {
             multiline: "execute".to_string(),
             confirm_execute: true,
+            ..crate::config::PasteConfig::default()
         },
         ..AppState::default()
     };
@@ -2847,6 +2899,7 @@ fn multiline_paste_execute_without_confirm_requests_submit() {
         paste_config: crate::config::PasteConfig {
             multiline: "execute".to_string(),
             confirm_execute: false,
+            ..crate::config::PasteConfig::default()
         },
         ..AppState::default()
     };
