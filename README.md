@@ -569,7 +569,8 @@ The main runtime state lives in `src/app.rs`, while command and UI subsystems ar
 - `src/completion/`: focused completion helpers for matching rules, token parsing, path/PATH scanning, private command completion, and rendering/acceptance.
 - `src/terminal.rs`: terminal event loop, key/paste handling, picker/editor boundaries, and prompt redraw positioning.
 - `src/terminal/completion_ui.rs`: live completion display, inline suffixes, Tab/Right acceptance, and completion panel state transitions.
-- `src/pty.rs` remains the larger backend shell engine layer and should be split further only along tested behavior boundaries.
+- `src/pty.rs`: PTY backend lifecycle, command execution, read loop, and streaming event callbacks.
+- `src/pty/`: shell launch setup, marker parsing, output filtering, and continuation syntax helpers.
 
 ## Testing
 
