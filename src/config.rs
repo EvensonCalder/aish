@@ -56,6 +56,11 @@ mod tests {
         assert_eq!(config.completion.tab_accept, CompletionTabAccept::Word);
         assert_eq!(config.completion.match_threshold_percent, 50);
         assert_eq!(config.completion.typo_threshold_percent, 80);
+        assert_eq!(config.keybindings.history_search[0].as_str(), "Ctrl-R");
+        assert_eq!(
+            config.keybindings.external_editor[0].as_str(),
+            "Ctrl-X Ctrl-E"
+        );
         assert_eq!(config.ai, AiConfig::default());
         assert_eq!(config.context, ContextConfig::default());
         assert_eq!(config.encryption, EncryptionConfig::default());
@@ -103,6 +108,7 @@ mod tests {
                 match_threshold_percent: 101,
                 typo_threshold_percent: 101,
             },
+            keybindings: crate::keybindings::KeybindingConfig::default(),
             ai: AiConfig {
                 model: "  gpt-test  ".to_string(),
                 base_url: "  https://example.invalid/v1  ".to_string(),
@@ -273,6 +279,37 @@ mod tests {
         assert!(err.contains("auto"));
         assert!(err.contains("tab"));
         assert!(err.contains("off"));
+    }
+
+    #[test]
+    fn keybinding_config_rejects_invalid_key_sequences() {
+        let raw = r#"
+            [keybindings]
+            history_search = ["Ctrl-"]
+        "#;
+
+        let err = toml::from_str::<Config>(raw).unwrap_err().to_string();
+
+        assert!(err.contains("invalid key binding"));
+    }
+
+    #[test]
+    fn partial_keybinding_config_preserves_unspecified_defaults() {
+        let raw = r#"
+            [keybindings]
+            history_search = ["Ctrl-P"]
+            file_picker = []
+        "#;
+
+        let config: Config = toml::from_str(raw).unwrap();
+
+        assert_eq!(config.keybindings.history_search[0].as_str(), "Ctrl-P");
+        assert!(config.keybindings.file_picker.is_empty());
+        assert_eq!(config.keybindings.clear_screen[0].as_str(), "Ctrl-L");
+        assert_eq!(
+            config.keybindings.external_editor[0].as_str(),
+            "Ctrl-X Ctrl-E"
+        );
     }
 
     #[test]

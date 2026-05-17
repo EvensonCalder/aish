@@ -3,7 +3,7 @@ use std::io::Write;
 use anyhow::Result;
 
 use crate::commands::HELP_TOPICS;
-use crate::keybindings::default_keybindings;
+use crate::keybindings::{KeybindingConfig, configured_keybindings};
 
 #[derive(Debug, Clone, Copy)]
 struct HelpEntry {
@@ -354,12 +354,16 @@ const CONFIG_HELP: &[HelpEntry] = &[
     },
 ];
 
-pub(super) fn write_help(out: &mut impl Write, args: &str) -> Result<()> {
+pub(super) fn write_help(
+    out: &mut impl Write,
+    args: &str,
+    keybindings: &KeybindingConfig,
+) -> Result<()> {
     let mut parts = args.split_whitespace();
     match (parts.next(), parts.next()) {
-        (None, None) => write_full_help(out),
+        (None, None) => write_full_help(out, keybindings),
         (Some("commands"), None) => write_commands_help(out),
-        (Some("keys"), None) => write_keys_help(out),
+        (Some("keys"), None) => write_keys_help(out, keybindings),
         (Some("ai"), None) => write_ai_help(out),
         (Some("paste"), None) => write_paste_help(out),
         (Some("completion"), None) => write_completion_help(out),
@@ -379,7 +383,7 @@ pub(super) fn write_help(out: &mut impl Write, args: &str) -> Result<()> {
     }
 }
 
-fn write_full_help(out: &mut impl Write) -> Result<()> {
+fn write_full_help(out: &mut impl Write, keybindings: &KeybindingConfig) -> Result<()> {
     writeln!(out, "Aish help")?;
     writeln!(out, "Usage:")?;
     writeln!(out, "  #help [topic]")?;
@@ -388,7 +392,7 @@ fn write_full_help(out: &mut impl Write) -> Result<()> {
     writeln!(out)?;
     write_commands_help(out)?;
     writeln!(out)?;
-    write_keys_help(out)?;
+    write_keys_help(out, keybindings)?;
     writeln!(out)?;
     write_ai_help(out)?;
     writeln!(out)?;
@@ -411,10 +415,10 @@ fn write_commands_help(out: &mut impl Write) -> Result<()> {
     write_entries(out, COMMAND_HELP)
 }
 
-fn write_keys_help(out: &mut impl Write) -> Result<()> {
+fn write_keys_help(out: &mut impl Write, keybindings: &KeybindingConfig) -> Result<()> {
     writeln!(out, "Keybindings:")?;
-    for binding in default_keybindings() {
-        writeln!(out, "  {} - {}", binding.key, binding.action)?;
+    for binding in configured_keybindings(keybindings) {
+        writeln!(out, "  {} - {}", binding.keys, binding.action)?;
     }
     Ok(())
 }

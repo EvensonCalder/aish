@@ -954,6 +954,9 @@ Ctrl-R        history search
 Tab           completion or empty-input mode switch
 Esc           cancel current menu/suggestion/search
 Up/Down       mode-specific navigation
+Left/Right    character navigation; Right may accept completion at end of draft
+Backspace     delete previous character
+Delete        delete next character
 ```
 
 ### 12.2 Advanced default shortcuts
@@ -966,7 +969,47 @@ Ctrl-X Ctrl-B  git branch picker
 Ctrl-X Ctrl-V  environment variable picker
 ```
 
-All keybindings must be configurable. Current default bindings are fixed; user-configurable key rebinding remains future work and must preserve passthrough forwarding semantics.
+All keybindings are configurable through the `[keybindings]` config table. Each action is an array of one-key or two-key sequences, for example:
+
+```toml
+[keybindings]
+history_search = ["Ctrl-P"]
+file_picker = ["Ctrl-G Ctrl-F"]
+external_editor = ["Ctrl-X Ctrl-E", "Ctrl-O"]
+```
+
+An empty array disables that action. Rebinding applies only to Aish-owned prompt modes; passthrough modes still forward keys to the foreground program.
+
+Configured action names:
+
+```text
+clear_or_cancel
+exit_or_delete
+clear_screen
+move_start
+move_end
+delete_to_start
+delete_to_end
+delete_previous_word
+delete_next_word
+move_previous_word
+move_next_word
+move_left
+move_right_or_accept_completion
+previous_item
+next_item
+delete_previous_char
+delete_next_char
+cancel
+complete_or_cycle
+submit
+history_search
+external_editor
+file_picker
+template_picker
+git_branch_picker
+env_var_picker
+```
 
 ---
 

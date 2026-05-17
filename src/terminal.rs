@@ -16,6 +16,7 @@ use crate::app::{AppState, answer_context_confirmation, execute_draft, save_draf
 use crate::config::CompletionMode;
 use crate::display_width::{visual_line_count, visual_position};
 use crate::editor::resolve_editor_command;
+use crate::keybindings::{KeyBindingAction, KeyBindingMatch, match_keybinding};
 use crate::picker::{
     PickerAction, PickerRunResult, env_var_picker_candidates, file_picker_candidates,
     git_branch_picker_candidates, run_fzf_picker, shell_env_var_reference,
@@ -243,7 +244,7 @@ fn should_apply_completion_event_update(state: &AppState) -> bool {
     state.completion_config.enabled
         && state.completion_config.mode() != CompletionMode::Off
         && state.pending_context.is_none()
-        && !state.ctrl_x_prefix
+        && !state.has_pending_key_prefix()
         && state.mode == crate::modes::Mode::Draft
         && !state.draft_from_editor
         && !state.draft.is_empty()
@@ -779,10 +780,6 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
             .unwrap_or(KeyAction::Continue);
     }
 
-    if !matches!(key.code, KeyCode::Tab | KeyCode::Right) {
-        state.clear_completion_ui();
-    }
-
     if state.pending_context.is_some() {
         return match (key.modifiers, key.code) {
             (_, KeyCode::Enter) => KeyAction::ConfirmContext(true),
@@ -794,30 +791,79 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
         };
     }
 
+    let binding_match = match_keybinding(
+        &state.keybinding_config,
+        state.pending_key_prefix.as_ref(),
+        key,
+    );
+    let action = match binding_match {
+        KeyBindingMatch::Action(action) => {
+            state.clear_pending_key_prefix();
+            Some(action)
+        }
+        KeyBindingMatch::Prefix(prefix) => {
+            state.clear_completion_ui();
+            state.set_pending_key_prefix(prefix);
+            return KeyAction::Continue;
+        }
+        KeyBindingMatch::UnmatchedPending => {
+            state.clear_pending_key_prefix();
+            state.clear_completion_ui();
+            return KeyAction::Continue;
+        }
+        KeyBindingMatch::None => {
+            state.clear_pending_key_prefix();
+            None
+        }
+    };
+    if let Some(action) = action {
+        if !matches!(
+            action,
+            KeyBindingAction::CompleteOrCycle | KeyBindingAction::MoveRightOrAcceptCompletion
+        ) {
+            state.clear_completion_ui();
+        }
+        return apply_bound_key_action(action, state);
+    }
+
+    state.clear_completion_ui();
+    let is_editor_draft = state.mode == crate::modes::Mode::Draft && state.draft_from_editor;
+    match key.code {
+        KeyCode::Char(ch)
+            if !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+                && !is_editor_draft =>
+        {
+            state.copy_read_only_selection_to_draft();
+            if state.draft.is_empty() {
+                state.draft_from_editor = false;
+                state.draft_from_ai_editor = false;
+                state.draft_from_template = false;
+                state.draft_has_paste_preview = false;
+            }
+            expand_template_draft_if_inside_placeholder(state);
+            state.draft.insert_char(ch);
+            KeyAction::Continue
+        }
+        _ => KeyAction::Continue,
+    }
+}
+
+fn apply_bound_key_action(action: KeyBindingAction, state: &mut AppState) -> KeyAction {
     let is_read_only_mode = matches!(
         state.mode,
         crate::modes::Mode::History | crate::modes::Mode::Ai
     );
     let is_editor_draft = state.mode == crate::modes::Mode::Draft && state.draft_from_editor;
-    if state.ctrl_x_prefix {
-        state.ctrl_x_prefix = false;
-        return match (key.modifiers, key.code) {
-            (KeyModifiers::CONTROL, KeyCode::Char('e')) => KeyAction::ExternalEditor,
-            (KeyModifiers::CONTROL, KeyCode::Char('f')) => KeyAction::FilePicker,
-            (KeyModifiers::CONTROL, KeyCode::Char('t')) => KeyAction::TemplatePicker,
-            (KeyModifiers::CONTROL, KeyCode::Char('b')) => KeyAction::GitBranchPicker,
-            (KeyModifiers::CONTROL, KeyCode::Char('v')) => KeyAction::EnvVarPicker,
-            _ => KeyAction::Continue,
-        };
-    }
-    match (key.modifiers, key.code) {
-        (KeyModifiers::CONTROL, KeyCode::Char('x')) => {
-            state.ctrl_x_prefix = true;
+    match action {
+        KeyBindingAction::ClearOrCancel => {
+            state.clear_draft_for_new_draft();
             KeyAction::Continue
         }
-        (KeyModifiers::CONTROL, KeyCode::Char('d')) if state.draft.is_empty() => KeyAction::Exit,
-        (KeyModifiers::CONTROL, KeyCode::Char('d')) if is_editor_draft => KeyAction::Continue,
-        (KeyModifiers::CONTROL, KeyCode::Char('d')) => {
+        KeyBindingAction::ExitOrDelete if state.draft.is_empty() => KeyAction::Exit,
+        KeyBindingAction::ExitOrDelete if is_editor_draft => KeyAction::Continue,
+        KeyBindingAction::ExitOrDelete => {
             if !delete_template_placeholder_after_cursor(state) {
                 state.draft.delete();
             }
@@ -826,85 +872,102 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
             }
             KeyAction::Continue
         }
-        (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
-            state.clear_draft_for_new_draft();
-            KeyAction::Continue
-        }
-        (KeyModifiers::CONTROL, KeyCode::Char('l')) => KeyAction::ClearScreen,
-        (KeyModifiers::CONTROL, KeyCode::Char('r')) => KeyAction::HistorySearch,
-        (KeyModifiers::CONTROL, KeyCode::Char('a')) => {
+        KeyBindingAction::ClearScreen => KeyAction::ClearScreen,
+        KeyBindingAction::HistorySearch => KeyAction::HistorySearch,
+        KeyBindingAction::ExternalEditor => KeyAction::ExternalEditor,
+        KeyBindingAction::FilePicker => KeyAction::FilePicker,
+        KeyBindingAction::TemplatePicker => KeyAction::TemplatePicker,
+        KeyBindingAction::GitBranchPicker => KeyAction::GitBranchPicker,
+        KeyBindingAction::EnvVarPicker => KeyAction::EnvVarPicker,
+        KeyBindingAction::MoveStart => {
             if !is_read_only_mode && !is_editor_draft {
                 state.draft.move_start();
             }
             KeyAction::Continue
         }
-        (KeyModifiers::CONTROL, KeyCode::Char('e')) => {
+        KeyBindingAction::MoveEnd => {
             if !is_read_only_mode && !is_editor_draft {
                 state.draft.move_end();
             }
             KeyAction::Continue
         }
-        (KeyModifiers::CONTROL, KeyCode::Char('u' | 'k' | 'w')) if is_editor_draft => {
-            KeyAction::Continue
-        }
-        (KeyModifiers::CONTROL, KeyCode::Char('u')) => {
+        KeyBindingAction::DeleteToStart if is_editor_draft => KeyAction::Continue,
+        KeyBindingAction::DeleteToStart => {
             state.copy_read_only_selection_to_draft();
             state.draft.delete_to_start();
             KeyAction::Continue
         }
-        (KeyModifiers::CONTROL, KeyCode::Char('k')) => {
+        KeyBindingAction::DeleteToEnd if is_editor_draft => KeyAction::Continue,
+        KeyBindingAction::DeleteToEnd => {
             state.copy_read_only_selection_to_draft();
             state.draft.delete_to_end();
             KeyAction::Continue
         }
-        (KeyModifiers::CONTROL, KeyCode::Char('w')) => {
+        KeyBindingAction::DeletePreviousWord if is_editor_draft => KeyAction::Continue,
+        KeyBindingAction::DeletePreviousWord => {
             state.copy_read_only_selection_to_draft();
-            state.draft.delete_previous_word();
+            if !delete_template_placeholder_before_cursor(state) {
+                expand_template_draft_if_inside_placeholder(state);
+                state.draft.delete_previous_word();
+            }
+            clear_draft_metadata_if_empty(state);
             KeyAction::Continue
         }
-        (KeyModifiers::ALT, KeyCode::Char('b') | KeyCode::Left) => {
+        KeyBindingAction::DeleteNextWord if is_editor_draft => KeyAction::Continue,
+        KeyBindingAction::DeleteNextWord => {
+            state.copy_read_only_selection_to_draft();
+            if !delete_template_placeholder_after_cursor(state) {
+                expand_template_draft_if_inside_placeholder(state);
+                state.draft.delete_next_word();
+            }
+            clear_draft_metadata_if_empty(state);
+            KeyAction::Continue
+        }
+        KeyBindingAction::MovePreviousWord => {
             if !is_read_only_mode && !is_editor_draft {
                 state.draft.move_previous_word();
             }
             KeyAction::Continue
         }
-        (KeyModifiers::ALT, KeyCode::Char('f') | KeyCode::Right) => {
+        KeyBindingAction::MoveNextWord => {
             if !is_read_only_mode && !is_editor_draft {
                 state.draft.move_next_word();
             }
             KeyAction::Continue
         }
-        (_, KeyCode::Up) if state.mode == crate::modes::Mode::History => {
+        KeyBindingAction::PreviousItem if state.mode == crate::modes::Mode::History => {
             state.move_history_selection_older();
             KeyAction::Continue
         }
-        (_, KeyCode::Down) if state.mode == crate::modes::Mode::History => {
-            state.move_history_selection_newer();
-            KeyAction::Continue
-        }
-        (_, KeyCode::Up) if state.mode == crate::modes::Mode::Ai => {
+        KeyBindingAction::PreviousItem if state.mode == crate::modes::Mode::Ai => {
             state.move_ai_selection_previous();
             KeyAction::Continue
         }
-        (_, KeyCode::Up) if state.mode == crate::modes::Mode::Draft => KeyAction::PreviousDraft,
-        (_, KeyCode::Down) if state.mode == crate::modes::Mode::Ai => {
+        KeyBindingAction::PreviousItem if state.mode == crate::modes::Mode::Draft => {
+            KeyAction::PreviousDraft
+        }
+        KeyBindingAction::PreviousItem => KeyAction::Continue,
+        KeyBindingAction::NextItem if state.mode == crate::modes::Mode::History => {
+            state.move_history_selection_newer();
+            KeyAction::Continue
+        }
+        KeyBindingAction::NextItem if state.mode == crate::modes::Mode::Ai => {
             state.move_ai_selection_next();
             KeyAction::Continue
         }
-        (_, KeyCode::Down) => {
-            if state.mode == crate::modes::Mode::Draft && !is_editor_draft {
-                KeyAction::NextDraft
-            } else {
-                KeyAction::Continue
-            }
+        KeyBindingAction::NextItem
+            if state.mode == crate::modes::Mode::Draft && !is_editor_draft =>
+        {
+            KeyAction::NextDraft
         }
-        (_, KeyCode::Left) => {
+        KeyBindingAction::NextItem => KeyAction::Continue,
+        KeyBindingAction::MoveLeft => {
             if !is_read_only_mode && !is_editor_draft {
                 state.draft.move_left();
             }
             KeyAction::Continue
         }
-        (_, KeyCode::Right) => {
+        KeyBindingAction::MoveRightOrAcceptCompletion => {
             if !is_read_only_mode && !is_editor_draft {
                 if state.mode == crate::modes::Mode::Draft
                     && state.draft.cursor() == state.draft.as_str().len()
@@ -922,30 +985,8 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
             }
             KeyAction::Continue
         }
-        (_, KeyCode::Backspace | KeyCode::Delete | KeyCode::Char(_)) if is_editor_draft => {
-            KeyAction::Continue
-        }
-        (modifiers, KeyCode::Backspace) if modifiers.contains(KeyModifiers::ALT) => {
-            state.copy_read_only_selection_to_draft();
-            if !delete_template_placeholder_before_cursor(state) {
-                expand_template_draft_if_inside_placeholder(state);
-                state.draft.delete_previous_word();
-            }
-            clear_draft_metadata_if_empty(state);
-            KeyAction::Continue
-        }
-        (modifiers, KeyCode::Delete | KeyCode::Char('d'))
-            if modifiers.contains(KeyModifiers::ALT) =>
-        {
-            state.copy_read_only_selection_to_draft();
-            if !delete_template_placeholder_after_cursor(state) {
-                expand_template_draft_if_inside_placeholder(state);
-                state.draft.delete_next_word();
-            }
-            clear_draft_metadata_if_empty(state);
-            KeyAction::Continue
-        }
-        (_, KeyCode::Backspace) => {
+        KeyBindingAction::DeletePreviousChar if is_editor_draft => KeyAction::Continue,
+        KeyBindingAction::DeletePreviousChar => {
             state.copy_read_only_selection_to_draft();
             if !delete_template_placeholder_before_cursor(state) {
                 expand_template_draft_if_inside_placeholder(state);
@@ -954,7 +995,8 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
             clear_draft_metadata_if_empty(state);
             KeyAction::Continue
         }
-        (_, KeyCode::Delete) => {
+        KeyBindingAction::DeleteNextChar if is_editor_draft => KeyAction::Continue,
+        KeyBindingAction::DeleteNextChar => {
             state.copy_read_only_selection_to_draft();
             if !delete_template_placeholder_after_cursor(state) {
                 expand_template_draft_if_inside_placeholder(state);
@@ -963,11 +1005,11 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
             clear_draft_metadata_if_empty(state);
             KeyAction::Continue
         }
-        (_, KeyCode::Esc) => {
+        KeyBindingAction::Cancel => {
             state.clear_draft_for_new_draft();
             KeyAction::Continue
         }
-        (_, KeyCode::Tab) => {
+        KeyBindingAction::CompleteOrCycle => {
             if !state.draft.is_empty() && state.mode == crate::modes::Mode::Draft {
                 if state.completion_config.mode() != CompletionMode::Off {
                     return KeyAction::CompleteOrShow;
@@ -979,20 +1021,7 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
             state.handle_empty_tab();
             KeyAction::Continue
         }
-        (_, KeyCode::Enter) => KeyAction::Submit,
-        (_, KeyCode::Char(ch)) => {
-            state.copy_read_only_selection_to_draft();
-            if state.draft.is_empty() {
-                state.draft_from_editor = false;
-                state.draft_from_ai_editor = false;
-                state.draft_from_template = false;
-                state.draft_has_paste_preview = false;
-            }
-            expand_template_draft_if_inside_placeholder(state);
-            state.draft.insert_char(ch);
-            KeyAction::Continue
-        }
-        _ => KeyAction::Continue,
+        KeyBindingAction::Submit => KeyAction::Submit,
     }
 }
 

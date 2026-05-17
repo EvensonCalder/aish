@@ -28,7 +28,7 @@ pub(super) fn execute_private_command(
         "exit" | "quit" => {
             state.exit_requested = true;
         }
-        "help" => help::write_help(out, args)?,
+        "help" => help::write_help(out, args, &state.keybinding_config)?,
         "status" => write_status_report(state, out)?,
         "config" => write_config_report(state, out)?,
         "doctor" => write_doctor_report(state, out)?,

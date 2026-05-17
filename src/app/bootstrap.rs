@@ -50,6 +50,7 @@ pub fn run() -> Result<()> {
         editor_config: config.editor,
         paste_config: config.paste,
         completion_config: config.completion,
+        keybinding_config: config.keybindings,
         ai_config: config.ai,
         context_config: config.context,
         encryption_config: config.encryption,

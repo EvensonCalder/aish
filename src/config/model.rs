@@ -3,6 +3,8 @@ use std::path::PathBuf;
 use serde::de::{self, Unexpected};
 use serde::{Deserialize, Deserializer, Serialize};
 
+use crate::keybindings::KeybindingConfig;
+
 use super::default_aish_dir;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -15,6 +17,7 @@ pub struct Config {
     pub editor: EditorConfig,
     pub paste: PasteConfig,
     pub completion: CompletionConfig,
+    pub keybindings: KeybindingConfig,
     pub ai: AiConfig,
     pub context: ContextConfig,
     pub encryption: EncryptionConfig,

@@ -127,7 +127,7 @@ fn should_refresh_live_completion(state: &AppState) -> bool {
     state.completion_config.enabled
         && state.completion_config.mode() == CompletionMode::Auto
         && state.pending_context.is_none()
-        && !state.ctrl_x_prefix
+        && !state.has_pending_key_prefix()
         && state.mode == crate::modes::Mode::Draft
         && !state.draft_from_editor
         && !state.draft.is_empty()

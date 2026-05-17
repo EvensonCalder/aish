@@ -8,7 +8,7 @@ use crate::ai::read_api_key_from_env;
 use crate::config::CompletionConfig;
 use crate::editor::resolve_editor_command;
 use crate::encryption::gpg_program;
-use crate::keybindings::default_keybindings;
+use crate::keybindings::configured_keybindings;
 
 use super::{AppState, configured_encryption_key, prompt_command::write_prompt_config};
 
@@ -84,7 +84,11 @@ pub(super) fn write_status_report(state: &AppState, out: &mut impl Write) -> Res
     writeln!(out, "context.confirm={}", state.context_config.confirm)?;
     writeln!(out, "context.max_bytes={}", state.context_config.max_bytes)?;
     write_completion_config_lines(out, &state.completion_config)?;
-    writeln!(out, "keybindings={}", default_keybindings().len())?;
+    writeln!(
+        out,
+        "keybindings={}",
+        configured_keybindings(&state.keybinding_config).len()
+    )?;
     Ok(())
 }
 

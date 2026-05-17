@@ -14,7 +14,7 @@ git diff --check
 
 Current test inventory:
 
-- 508 library unit tests.
+- 515 library unit tests.
 - 26 draft execution integration tests.
 - 1 first-run integration test.
 - 45 tmux screen-capture integration tests.
@@ -327,13 +327,12 @@ Implemented:
 - Unknown private commands are not sent to shell.
 - Unknown private commands suggest the nearest implemented command when there is a close match.
 - Minimal private commands: `#help`, `#status`, `#config`, `#doctor`, `#model`, `#base-url`, `#env-key`, `#key set`, `#key clear`, `#context`, `#completion`, `#log`, `#editor`, `#mt`, `#template find`, `#template show`, `#template use`, `#template rm`, `#template replace`, `#encrypt`, `#set-remote`, `#push`, `#sync`, `#exit`, `#quit`, `#history <count>`.
-- `#help` prints private commands and the default keybinding map.
-- Help output distinguishes implemented keybindings from reserved keybindings.
+- `#help` prints private commands and the configured keybinding map.
 - `Esc` clears the draft and returns to draft mode.
 - `Ctrl-R` resolves to history search without editing draft state before the picker returns a selection.
 - `Ctrl-X Ctrl-E` resolves to an external-editor launch action without editing draft state.
 - `Ctrl-X` advanced picker chords resolve to launch actions without editing draft state before the picker returns a selection.
-- `#status` reports the default keybinding count.
+- `#status` reports the configured keybinding count.
 - AI configuration commands `#model`, `#base-url`, and `#env-key` persist to `config.toml`; `#base-url` stores the normalized final chat-completions URL; `#key set` stores the current configured environment API key with GPG when an encryption key fingerprint is configured, and `#key clear` removes the encrypted key file.
 - AI helpers normalize chat-completions URLs, read API keys from configured environment variables, build strict JSON-only chat request bodies, and parse/validate structured AI item JSON without relying on newline boundaries.
 - AI session helpers persist parsed AI items to `ai.jsonl`, rebuild command indexes, and switch to `%` AI mode at the first command from the new session.
@@ -458,9 +457,15 @@ Tests:
 - `execute_draft_does_not_run_context_pseudo_pipe_command`
 - `app::tests::private_help_prints_available_commands`
 - `keybindings::tests::default_keybindings_include_common_and_advanced_bindings`
-- `keybindings::tests::default_keybindings_distinguish_implemented_and_reserved_bindings`
+- `keybindings::tests::key_sequence_config_rejects_invalid_keys`
+- `keybindings::tests::keybinding_match_resolves_single_key_actions`
+- `keybindings::tests::keybinding_match_resolves_two_key_prefixes`
+- `keybindings::tests::configured_keybindings_skip_disabled_actions`
+- `config::tests::keybinding_config_rejects_invalid_key_sequences`
 - `terminal::tests::esc_clears_draft_and_returns_to_draft_mode`
 - `terminal::tests::ctrl_r_returns_history_search_action_without_editing_draft`
+- `terminal::tests::configured_single_key_binding_replaces_default_history_search`
+- `terminal::tests::configured_two_key_binding_uses_custom_prefix`
 - `terminal::tests::ctrl_x_prefix_resolves_editor_chord_to_launch_action`
 - `terminal::tests::ctrl_x_prefix_resolves_file_picker_chord_to_launch_action`
 - `terminal::tests::ctrl_x_prefix_resolves_template_picker_chord_to_launch_action`
@@ -653,7 +658,6 @@ Known gaps:
 
 - Fully automatic startup pinentry prompting is not implemented; passphrase-required startup unlock is explicit through `#unlock`.
 - Real passphrase/pinentry GPG behavior is human-only; fake-GPG command boundaries, startup unlock fallback, and storage migration are automated.
-- Key rebinding remains incomplete.
 - Future scheduled background work is not attached to tick events yet.
 
 ### Regular History Storage
@@ -956,7 +960,6 @@ There are no intentionally ignored tests in the current default suite. Bash and 
 
 Important missing or partial areas:
 
-- Full keybinding map and rebinding config.
 - Fully automatic startup pinentry prompting without user-running `#unlock`.
 - Future scheduled background events beyond the current tick hook and encrypted-write completion events.
 - Broader automatic passthrough detection for arbitrary alternate-screen or job-control programs.
@@ -972,4 +975,3 @@ Next high-value tests to add:
 - Fully automatic startup pinentry prompting coverage if that workflow is implemented.
 - Additional fish tmux workflows after cross-platform fish behavior is validated.
 - Focused passthrough regressions for newly allowlisted interactive programs.
-- Keybinding rebinding tests when user-configurable bindings are implemented.

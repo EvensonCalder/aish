@@ -26,7 +26,6 @@ Implemented and covered:
 
 Explicitly incomplete:
 
-- Configurable key rebinding is not implemented yet.
 - Fish support is opt-in until behavior is validated across macOS and representative Linux distributions.
 - Fully automatic startup pinentry prompting remains future work; encrypted history/templates now start with a noninteractive background unlock attempt, and `#unlock` uses the dedicated GPG/pinentry passthrough path when passphrase entry is needed.
 - Future scheduled background events are not implemented yet; current background work is limited to tick-driven refresh and serialized encrypted writes.
@@ -121,6 +120,17 @@ Tools:
 - `Ctrl-X Ctrl-T`: template picker through external `fzf`.
 - `Ctrl-X Ctrl-B`: git branch picker through external `fzf`.
 - `Ctrl-X Ctrl-V`: environment variable picker through external `fzf`.
+
+Keybindings are configurable in `config.toml`. Each action takes an array of key sequences; each sequence is one key or a two-key chord. Use an empty array to disable an action.
+
+```toml
+[keybindings]
+history_search = ["Ctrl-P"]
+file_picker = ["Ctrl-G Ctrl-F"]
+external_editor = ["Ctrl-X Ctrl-E", "Ctrl-O"]
+```
+
+Supported action names include `clear_or_cancel`, `exit_or_delete`, `clear_screen`, `move_start`, `move_end`, `delete_to_start`, `delete_to_end`, `delete_previous_word`, `delete_next_word`, `move_previous_word`, `move_next_word`, `move_left`, `move_right_or_accept_completion`, `previous_item`, `next_item`, `delete_previous_char`, `delete_next_char`, `cancel`, `complete_or_cycle`, `submit`, `history_search`, `external_editor`, `file_picker`, `template_picker`, `git_branch_picker`, and `env_var_picker`.
 
 ## Completion
 
@@ -645,12 +655,12 @@ cargo test
 
 Current active inventory:
 
-- 490 library unit tests.
+- 515 library unit tests.
 - 26 draft execution integration tests.
 - 1 first-run integration test.
-- 21 PTY integration tests, with bash/zsh active by default and fish-specific cases opt-in.
-- 114 expect-driven end-to-end interactive scenarios.
-- 44 tmux screen-capture integration tests.
+- 23 PTY integration tests, with bash/zsh active by default and fish-specific cases opt-in.
+- 116 expect-driven end-to-end interactive scenarios.
+- 45 tmux screen-capture integration tests.
 
 Expect and tmux tests launch real terminal sessions with isolated Aish homes. They should be serialized because concurrent real-terminal sessions can create false prompt and scheduler failures.
 

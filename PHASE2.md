@@ -19,7 +19,7 @@ Current state:
 - The PTY shell wrapper, prompt rendering, draft editor, history/AI modes, private command parser, context flow, event log, templates, inline completion, external editor, multiline paste review, shell continuation handling, sync flow, diagnostics, and shell integration scaffolding are implemented and tested.
 - Expect-driven end-to-end coverage exists and is the acceptance layer for visible terminal behavior.
 - Phase 18 encryption/GPG now has GPG-backed key storage, encrypted managed JSONL storage, key rotation, explicit history rewrite planning/running, nonblocking encrypted startup unlock with explicit `#unlock`, and fake-GPG coverage. The remaining encryption gap is fully automatic startup pinentry prompting and dedicated real-key pinentry coverage.
-- Configurable key rebinding remains incomplete.
+- Configurable key rebinding is implemented through the `[keybindings]` config table with one-key and two-key sequence support.
 - Command-running PTY output is streamed through explicit output/idle callbacks. Timer/background support exists for tick wakeups and encrypted-write events; future scheduled background work is not attached yet.
 - Full automatic passthrough for arbitrary interactive/alternate-screen programs remains incomplete; allowlisted foreground passthrough exists.
 - Some documentation had become stale during implementation and must stay aligned with actual behavior as Phase 2 continues.
@@ -35,7 +35,6 @@ Current state:
 This hardening pass is complete for the implemented v0.1 terminal wrapper surface. The remaining items below are explicitly deferred instead of being treated as partially complete Phase 2 fixes:
 
 - Fully automatic startup pinentry prompting stays deferred until it has real-terminal coverage with isolated keys. Current direct decrypt operations and explicit `#unlock` temporarily leave raw mode so GPG/pinentry can own the terminal.
-- Configurable key rebinding stays deferred until a stable config schema is chosen; default keybindings remain covered and documented.
 - Future scheduled background event sources stay deferred until a concrete feature requires them beyond current tick wakeups, encrypted-write events, and command-running PTY output callbacks.
 - Automatic passthrough for arbitrary interactive programs stays deferred; the current product supports allowlisted foreground passthrough and key-forwarding tests.
 - Fish backend tests remain opt-in with `AISH_TEST_FISH=1`; bash and zsh are the default backend compatibility baseline for cross-platform CI until fish behavior is validated across macOS and Linux distributions.
@@ -148,15 +147,15 @@ Goal: finish user-facing input control without breaking common readline expectat
 
 Tasks:
 
-- Implement configurable key rebinding only after a minimal, stable config shape is chosen.
+- Keep configurable key rebinding stable; changes to action names or sequence syntax must be backwards compatible.
 - Keep default keybindings non-conflicting.
 - Ensure `#help` and `#status` accurately describe configured bindings.
 - Strengthen picker tests around cancellation, shell quoting, spaces, and replacement actions.
 
 Required tests:
 
-- Unit tests for keybinding config load/validation once implemented.
-- Expect tests for at least one configured rebind if key rebinding ships.
+- Unit tests for keybinding config load/validation and runtime matching.
+- Add expect tests for configured rebinds if the config file format or real terminal behavior changes.
 - Expect tests for fake-`fzf` picker success and cancellation where practical.
 
 ## Workstream 5: Sync Hardening

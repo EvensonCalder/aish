@@ -3,6 +3,7 @@ use crate::config::{CompletionConfig, CompletionMode, CompletionTabAccept, Edito
 use crate::display_width::display_width;
 use crate::encrypted_writer::EncryptedWriteQueue;
 use crate::history::{DraftEntry, HistoryEntry, HistorySource};
+use crate::keybindings::{KeySequenceConfig, KeybindingConfig};
 use crate::modes::Mode;
 use std::collections::HashMap;
 use std::path::Path;
@@ -1765,6 +1766,53 @@ fn ctrl_r_returns_history_search_action_without_editing_draft() {
 
     assert_eq!(state.mode, Mode::Draft);
     assert_eq!(state.draft.as_str(), "git status");
+}
+
+#[test]
+fn configured_single_key_binding_replaces_default_history_search() {
+    let mut state = AppState {
+        keybinding_config: KeybindingConfig {
+            history_search: vec![KeySequenceConfig::new("Ctrl-P").unwrap()],
+            ..KeybindingConfig::default()
+        },
+        ..AppState::default()
+    };
+    state.draft.insert_str("git status");
+
+    assert_eq!(
+        apply_key_to_state(ctrl('p'), &mut state),
+        KeyAction::HistorySearch
+    );
+    assert_eq!(
+        apply_key_to_state(ctrl('r'), &mut state),
+        KeyAction::Continue
+    );
+    assert_eq!(state.draft.as_str(), "git status");
+}
+
+#[test]
+fn configured_two_key_binding_uses_custom_prefix() {
+    let mut state = AppState {
+        keybinding_config: KeybindingConfig {
+            file_picker: vec![KeySequenceConfig::new("Ctrl-G Ctrl-F").unwrap()],
+            ..KeybindingConfig::default()
+        },
+        ..AppState::default()
+    };
+    state.draft.insert_str("cat old.txt");
+
+    assert_eq!(
+        apply_key_to_state(ctrl('g'), &mut state),
+        KeyAction::Continue
+    );
+    assert!(!state.ctrl_x_prefix);
+    assert!(state.has_pending_key_prefix());
+    assert_eq!(
+        apply_key_to_state(ctrl('f'), &mut state),
+        KeyAction::FilePicker
+    );
+    assert!(!state.has_pending_key_prefix());
+    assert_eq!(state.draft.as_str(), "cat old.txt");
 }
 
 #[test]

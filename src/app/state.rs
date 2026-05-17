@@ -23,6 +23,7 @@ use crate::history::{
     JsonlLoad, NoteEntry, ai_command_indices, append_jsonl,
 };
 use crate::input::InputBuffer;
+use crate::keybindings::{KeyPress, KeybindingConfig};
 use crate::log::{DEFAULT_MAX_EVENTS, EventLevel, append_event};
 use crate::modes::Mode;
 use crate::picker::{
@@ -92,6 +93,7 @@ pub struct AppState {
     pub editor_temp_root: Option<PathBuf>,
     pub paste_config: PasteConfig,
     pub completion_config: CompletionConfig,
+    pub keybinding_config: KeybindingConfig,
     pub ai_config: AiConfig,
     pub ai_requester: fn(&AiConfig, &str) -> Result<Vec<AiItem>>,
     pub context_config: ContextConfig,
@@ -128,6 +130,7 @@ pub struct AppState {
     pub draft_from_template: bool,
     pub draft_has_paste_preview: bool,
     pub ctrl_x_prefix: bool,
+    pub pending_key_prefix: Option<KeyPress>,
     pub clock: fn() -> i64,
 }
 
@@ -188,6 +191,7 @@ impl Default for AppState {
             editor_temp_root: None,
             paste_config: PasteConfig::default(),
             completion_config: CompletionConfig::default(),
+            keybinding_config: KeybindingConfig::default(),
             ai_config: AiConfig::default(),
             ai_requester: request_ai_items,
             context_config: ContextConfig::default(),
@@ -224,6 +228,7 @@ impl Default for AppState {
             draft_from_template: false,
             draft_has_paste_preview: false,
             ctrl_x_prefix: false,
+            pending_key_prefix: None,
             clock: unix_timestamp,
         }
     }
@@ -379,10 +384,25 @@ impl AppState {
         let previous_mode = self.mode;
         self.mode = Mode::UnlockPassthrough;
         self.ctrl_x_prefix = false;
+        self.pending_key_prefix = None;
         self.cancel_live_completion();
         let result = operation(self);
         self.mode = previous_mode;
         result
+    }
+
+    pub(crate) fn has_pending_key_prefix(&self) -> bool {
+        self.pending_key_prefix.is_some()
+    }
+
+    pub(crate) fn set_pending_key_prefix(&mut self, prefix: KeyPress) {
+        self.ctrl_x_prefix = prefix.is_ctrl_x();
+        self.pending_key_prefix = Some(prefix);
+    }
+
+    pub(crate) fn clear_pending_key_prefix(&mut self) {
+        self.ctrl_x_prefix = false;
+        self.pending_key_prefix = None;
     }
 
     pub fn save_current_draft_if_needed(&mut self) -> Result<bool> {

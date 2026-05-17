@@ -4224,7 +4224,7 @@ fn private_status_prints_mode_and_last_status() {
     assert!(output.contains("completion.fuzzy=true"));
     assert!(output.contains("completion.match_threshold_percent=50"));
     assert!(output.contains("completion.typo_threshold_percent=80"));
-    assert!(output.contains("keybindings=22"));
+    assert!(output.contains("keybindings=26"));
     assert!(state.draft.is_empty());
 }
 

@@ -8,7 +8,7 @@ Status as of the latest full review:
 
 - Core interactive shell wrapper is implemented: PTY backend, raw terminal input, draft editing, continuation handling, history/AI modes, private command parsing, editor/paste flows, templates, completion, picker boundaries, AI request plumbing, context pseudo-pipe, event log, and diagnostics.
 - Rust unit/integration coverage and expect-driven real terminal coverage both exist for the implemented interactive behaviors. New user-facing terminal behavior should continue to receive both Rust-level and expect-level coverage.
-- Large intentionally incomplete areas remain: configurable key rebinding, fully automatic startup pinentry prompting, future scheduled background event sources, and robust automatic passthrough for arbitrary interactive commands.
+- Large intentionally incomplete areas remain: fully automatic startup pinentry prompting, future scheduled background event sources, and robust automatic passthrough for arbitrary interactive commands.
 - GPG-backed secrets and encrypted history/template storage are implemented. Startup history/template unlock starts with a noninteractive background GPG attempt; passphrase-required startup unlock uses explicit `#unlock` and the dedicated UnlockPassthrough path. Normal encrypted JSONL appends use a serialized background writer, and direct GPG decrypt operations enter UnlockPassthrough so pinentry can own the terminal when needed.
 - The remaining unchecked items below are the source of truth for future work; do not skip them just because adjacent scaffolding exists.
 
@@ -232,9 +232,9 @@ Status as of the latest full review:
   - [x] `Ctrl-X Ctrl-T` template picker
   - [x] `Ctrl-X Ctrl-B` git branch picker
   - [x] `Ctrl-X Ctrl-V` env var picker
-- [ ] Add config support for user key rebinding.
-  - [ ] Keep default readline-compatible bindings stable.
-  - [ ] Allow user overrides without affecting passthrough forwarding.
+- [x] Add config support for user key rebinding.
+  - [x] Keep default readline-compatible bindings stable.
+  - [x] Allow user overrides without affecting passthrough forwarding.
 
 ### Acceptance criteria
 
