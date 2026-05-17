@@ -1,11 +1,30 @@
+use super::encryption_commands::{StoredApiKey, write_history_rewrite_script};
+use super::state::OUTPUT_RING_CAPACITY;
+use super::sync_commands::{run_startup_sync_check, write_last_sync_attempt};
 use super::*;
-use crate::completion::CompletionSource;
-use crate::config::{CompletionMode, CompletionTabAccept};
+use crate::completion::{CompletionCandidate, CompletionSource};
+use crate::config::{
+    self, AiConfig, CompletionConfig, CompletionMode, CompletionTabAccept, ContextConfig,
+    EditorConfig, EncryptionConfig, PromptConfig, SyncConfig,
+};
 use crate::display_width::display_width;
-use crate::encryption::gpg_decrypt_file;
+use crate::editor::EditorCommand;
+use crate::encrypted_writer::EncryptedWriteQueue;
+use crate::encryption::{gpg_decrypt_file, load_encrypted_jsonl, rewrite_encrypted_jsonl};
+use crate::history::{
+    AiCommandIndex, AiItem, AiItemKind, AiSession, HistoryEntry, HistorySource, NoteEntry,
+    append_jsonl, load_jsonl,
+};
+use crate::log::{DEFAULT_MAX_EVENTS, EventLevel, append_event, load_events};
+use crate::modes::Mode;
+use crate::pty::PtyBackend;
+use crate::templates::{TemplateEntry, append_template, load_templates, template_id};
+use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 

@@ -558,13 +558,22 @@ On Unix-like systems, Aish creates managed storage directories with private dire
 
 ## Code Organization
 
-The main runtime state lives in `src/app.rs`, while command and UI subsystems are split into focused modules:
+The app module root in `src/app.rs` wires together focused runtime modules:
 
+- `src/app/state.rs`: `AppState`, output ring state, draft/history/template state transitions, and encrypted writer lifecycle.
+- `src/app/bootstrap.rs`: startup layout/config/history/template loading and terminal launch.
 - `src/app/completion_runtime.rs`: AppState completion request/cache orchestration.
 - `src/app/config_commands.rs`: `#model`, `#base-url`, `#env-key`, `#context`, and `#completion` config mutations.
+- `src/app/context_prompt.rs`: AI prompt submission, context collection confirmation, and contextual prompt building.
 - `src/app/encryption_commands.rs`: GPG key storage, `#encrypt`, current-storage rotation, and confirmed history rewrite.
+- `src/app/execution.rs`: draft submission, command execution, foreground passthrough, PTY output forwarding, and command recording.
+- `src/app/history_ops.rs`: history trimming and encrypted/plain AI history loading helpers.
+- `src/app/template_args.rs`: template subcommand argument parsing.
+- `src/app/event_log.rs`: event log display for `#log`.
 - `src/app/reports.rs`: `#status`, `#config`, `#doctor`, `#editor`, and encryption/sync status output.
 - `src/app/sync_commands.rs`: `#set-remote`, `#sync`, `#push`, startup sync checks, and git step handling.
+- `src/config.rs`: public config module facade and config tests.
+- `src/config/`: config model types, directory layout, private file permissions, root path resolution, file IO, and normalization.
 - `src/completion.rs`: completion orchestration across templates, history, paths, private commands, and typo tiers.
 - `src/completion/`: focused completion helpers for matching rules, token parsing, path/PATH scanning, private command completion, and rendering/acceptance.
 - `src/terminal.rs`: terminal event loop, key/paste handling, picker/editor boundaries, and prompt redraw positioning.
