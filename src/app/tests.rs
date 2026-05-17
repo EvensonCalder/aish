@@ -1,4 +1,5 @@
 use super::encryption_commands::{StoredApiKey, write_history_rewrite_script};
+use super::startup_unlock::{EncryptedStartupPaths, UnlockMode, load_encrypted_startup_data};
 use super::state::OUTPUT_RING_CAPACITY;
 use super::sync_commands::{run_startup_sync_check, write_last_sync_attempt};
 use super::*;
@@ -10,7 +11,9 @@ use crate::config::{
 use crate::display_width::display_width;
 use crate::editor::EditorCommand;
 use crate::encrypted_writer::EncryptedWriteQueue;
-use crate::encryption::{gpg_decrypt_file, load_encrypted_jsonl, rewrite_encrypted_jsonl};
+use crate::encryption::{
+    append_encrypted_jsonl, gpg_decrypt_file, load_encrypted_jsonl, rewrite_encrypted_jsonl,
+};
 use crate::history::{
     AiCommandIndex, AiItem, AiItemKind, AiSession, HistoryEntry, HistorySource, NoteEntry,
     append_jsonl, load_jsonl,
@@ -3323,6 +3326,142 @@ fn encrypted_writes_use_gpg_files_without_plaintext_jsonl() {
 
 #[test]
 #[cfg(unix)]
+fn startup_unlock_noninteractive_loads_cached_agent_data() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let fake_gpg = write_fake_gpg(&temp);
+    unsafe {
+        std::env::set_var("AISH_GPG", &fake_gpg);
+    }
+    let paths = EncryptedStartupPaths {
+        regular_history: temp.path().join("history/regular.jsonl"),
+        draft_history: temp.path().join("history/draft.jsonl"),
+        ai_history: temp.path().join("history/ai.jsonl"),
+        notes: temp.path().join("history/notes.jsonl"),
+        template_store: temp.path().join("templates/templates.jsonl"),
+    };
+    append_encrypted_jsonl(
+        fake_gpg.display().to_string(),
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        &paths.regular_history,
+        &HistoryEntry {
+            t: 1,
+            command: "pwd".to_string(),
+            exit_code: Some(0),
+            source: HistorySource::User,
+        },
+    )
+    .unwrap();
+    append_encrypted_jsonl(
+        fake_gpg.display().to_string(),
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        &paths.template_store,
+        &TemplateEntry::new("echo cached"),
+    )
+    .unwrap();
+
+    let data = load_encrypted_startup_data(&paths, UnlockMode::Noninteractive).unwrap();
+
+    unsafe {
+        std::env::remove_var("AISH_GPG");
+    }
+    assert_eq!(data.store.regular.len(), 1);
+    assert_eq!(data.store.regular[0].command, "pwd");
+    assert_eq!(data.templates.items.len(), 1);
+    assert_eq!(data.templates.items[0].body, "echo cached");
+    assert!(data.encrypted_cache.contains_key(&paths.regular_history));
+    assert!(data.encrypted_cache.contains_key(&paths.template_store));
+}
+
+#[test]
+#[cfg(unix)]
+fn locked_encrypted_storage_buffers_history_until_unlock() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let fake_gpg = write_fake_gpg(&temp);
+    unsafe {
+        std::env::set_var("AISH_GPG", &fake_gpg);
+    }
+    let regular_path = temp.path().join("history/regular.jsonl");
+    let draft_path = temp.path().join("history/draft.jsonl");
+    let ai_path = temp.path().join("history/ai.jsonl");
+    let notes_path = temp.path().join("history/notes.jsonl");
+    let template_path = temp.path().join("templates/templates.jsonl");
+    append_encrypted_jsonl(
+        fake_gpg.display().to_string(),
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        &regular_path,
+        &HistoryEntry {
+            t: 1,
+            command: "old".to_string(),
+            exit_code: Some(0),
+            source: HistorySource::User,
+        },
+    )
+    .unwrap();
+    let mut state = AppState {
+        regular_history_path: Some(regular_path.clone()),
+        draft_history_path: Some(draft_path),
+        ai_history_path: Some(ai_path),
+        notes_path: Some(notes_path),
+        template_store_path: Some(template_path),
+        encryption_config: EncryptionConfig {
+            enabled: true,
+            key_fingerprint: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
+            recipient: String::new(),
+        },
+        encrypted_storage_unlocked: false,
+        ..AppState::default()
+    };
+
+    record_completed_command(&mut state, "new".to_string(), String::new(), 0, false).unwrap();
+
+    assert!(state.encrypted_storage_is_locked());
+    assert_eq!(state.pending_locked_regular_history.len(), 1);
+    assert!(state.encrypted_writer.is_none());
+
+    assert!(state.unlock_encrypted_storage_interactively().unwrap());
+    state.flush_encrypted_writes().unwrap();
+    let loaded =
+        load_encrypted_jsonl::<HistoryEntry>(fake_gpg.display().to_string(), &regular_path)
+            .unwrap();
+
+    unsafe {
+        std::env::remove_var("AISH_GPG");
+    }
+    assert!(state.encrypted_storage_unlocked);
+    assert!(state.pending_locked_regular_history.is_empty());
+    assert_eq!(state.regular_history.len(), 2);
+    assert_eq!(loaded.items.len(), 2);
+    assert_eq!(loaded.items[0].command, "old");
+    assert_eq!(loaded.items[1].command, "new");
+}
+
+#[test]
+fn locked_history_mode_renders_unlock_message() {
+    let state = AppState {
+        mode: Mode::History,
+        encryption_config: EncryptionConfig {
+            enabled: true,
+            key_fingerprint: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
+            recipient: String::new(),
+        },
+        encrypted_storage_unlocked: false,
+        ..AppState::default()
+    };
+
+    assert_eq!(
+        state.render_prompt_line(),
+        "$ history is still unlocking..."
+    );
+    assert_eq!(
+        state.terminal_cursor_column(),
+        display_width("$ history is still unlocking...") as u16
+    );
+}
+
+#[test]
+#[cfg(unix)]
 fn key_set_encrypts_env_api_key_without_printing_secret() {
     let _guard = ENV_LOCK.lock().unwrap();
     let temp = tempfile::tempdir().unwrap();
@@ -4132,7 +4271,7 @@ fn save_draft_if_configured_persists_non_empty_draft() {
     };
     state.draft.insert_str("git status");
 
-    assert!(save_draft_if_configured(&state).unwrap());
+    assert!(save_draft_if_configured(&mut state).unwrap());
 
     let loaded = crate::history::load_jsonl::<DraftEntry>(&path).unwrap();
     assert_eq!(loaded.errors, []);
@@ -4152,14 +4291,14 @@ fn save_draft_if_configured_skips_empty_or_disabled_drafts() {
     };
     state.draft.insert_str("git status");
 
-    assert!(!save_draft_if_configured(&state).unwrap());
+    assert!(!save_draft_if_configured(&mut state).unwrap());
     assert!(!path.exists());
 
-    let state = AppState {
+    let mut state = AppState {
         draft_history_path: Some(path.clone()),
         ..AppState::default()
     };
-    assert!(!save_draft_if_configured(&state).unwrap());
+    assert!(!save_draft_if_configured(&mut state).unwrap());
     assert!(!path.exists());
 }
 

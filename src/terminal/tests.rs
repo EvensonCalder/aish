@@ -213,7 +213,7 @@ fn exit_persistence_boundary_flushes_pending_encrypted_draft() {
     });
 
     let started = Instant::now();
-    persist_draft_and_flush_before_exit(&state).unwrap();
+    persist_draft_and_flush_before_exit(&mut state).unwrap();
     let elapsed = started.elapsed();
     releaser.join().unwrap();
 

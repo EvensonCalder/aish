@@ -41,6 +41,7 @@ pub(super) fn execute_private_command(
             Some("clear") => clear_stored_key(state, out)?,
             _ => writeln!(out, "usage: #key set | #key clear")?,
         },
+        "unlock" => unlock_encrypted_storage_command(state, out)?,
         "context" => update_context_config(state, out, args)?,
         "paste" => update_paste_config(state, out, args)?,
         "completion" => update_completion_config(state, out, args)?,
@@ -72,7 +73,25 @@ pub(super) fn execute_private_command(
     Ok(())
 }
 
+fn unlock_encrypted_storage_command(state: &mut AppState, out: &mut impl Write) -> Result<()> {
+    if !state.encryption_config.enabled {
+        writeln!(out, "encryption is off")?;
+        return Ok(());
+    }
+    if state.encrypted_storage_unlocked {
+        writeln!(out, "encrypted storage already unlocked")?;
+        return Ok(());
+    }
+    state.unlock_encrypted_storage_interactively()?;
+    writeln!(out, "encrypted storage unlocked")?;
+    Ok(())
+}
+
 fn trim_history_command(state: &mut AppState, out: &mut impl Write, args: &str) -> Result<()> {
+    if state.encrypted_storage_is_locked() {
+        writeln!(out, "history is still unlocking; run #unlock")?;
+        return Ok(());
+    }
     let count = args.parse::<usize>();
     match (count, &state.regular_history_path, &state.ai_history_path) {
         (Ok(count), Some(_), Some(_)) => {
@@ -116,7 +135,12 @@ fn create_template_command(state: &mut AppState, out: &mut impl Write, args: &st
 
 fn template_command(state: &mut AppState, out: &mut impl Write, args: &str) -> Result<bool> {
     let mut keep_draft = false;
-    match args.split_whitespace().next() {
+    let subcommand = args.split_whitespace().next();
+    if state.encrypted_storage_is_locked() && !matches!(subcommand, Some("list") | None) {
+        writeln!(out, "templates are still unlocking; run #unlock")?;
+        return Ok(false);
+    }
+    match subcommand {
         Some("list") => {
             writeln!(
                 out,

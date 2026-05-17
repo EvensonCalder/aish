@@ -52,6 +52,10 @@ const COMMAND_HELP: &[HelpEntry] = &[
         description: "store or clear the encrypted API key override",
     },
     HelpEntry {
+        usage: "#unlock",
+        description: "unlock encrypted startup storage when passphrase entry is needed",
+    },
+    HelpEntry {
         usage: "#context [on|off|confirm on|confirm off|<bytes>]",
         description: "show or update context capture settings",
     },
@@ -312,6 +316,10 @@ const ENCRYPTION_HELP: &[HelpEntry] = &[
     HelpEntry {
         usage: "#key set | #key clear",
         description: "store or clear the encrypted AI API key override",
+    },
+    HelpEntry {
+        usage: "#unlock",
+        description: "load encrypted startup history and templates with GPG/pinentry",
     },
 ];
 

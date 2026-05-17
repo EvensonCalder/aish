@@ -202,7 +202,7 @@ Used when GPG or pinentry needs interactive terminal control.
 - Direct GPG decrypt, key migration, and history rewrite operations give GPG/pinentry dedicated terminal control.
 - Aish sets `GPG_TTY` when a controlling TTY is known and asks `gpg-agent` to update its startup TTY.
 - After completion or failure, Aish restores raw mode and the previous Aish mode before redrawing.
-- Dedicated async startup unlock passthrough remains future work. Startup encrypted history/template decrypt is still synchronous until that architecture lands.
+- Startup encrypted history/template decrypt starts in a noninteractive background unlock attempt. If GPG needs a passphrase, Aish remains usable with locked history/templates until `#unlock` runs the dedicated GPG/pinentry passthrough.
 
 ---
 
@@ -295,6 +295,7 @@ Private commands use `#<name>` with no required space after `#`:
 #prompt draft "{basename} > "
 #prompt reset
 #key set
+#unlock
 #encrypt on
 #history 20000
 #context 65536
@@ -1108,6 +1109,7 @@ Commands:
 #env-key <ENV_NAME>
 #key set
 #key clear
+#unlock
 ```
 
 Priority:
@@ -1129,6 +1131,7 @@ Commands:
 #encrypt rewrite-history plan
 #encrypt rewrite-history run <key-fingerprint|unique-email> --confirm-rewrite-history
 #encrypt off
+#unlock
 ```
 
 Behavior:
@@ -1148,9 +1151,10 @@ Behavior:
 - Operations that need durable storage or rewrite storage globally must flush pending encrypted writes first. This includes exit, `#push`, `#history`, `#encrypt off`, key rotation, and confirmed history rewrite.
 - Encrypted-write completion and failure events are frontend background events. Draining those events should refresh live completion and redraw the prompt when needed.
 - Direct GPG decrypt operations that may need pinentry should enter `UnlockPassthrough`, clear stale live completion state, yield terminal control, set `GPG_TTY` when possible, and restore raw mode and the previous Aish mode after completion or failure.
-- Decrypt asynchronously on startup so the shell is usable before history/template unlock completes.
-- While unlock is pending, completion/history features can show `history is still unlocking...`.
-- Startup unlock should use dedicated GPG/pinentry unlock passthrough so passphrase entry owns the terminal without blocking unrelated UI once the event architecture supports it.
+- Startup decrypt should first use a noninteractive background GPG attempt (`--batch --pinentry-mode error`) so startup never blocks on passphrase entry or lets pinentry fight the raw-mode UI.
+- If startup unlock succeeds because `gpg-agent` can decrypt without prompting, Aish loads history/templates, starts the encrypted writer with decrypted caches, refreshes completion, and redraws.
+- If startup unlock needs a passphrase, Aish keeps shell input usable, buffers new encrypted-storage appends in memory, shows `history is still unlocking...` in history/AI modes when needed, and exposes `#unlock`.
+- `#unlock` runs the interactive GPG/pinentry unlock path, merges loaded encrypted history/templates with buffered appends, starts the encrypted writer, and replays buffered appends before durability boundaries such as exit flush.
 - `#encrypt rewrite-history plan` prints the risk and exact confirmed command for rewriting Git history.
 - `#encrypt rewrite-history run <key> --confirm-rewrite-history` is destructive by design: it requires a clean worktree, creates a backup branch, rewrites the current branch's managed storage blobs by encrypting plaintext blobs and re-encrypting old-key blobs for the target fingerprint, and never pushes automatically.
 
@@ -1290,6 +1294,7 @@ Initial command set:
 #env-key <ENV_NAME>
 #key set
 #key clear
+#unlock
 
 #context on|off
 #context <bytes>

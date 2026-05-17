@@ -18,6 +18,7 @@ mod private_commands;
 mod prompt;
 mod prompt_command;
 mod reports;
+pub mod startup_unlock;
 mod sync_commands;
 mod template_args;
 
@@ -87,7 +88,7 @@ pub fn unix_timestamp() -> i64 {
         .unwrap_or(0)
 }
 
-pub fn save_draft_if_configured(state: &AppState) -> Result<bool> {
+pub fn save_draft_if_configured(state: &mut AppState) -> Result<bool> {
     if !state.draft_persist || state.draft.is_empty() {
         return Ok(false);
     }

@@ -91,7 +91,7 @@ pub(super) fn set_sync_schedule(
 }
 
 pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -> Result<()> {
-    let remote = state.sync_config.remote.trim();
+    let remote = state.sync_config.remote.trim().to_string();
     if remote.is_empty() {
         writeln!(
             out,
@@ -103,6 +103,9 @@ pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -
         writeln!(out, "config path is not configured; sync push cannot run")?;
         return Ok(());
     };
+    if state.has_pending_locked_writes() {
+        state.unlock_encrypted_storage_interactively()?;
+    }
     state.flush_encrypted_writes()?;
     let lock_path = root.join("cache/runtime/sync.lock");
     let Some(_lock) = SyncLock::acquire(&lock_path)? else {
@@ -114,7 +117,7 @@ pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -
     let mut initialized_repo = false;
     if root.join(".git").is_dir() {
         warn_tracked_managed_paths(&root, out)?;
-    } else if let Some(plan) = init_repo_plan(remote) {
+    } else if let Some(plan) = init_repo_plan(&remote) {
         for command in &plan.commands {
             run_sync_git_step(state, out, &root, command)?;
         }

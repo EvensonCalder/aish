@@ -35,6 +35,10 @@ use crate::templates::{
     remove_templates_by_id, replace_template_by_id,
 };
 
+use super::startup_unlock::{
+    EncryptedStartupData, EncryptedStartupPaths, EncryptedStartupUnlock, UnlockMode,
+    load_encrypted_startup_data,
+};
 use super::{
     PromptTemplates, ai_editor_initial_text, configured_encryption_key,
     draft_is_ai_prompt_or_empty_editor_trigger, normalize_editor_draft_content, unix_timestamp,
@@ -94,6 +98,14 @@ pub struct AppState {
     pub encryption_config: EncryptionConfig,
     pub encrypted_writer: Option<EncryptedWriteQueue>,
     pub last_encrypted_write_error: Option<String>,
+    pub encrypted_storage_unlocked: bool,
+    pub encrypted_startup_unlock: Option<EncryptedStartupUnlock>,
+    pub encrypted_startup_unlock_message: Option<String>,
+    pub pending_locked_regular_history: Vec<HistoryEntry>,
+    pub pending_locked_draft_history: Vec<DraftEntry>,
+    pub pending_locked_ai_sessions: Vec<AiSession>,
+    pub pending_locked_notes: Vec<NoteEntry>,
+    pub pending_locked_templates: Vec<TemplateEntry>,
     pub sync_config: SyncConfig,
     pub pending_context: Option<PendingContextPrompt>,
     pub completion_panel: Vec<String>,
@@ -182,6 +194,14 @@ impl Default for AppState {
             encryption_config: EncryptionConfig::default(),
             encrypted_writer: None,
             last_encrypted_write_error: None,
+            encrypted_storage_unlocked: true,
+            encrypted_startup_unlock: None,
+            encrypted_startup_unlock_message: None,
+            pending_locked_regular_history: Vec::new(),
+            pending_locked_draft_history: Vec::new(),
+            pending_locked_ai_sessions: Vec::new(),
+            pending_locked_notes: Vec::new(),
+            pending_locked_templates: Vec::new(),
             sync_config: SyncConfig::default(),
             pending_context: None,
             completion_panel: Vec::new(),
@@ -624,6 +644,12 @@ impl AppState {
         let Some(path) = &self.template_store_path else {
             return Ok(());
         };
+        if self.encrypted_storage_is_locked() {
+            self.pending_locked_templates.push(entry.clone());
+            self.templates.push(entry.clone());
+            self.invalidate_completion_template_snapshot();
+            return Ok(());
+        }
         if self.encryption_config.enabled {
             if let Some(writer) = &self.encrypted_writer {
                 writer.enqueue_append_jsonl(path, entry)?;
@@ -669,6 +695,9 @@ impl AppState {
         let Some(path) = &self.template_store_path else {
             return Ok(None);
         };
+        if self.encrypted_storage_is_locked() {
+            anyhow::bail!("encrypted templates are still unlocking; run #unlock");
+        }
         if !self.encryption_config.enabled {
             let removal = remove_templates_by_id(path, id)?;
             self.templates = removal.remaining.clone();
@@ -712,6 +741,9 @@ impl AppState {
         let Some(path) = &self.template_store_path else {
             return Ok(None);
         };
+        if self.encrypted_storage_is_locked() {
+            anyhow::bail!("encrypted templates are still unlocking; run #unlock");
+        }
         if !self.encryption_config.enabled {
             let removal = replace_template_by_id(path, existing_id, entry)?;
             self.templates = removal.remaining.clone();
@@ -748,28 +780,44 @@ impl AppState {
         Ok(Some(removal))
     }
 
-    pub(crate) fn append_note(&self, entry: NoteEntry) -> Result<()> {
+    pub(crate) fn append_note(&mut self, entry: NoteEntry) -> Result<()> {
+        if self.encrypted_storage_is_locked() {
+            self.pending_locked_notes.push(entry);
+            return Ok(());
+        }
         let Some(path) = &self.notes_path else {
             return Ok(());
         };
         self.append_jsonl_item(path, &entry)
     }
 
-    pub(crate) fn append_draft_entry(&self, entry: &DraftEntry) -> Result<()> {
+    pub(crate) fn append_draft_entry(&mut self, entry: &DraftEntry) -> Result<()> {
+        if self.encrypted_storage_is_locked() {
+            self.pending_locked_draft_history.push(entry.clone());
+            return Ok(());
+        }
         let Some(path) = &self.draft_history_path else {
             return Ok(());
         };
         self.append_jsonl_item(path, entry)
     }
 
-    fn append_ai_session(&self, session: &AiSession) -> Result<()> {
+    fn append_ai_session(&mut self, session: &AiSession) -> Result<()> {
+        if self.encrypted_storage_is_locked() {
+            self.pending_locked_ai_sessions.push(session.clone());
+            return Ok(());
+        }
         let Some(path) = &self.ai_history_path else {
             return Ok(());
         };
         self.append_jsonl_item(path, session)
     }
 
-    pub(crate) fn append_regular_history_entry(&self, entry: &HistoryEntry) -> Result<()> {
+    pub(crate) fn append_regular_history_entry(&mut self, entry: &HistoryEntry) -> Result<()> {
+        if self.encrypted_storage_is_locked() {
+            self.pending_locked_regular_history.push(entry.clone());
+            return Ok(());
+        }
         let Some(path) = &self.regular_history_path else {
             return Ok(());
         };
@@ -892,6 +940,135 @@ impl AppState {
             initial_cache,
         ));
         self.last_encrypted_write_error = None;
+    }
+
+    pub fn encrypted_storage_is_locked(&self) -> bool {
+        self.encryption_config.enabled && !self.encrypted_storage_unlocked
+    }
+
+    pub fn has_pending_locked_writes(&self) -> bool {
+        !self.pending_locked_regular_history.is_empty()
+            || !self.pending_locked_draft_history.is_empty()
+            || !self.pending_locked_ai_sessions.is_empty()
+            || !self.pending_locked_notes.is_empty()
+            || !self.pending_locked_templates.is_empty()
+    }
+
+    pub(crate) fn drain_startup_unlock_event(&mut self) -> Result<bool> {
+        let Some(unlock) = &self.encrypted_startup_unlock else {
+            return Ok(false);
+        };
+        let Some(result) = unlock.try_recv() else {
+            return Ok(false);
+        };
+        self.encrypted_startup_unlock = None;
+        match result {
+            Ok(data) => {
+                self.apply_encrypted_startup_data(data)?;
+                self.encrypted_startup_unlock_message = Some("encrypted storage unlocked".into());
+            }
+            Err(error) => {
+                self.encrypted_startup_unlock_message = Some(format!(
+                    "encrypted storage needs passphrase; run #unlock ({error})"
+                ));
+            }
+        }
+        Ok(true)
+    }
+
+    pub(crate) fn unlock_encrypted_storage_interactively(&mut self) -> Result<bool> {
+        if !self.encryption_config.enabled || self.encrypted_storage_unlocked {
+            return Ok(false);
+        }
+        let Some(paths) = self.encrypted_startup_paths() else {
+            anyhow::bail!("encrypted storage paths are not configured");
+        };
+        self.encrypted_startup_unlock = None;
+        let data = self.run_unlock_passthrough(|_| {
+            load_encrypted_startup_data(&paths, UnlockMode::Interactive)
+        })?;
+        self.apply_encrypted_startup_data(data)?;
+        self.encrypted_startup_unlock_message = Some("encrypted storage unlocked".into());
+        Ok(true)
+    }
+
+    fn encrypted_startup_paths(&self) -> Option<EncryptedStartupPaths> {
+        Some(EncryptedStartupPaths {
+            regular_history: self.regular_history_path.clone()?,
+            draft_history: self.draft_history_path.clone()?,
+            ai_history: self.ai_history_path.clone()?,
+            notes: self.notes_path.clone()?,
+            template_store: self.template_store_path.clone()?,
+        })
+    }
+
+    fn apply_encrypted_startup_data(&mut self, data: EncryptedStartupData) -> Result<()> {
+        let pending_regular = std::mem::take(&mut self.pending_locked_regular_history);
+        let pending_drafts = std::mem::take(&mut self.pending_locked_draft_history);
+        let pending_ai_sessions = std::mem::take(&mut self.pending_locked_ai_sessions);
+        let pending_notes = std::mem::take(&mut self.pending_locked_notes);
+        let pending_templates = std::mem::take(&mut self.pending_locked_templates);
+
+        self.regular_history = data.store.regular;
+        self.regular_history.extend(pending_regular.iter().cloned());
+        self.draft_history = data.store.drafts;
+        self.draft_history.extend(pending_drafts.iter().cloned());
+        self.ai_sessions = data.store.ai_sessions;
+        self.ai_sessions.extend(pending_ai_sessions.iter().cloned());
+        self.ai_command_indices = ai_command_indices(&self.ai_sessions);
+        self.templates = data.templates.items;
+        self.templates.extend(pending_templates.iter().cloned());
+        self.template_errors = data.templates.errors;
+        self.invalidate_completion_history_snapshot();
+        self.invalidate_completion_template_snapshot();
+        self.encrypted_storage_unlocked = true;
+        self.start_encrypted_writer_with_cache(data.encrypted_cache);
+        self.replay_pending_locked_writes(
+            pending_regular,
+            pending_drafts,
+            pending_ai_sessions,
+            pending_notes,
+            pending_templates,
+        )
+    }
+
+    fn replay_pending_locked_writes(
+        &self,
+        regular: Vec<HistoryEntry>,
+        drafts: Vec<DraftEntry>,
+        ai_sessions: Vec<AiSession>,
+        notes: Vec<NoteEntry>,
+        templates: Vec<TemplateEntry>,
+    ) -> Result<()> {
+        let Some(writer) = &self.encrypted_writer else {
+            return Ok(());
+        };
+        if let Some(path) = &self.regular_history_path {
+            for entry in regular {
+                writer.enqueue_append_jsonl(path, &entry)?;
+            }
+        }
+        if let Some(path) = &self.draft_history_path {
+            for entry in drafts {
+                writer.enqueue_append_jsonl(path, &entry)?;
+            }
+        }
+        if let Some(path) = &self.ai_history_path {
+            for session in ai_sessions {
+                writer.enqueue_append_jsonl(path, &session)?;
+            }
+        }
+        if let Some(path) = &self.notes_path {
+            for note in notes {
+                writer.enqueue_append_jsonl(path, &note)?;
+            }
+        }
+        if let Some(path) = &self.template_store_path {
+            for template in templates {
+                writer.enqueue_append_jsonl(path, &template)?;
+            }
+        }
+        Ok(())
     }
 
     pub fn stop_encrypted_writer(&mut self) {

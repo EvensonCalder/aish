@@ -131,6 +131,13 @@ pub(super) fn update_encryption_config(
     args: &str,
 ) -> Result<()> {
     let parts: Vec<_> = args.split_whitespace().collect();
+    if state.encrypted_storage_is_locked() {
+        writeln!(
+            out,
+            "encrypted storage is still unlocking; run #unlock before changing encryption"
+        )?;
+        return Ok(());
+    }
     match parts.as_slice() {
         ["on"] => enable_encryption(state, out, None),
         ["on", key_selector] => enable_encryption(state, out, Some(key_selector)),

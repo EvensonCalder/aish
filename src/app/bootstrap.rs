@@ -6,21 +6,27 @@ use std::time::Duration;
 use anyhow::Result;
 
 use crate::config::{self, EncryptionConfig};
-use crate::encryption::{gpg_program, load_encrypted_jsonl_with_bytes};
-use crate::history::{
-    AiSession, DraftEntry, HistoryEntry, HistoryStore, JsonlLoad, NoteEntry, ai_command_indices,
-    newest_first_indices,
-};
+use crate::history::{HistoryStore, JsonlLoad};
 use crate::pty::PtyBackend;
 use crate::templates::{TemplateEntry, load_templates};
 
-use super::{AppState, sync_commands::run_startup_sync_check};
+use super::{
+    AppState,
+    startup_unlock::{EncryptedStartupPaths, EncryptedStartupUnlock, empty_history_store},
+    sync_commands::run_startup_sync_check,
+};
 
 pub fn run() -> Result<()> {
     let (layout, config) = config::init_default_layout(config::runtime_aish_dir()?)?;
-    let mut encrypted_cache = HashMap::new();
-    let store = load_history_store(&layout, &config.encryption, &mut encrypted_cache)?;
-    let templates = load_template_store(&layout, &config.encryption, &mut encrypted_cache)?;
+    let encryption_enabled = config.encryption.enabled;
+    let encrypted_cache = HashMap::new();
+    let encrypted_startup_unlock = config
+        .encryption
+        .enabled
+        .then(|| EncryptedStartupUnlock::start(EncryptedStartupPaths::from_layout(&layout)));
+    let encrypted_storage_unlocked = !encryption_enabled;
+    let store = load_history_store(&layout, &config.encryption)?;
+    let templates = load_template_store(&layout, &config.encryption)?;
     let mut backend = PtyBackend::spawn(&config.shell.backend)?;
     let mut state = AppState {
         current_cwd: backend.initial_cwd().map(PathBuf::from),
@@ -47,11 +53,17 @@ pub fn run() -> Result<()> {
         ai_config: config.ai,
         context_config: config.context,
         encryption_config: config.encryption,
+        encrypted_storage_unlocked,
+        encrypted_startup_unlock,
+        encrypted_startup_unlock_message: encryption_enabled
+            .then(|| "encrypted storage unlocking in background".to_string()),
         sync_config: config.sync,
         editor_temp_root: Some(layout.runtime_cache.join("editor")),
         ..AppState::default()
     };
-    state.start_encrypted_writer_with_cache(encrypted_cache);
+    if state.encrypted_storage_unlocked {
+        state.start_encrypted_writer_with_cache(encrypted_cache);
+    }
     run_startup_sync_check(&mut state, &layout.root, &mut io::stdout())?;
     crate::terminal::run(
         &mut state,
@@ -64,15 +76,12 @@ pub fn run() -> Result<()> {
 fn load_template_store(
     layout: &config::DirectoryLayout,
     encryption: &EncryptionConfig,
-    encrypted_cache: &mut HashMap<PathBuf, Vec<u8>>,
 ) -> Result<JsonlLoad<TemplateEntry>> {
     if encryption.enabled {
-        let (loaded, bytes) = load_encrypted_jsonl_with_bytes::<TemplateEntry>(
-            gpg_program(),
-            &layout.template_store,
-        )?;
-        encrypted_cache.insert(layout.template_store.clone(), bytes);
-        Ok(loaded)
+        Ok(JsonlLoad {
+            items: Vec::new(),
+            errors: Vec::new(),
+        })
     } else {
         load_templates(&layout.template_store)
     }
@@ -81,41 +90,9 @@ fn load_template_store(
 fn load_history_store(
     layout: &config::DirectoryLayout,
     encryption: &EncryptionConfig,
-    encrypted_cache: &mut HashMap<PathBuf, Vec<u8>>,
 ) -> Result<HistoryStore> {
     if !encryption.enabled {
         return HistoryStore::load(layout);
     }
-
-    let program = gpg_program();
-    let (regular, regular_bytes) =
-        load_encrypted_jsonl_with_bytes::<HistoryEntry>(&program, &layout.regular_history)?;
-    let (drafts, draft_bytes) =
-        load_encrypted_jsonl_with_bytes::<DraftEntry>(&program, &layout.draft_history)?;
-    let (ai_sessions, ai_bytes) =
-        load_encrypted_jsonl_with_bytes::<AiSession>(&program, &layout.ai_history)?;
-    let (notes, note_bytes) =
-        load_encrypted_jsonl_with_bytes::<NoteEntry>(&program, &layout.notes)?;
-    encrypted_cache.insert(layout.regular_history.clone(), regular_bytes);
-    encrypted_cache.insert(layout.draft_history.clone(), draft_bytes);
-    encrypted_cache.insert(layout.ai_history.clone(), ai_bytes);
-    encrypted_cache.insert(layout.notes.clone(), note_bytes);
-    let regular_newest_indices = newest_first_indices(regular.items.len());
-    let ai_command_indices = ai_command_indices(&ai_sessions.items);
-
-    let mut errors = Vec::new();
-    errors.extend(regular.errors);
-    errors.extend(drafts.errors);
-    errors.extend(ai_sessions.errors);
-    errors.extend(notes.errors);
-
-    Ok(HistoryStore {
-        regular: regular.items,
-        regular_newest_indices,
-        drafts: drafts.items,
-        ai_sessions: ai_sessions.items,
-        ai_command_indices,
-        notes: notes.items,
-        errors,
-    })
+    Ok(empty_history_store())
 }

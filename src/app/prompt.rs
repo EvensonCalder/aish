@@ -86,8 +86,20 @@ impl AppState {
             return format!("{}{}", self.prompt_prefix(), marker);
         }
         let text = match self.mode {
-            Mode::History => self.selected_history_command().unwrap_or(""),
-            Mode::Ai => self.selected_ai_command().unwrap_or(""),
+            Mode::History => self
+                .selected_history_command()
+                .or_else(|| {
+                    self.encrypted_storage_is_locked()
+                        .then_some("history is still unlocking...")
+                })
+                .unwrap_or(""),
+            Mode::Ai => self
+                .selected_ai_command()
+                .or_else(|| {
+                    self.encrypted_storage_is_locked()
+                        .then_some("history is still unlocking...")
+                })
+                .unwrap_or(""),
             Mode::Draft if self.draft_from_editor => {
                 let mut rendered = format!(
                     "{}{}",
@@ -135,12 +147,20 @@ impl AppState {
             Mode::History => format!(
                 "{}{}",
                 self.prompt_prefix(),
-                self.selected_history_command().unwrap_or("")
+                self.selected_history_command()
+                    .or_else(|| self
+                        .encrypted_storage_is_locked()
+                        .then_some("history is still unlocking..."))
+                    .unwrap_or("")
             ),
             Mode::Ai => format!(
                 "{}{}",
                 self.prompt_prefix(),
-                self.selected_ai_command().unwrap_or("")
+                self.selected_ai_command()
+                    .or_else(|| self
+                        .encrypted_storage_is_locked()
+                        .then_some("history is still unlocking..."))
+                    .unwrap_or("")
             ),
             Mode::Draft if self.draft_from_editor => {
                 format!(

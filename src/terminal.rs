@@ -202,8 +202,11 @@ pub fn run(
     Ok(())
 }
 
-fn persist_draft_and_flush_before_exit(state: &AppState) -> Result<()> {
+fn persist_draft_and_flush_before_exit(state: &mut AppState) -> Result<()> {
     let _ = save_draft_if_configured(state)?;
+    if state.has_pending_locked_writes() {
+        state.unlock_encrypted_storage_interactively()?;
+    }
     state.flush_encrypted_writes()
 }
 
@@ -225,6 +228,10 @@ fn refresh_after_background_events(state: &mut AppState, out: &mut impl Write) -
         refresh_live_completion_ui(state)?;
         should_redraw |=
             state.completion_inline != previous_inline || state.completion_panel != previous_panel;
+    }
+    if state.drain_startup_unlock_event()? {
+        refresh_live_completion_ui(state)?;
+        should_redraw = true;
     }
     if should_redraw {
         redraw(state, out)?;

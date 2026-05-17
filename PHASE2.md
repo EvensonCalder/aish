@@ -18,7 +18,7 @@ Current state:
 
 - The PTY shell wrapper, prompt rendering, draft editor, history/AI modes, private command parser, context flow, event log, templates, inline completion, external editor, multiline paste review, shell continuation handling, sync flow, diagnostics, and shell integration scaffolding are implemented and tested.
 - Expect-driven end-to-end coverage exists and is the acceptance layer for visible terminal behavior.
-- Phase 18 encryption/GPG now has GPG-backed key storage, encrypted managed JSONL storage, key rotation, explicit history rewrite planning/running, and fake-GPG coverage. The remaining encryption gap is async startup unlock and dedicated real pinentry handoff UX.
+- Phase 18 encryption/GPG now has GPG-backed key storage, encrypted managed JSONL storage, key rotation, explicit history rewrite planning/running, nonblocking encrypted startup unlock with explicit `#unlock`, and fake-GPG coverage. The remaining encryption gap is fully automatic startup pinentry prompting and dedicated real-key pinentry coverage.
 - Configurable key rebinding remains incomplete.
 - Command-running PTY output is streamed through explicit output/idle callbacks. Timer/background support exists for tick wakeups and encrypted-write events; future scheduled background work is not attached yet.
 - Full automatic passthrough for arbitrary interactive/alternate-screen programs remains incomplete; allowlisted foreground passthrough exists.
@@ -34,7 +34,7 @@ Current state:
 
 This hardening pass is complete for the implemented v0.1 terminal wrapper surface. The remaining items below are explicitly deferred instead of being treated as partially complete Phase 2 fixes:
 
-- Async encrypted-history unlock and dedicated GPG/pinentry handoff stay deferred until they have real-terminal coverage with isolated keys. Current direct decrypt operations temporarily leave raw mode so pinentry can prompt.
+- Fully automatic startup pinentry prompting stays deferred until it has real-terminal coverage with isolated keys. Current direct decrypt operations and explicit `#unlock` temporarily leave raw mode so GPG/pinentry can own the terminal.
 - Configurable key rebinding stays deferred until a stable config schema is chosen; default keybindings remain covered and documented.
 - Future scheduled background event sources stay deferred until a concrete feature requires them beyond current tick wakeups, encrypted-write events, and command-running PTY output callbacks.
 - Automatic passthrough for arbitrary interactive programs stays deferred; the current product supports allowlisted foreground passthrough and key-forwarding tests.
@@ -50,7 +50,7 @@ This hardening pass is complete for the implemented v0.1 terminal wrapper surfac
 - Useless tests should be replaced by tests that prove user-visible behavior, safety boundaries, persistence, or integration correctness.
 - Do not create scheduler files.
 - Do not rewrite git history, auto-resolve sync conflicts, or remove tracked files automatically.
-- Do not overclaim async encryption unlock, real pinentry UX, or history rewrite safety beyond the implemented explicit command flow.
+- Do not overclaim automatic startup pinentry prompting, real passphrase-key coverage, or history rewrite safety beyond the implemented explicit command flow.
 - Keep `SPEC.md`, `TODO.md`, `TESTS.md`, `README.md`, and this file accurate after every feature or test change.
 
 ## Required Verification Before Phase 2 Commits
@@ -85,18 +85,19 @@ Implemented:
 - No persisted plaintext search/completion indexes when encryption is enabled.
 - Atomic encrypted writes and serialized background encrypted JSONL appends.
 - Explicit confirmed `#encrypt rewrite-history` flow with backup branch creation.
+- Noninteractive encrypted startup unlock runs in the background so startup does not block on passphrase entry.
+- Passphrase-required startup unlock is explicit through `#unlock`, which uses the terminal-safe GPG/pinentry passthrough path.
+- New encrypted-storage appends are buffered while startup storage is locked and replayed after unlock.
 
 Remaining tasks:
 
-- Add asynchronous unlock/loading behavior so Aish remains usable while encrypted history/templates are unavailable.
-- Show a user-visible `history is still unlocking...` state where encrypted history/template data is not ready.
-- Handle real GPG/pinentry through `UnlockPassthrough` or an equivalent terminal-safe handoff.
+- Add fully automatic startup pinentry prompting without requiring the user to run `#unlock`.
 - Add isolated real-key manual or opt-in integration coverage for passphrase-protected keys and pinentry recovery.
 
 Required tests:
 
-- Keep fake-GPG unit/integration coverage for command planning, storage migration, key storage, encrypted writes, history rewrite script safety, and no plaintext secret leakage in output/logs.
-- Add real-terminal manual or opt-in coverage for passphrase-protected key unlock before claiming async unlock/pinentry completion.
+- Keep fake-GPG unit/integration coverage for command planning, storage migration, key storage, encrypted writes, startup unlock fallback, history rewrite script safety, and no plaintext secret leakage in output/logs.
+- Add real-terminal manual or opt-in coverage for passphrase-protected key unlock before claiming automatic startup pinentry completion.
 
 ## Workstream 2: End-To-End User Workflows
 

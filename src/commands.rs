@@ -28,6 +28,7 @@ pub const IMPLEMENTED_PRIVATE_COMMANDS: &[&str] = &[
     "base-url",
     "env-key",
     "key",
+    "unlock",
     "context",
     "paste",
     "exit",

@@ -6,25 +6,21 @@ Last full verification performed during development:
 
 ```text
 cargo fmt --check
-cargo test --lib
-cargo test --test pty_backend -- --nocapture
-AISH_TEST_FISH=1 cargo test --test pty_backend -- --nocapture
-cargo test --test expect_runner -- --nocapture
-cargo test --test tmux_capture -- --test-threads=1 --nocapture
-AISH_TEST_FISH=1 cargo test --test tmux_capture tmux_common_shell_workflow_matches_fish_backend_real_terminal_screen -- --nocapture
+cargo check --all-targets
 cargo clippy --all-targets -- -D warnings
+cargo test
 git diff --check
 ```
 
 Current test inventory:
 
-- 490 library unit tests.
+- 508 library unit tests.
 - 26 draft execution integration tests.
 - 1 first-run integration test.
-- 44 tmux screen-capture integration tests.
+- 45 tmux screen-capture integration tests.
 - 9 of the tmux tests are manual-equivalent workflows that replaced deterministic rows from `MANUAL_TESTS.md`: real-world shell commands, prompt editing keys, completion UX mechanics, private commands/notes, templates/editor/default home, AI/context/sync config, local sync, `less` passthrough smoke, and startup failure messages.
-- 21 PTY integration tests, including default bash/zsh coverage and fish cases that skip unless fish opt-in prerequisites are available.
-- 114 expect-driven end-to-end interactive scenarios.
+- 23 PTY integration tests, including default bash/zsh coverage and fish cases that skip unless fish opt-in prerequisites are available.
+- 116 expect-driven end-to-end interactive scenarios.
 - Expect scenarios are serialized inside `expect_runner` because they launch real interactive terminals; parallel execution created false `no prompt` and Tcl/expect crash failures that did not match actual single-user operation.
 - Expect scenarios force `commit.gpgsign=false` through `GIT_CONFIG_COUNT` so temporary local git repositories do not depend on a developer's global GPG/pinentry setup.
 - Tmux screen-capture tests are serialized inside `tmux_capture` for the same reason: they launch real terminal panes and assert screen state.
@@ -83,7 +79,7 @@ Expect scenarios are the acceptance layer for user-visible terminal behavior. Th
 | Editor and paste flows | `external_editor_roundtrip`, `home_default_external_editor_roundtrip`, `external_editor_failure_preserves_draft`, `home_default_external_editor_failure_preserves_draft`, `tmux_manual_templates_editor_and_default_home_match_visible_terminal_behavior`, `tmux_editor_and_paste_review_render_cleanly`, `editor_hash_content_bypasses_parser`, `multiline_paste_editor_review`, `home_default_multiline_paste_editor_review` | Covered | Real OS clipboard and full-screen editor behavior remains human-only in `MANUAL_TESTS.md`. |
 | Sync | `key_encryption_sync_safe_failures`, `home_default_sync_config_persists`, `home_default_startup_sync_runs`, `home_default_startup_sync_unsupported_schedule`, `home_default_startup_sync_failure_logs`, `home_default_startup_sync_disabled_noops`, `home_default_sync_push_local_remote`, `sync_push_local_remote`, `sync_push_failure_logs`, `sync_push_conflict_logs`, `tmux_manual_ai_context_and_sync_config_match_visible_terminal_behavior`, `tmux_manual_sync_local_remote_matches_visible_terminal_behavior` | Covered | Real remote auth and human conflict review remain manual-only. |
 | Passthrough/interactive programs | `passthrough_less`, `tmux_manual_passthrough_less_recovers_prompt_when_available` when `less` is available, `tmux_python_repl_passthrough_recovers_prompt_when_available` when `python3` is available, `tmux_stdin_and_gpg_like_passthrough_recovers_prompt`, backend interrupt recovery through `pty_backend_wait_callback_can_interrupt_long_running_commands`; key forwarding is Rust-covered | Partial | Broader real interactive programs remain human-only because alternate-screen and job-control behavior vary by environment. |
-| Encryption/GPG | `key_clear_removes_stored_key`, `home_default_key_clear_removes_stored_key`, `home_default_encrypt_on_migrates_storage`, `key_encryption_sync_safe_failures`; Rust coverage for `key_set_encrypts_env_api_key_without_printing_secret`, `ai_prompt_uses_gpg_stored_key_when_env_key_is_missing`, `encrypt_on_migrates_plaintext_storage_and_persists_config`, `encrypt_rotate_reencrypts_existing_storage_and_persists_fingerprint`, `encrypt_off_decrypts_storage_and_persists_config`, `encrypted_writes_use_gpg_files_without_plaintext_jsonl`, `encrypted_history_append_does_not_block_command_completion`, `encrypted_completion_uses_cached_templates_without_gpg_on_keypress`, and rewrite-history planning/script safety | Mostly covered with fake GPG | Real passphrase-protected key and pinentry behavior remains human-only in `MANUAL_TESTS.md`. Async startup unlock remains a known gap. |
+| Encryption/GPG | `key_clear_removes_stored_key`, `home_default_key_clear_removes_stored_key`, `home_default_encrypt_on_migrates_storage`, `encrypted_startup_unlock`, `key_encryption_sync_safe_failures`; Rust coverage for `key_set_encrypts_env_api_key_without_printing_secret`, `ai_prompt_uses_gpg_stored_key_when_env_key_is_missing`, `encrypt_on_migrates_plaintext_storage_and_persists_config`, `encrypt_rotate_reencrypts_existing_storage_and_persists_fingerprint`, `encrypt_off_decrypts_storage_and_persists_config`, `encrypted_writes_use_gpg_files_without_plaintext_jsonl`, `encrypted_history_append_does_not_block_command_completion`, `encrypted_completion_uses_cached_templates_without_gpg_on_keypress`, startup unlock buffering, noninteractive GPG decrypt boundaries, and rewrite-history planning/script safety | Mostly covered with fake GPG | Real passphrase-protected key and pinentry behavior remains human-only in `MANUAL_TESTS.md`. Fully automatic startup pinentry prompting remains future work; passphrase-required startup unlock is explicit through `#unlock`. |
 
 ## Feature Coverage
 
@@ -522,9 +518,13 @@ Tests:
 - `app::tests::encrypted_writes_use_gpg_files_without_plaintext_jsonl`
 - `app::tests::encrypted_history_append_does_not_block_command_completion`
 - `app::tests::encrypted_completion_uses_cached_templates_without_gpg_on_keypress`
+- `app::tests::startup_unlock_noninteractive_loads_cached_agent_data`
+- `app::tests::locked_encrypted_storage_buffers_history_until_unlock`
+- `app::tests::locked_history_mode_renders_unlock_message`
 - `app::tests::encrypt_rewrite_history_plan_reports_manual_confirmed_flow`
 - `app::tests::encrypt_rewrite_history_run_requires_clean_git_worktree`
 - `app::tests::encrypt_rewrite_history_script_keeps_decrypted_temp_outside_rewrite_tree`
+- `encryption::tests::gpg_decrypt_file_noninteractive_never_uses_pinentry`
 - `app::tests::sync_config_commands_persist_without_running_git`
 - `app::tests::sync_category_toggle_rejects_invalid_usage_without_persisting`
 - `app::tests::subsystem_commands_report_current_state`
@@ -651,8 +651,8 @@ Status:
 
 Known gaps:
 
-- Async encrypted startup unlock is not implemented; encrypted history/template loading is synchronous.
-- Real passphrase/pinentry GPG behavior is human-only; fake-GPG command boundaries and storage migration are automated.
+- Fully automatic startup pinentry prompting is not implemented; passphrase-required startup unlock is explicit through `#unlock`.
+- Real passphrase/pinentry GPG behavior is human-only; fake-GPG command boundaries, startup unlock fallback, and storage migration are automated.
 - Key rebinding remains incomplete.
 - Future scheduled background work is not attached to tick events yet.
 
@@ -900,6 +900,7 @@ Implemented:
 
 - A Rust integration harness runs `expect` scenarios against the built `aish` binary with isolated `AISH_HOME` directories.
 - Interactive smoke coverage now checks real terminal input/output for basic command execution, cwd persistence, mode cycling, private command safety, help output, status/config/doctor diagnostics, notes, context confirmation skip, event log output, clear screen, exit paths, completion, readline-style editing keys, unknown `Ctrl-X` chord cancellation, history execution, persisted history trimming, AI command sequencing, AI config persistence and key-source redaction, read-only edit-copy behavior, template execution, template CRUD, unresolved template blocking, external editor roundtrip, editor hash-content parser bypass, multiline paste editor-review warning/execution, key/encryption/sync safe-failure behavior, quote continuation, backslash continuation, Ctrl-C continuation cancellation, and backend prompt leak prevention.
+- Encrypted startup unlock has expect coverage for nonblocking locked startup, the visible `history is still unlocking...` state, explicit `#unlock`, and restored encrypted history after unlock.
 - Each new user-facing interactive feature should now receive both Rust-level tests and at least one expect scenario when it affects real terminal behavior.
 
 Tests:
@@ -956,8 +957,7 @@ There are no intentionally ignored tests in the current default suite. Bash and 
 Important missing or partial areas:
 
 - Full keybinding map and rebinding config.
-- Async encrypted-history/template startup unlock and user-visible `history is still unlocking...` state.
-- Dedicated GPG/pinentry unlock passthrough state instead of synchronous direct decrypt operations.
+- Fully automatic startup pinentry prompting without user-running `#unlock`.
 - Future scheduled background events beyond the current tick hook and encrypted-write completion events.
 - Broader automatic passthrough detection for arbitrary alternate-screen or job-control programs.
 - Fish backend validation across macOS and representative Linux distributions before it becomes default required coverage.
@@ -968,8 +968,8 @@ Important missing or partial areas:
 
 Next high-value tests to add:
 
-- Async encrypted unlock behavior once startup decrypt is made non-blocking.
 - Real passphrase/pinentry manual harness notes for isolated GPG keys.
+- Fully automatic startup pinentry prompting coverage if that workflow is implemented.
 - Additional fish tmux workflows after cross-platform fish behavior is validated.
 - Focused passthrough regressions for newly allowlisted interactive programs.
 - Keybinding rebinding tests when user-configurable bindings are implemented.

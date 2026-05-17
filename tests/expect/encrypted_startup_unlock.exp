@@ -1,0 +1,80 @@
+#!/usr/bin/env expect
+# Encrypted startup does not block on pinentry; #unlock performs the
+# interactive unlock path and restores encrypted history.
+
+set timeout 15
+source [file dirname [info script]]/_lib.exp
+
+set home [aish_new_home]
+set fake_gpg "$home/fake-gpg"
+set fh [open $fake_gpg w]
+puts $fh {#!/bin/sh
+mode=encrypt
+out=""
+input=""
+pinentry_error=0
+last=""
+for arg in "$@"; do
+  last="$arg"
+  if [ "$arg" = "--version" ]; then printf 'fake gpg\n'; exit 0; fi
+  if [ "$arg" = "--pinentry-mode" ]; then pinentry_error=1; fi
+done
+for arg in "$@"; do
+  if [ "$arg" = "--list-keys" ]; then
+    printf '%s\n' 'pub:u:255:22:1111111111111111:1:::u:::scESC::::::23::0:'
+    printf '%s\n' 'fpr:::::::::AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA:'
+    printf '%s\n' 'uid:u::::1::hash::Test User <test@example.invalid>::::::::::0:'
+    exit 0
+  fi
+done
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --decrypt) mode=decrypt ;;
+    --output) shift; out="$1" ;;
+    --recipient|--trust-model|--pinentry-mode) shift ;;
+    --batch|--yes|--no-tty|--encrypt|--with-colons|--fingerprint|error) ;;
+    *) input="$1" ;;
+  esac
+  shift
+done
+if [ "$mode" = decrypt ]; then
+  if [ "$pinentry_error" = 1 ]; then
+    printf 'passphrase required\n' >&2
+    exit 9
+  fi
+  sed '1{/^recipient:/d;}' "$input"
+else
+  { printf 'recipient:%s\n' "$recipient"; cat "$input"; } > "$out"
+fi
+}
+close $fh
+file attributes $fake_gpg -permissions 0755
+set ::env(AISH_GPG) $fake_gpg
+
+aish_spawn
+
+aish_send "echo old-history"
+aish_enter
+aish_expect "old-history"
+aish_wait_prompt
+
+aish_send "#encrypt on test@example.invalid"
+aish_enter
+aish_expect "encryption=on"
+aish_wait_prompt
+aish_quit
+
+aish_spawn
+send -- "\t"
+aish_expect "history is still unlocking..."
+aish_clear_draft
+
+aish_send "#unlock"
+aish_enter
+aish_expect "encrypted storage unlocked"
+aish_wait_prompt
+
+send -- "\t"
+aish_expect "old-history"
+aish_clear_draft
+aish_quit

@@ -121,6 +121,14 @@ pub(super) fn write_encryption_sync_status(state: &AppState, out: &mut impl Writ
     )?;
     writeln!(
         out,
+        "encryption.storage_unlocked={}",
+        state.encrypted_storage_unlocked
+    )?;
+    if let Some(message) = &state.encrypted_startup_unlock_message {
+        writeln!(out, "encryption.unlock_status={message}")?;
+    }
+    writeln!(
+        out,
         "encryption.last_write_error={}",
         config_value(state.last_encrypted_write_error.as_deref().unwrap_or(""))
     )?;

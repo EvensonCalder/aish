@@ -434,6 +434,11 @@ fn key_encryption_sync_safe_failures() {
 }
 
 #[test]
+fn encrypted_startup_unlock() {
+    run_script("encrypted_startup_unlock.exp");
+}
+
+#[test]
 fn home_default_sync_config_persists() {
     run_script("home_default_sync_config_persists.exp");
 }

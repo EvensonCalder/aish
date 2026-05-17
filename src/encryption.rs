@@ -233,6 +233,38 @@ pub fn gpg_decrypt_file(gpg_program: impl AsRef<str>, input: impl AsRef<Path>) -
     Ok(output.stdout)
 }
 
+pub fn gpg_decrypt_file_noninteractive(
+    gpg_program: impl AsRef<str>,
+    input: impl AsRef<Path>,
+) -> Result<Vec<u8>> {
+    let input = input.as_ref();
+    let program = gpg_program.as_ref();
+    let input_arg = input.display().to_string();
+    let output = Command::new(program)
+        .args([
+            "--batch",
+            "--yes",
+            "--pinentry-mode",
+            "error",
+            "--decrypt",
+            &input_arg,
+        ])
+        .output()
+        .with_context(|| format!("failed to run GPG command: {program}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let summary = stderr
+            .lines()
+            .next()
+            .unwrap_or("GPG noninteractive decryption failed")
+            .trim();
+        bail!("GPG noninteractive decryption failed: {summary}");
+    }
+
+    Ok(output.stdout)
+}
+
 pub(crate) struct GpgTerminalPassthrough {
     _raw_mode_pause: RawModePause,
     tty: Option<String>,
@@ -406,6 +438,26 @@ pub fn load_encrypted_jsonl_with_bytes<T: DeserializeOwned>(
         ));
     }
     let bytes = gpg_decrypt_file(gpg_program, &path)?;
+    let loaded = load_jsonl_bytes(&path, &bytes)?;
+    Ok((loaded, bytes))
+}
+
+pub fn load_encrypted_jsonl_with_bytes_noninteractive<T: DeserializeOwned>(
+    gpg_program: impl AsRef<str>,
+    plaintext_path: impl AsRef<Path>,
+) -> Result<(JsonlLoad<T>, Vec<u8>)> {
+    let plaintext_path = plaintext_path.as_ref();
+    let path = encrypted_path(plaintext_path);
+    if !path.exists() {
+        return Ok((
+            JsonlLoad {
+                items: Vec::new(),
+                errors: Vec::new(),
+            },
+            Vec::new(),
+        ));
+    }
+    let bytes = gpg_decrypt_file_noninteractive(gpg_program, &path)?;
     let loaded = load_jsonl_bytes(&path, &bytes)?;
     Ok((loaded, bytes))
 }
@@ -816,6 +868,23 @@ mod tests {
         }
         let bytes = result.unwrap();
         assert_eq!(bytes, b"decrypted bytes");
+    }
+
+    #[test]
+    fn gpg_decrypt_file_noninteractive_never_uses_pinentry() {
+        let temp = tempfile::tempdir().unwrap();
+        let fake_gpg = temp.path().join("fake-gpg");
+        let encrypted = temp.path().join("secret.json.gpg");
+        fs::write(&encrypted, "cached decrypt").unwrap();
+        write_executable(
+            &fake_gpg,
+            "#!/bin/sh\nseen_batch=0\nseen_pinentry=0\nseen_error=0\nfor arg in \"$@\"; do\n  [ \"$arg\" = '--batch' ] && seen_batch=1\n  [ \"$arg\" = '--pinentry-mode' ] && seen_pinentry=1\n  [ \"$arg\" = 'error' ] && seen_error=1\ndone\nif [ \"$seen_batch:$seen_pinentry:$seen_error\" != '1:1:1' ]; then\n  printf 'missing noninteractive flags\\n' >&2\n  exit 8\nfi\ncat \"$6\"\n",
+        );
+
+        let bytes =
+            gpg_decrypt_file_noninteractive(fake_gpg.display().to_string(), &encrypted).unwrap();
+
+        assert_eq!(bytes, b"cached decrypt");
     }
 
     #[test]
