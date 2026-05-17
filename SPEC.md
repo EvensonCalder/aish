@@ -164,6 +164,7 @@ Used for interactive programs that need to own terminal input, such as `vim`, `n
 - Output is displayed as-is.
 - Aish keybindings are mostly disabled.
 - Return to normal mode occurs when the backend shell prompt is detected again.
+- Current implementation may use a conservative allowlist for known interactive and stdin-oriented programs. Robust automatic passthrough for arbitrary interactive programs is future work and must not rely only on fragile command-name matching.
 
 #### ExternalEditor mode
 
@@ -200,6 +201,7 @@ Used when GPG or pinentry needs interactive terminal control.
 - Aish temporarily pauses normal UI.
 - The GPG/pinentry interaction receives the terminal.
 - After completion, Aish restores raw mode and redraws.
+- Dedicated async startup unlock passthrough is future work. Until then, direct decrypt operations may temporarily leave raw mode so `gpg-agent`/pinentry can prompt for passphrases.
 
 ---
 
@@ -448,6 +450,7 @@ Multi-line paste:
 - Must not execute by default.
 - Default behavior creates an opaque editor draft using the pasted content.
 - Alternative behavior can be direct execution after warning.
+- Paste preview is future work. It should show bounded preview content before execution without placing raw multi-line paste inline in the draft prompt.
 
 Config:
 
@@ -957,7 +960,7 @@ Ctrl-X Ctrl-B  git branch picker
 Ctrl-X Ctrl-V  environment variable picker
 ```
 
-All keybindings must be configurable.
+All keybindings must be configurable. Current default bindings are fixed; user-configurable key rebinding remains future work and must preserve passthrough forwarding semantics.
 
 ---
 
@@ -1141,6 +1144,7 @@ Behavior:
 - Encrypted-write completion and failure events are frontend background events. Draining those events should refresh live completion and redraw the prompt when needed.
 - Decrypt asynchronously on startup so the shell is usable before history/template unlock completes.
 - While unlock is pending, completion/history features can show `history is still unlocking...`.
+- Startup unlock should use dedicated GPG/pinentry unlock passthrough so passphrase entry owns the terminal without blocking unrelated UI once the event architecture supports it.
 - `#encrypt rewrite-history plan` prints the risk and exact confirmed command for rewriting Git history.
 - `#encrypt rewrite-history run <key> --confirm-rewrite-history` is destructive by design: it requires a clean worktree, creates a backup branch, rewrites the current branch's managed storage blobs by encrypting plaintext blobs and re-encrypting old-key blobs for the target fingerprint, and never pushes automatically.
 
@@ -1206,6 +1210,8 @@ Startup sync check:
 5. Acquire lock.
 6. Run conservative sync.
 7. Log success/failure.
+
+Scheduled background events beyond the current tick-driven refresh hooks are future work. They must integrate with the frontend event loop without blocking keyboard input, PTY output, or redraw.
 
 Recommended conservative sync:
 

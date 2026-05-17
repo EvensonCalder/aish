@@ -28,8 +28,10 @@ Explicitly incomplete:
 
 - Configurable key rebinding is not implemented yet.
 - Fish support is opt-in until behavior is validated across macOS and representative Linux distributions.
-- Async encrypted-history unlock remains future work; direct GPG decrypt operations temporarily yield the terminal to `gpg-agent`/pinentry for passphrase entry.
+- Async encrypted-history unlock and dedicated GPG/pinentry unlock passthrough remain future work; direct GPG decrypt operations temporarily yield the terminal to `gpg-agent`/pinentry for passphrase entry.
+- Future scheduled background events are not implemented yet; current background work is limited to tick-driven refresh and serialized encrypted writes.
 - Full automatic passthrough for arbitrary interactive programs remains future work; Aish currently uses an allowlist and tested stdin-command handling.
+- Paste preview remains future work; multiline paste currently uses the editor-review flow described below.
 
 ## Quickstart
 
@@ -530,7 +532,7 @@ To decrypt managed storage back to plaintext and write plaintext files from then
 #encrypt off
 ```
 
-Known limits: encrypted startup loading is synchronous. Direct decrypt operations temporarily leave raw mode so `gpg-agent`/pinentry can prompt for passphrases; a fully async unlock UI is still future work. Aish warns that Git history can contain plaintext data or data encrypted for an older key; history rewrite is available only through the explicit confirmed command above.
+Known limits: encrypted startup loading is synchronous. Direct decrypt operations temporarily leave raw mode so `gpg-agent`/pinentry can prompt for passphrases; a fully async unlock UI with dedicated GPG/pinentry unlock passthrough is still future work. Aish warns that Git history can contain plaintext data or data encrypted for an older key; history rewrite is available only through the explicit confirmed command above.
 
 ## Files And Storage
 

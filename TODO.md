@@ -8,8 +8,8 @@ Status as of the latest full review:
 
 - Core interactive shell wrapper is implemented: PTY backend, raw terminal input, draft editing, continuation handling, history/AI modes, private command parsing, editor/paste flows, templates, completion, picker boundaries, AI request plumbing, context pseudo-pipe, event log, and diagnostics.
 - Rust unit/integration coverage and expect-driven real terminal coverage both exist for the implemented interactive behaviors. New user-facing terminal behavior should continue to receive both Rust-level and expect-level coverage.
-- Large intentionally incomplete areas remain: configurable key rebinding, async encrypted-history unlock UI, future scheduled background event sources, and robust automatic passthrough for arbitrary interactive commands.
-- GPG-backed secrets and encrypted history/template storage are implemented. Startup decrypt is still synchronous; normal encrypted JSONL appends now use a serialized background writer, and direct GPG decrypt operations temporarily leave raw mode for pinentry until Phase 18 async unlock work lands.
+- Large intentionally incomplete areas remain: configurable key rebinding, async encrypted-history unlock UI, dedicated GPG/pinentry unlock passthrough, future scheduled background event sources, robust automatic passthrough for arbitrary interactive commands, and paste preview.
+- GPG-backed secrets and encrypted history/template storage are implemented. Startup decrypt is still synchronous; normal encrypted JSONL appends now use a serialized background writer, and direct GPG decrypt operations temporarily leave raw mode for pinentry until the future dedicated UnlockPassthrough work lands.
 - The remaining unchecked items below are the source of truth for future work; do not skip them just because adjacent scaffolding exists.
 
 ---
@@ -104,6 +104,7 @@ Status as of the latest full review:
     - [x] Add a no-op frontend tick event so future timers have a stable event-loop hook.
     - [x] Attach encrypted-write completion/failure events to tick-driven frontend refresh.
     - [ ] Attach future scheduled background work to tick events.
+    - [ ] Add scheduled background event sources without blocking keyboard input, PTY output, or redraw.
 - [x] Fix real-terminal backend output visibility regressions that old expect byte-stream tests missed.
 - [x] Add persistent `tmux`-driven end-to-end screen-capture scripts for real terminal verification.
 - [x] Add redraw function for prompt/input line.
@@ -232,6 +233,8 @@ Status as of the latest full review:
   - [x] `Ctrl-X Ctrl-B` git branch picker
   - [x] `Ctrl-X Ctrl-V` env var picker
 - [ ] Add config support for user key rebinding.
+  - [ ] Keep default readline-compatible bindings stable.
+  - [ ] Allow user overrides without affecting passthrough forwarding.
 
 ### Acceptance criteria
 
@@ -393,6 +396,10 @@ Status as of the latest full review:
   - [x] `execute`
   - [x] `discard`
 - [x] Represent paste review as opaque editor draft.
+- [ ] Add paste preview UI.
+  - [ ] Preview pasted content before execution without placing the raw content inline.
+  - [ ] Keep preview rendering bounded for large pastes.
+  - [ ] Preserve the current safe default: no silent multi-line execution.
 - [x] Add safe execute confirmation behavior using editor draft when configured.
 - [x] Ensure multi-line paste enters opaque editor draft by default without execution.
 - [x] Implement raw submission to backend shell.
@@ -652,6 +659,9 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 - [ ] Show `history is still unlocking...` when needed.
 - [x] Temporarily leave raw mode for direct GPG/pinentry decrypt operations.
 - [ ] Handle GPG/pinentry through the future async UnlockPassthrough state.
+  - [ ] Give GPG/pinentry dedicated terminal control while unlock is pending.
+  - [ ] Restore raw mode and redraw after unlock completes or fails.
+  - [ ] Avoid blocking startup UI on encrypted history/template decrypt.
 - [x] Add atomic encrypted-write helper.
 - [x] Add serialized async encrypted JSONL append/rewrite worker for normal foreground writes.
 - [x] Flush pending encrypted writes before exit, sync, history trim, encryption changes, and confirmed history rewrite.
@@ -730,6 +740,10 @@ Status: direct AI prompts are wired to the chat-completions request path using c
   - [x] command allowlist
   - [x] alternate screen buffer detection
   - [x] prompt return detection
+- [ ] Broaden passthrough beyond the allowlist for arbitrary interactive programs.
+  - [ ] Detect unknown interactive foreground programs without fragile command-name matching.
+  - [ ] Avoid interpreting Aish app keys while a foreground program owns the terminal.
+  - [ ] Preserve robust return-to-prompt detection after the program exits.
 - [x] Add `#doctor` integration checks.
 
 ### Acceptance criteria
