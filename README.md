@@ -565,7 +565,11 @@ The main runtime state lives in `src/app.rs`, while command and UI subsystems ar
 - `src/app/encryption_commands.rs`: GPG key storage, `#encrypt`, current-storage rotation, and confirmed history rewrite.
 - `src/app/reports.rs`: `#status`, `#config`, `#doctor`, `#editor`, and encryption/sync status output.
 - `src/app/sync_commands.rs`: `#set-remote`, `#sync`, `#push`, startup sync checks, and git step handling.
-- `src/completion.rs`, `src/terminal.rs`, and `src/pty.rs` contain the larger remaining engine layers and should be split further only along tested behavior boundaries.
+- `src/completion.rs`: completion orchestration across templates, history, paths, private commands, and typo tiers.
+- `src/completion/`: focused completion helpers for matching rules, token parsing, path/PATH scanning, private command completion, and rendering/acceptance.
+- `src/terminal.rs`: terminal event loop, key/paste handling, picker/editor boundaries, and prompt redraw positioning.
+- `src/terminal/completion_ui.rs`: live completion display, inline suffixes, Tab/Right acceptance, and completion panel state transitions.
+- `src/pty.rs` remains the larger backend shell engine layer and should be split further only along tested behavior boundaries.
 
 ## Testing
 

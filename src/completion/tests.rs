@@ -1,4 +1,6 @@
 use super::*;
+use crate::config::CompletionTabAccept;
+use crate::display_width::display_width;
 
 #[test]
 fn current_token_detects_first_token_prefix() {
