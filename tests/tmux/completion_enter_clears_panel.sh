@@ -5,7 +5,19 @@ SESSION="aish-completion-enter-clears-$$"
 HOME_DIR="/tmp/aish-tmux-completion-enter-home-$$"
 WORK_DIR="/tmp/aish-tmux-completion-enter-work-$$"
 : "${AISH_BIN:?AISH_BIN must point to the aish binary under test}"
-trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; rm -rf "$HOME_DIR" "$WORK_DIR"' EXIT INT TERM
+
+cleanup() {
+  tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true
+  for path in "$HOME_DIR" "$WORK_DIR"; do
+    for _ in 1 2 3 4 5; do
+      rm -rf "$path" 2>/dev/null && break
+      sleep 0.1
+    done
+    rm -rf "$path" 2>/dev/null || true
+  done
+}
+
+trap cleanup EXIT INT TERM
 
 mkdir -p "$HOME_DIR" "$WORK_DIR"
 touch "$WORK_DIR/alpha-one.txt" "$WORK_DIR/alpha-two.txt"

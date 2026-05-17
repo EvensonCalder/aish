@@ -1,5 +1,9 @@
 use super::*;
+use crate::completion::CompletionSource;
+use crate::config::{CompletionMode, CompletionTabAccept};
 use crate::display_width::display_width;
+use crate::encryption::gpg_decrypt_file;
+use std::fs;
 use std::path::Path;
 use std::sync::Mutex;
 

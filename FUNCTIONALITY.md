@@ -179,7 +179,7 @@ This document describes the behavior implemented in the current codebase. It is 
 
 - Regular history is JSONL and stores command, timestamp, exit code, and source.
 - Draft history is JSONL and non-empty drafts persist on normal exit when enabled.
-- The newest persisted draft restores on startup when draft persistence is enabled.
+- Startup loads persisted draft history but keeps the active prompt blank; `Up` explicitly restores the newest saved draft when draft persistence is enabled.
 - AI history is JSONL and stores prompt, model, context flag, and ordered items.
 - Bad JSONL lines are skipped and reported at load/trim surfaces where applicable.
 - `#history <count>` trims regular history and AI command items to a combined command-item limit.
@@ -209,7 +209,7 @@ This document describes the behavior implemented in the current codebase. It is 
 - Sync maintains an Aish-managed `.gitignore` section while preserving user content.
 - Sync initializes a repo if needed, skips initial pull in a new repo, adds only existing enabled managed paths plus `.gitignore`, commits if needed, and pushes with upstream.
 - Sync uses a lock file to avoid concurrent runs.
-- Sync never auto-resolves conflicts, rewrites history, creates scheduler files, or runs `git rm --cached` automatically.
+- Sync itself never auto-resolves conflicts, rewrites history, creates scheduler files, or runs `git rm --cached` automatically. The encryption Git history rewrite flow is separate and requires an explicit destructive confirmation command.
 - Sync failures/conflicts are logged with redaction.
 
 ## Passthrough And Interactive Programs

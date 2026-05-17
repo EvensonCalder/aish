@@ -18,7 +18,7 @@ Aish does **not** try to replace Bash, Zsh, or Fish. The backend shell remains r
 7. **Multi-line pasted content does not enter draft by default.** It opens an editor-review flow or executes with warning, depending on config.
 8. **Editor-submitted content is raw shell input.** Aish does not parse line-leading `#` inside external editor content.
 9. **Encryption prioritizes confidentiality over speed.** When encrypted, Aish does not persist plaintext search indexes.
-10. **Git sync is conservative.** Aish never auto-resolves conflicts and never rewrites history or runs `git rm --cached` automatically.
+10. **Git sync is conservative.** Sync never auto-resolves conflicts and never rewrites history or runs `git rm --cached` automatically. Encrypted-storage Git history rewrite is a separate explicit command with destructive confirmation.
 11. **End-to-end behavior must be tested as users experience it.** Every user-visible feature needs expect-driven coverage in addition to Rust unit/integration tests, including rendering, redraw boundaries, PTY output framing, shell continuation, keybindings, mode transitions, error paths, and regression cases.
 
 ---
@@ -1187,7 +1187,7 @@ Policy:
 - Aish uses a lock file to prevent concurrent sync.
 - Aish does not auto-resolve conflicts.
 - Aish does not run `git rm --cached` automatically.
-- Aish does not rewrite git history.
+- Sync does not rewrite git history. Encrypted-storage history rewrite is available only through `#encrypt rewrite-history run <key> --confirm-rewrite-history`.
 - If a category is disabled for sync, Aish updates future `.gitignore` behavior and warns if files may already be tracked.
 
 Commit messages:

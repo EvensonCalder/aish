@@ -947,52 +947,29 @@ Status:
 
 - Passing when `expect` is installed; the harness skips scenarios if `expect` is unavailable.
 
-## Current Ignored Test
+## Current Ignored Tests
 
-Ignored test:
-
-- `zsh_pty_backend_runs_commands_and_preserves_shell_state_when_available`
-
-Reason:
-
-- zsh emits prompt/ZLE/control-sequence behavior that needs shell-specific integration. The project currently targets bash v0.1 behavior first while preserving a test scaffold for zsh.
-
-How to run ignored tests manually:
-
-```text
-cargo test --test pty_backend -- --ignored --nocapture
-```
-
-Expected current result:
-
-- The zsh ignored test is not expected to pass yet.
+There are no intentionally ignored tests in the current default suite. Bash and zsh PTY and tmux coverage are active by default. Fish-specific coverage remains opt-in through `AISH_TEST_FISH=1` because cross-platform fish behavior still needs broader validation.
 
 ## Current Gaps
 
 Important missing or partial areas:
 
-- Full terminal event loop integration for concurrent PTY output.
 - Full keybinding map and rebinding config.
-- Full history browsing UX beyond regular Up/Down/Enter/edit-copy foundation.
-- Full AI browsing UX beyond Up/Down/Enter/edit-copy foundation.
-- AI client and chat completions parsing.
-- Context pseudo-pipe.
-- External editor integration.
-- Multi-line paste review editor.
-- Template picker UI and placeholder expansion UX.
-- Completion engine.
-- Pickers/fzf integration.
-- Event log.
-- Encryption.
-- Git sync.
-- Shell-specific zsh/fish integration.
+- Async encrypted-history/template startup unlock and user-visible `history is still unlocking...` state.
+- Dedicated GPG/pinentry unlock passthrough state instead of synchronous direct decrypt operations.
+- Future scheduled background events beyond the current tick hook and encrypted-write completion events.
+- Broader automatic passthrough detection for arbitrary alternate-screen or job-control programs.
+- Fish backend validation across macOS and representative Linux distributions before it becomes default required coverage.
+- Search-specific indexes beyond the current in-memory history/template completion caches.
+- Live network AI provider behavior, real passphrase-protected GPG/pinentry behavior, and real remote sync authentication remain manual-only.
 
 ## Recommended Next Tests
 
 Next high-value tests to add:
 
-- `HistoryStore` startup loader tests for regular, draft, AI, and note JSONL files.
-- In-memory index tests for newest-to-oldest regular history ordering.
-- Read-only history mode transition tests.
-- AI item flattening tests from `AiSession` into browsable command candidates.
-- More terminal-level tests around paste behavior and redraw with multi-line drafts.
+- Async encrypted unlock behavior once startup decrypt is made non-blocking.
+- Real passphrase/pinentry manual harness notes for isolated GPG keys.
+- Additional fish tmux workflows after cross-platform fish behavior is validated.
+- Focused passthrough regressions for newly allowlisted interactive programs.
+- Keybinding rebinding tests when user-configurable bindings are implemented.

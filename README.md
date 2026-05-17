@@ -443,7 +443,7 @@ Implemented:
 Aish does not:
 
 - Auto-resolve conflicts.
-- Rewrite history.
+- Rewrite history as part of sync. Encrypted storage history rewrite is a separate `#encrypt rewrite-history ... --confirm-rewrite-history` flow.
 - Run `git rm --cached` automatically.
 - Create scheduler files.
 - Remove user-managed files.
@@ -556,6 +556,17 @@ Use `#doctor`, `#status`, and `#config` to inspect the active paths and runtime 
 
 On Unix-like systems, Aish creates managed storage directories with private directory permissions and writes config/history/encrypted storage files with private file permissions where supported.
 
+## Code Organization
+
+The main runtime state lives in `src/app.rs`, while command and UI subsystems are split into focused modules:
+
+- `src/app/completion_runtime.rs`: AppState completion request/cache orchestration.
+- `src/app/config_commands.rs`: `#model`, `#base-url`, `#env-key`, `#context`, and `#completion` config mutations.
+- `src/app/encryption_commands.rs`: GPG key storage, `#encrypt`, current-storage rotation, and confirmed history rewrite.
+- `src/app/reports.rs`: `#status`, `#config`, `#doctor`, `#editor`, and encryption/sync status output.
+- `src/app/sync_commands.rs`: `#set-remote`, `#sync`, `#push`, startup sync checks, and git step handling.
+- `src/completion.rs`, `src/terminal.rs`, and `src/pty.rs` contain the larger remaining engine layers and should be split further only along tested behavior boundaries.
+
 ## Testing
 
 Distributed tester documentation:
@@ -586,12 +597,12 @@ cargo test
 
 Current active inventory:
 
-- 403 library unit tests.
+- 490 library unit tests.
 - 26 draft execution integration tests.
 - 1 first-run integration test.
-- 13 PTY integration tests, with bash/zsh active by default and fish-specific cases opt-in.
-- 109 expect-driven end-to-end interactive scenarios.
-- 34 tmux screen-capture integration tests.
+- 21 PTY integration tests, with bash/zsh active by default and fish-specific cases opt-in.
+- 114 expect-driven end-to-end interactive scenarios.
+- 44 tmux screen-capture integration tests.
 
 Expect and tmux tests launch real terminal sessions with isolated Aish homes. They should be serialized because concurrent real-terminal sessions can create false prompt and scheduler failures.
 

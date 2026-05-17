@@ -8,7 +8,7 @@ Status as of the latest full review:
 
 - Core interactive shell wrapper is implemented: PTY backend, raw terminal input, draft editing, continuation handling, history/AI modes, private command parsing, editor/paste flows, templates, completion, picker boundaries, AI request plumbing, context pseudo-pipe, event log, and diagnostics.
 - Rust unit/integration coverage and expect-driven real terminal coverage both exist for the implemented interactive behaviors. New user-facing terminal behavior should continue to receive both Rust-level and expect-level coverage.
-- Large intentionally incomplete areas remain: configurable key rebinding, async encrypted-history unlock UI, independent PTY/timer event-loop sources, and robust automatic passthrough for arbitrary interactive commands.
+- Large intentionally incomplete areas remain: configurable key rebinding, async encrypted-history unlock UI, future scheduled background event sources, and robust automatic passthrough for arbitrary interactive commands.
 - GPG-backed secrets and encrypted history/template storage are implemented. Startup decrypt is still synchronous; normal encrypted JSONL appends now use a serialized background writer, and direct GPG decrypt operations temporarily leave raw mode for pinentry until Phase 18 async unlock work lands.
 - The remaining unchecked items below are the source of truth for future work; do not skip them just because adjacent scaffolding exists.
 
@@ -94,7 +94,7 @@ Status as of the latest full review:
   - [x] keyboard events
   - [x] paste events
   - [x] explicit frontend event source for keyboard, paste, resize, ignored terminal events, and tick wakeups
-  - [ ] PTY output events
+  - [x] PTY output events
     - [x] Centralize backend PTY reads around explicit output/idle events instead of duplicating per-marker loops.
     - [x] Expose command-running PTY output, input-poll, and idle ticks through one event callback.
     - [x] Stream ordinary command output to the frontend while commands run instead of waiting for completion.
@@ -555,10 +555,10 @@ Status: implemented for v0.1.0 via external `fzf`. Picker actions are intentiona
   - [x] `#base-url`
   - [x] `#model`
   - [x] `#env-key`
-  - [ ] `#key set`
+  - [x] `#key set`
 - [x] Normalize final chat completions URL.
 - [x] Read API key from configured environment variable.
-- [x] Implement GPG-backed key storage later; initially support env key.
+- [x] Implement GPG-backed key storage fallback for configured env-key credentials.
 - [x] Build request body for chat completions-compatible endpoint.
 - [x] Write strict system prompt requiring JSON only.
 - [x] Discard thinking/reasoning fields if provider returns them.
