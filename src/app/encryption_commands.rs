@@ -9,9 +9,9 @@ use anyhow::{Context, Result};
 use crate::ai::read_api_key_from_env;
 use crate::config::{self, AiConfig, EncryptionConfig, write_private_file};
 use crate::encryption::{
-    atomic_gpg_encrypt_bytes, encrypted_path, encryption_git_history_warning, existing_jsonl_bytes,
-    gpg_decrypt_file, gpg_program, migrate_gpg_jsonl_to_plaintext, migrate_plaintext_jsonl_to_gpg,
-    pause_terminal_raw_mode_for_gpg, prepare_gpg_terminal_env, reencrypt_gpg_jsonl,
+    atomic_gpg_encrypt_bytes, encrypted_path, encryption_git_history_warning,
+    enter_gpg_terminal_passthrough, existing_jsonl_bytes, gpg_decrypt_file, gpg_program,
+    migrate_gpg_jsonl_to_plaintext, migrate_plaintext_jsonl_to_gpg, reencrypt_gpg_jsonl,
     resolve_gpg_key_fingerprint,
 };
 use crate::log::EventLevel;
@@ -95,23 +95,25 @@ pub(super) fn clear_stored_key(state: &mut AppState, out: &mut impl Write) -> Re
     Ok(())
 }
 
-fn load_stored_api_key(state: &AppState) -> Result<Option<String>> {
-    let Some(path) = &state.secret_key_path else {
-        return Ok(None);
-    };
-    if !path.exists() {
-        return Ok(None);
-    }
-    let bytes = gpg_decrypt_file(gpg_program(), path)?;
-    let record: StoredApiKey =
-        serde_json::from_slice(&bytes).context("stored API key record is not valid JSON")?;
-    if record.value.trim().is_empty() {
-        anyhow::bail!("stored API key is empty");
-    }
-    Ok(Some(record.value))
+fn load_stored_api_key(state: &mut AppState) -> Result<Option<String>> {
+    state.run_unlock_passthrough(|state| {
+        let Some(path) = &state.secret_key_path else {
+            return Ok(None);
+        };
+        if !path.exists() {
+            return Ok(None);
+        }
+        let bytes = gpg_decrypt_file(gpg_program(), path)?;
+        let record: StoredApiKey =
+            serde_json::from_slice(&bytes).context("stored API key record is not valid JSON")?;
+        if record.value.trim().is_empty() {
+            anyhow::bail!("stored API key is empty");
+        }
+        Ok(Some(record.value))
+    })
 }
 
-pub(super) fn ai_config_for_request(state: &AppState) -> Result<AiConfig> {
+pub(super) fn ai_config_for_request(state: &mut AppState) -> Result<AiConfig> {
     let mut config = state.ai_config.clone();
     config.api_key_override = None;
     if read_api_key_from_env(&config.env_key).is_ok() {
@@ -166,9 +168,12 @@ fn enable_encryption(
 
     let fingerprint = resolve_gpg_key_fingerprint(gpg_program(), &selector)?;
     state.flush_encrypted_writes()?;
-    let encrypted_cache = encrypted_writer_cache_from_storage(state)?;
+    let encrypted_cache =
+        state.run_unlock_passthrough(|state| encrypted_writer_cache_from_storage(state))?;
     let current_key = configured_encryption_key(&state.encryption_config).to_string();
-    let summary = rewrite_storage_for_encryption_key(state, &current_key, &fingerprint)?;
+    let summary = state.run_unlock_passthrough(|state| {
+        rewrite_storage_for_encryption_key(state, &current_key, &fingerprint)
+    })?;
     set_encryption_config(state, |config| {
         config.encryption.enabled = true;
         config.encryption.key_fingerprint = fingerprint.clone();
@@ -209,9 +214,12 @@ fn rotate_encryption_key(
 
     let fingerprint = resolve_gpg_key_fingerprint(gpg_program(), selector)?;
     state.flush_encrypted_writes()?;
-    let encrypted_cache = encrypted_writer_cache_from_storage(state)?;
+    let encrypted_cache =
+        state.run_unlock_passthrough(|state| encrypted_writer_cache_from_storage(state))?;
     let current_key = configured_encryption_key(&state.encryption_config).to_string();
-    let summary = rewrite_storage_for_encryption_key(state, &current_key, &fingerprint)?;
+    let summary = state.run_unlock_passthrough(|state| {
+        rewrite_storage_for_encryption_key(state, &current_key, &fingerprint)
+    })?;
     set_encryption_config(state, |config| {
         config.encryption.enabled = true;
         config.encryption.key_fingerprint = fingerprint.clone();
@@ -232,7 +240,7 @@ fn disable_encryption(state: &mut AppState, out: &mut impl Write) -> Result<()> 
 
     state.flush_encrypted_writes()?;
     state.stop_encrypted_writer();
-    migrate_storage_to_plaintext(state)?;
+    state.run_unlock_passthrough(|state| migrate_storage_to_plaintext(state))?;
     set_encryption_config(state, |config| {
         config.encryption.enabled = false;
     })?;
@@ -403,7 +411,8 @@ fn run_encryption_history_rewrite(
     }
 
     state.flush_encrypted_writes()?;
-    let encrypted_cache = encrypted_writer_cache_from_storage(state)?;
+    let encrypted_cache =
+        state.run_unlock_passthrough(|state| encrypted_writer_cache_from_storage(state))?;
     let clean = run_git_command(
         &root,
         &GitCommandPlan {
@@ -441,7 +450,9 @@ fn run_encryption_history_rewrite(
         );
     }
 
-    let filter_result = run_git_filter_branch_reencrypt(&root, &script_path, &fingerprint);
+    let filter_result = state.run_unlock_passthrough(|_| {
+        run_git_filter_branch_reencrypt(&root, &script_path, &fingerprint)
+    });
     let _ = fs::remove_file(&script_path);
     let filter_result = filter_result?;
     if !filter_result.success {
@@ -451,8 +462,9 @@ fn run_encryption_history_rewrite(
         );
     }
 
-    let untracked =
-        rewrite_untracked_storage_for_encryption_key(state, &root, &current_key, &fingerprint)?;
+    let untracked = state.run_unlock_passthrough(|state| {
+        rewrite_untracked_storage_for_encryption_key(state, &root, &current_key, &fingerprint)
+    })?;
     set_encryption_config(state, |config| {
         config.encryption.enabled = true;
         config.encryption.key_fingerprint = fingerprint.clone();
@@ -501,7 +513,7 @@ fn run_git_filter_branch_reencrypt(
         "sh {}",
         shell_single_quote(&script_path.display().to_string())
     );
-    let _raw_mode_pause = pause_terminal_raw_mode_for_gpg()?;
+    let terminal = enter_gpg_terminal_passthrough()?;
     let mut command = Command::new("git");
     command
         .args([
@@ -516,7 +528,7 @@ fn run_git_filter_branch_reencrypt(
         .env("FILTER_BRANCH_SQUELCH_WARNING", "1")
         .env("AISH_REWRITE_GPG", gpg_program())
         .env("AISH_REWRITE_RECIPIENT", fingerprint);
-    prepare_gpg_terminal_env(&mut command);
+    terminal.prepare_command(&mut command);
     let output = command
         .output()
         .context("failed to run git filter-branch")?;

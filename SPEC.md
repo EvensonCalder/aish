@@ -198,10 +198,11 @@ Temporary UI modes for selecting files, history, templates, git branches, enviro
 
 Used when GPG or pinentry needs interactive terminal control.
 
-- Aish temporarily pauses normal UI.
-- The GPG/pinentry interaction receives the terminal.
-- After completion, Aish restores raw mode and redraws.
-- Dedicated async startup unlock passthrough is future work. Until then, direct decrypt operations may temporarily leave raw mode so `gpg-agent`/pinentry can prompt for passphrases.
+- Aish temporarily pauses normal UI and clears stale completion UI.
+- Direct GPG decrypt, key migration, and history rewrite operations give GPG/pinentry dedicated terminal control.
+- Aish sets `GPG_TTY` when a controlling TTY is known and asks `gpg-agent` to update its startup TTY.
+- After completion or failure, Aish restores raw mode and the previous Aish mode before redrawing.
+- Dedicated async startup unlock passthrough remains future work. Startup encrypted history/template decrypt is still synchronous until that architecture lands.
 
 ---
 
@@ -1146,6 +1147,7 @@ Behavior:
 - The background encrypted writer must preserve write order per Aish process, use atomic encrypted file replacement, and fail closed after a write failure until the error is surfaced and pending writes are flushed or the process is restarted.
 - Operations that need durable storage or rewrite storage globally must flush pending encrypted writes first. This includes exit, `#push`, `#history`, `#encrypt off`, key rotation, and confirmed history rewrite.
 - Encrypted-write completion and failure events are frontend background events. Draining those events should refresh live completion and redraw the prompt when needed.
+- Direct GPG decrypt operations that may need pinentry should enter `UnlockPassthrough`, clear stale live completion state, yield terminal control, set `GPG_TTY` when possible, and restore raw mode and the previous Aish mode after completion or failure.
 - Decrypt asynchronously on startup so the shell is usable before history/template unlock completes.
 - While unlock is pending, completion/history features can show `history is still unlocking...`.
 - Startup unlock should use dedicated GPG/pinentry unlock passthrough so passphrase entry owns the terminal without blocking unrelated UI once the event architecture supports it.

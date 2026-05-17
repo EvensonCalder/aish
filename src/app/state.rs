@@ -352,6 +352,19 @@ impl AppState {
         self.clear_completion_ui();
     }
 
+    pub(crate) fn run_unlock_passthrough<T>(
+        &mut self,
+        operation: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        let previous_mode = self.mode;
+        self.mode = Mode::UnlockPassthrough;
+        self.ctrl_x_prefix = false;
+        self.cancel_live_completion();
+        let result = operation(self);
+        self.mode = previous_mode;
+        result
+    }
+
     pub fn save_current_draft_if_needed(&mut self) -> Result<bool> {
         if !self.draft_persist || self.draft.is_empty() {
             return Ok(false);

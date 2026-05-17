@@ -212,16 +212,10 @@ pub fn gpg_decrypt_file(gpg_program: impl AsRef<str>, input: impl AsRef<Path>) -
     let input = input.as_ref();
     let program = gpg_program.as_ref();
     let input_arg = input.display().to_string();
-    let _raw_mode_pause = pause_terminal_raw_mode_for_gpg()?;
-    let gpg_tty = resolve_gpg_tty();
-    if let Some(tty) = gpg_tty.as_deref() {
-        update_gpg_agent_tty(tty);
-    }
+    let terminal = enter_gpg_terminal_passthrough()?;
     let mut command = Command::new(program);
     command.args(["--yes", "--decrypt", &input_arg]);
-    if let Some(tty) = gpg_tty {
-        command.env("GPG_TTY", tty);
-    }
+    terminal.prepare_command(&mut command);
     let output = command
         .output()
         .with_context(|| format!("failed to run GPG command: {program}"))?;
@@ -239,7 +233,36 @@ pub fn gpg_decrypt_file(gpg_program: impl AsRef<str>, input: impl AsRef<Path>) -
     Ok(output.stdout)
 }
 
-pub struct RawModePause {
+pub(crate) struct GpgTerminalPassthrough {
+    _raw_mode_pause: RawModePause,
+    tty: Option<String>,
+}
+
+impl GpgTerminalPassthrough {
+    fn enter() -> Result<Self> {
+        let raw_mode_pause = pause_terminal_raw_mode_for_gpg()?;
+        let tty = resolve_gpg_tty();
+        if let Some(tty) = tty.as_deref() {
+            update_gpg_agent_tty(tty);
+        }
+        Ok(Self {
+            _raw_mode_pause: raw_mode_pause,
+            tty,
+        })
+    }
+
+    pub fn prepare_command(&self, command: &mut Command) {
+        if let Some(tty) = &self.tty {
+            command.env("GPG_TTY", tty);
+        }
+    }
+}
+
+pub(crate) fn enter_gpg_terminal_passthrough() -> Result<GpgTerminalPassthrough> {
+    GpgTerminalPassthrough::enter()
+}
+
+struct RawModePause {
     was_enabled: bool,
 }
 
@@ -253,15 +276,8 @@ impl RawModePause {
     }
 }
 
-pub fn pause_terminal_raw_mode_for_gpg() -> Result<RawModePause> {
+fn pause_terminal_raw_mode_for_gpg() -> Result<RawModePause> {
     RawModePause::new()
-}
-
-pub fn prepare_gpg_terminal_env(command: &mut Command) {
-    if let Some(tty) = resolve_gpg_tty() {
-        update_gpg_agent_tty(&tty);
-        command.env("GPG_TTY", tty);
-    }
 }
 
 impl Drop for RawModePause {
@@ -642,6 +658,9 @@ mod tests {
     use super::*;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn write_executable(path: &Path, contents: &str) {
         let mut file = fs::File::create(path).unwrap();
@@ -752,6 +771,51 @@ mod tests {
                 "plain.txt"
             ]
         );
+    }
+
+    #[test]
+    fn gpg_terminal_passthrough_prepares_command_tty_env() {
+        let terminal = GpgTerminalPassthrough {
+            _raw_mode_pause: RawModePause { was_enabled: false },
+            tty: Some("/dev/pts/test".to_string()),
+        };
+        let mut command = Command::new("gpg");
+
+        terminal.prepare_command(&mut command);
+
+        let gpg_tty = command
+            .get_envs()
+            .find_map(|(key, value)| (key == "GPG_TTY").then_some(value))
+            .flatten();
+        assert_eq!(gpg_tty, Some(std::ffi::OsStr::new("/dev/pts/test")));
+    }
+
+    #[test]
+    fn gpg_decrypt_file_passes_gpg_tty_to_decrypt_command() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let fake_gpg = temp.path().join("fake-gpg");
+        let encrypted = temp.path().join("secret.json.gpg");
+        fs::write(&encrypted, "decrypted bytes").unwrap();
+        write_executable(
+            &fake_gpg,
+            "#!/bin/sh\nif [ \"${GPG_TTY:-}\" != '/dev/pts/aish-test' ]; then\n  printf 'unexpected GPG_TTY: %s\\n' \"${GPG_TTY:-}\" >&2\n  exit 7\nfi\nif [ \"$1\" = '--yes' ] && [ \"$2\" = '--decrypt' ]; then\n  cat \"$3\"\n  exit 0\nfi\nprintf 'unexpected args\\n' >&2\nexit 2\n",
+        );
+        let old_gpg_tty = std::env::var_os("GPG_TTY");
+        unsafe {
+            std::env::set_var("GPG_TTY", "/dev/pts/aish-test");
+        }
+
+        let result = gpg_decrypt_file(fake_gpg.display().to_string(), &encrypted);
+
+        unsafe {
+            match old_gpg_tty {
+                Some(value) => std::env::set_var("GPG_TTY", value),
+                None => std::env::remove_var("GPG_TTY"),
+            }
+        }
+        let bytes = result.unwrap();
+        assert_eq!(bytes, b"decrypted bytes");
     }
 
     #[test]

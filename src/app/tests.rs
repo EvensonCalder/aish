@@ -69,6 +69,15 @@ fn ai_requester_requires_stored_key(config: &AiConfig, _prompt: &str) -> Result<
     }])
 }
 
+fn test_completion_candidate(display: &str) -> CompletionCandidate {
+    CompletionCandidate {
+        display: display.to_string(),
+        replacement: display.to_string(),
+        is_dir: false,
+        source: CompletionSource::History,
+    }
+}
+
 #[test]
 fn empty_tab_cycles_modes() {
     let mut state = AppState::default();
@@ -107,6 +116,71 @@ fn non_empty_tab_does_not_switch_modes() {
     state.draft.insert_str("git");
     state.handle_empty_tab();
     assert_eq!(state.mode, Mode::Draft);
+}
+
+#[test]
+fn unlock_passthrough_clears_live_completion_and_restores_mode_on_success() {
+    let candidate = test_completion_candidate("git status");
+    let now = Instant::now();
+    let mut state = AppState {
+        mode: Mode::Ai,
+        ctrl_x_prefix: true,
+        completion_panel: vec!["history           git status".to_string()],
+        completion_inline: Some(InlineCompletion {
+            candidate: candidate.clone(),
+            suffix: " status".to_string(),
+        }),
+        pending_completion: Some(PendingCompletion {
+            id: 1,
+            line: "git".to_string(),
+            cursor: 3,
+            candidates: vec![candidate.clone()],
+        }),
+        pending_completion_update: Some(PendingCompletionUpdate {
+            id: 1,
+            line: "git".to_string(),
+            cursor: 3,
+            candidates: vec![candidate],
+            first_seen: now,
+            final_tier_seen: false,
+        }),
+        completion_display_not_before: Some(now + Duration::from_millis(120)),
+        ..AppState::default()
+    };
+
+    let observed = state
+        .run_unlock_passthrough(|state| {
+            assert_eq!(state.mode, Mode::UnlockPassthrough);
+            assert!(!state.ctrl_x_prefix);
+            assert!(state.completion_panel.is_empty());
+            assert!(state.completion_inline.is_none());
+            assert!(state.pending_completion.is_none());
+            assert!(state.pending_completion_update.is_none());
+            assert!(state.completion_display_not_before.is_none());
+            Ok(42)
+        })
+        .unwrap();
+
+    assert_eq!(observed, 42);
+    assert_eq!(state.mode, Mode::Ai);
+}
+
+#[test]
+fn unlock_passthrough_restores_mode_on_error() {
+    let mut state = AppState {
+        mode: Mode::History,
+        ctrl_x_prefix: true,
+        ..AppState::default()
+    };
+
+    let result: Result<()> = state.run_unlock_passthrough(|state| {
+        assert_eq!(state.mode, Mode::UnlockPassthrough);
+        anyhow::bail!("unlock failed")
+    });
+
+    assert!(result.unwrap_err().to_string().contains("unlock failed"));
+    assert_eq!(state.mode, Mode::History);
+    assert!(!state.ctrl_x_prefix);
 }
 
 #[test]
