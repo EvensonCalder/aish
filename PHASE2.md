@@ -18,9 +18,9 @@ Current state:
 
 - The PTY shell wrapper, prompt rendering, draft editor, history/AI modes, private command parser, context flow, event log, templates, inline completion, external editor, multiline paste review, shell continuation handling, sync flow, diagnostics, and shell integration scaffolding are implemented and tested.
 - Expect-driven end-to-end coverage exists and is the acceptance layer for visible terminal behavior.
-- Phase 18 encryption/GPG remains the largest intentionally incomplete product area.
+- Phase 18 encryption/GPG now has GPG-backed key storage, encrypted managed JSONL storage, key rotation, explicit history rewrite planning/running, and fake-GPG coverage. The remaining encryption gap is async startup unlock and dedicated real pinentry handoff UX.
 - Configurable key rebinding remains incomplete.
-- PTY output events and timer/background events are not represented as independent central event-loop sources yet.
+- Command-running PTY output is streamed through explicit output/idle callbacks. Timer/background support exists for tick wakeups and encrypted-write events; future scheduled background work is not attached yet.
 - Full automatic passthrough for arbitrary interactive/alternate-screen programs remains incomplete; allowlisted foreground passthrough exists.
 - Some documentation had become stale during implementation and must stay aligned with actual behavior as Phase 2 continues.
 - Fixed during Phase 2: `#completion` no longer reports the completion engine as unimplemented; it reports config and persists `#completion max <count>`, `#completion inline on|off`, and `#completion tab-accept full|word`.
@@ -34,9 +34,9 @@ Current state:
 
 This hardening pass is complete for the implemented v0.1 terminal wrapper surface. The remaining items below are explicitly deferred instead of being treated as partially complete Phase 2 fixes:
 
-- GPG-backed secret storage and encrypted history/template storage stay deferred to the encryption workstream because they require a full fake-GPG or isolated-key integration path before user secrets can be handled safely.
+- Async encrypted-history unlock and dedicated GPG/pinentry handoff stay deferred until they have real-terminal coverage with isolated keys. Current direct decrypt operations temporarily leave raw mode so pinentry can prompt.
 - Configurable key rebinding stays deferred until a stable config schema is chosen; default keybindings remain covered and documented.
-- Independent PTY output and timer/background event sources stay deferred until a concrete feature requires asynchronous events beyond command-response execution.
+- Future scheduled background event sources stay deferred until a concrete feature requires them beyond current tick wakeups, encrypted-write events, and command-running PTY output callbacks.
 - Automatic passthrough for arbitrary interactive programs stays deferred; the current product supports allowlisted foreground passthrough and key-forwarding tests.
 - Fish backend tests remain opt-in with `AISH_TEST_FISH=1`; bash and zsh are the default backend compatibility baseline for cross-platform CI until fish behavior is validated across macOS and Linux distributions.
 
@@ -50,7 +50,7 @@ This hardening pass is complete for the implemented v0.1 terminal wrapper surfac
 - Useless tests should be replaced by tests that prove user-visible behavior, safety boundaries, persistence, or integration correctness.
 - Do not create scheduler files.
 - Do not rewrite git history, auto-resolve sync conflicts, or remove tracked files automatically.
-- Do not overclaim encryption or secret storage before GPG-backed behavior is actually implemented.
+- Do not overclaim async encryption unlock, real pinentry UX, or history rewrite safety beyond the implemented explicit command flow.
 - Keep `SPEC.md`, `TODO.md`, `TESTS.md`, `README.md`, and this file accurate after every feature or test change.
 
 ## Required Verification Before Phase 2 Commits
@@ -74,28 +74,29 @@ For documentation-only changes, `git diff --check` is sufficient unless the docu
 
 ## Workstream 1: Encryption And GPG
 
-Goal: complete Phase 18 without weakening confidentiality or overstating implementation status.
+Goal: finish the remaining Phase 18 work without weakening confidentiality or overstating implementation status.
 
-Tasks:
+Implemented:
 
-- Implement a tested GPG command boundary before wiring interactive secret flows.
-- Add fake-GPG or isolated test-key integration coverage for encrypt/decrypt behavior.
-- Implement `#key set` using GPG-backed storage.
-- Make AI key resolution follow the spec priority: configured environment variable first, then stored encrypted key.
-- Implement `#encrypt on` only when future writes actually switch to encrypted storage.
-- Implement `#encrypt off` only when decrypt/migration semantics are explicit and safe.
-- Encrypt regular history, AI history, draft history, notes, and templates when encryption is enabled.
-- Ensure no plaintext search or completion index is written when encryption is enabled.
-- Add atomic write helpers for encrypted output.
+- Tested GPG command boundary and fake-GPG encrypt/decrypt coverage.
+- `#key set` GPG-backed API key storage and stored-key AI fallback.
+- `#encrypt on`, `#encrypt rotate`, and `#encrypt off` with managed storage migration.
+- Encrypted regular history, AI history, draft history, notes, and templates.
+- No persisted plaintext search/completion indexes when encryption is enabled.
+- Atomic encrypted writes and serialized background encrypted JSONL appends.
+- Explicit confirmed `#encrypt rewrite-history` flow with backup branch creation.
+
+Remaining tasks:
+
 - Add asynchronous unlock/loading behavior so Aish remains usable while encrypted history/templates are unavailable.
 - Show a user-visible `history is still unlocking...` state where encrypted history/template data is not ready.
-- Handle GPG/pinentry through `UnlockPassthrough` or an equivalent terminal-safe handoff.
+- Handle real GPG/pinentry through `UnlockPassthrough` or an equivalent terminal-safe handoff.
+- Add isolated real-key manual or opt-in integration coverage for passphrase-protected keys and pinentry recovery.
 
 Required tests:
 
-- Unit tests for GPG command planning, error classification, redaction, and atomic write path selection.
-- Integration tests with fake GPG or isolated test keys for `#key set`, stored-key reads, and encryption failures.
-- Expect tests for `#key set` success or safe failure, `#key clear`, `#encrypt on`, `#encrypt off`, locked history behavior, and no plaintext secret leakage in output/logs.
+- Keep fake-GPG unit/integration coverage for command planning, storage migration, key storage, encrypted writes, history rewrite script safety, and no plaintext secret leakage in output/logs.
+- Add real-terminal manual or opt-in coverage for passphrase-protected key unlock before claiming async unlock/pinentry completion.
 
 ## Workstream 2: End-To-End User Workflows
 

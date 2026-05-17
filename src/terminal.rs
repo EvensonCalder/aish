@@ -348,17 +348,15 @@ fn handle_key(
         refresh_live_completion_ui(state)?;
     }
     let width = terminal_display_width();
-    if can_render_appended_char_incrementally(
-        key,
-        &action,
-        state,
+    let incremental_snapshot = IncrementalRenderSnapshot {
         had_completion_ui,
-        &previous_draft,
+        previous_draft: &previous_draft,
         previous_cursor,
         previous_mode,
         previous_draft_from_editor,
         width,
-    ) {
+    };
+    if can_render_appended_char_incrementally(key, &action, state, incremental_snapshot) {
         write_incremental_appended_char(state, out, key, width)?;
         return Ok(false);
     }
@@ -366,48 +364,52 @@ fn handle_key(
     Ok(false)
 }
 
-fn can_render_appended_char_incrementally(
-    key: KeyEvent,
-    action: &KeyAction,
-    state: &AppState,
+struct IncrementalRenderSnapshot<'a> {
     had_completion_ui: bool,
-    previous_draft: &str,
+    previous_draft: &'a str,
     previous_cursor: usize,
     previous_mode: crate::modes::Mode,
     previous_draft_from_editor: bool,
     width: usize,
+}
+
+fn can_render_appended_char_incrementally(
+    key: KeyEvent,
+    action: &KeyAction,
+    state: &AppState,
+    snapshot: IncrementalRenderSnapshot<'_>,
 ) -> bool {
     let KeyCode::Char(ch) = key.code else {
         return false;
     };
     if !key.modifiers.difference(KeyModifiers::SHIFT).is_empty()
         || !matches!(action, KeyAction::Continue)
-        || had_completion_ui
+        || snapshot.had_completion_ui
         || state.completion_inline.is_some()
         || !state.completion_panel.is_empty()
         || !state.render_anchor_saved
-        || previous_mode != crate::modes::Mode::Draft
+        || snapshot.previous_mode != crate::modes::Mode::Draft
         || state.mode != crate::modes::Mode::Draft
-        || previous_draft_from_editor
+        || snapshot.previous_draft_from_editor
         || state.draft_from_editor
-        || previous_cursor != previous_draft.len()
-        || previous_draft.contains('\n')
+        || snapshot.previous_cursor != snapshot.previous_draft.len()
+        || snapshot.previous_draft.contains('\n')
     {
         return false;
     }
-    if state.draft.as_str().len() < previous_draft.len() {
+    if state.draft.as_str().len() < snapshot.previous_draft.len() {
         return false;
     }
-    let appended = &state.draft.as_str()[previous_draft.len()..];
+    let appended = &state.draft.as_str()[snapshot.previous_draft.len()..];
     if state.draft.cursor() != state.draft.as_str().len()
-        || !state.draft.as_str().starts_with(previous_draft)
+        || !state.draft.as_str().starts_with(snapshot.previous_draft)
         || appended != ch.to_string()
     {
         return false;
     }
-    let previous_rendered = format!("{}{}", state.prompt_prefix(), previous_draft);
-    let (previous_row, _) = visual_position(&previous_rendered, width);
-    let (current_row, _) = terminal_cursor_position_for_width(state, width);
+    let previous_rendered = format!("{}{}", state.prompt_prefix(), snapshot.previous_draft);
+    let (previous_row, _) = visual_position(&previous_rendered, snapshot.width);
+    let (current_row, _) = terminal_cursor_position_for_width(state, snapshot.width);
     current_row == previous_row
 }
 
@@ -1155,7 +1157,7 @@ fn complete_or_show_auto_candidates_for_width(
             return Ok(());
         }
         set_completion_ui_from_candidates(state, candidates, width);
-        return Ok(());
+        Ok(())
     }
 }
 

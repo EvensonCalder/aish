@@ -1,8 +1,10 @@
+use std::io::{self, Read};
 use std::path::Path;
-use std::process::{Command, Stdio};
-use std::time::Duration;
+use std::process::{Child, Command, ExitStatus, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 
 use crate::log::redact_secrets;
 
@@ -39,7 +41,7 @@ pub fn run_context_command(
     command: &str,
     cwd: Option<&Path>,
     max_bytes: usize,
-    _timeout: Duration,
+    timeout: Duration,
 ) -> Result<ContextCommandResult> {
     let mut process = Command::new("/bin/sh");
     process
@@ -48,20 +50,134 @@ pub fn run_context_command(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    configure_context_process(&mut process);
     if let Some(cwd) = cwd {
         process.current_dir(cwd);
     }
 
-    let output = process
-        .output()
+    let mut child = process
+        .spawn()
         .with_context(|| format!("failed to run context command: {command}"))?;
-    let combined = combine_stdout_stderr(&output.stdout, &output.stderr);
-    let (captured_output, truncated) = cap_utf8(&combined, max_bytes);
+    let stdout = child.stdout.take().context("context stdout pipe missing")?;
+    let stderr = child.stderr.take().context("context stderr pipe missing")?;
+    let stdout_reader = thread::spawn(move || read_stream_capped(stdout, max_bytes));
+    let stderr_reader = thread::spawn(move || read_stream_capped(stderr, max_bytes));
+
+    let (status, timed_out) = wait_child_with_timeout(&mut child, timeout)
+        .with_context(|| format!("failed to wait for context command: {command}"))?;
+    let stdout = join_stream_reader(stdout_reader, "stdout")?;
+    let mut stderr = join_stream_reader(stderr_reader, "stderr")?;
+    if timed_out {
+        if !stderr.bytes.is_empty() && !stderr.bytes.ends_with(b"\n") {
+            stderr.bytes.push(b'\n');
+        }
+        stderr.bytes.extend_from_slice(
+            format!(
+                "context command timed out after {} ms\n",
+                timeout.as_millis()
+            )
+            .as_bytes(),
+        );
+    }
+
+    let combined = combine_stdout_stderr(&stdout.bytes, &stderr.bytes);
+    let (captured_output, cap_truncated) = cap_utf8(&combined, max_bytes);
     Ok(ContextCommandResult {
         output: captured_output,
-        exit_code: output_status_code(output.status),
-        truncated,
+        exit_code: status.and_then(output_status_code),
+        truncated: stdout.truncated || stderr.truncated || cap_truncated,
     })
+}
+
+#[cfg(unix)]
+fn configure_context_process(process: &mut Command) {
+    use std::os::unix::process::CommandExt;
+
+    process.process_group(0);
+}
+
+#[cfg(not(unix))]
+fn configure_context_process(_process: &mut Command) {}
+
+#[derive(Debug)]
+struct CappedStream {
+    bytes: Vec<u8>,
+    truncated: bool,
+}
+
+fn read_stream_capped(mut reader: impl Read, limit: usize) -> io::Result<CappedStream> {
+    let mut bytes = Vec::with_capacity(limit.min(8192));
+    let mut truncated = false;
+    let mut buffer = [0_u8; 8192];
+    loop {
+        let read = reader.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        let remaining = limit.saturating_sub(bytes.len());
+        let kept = remaining.min(read);
+        if kept > 0 {
+            bytes.extend_from_slice(&buffer[..kept]);
+        }
+        if kept < read {
+            truncated = true;
+        }
+    }
+    Ok(CappedStream { bytes, truncated })
+}
+
+fn join_stream_reader(
+    reader: thread::JoinHandle<io::Result<CappedStream>>,
+    name: &str,
+) -> Result<CappedStream> {
+    reader
+        .join()
+        .map_err(|_| anyhow!("context {name} reader panicked"))?
+        .with_context(|| format!("failed to read context command {name}"))
+}
+
+fn wait_child_with_timeout(
+    child: &mut Child,
+    timeout: Duration,
+) -> io::Result<(Option<ExitStatus>, bool)> {
+    let started = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok((Some(status), false));
+        }
+        let elapsed = started.elapsed();
+        if elapsed >= timeout {
+            let status = terminate_context_child(child)?;
+            return Ok((Some(status), true));
+        }
+        let remaining = timeout.saturating_sub(elapsed);
+        thread::sleep(remaining.min(Duration::from_millis(10)));
+    }
+}
+
+#[cfg(unix)]
+fn terminate_context_child(child: &mut Child) -> io::Result<ExitStatus> {
+    let pgid = child.id() as libc::pid_t;
+    unsafe {
+        libc::kill(-pgid, libc::SIGTERM);
+    }
+    for _ in 0..5 {
+        if let Some(status) = child.try_wait()? {
+            return Ok(status);
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    unsafe {
+        libc::kill(-pgid, libc::SIGKILL);
+    }
+    let _ = child.kill();
+    child.wait()
+}
+
+#[cfg(not(unix))]
+fn terminate_context_child(child: &mut Child) -> io::Result<ExitStatus> {
+    let _ = child.kill();
+    child.wait()
 }
 
 pub fn build_contextual_ai_prompt(
@@ -152,6 +268,27 @@ mod tests {
 
         assert_eq!(result.output, "1234");
         assert!(result.truncated);
+    }
+
+    #[test]
+    fn run_context_command_enforces_timeout() {
+        let started = Instant::now();
+        let result = run_context_command(
+            "printf start; sleep 5; printf done",
+            None,
+            1024,
+            Duration::from_millis(50),
+        )
+        .unwrap();
+
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "context command ignored timeout"
+        );
+        assert_eq!(result.exit_code, None);
+        assert!(result.output.contains("start"));
+        assert!(!result.output.contains("done"));
+        assert!(result.output.contains("context command timed out"));
     }
 
     #[test]

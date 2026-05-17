@@ -768,7 +768,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 
 ### Tasks
 
-- [x] Implement `#help`.
+- [x] Implement grouped `#help` and topic-specific `#help <topic>` output.
 - [x] Implement `#status`:
   - [x] mode
   - [x] shell
@@ -794,7 +794,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 
 - A new user can run `#doctor` and understand setup problems.
 - `#status` shows final request URL and key source without leaking the key.
-- `#help` lists private commands and keybindings.
+- `#help` lists private commands, keybindings, AI forms, notes, completion, templates, sync, encryption, and config/diagnostic topics.
 
 ---
 

@@ -15,6 +15,7 @@ This document describes the behavior implemented in the current codebase. It is 
 - Aish chooses its state directory from non-empty absolute `AISH_HOME`; if unset or empty, it uses `$HOME/.aish`.
 - Missing or relative `AISH_HOME`, missing/relative `HOME`, and an Aish home path that is a file fail with readable errors.
 - First run creates `config.toml`, `history/`, `templates/`, `secrets/`, `logs/`, and `cache/runtime/`.
+- Managed storage directories are private on Unix where supported, and config/history/encrypted storage files are written with private file permissions.
 - Config is TOML, denies unknown fields, and normalizes empty/defaultable values.
 - Invalid config fails startup with a readable error.
 - Read-only diagnostic commands do not create missing history/template/log files just by printing paths.
@@ -116,6 +117,7 @@ This document describes the behavior implemented in the current codebase. It is 
 - Dangerous context commands require confirmation even when confirmation is otherwise disabled.
 - Skipped context commands are logged and not executed.
 - Context output captures stdout and stderr, applies a byte cap, discloses truncation, and redacts common secret-shaped tokens in the AI prompt.
+- Context commands are timeout-limited and timed-out process groups are terminated where supported.
 
 ## Completion
 
@@ -185,13 +187,17 @@ This document describes the behavior implemented in the current codebase. It is 
 
 ## Encryption And Secrets
 
-- Full GPG-backed `#key set` is not implemented.
+- `#key set` encrypts the configured environment API key with GPG into `secrets/key.json.gpg` when an encryption key fingerprint is configured.
 - `#key clear` removes `secrets/key.json.gpg` if present and logs the action.
-- `#encrypt on` and `#encrypt off` are safe placeholders; they do not change storage formats or migrate files.
-- `#encrypt on` warns that existing plaintext may remain in git history and Aish will not rewrite history automatically.
-- GPG encryption command planning is implemented and unit-tested with fake GPG.
-- Atomic encrypted-write helper scaffolding is implemented and tested, but not wired to history/templates/secrets.
-- Encrypted history/templates, decrypt-on-startup, no-plaintext indexes, and unlock passthrough remain incomplete.
+- `#encrypt on [key]` resolves the target GPG key to a stable fingerprint, migrates managed JSONL storage to encrypted `*.jsonl.gpg` files, removes plaintext JSONL files after successful encryption, persists encryption config, and starts the background encrypted writer.
+- `#encrypt rotate <key>` decrypts existing encrypted managed storage and re-encrypts it for the new fingerprint.
+- `#encrypt off` flushes pending encrypted writes, decrypts managed storage back to plaintext JSONL files, and persists plaintext mode.
+- `#encrypt on` warns that Git history may contain plaintext or old-key encrypted data and that Aish will not rewrite history automatically.
+- `#encrypt rewrite-history plan` prints the explicit destructive rewrite flow; `#encrypt rewrite-history run <key> --confirm-rewrite-history` requires a clean git worktree, creates a backup branch, and rewrites managed storage blobs for the target fingerprint.
+- Normal encrypted JSONL appends are queued through a serialized background writer so command output and prompt redraw do not wait for GPG encryption.
+- Encrypted-write completion/failure events are drained through the frontend tick path and can refresh completion UI.
+- GPG key resolution, command planning, encrypted JSONL migration, fake-GPG roundtrips, encrypted key storage, and rewrite-script temp handling are covered by tests.
+- Encrypted startup loading is currently synchronous; direct decrypt operations temporarily leave raw mode so GPG/pinentry can prompt safely.
 
 ## Sync
 
@@ -216,11 +222,9 @@ This document describes the behavior implemented in the current codebase. It is 
 ## Known Incomplete Functionality
 
 - Configurable key rebinding.
-- Full GPG-backed `#key set`.
-- Encrypted history, AI history, drafts, notes, templates, and search/completion indexes.
-- Async decrypt/unlock and user-visible `history is still unlocking...` state.
-- GPG/pinentry terminal handoff through `UnlockPassthrough`.
-- Independent central event-loop sources for PTY output and timers.
+- Async encrypted-history decrypt/unlock and user-visible `history is still unlocking...` state.
+- Dedicated GPG/pinentry handoff through the future `UnlockPassthrough` state.
+- Fully independent scheduled background event sources beyond the current tick hook, encrypted-write events, and command-running PTY output callbacks.
 - Full automatic passthrough detection for arbitrary interactive programs.
 - Internal picker UI; current picker integration depends on external `fzf`.
 - Live network AI behavior is not covered by automated tests.
@@ -237,6 +241,6 @@ This document describes the behavior implemented in the current codebase. It is 
 - Verify bracketed paste from the OS clipboard for single-line and multi-line content.
 - Verify live AI requests against a test-compatible chat-completions endpoint with a disposable API key.
 - Verify no secret values appear in status, logs, or AI context when using real environment variables.
-- Verify GPG/pinentry behavior manually once `#key set` and unlock flows are implemented.
+- Verify real GPG/pinentry behavior with an isolated test key, including passphrase prompts, encrypted storage migration, key rotation, stored API key fallback, and terminal recovery.
 - Verify sync against a real non-production remote, including conflict presentation and manual recovery.
 - Verify installation/package execution outside the Cargo workspace once packaging exists.

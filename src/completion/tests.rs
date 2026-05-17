@@ -893,6 +893,33 @@ fn private_command_completion_includes_nested_arguments() {
         ["tab"]
     );
 
+    let help_candidates = complete_private_command_line("#help ", "#help ".len(), usize::MAX);
+    assert_eq!(
+        help_candidates
+            .iter()
+            .map(|candidate| candidate.replacement.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "commands",
+            "keys",
+            "ai",
+            "completion",
+            "templates",
+            "sync",
+            "encryption",
+            "config"
+        ]
+    );
+
+    let partial_help_candidates = complete_private_command_line("#help c", "#help c".len(), 10);
+    assert_eq!(
+        partial_help_candidates
+            .iter()
+            .map(|candidate| candidate.replacement.as_str())
+            .collect::<Vec<_>>(),
+        ["commands", "completion", "config"]
+    );
+
     assert!(complete_private_command_line("# ", "# ".len(), usize::MAX).is_empty());
 }
 

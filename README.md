@@ -199,14 +199,17 @@ Commands:
 
 Line-leading `#` is handled by Aish and is not accidentally sent to the backend shell.
 
+Use `#help` for grouped in-terminal help, or `#help commands|keys|ai|completion|templates|sync|encryption|config` for a specific topic.
+
 Diagnostics and status:
 
 ```text
-#help
+#help [topic]
 #status
 #doctor
 #config
 #log <count>
+#editor
 ```
 
 AI configuration:
@@ -326,6 +329,7 @@ Context safety rules:
 - `#context confirm off` allows safe context commands to run immediately.
 - Dangerous command patterns still require confirmation or are blocked.
 - Captured context is byte-limited.
+- Context commands are timeout-limited and timed-out process groups are terminated where supported.
 - Truncation is disclosed.
 - Common token-shaped secrets are redacted before the AI request prompt is built.
 
@@ -549,6 +553,8 @@ cache/
 ```
 
 Use `#doctor`, `#status`, and `#config` to inspect the active paths and runtime settings.
+
+On Unix-like systems, Aish creates managed storage directories with private directory permissions and writes config/history/encrypted storage files with private file permissions where supported.
 
 ## Testing
 

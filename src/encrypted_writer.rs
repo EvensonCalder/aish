@@ -188,7 +188,6 @@ fn run_worker(
                     rewrite_encrypted_jsonl_bytes(gpg_program.clone(), &recipient, &path, &bytes)
                         .map(|()| {
                             cache.insert(path.clone(), bytes);
-                            ()
                         })
                 };
                 send_event(

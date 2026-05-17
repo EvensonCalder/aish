@@ -44,7 +44,7 @@ Recommended:
 - `expect` for expect-driven terminal scenarios.
 - `fzf` for picker tests.
 - `python3` for REPL passthrough tests.
-- `gpg` for current passthrough and future encryption checks.
+- `gpg` for current encryption checks and passthrough recovery.
 - Fish for opt-in fish backend compatibility testing.
 
 Native Windows is not a primary target for this PTY implementation. Windows testers should use WSL unless native Windows support is explicitly added later.
@@ -122,7 +122,7 @@ Use this structure:
 | AI and context |  |  |
 | Interactive passthrough |  |  |
 | Sync |  |  |
-| Encryption placeholders and GPG |  |  |
+| Encryption and GPG |  |  |
 | Visual/accessibility checks |  |  |
 
 ## Detailed Results
@@ -573,7 +573,7 @@ Run in small groups:
 - `#help`, unknown command, `#log`.
 - AI config commands without real secrets.
 - Notes.
-- Encryption placeholders.
+- Encryption commands without real keys.
 - Template create/list/show/use/replace/remove.
 
 Expected:
@@ -581,7 +581,7 @@ Expected:
 - Line-leading `#` private commands are not sent to the backend shell.
 - Recognized note lines are stored as notes.
 - Templates block unresolved placeholders.
-- Encryption commands do not overclaim unfinished encryption behavior.
+- Encryption commands without configured keys fail safely and do not print secrets.
 
 Stop and record results.
 
@@ -734,19 +734,22 @@ Stop and record output.
 
 Use `ENC-*` from `FULL_TESTS.md`.
 
+Use isolated state only:
+
+- Use a disposable `AISH_HOME`.
+- Use an isolated `GNUPGHOME`.
+- Use disposable GPG keys only.
+- Do not use a personal API key or personal `~/.aish`.
+
 Current expected state:
 
-- `#key set` is not implemented and should say so safely.
-- `#key clear` is safe.
-- `#encrypt on` and `#encrypt off` are placeholders and should not claim real encryption.
+- Before a key is configured, `#key set` and `#encrypt on` report the missing key safely and do not print secrets.
+- With a disposable key, `#encrypt on <fingerprint>` migrates managed JSONL storage to `*.jsonl.gpg` and removes plaintext JSONL files after successful encryption.
+- `#key set` stores the configured environment API key encrypted when an encryption key fingerprint is configured.
+- `#encrypt rotate <fingerprint>` re-encrypts current managed storage for the new key when a second disposable key is available.
+- `#encrypt off` decrypts current managed storage back to plaintext and leaves the prompt usable.
 - Running real `gpg` must not wedge Aish.
-
-Future expected state after encryption is implemented:
-
-- Use an isolated test GPG home.
-- Use a disposable key.
-- Verify pinentry terminal control.
-- Verify encrypted history/templates and no plaintext secret leakage.
+- Pinentry/passphrase prompts must get terminal control and recover cleanly.
 
 Stop and record output.
 

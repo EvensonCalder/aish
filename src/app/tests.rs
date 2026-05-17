@@ -1354,6 +1354,12 @@ fn private_help_prints_available_commands() {
     .unwrap();
 
     let output = String::from_utf8(output).unwrap();
+    assert!(output.contains("Aish help"));
+    assert!(output.contains("Usage:"));
+    assert!(output.contains("#help [topic]"));
+    assert!(output.contains("Topics:"));
+    assert!(output.contains("commands, keys, ai, completion, templates, sync, encryption, config"));
+    assert!(output.contains("Private commands:"));
     assert!(output.contains("#help"));
     assert!(output.contains("#status"));
     assert!(output.contains("#config"));
@@ -1376,9 +1382,65 @@ fn private_help_prints_available_commands() {
     assert!(output.contains("#exit"));
     assert!(output.contains("#quit"));
     assert!(output.contains("#history"));
-    assert!(output.contains("Default keybindings:"));
-    assert!(output.contains("Ctrl-C [implemented] - clear or cancel draft"));
-    assert!(output.contains("Ctrl-X Ctrl-E [implemented] - external editor"));
+    assert!(output.contains("Keybindings:"));
+    assert!(
+        output.contains(
+            "Tab - empty draft cycles modes; non-empty draft shows or accepts completion"
+        )
+    );
+    assert!(output.contains("Ctrl-X Ctrl-E - open the configured external editor"));
+    assert!(output.contains("AI and notes:"));
+    assert!(output.contains("# <prompt> - send an AI prompt"));
+    assert!(output.contains("# TODO: <text> - store a note"));
+    assert!(state.draft.is_empty());
+}
+
+#[test]
+fn private_help_prints_topic_specific_usage() {
+    let mut state = AppState::default();
+    state.draft.insert_str("#help completion");
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.contains("Completion help"));
+    assert!(output.contains("#completion mode auto|tab|off"));
+    assert!(output.contains("#completion display-delay-ms <0-1000>"));
+    assert!(output.contains("#completion tab-accept full|word"));
+    assert!(output.contains("auto shows live hints while typing"));
+    assert!(!output.contains("Sync help"));
+}
+
+#[test]
+fn private_help_rejects_unknown_topic_without_running_shell() {
+    let mut state = AppState::default();
+    state.draft.insert_str("#help unknown-topic");
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.contains("unknown help topic: unknown-topic"));
+    assert!(
+        output.contains(
+            "usage: #help [commands|keys|ai|completion|templates|sync|encryption|config]"
+        )
+    );
     assert!(state.draft.is_empty());
 }
 
@@ -2908,6 +2970,33 @@ fn encrypt_rewrite_history_plan_reports_manual_confirmed_flow() {
             "next=#encrypt rewrite-history run <key-fingerprint> --confirm-rewrite-history"
         )
     );
+}
+
+#[test]
+fn encrypt_rewrite_history_script_keeps_decrypted_temp_outside_rewrite_tree() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let state = AppState {
+        regular_history_path: Some(root.join("history/regular.jsonl")),
+        ..AppState::default()
+    };
+
+    let script_path = write_history_rewrite_script(root, &state).unwrap();
+    let script = fs::read_to_string(&script_path).unwrap();
+
+    assert!(script.contains("mktemp -d"));
+    assert!(script.contains("tmp=\"$tmp_dir/plain\""));
+    assert!(script.contains("trap cleanup EXIT HUP INT TERM"));
+    assert!(!script.contains("$enc.plain"));
+    assert!(!script.contains(".plain.$$"));
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mode = fs::metadata(&script_path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
 }
 
 #[test]

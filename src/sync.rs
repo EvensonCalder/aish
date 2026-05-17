@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use crate::config::SyncConfig;
+use crate::config::{SyncConfig, create_private_dir_all, set_private_file_permissions};
 use crate::log::{DEFAULT_MAX_EVENTS, EventLevel, append_event};
 
 const GITIGNORE_BEGIN: &str = "# BEGIN AISH MANAGED";
@@ -76,13 +76,21 @@ impl SyncLock {
     pub fn acquire(path: impl AsRef<Path>) -> Result<Option<Self>> {
         let path = path.as_ref();
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).with_context(|| {
+            create_private_dir_all(parent).with_context(|| {
                 format!("failed to create sync lock directory {}", parent.display())
             })?;
         }
 
-        match OpenOptions::new().write(true).create_new(true).open(path) {
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        match options.open(path) {
             Ok(file) => {
+                set_private_file_permissions(path)?;
                 write_lock_metadata(file)?;
                 Ok(Some(Self {
                     path: path.to_path_buf(),

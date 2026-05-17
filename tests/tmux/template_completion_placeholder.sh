@@ -40,6 +40,10 @@ STRUCTURAL_AUTO_CAPTURE="$(tmux capture-pane -p -t "$SESSION")"
 
 tmux send-keys -t "$SESSION" Tab
 sleep 1
+STRUCTURAL_WORD_CAPTURE="$(tmux capture-pane -p -t "$SESSION")"
+
+tmux send-keys -t "$SESSION" Tab
+sleep 1
 STRUCTURAL_ACCEPT_CAPTURE="$(tmux capture-pane -p -t "$SESSION")"
 
 tmux send-keys -t "$SESSION" Enter
@@ -50,6 +54,7 @@ printf '%s\n' "$AUTO_CAPTURE"
 printf '%s\n' "$ACCEPT_CAPTURE"
 printf '%s\n' "$BLOCK_CAPTURE"
 printf '%s\n' "$STRUCTURAL_AUTO_CAPTURE"
+printf '%s\n' "$STRUCTURAL_WORD_CAPTURE"
 printf '%s\n' "$STRUCTURAL_ACCEPT_CAPTURE"
 printf '%s\n' "$STRUCTURAL_BLOCK_CAPTURE"
 
@@ -57,5 +62,6 @@ printf '%s\n' "$AUTO_CAPTURE" | rg -q '\{something\}'
 printf '%s\n' "$ACCEPT_CAPTURE" | rg -q 'echo \{something\}'
 printf '%s\n' "$BLOCK_CAPTURE" | rg -q '^cannot execute unresolved template placeholders: something$'
 printf '%s\n' "$STRUCTURAL_AUTO_CAPTURE" | rg -q 'template[[:space:]]+echo \{a\} \{b\} \{c\}'
+printf '%s\n' "$STRUCTURAL_WORD_CAPTURE" | rg -q 'echo \{a\} \{b\}'
 printf '%s\n' "$STRUCTURAL_ACCEPT_CAPTURE" | rg -q 'echo \{a\} \{b\} \{c\}'
 printf '%s\n' "$STRUCTURAL_BLOCK_CAPTURE" | rg -q '^cannot execute unresolved template placeholders: a, b, c$'

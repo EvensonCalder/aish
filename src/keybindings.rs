@@ -8,7 +8,7 @@ pub struct KeyBinding {
 pub const DEFAULT_KEYBINDINGS: &[KeyBinding] = &[
     KeyBinding {
         key: "Ctrl-C",
-        action: "clear or cancel draft",
+        action: "clear the draft, cancel continuation, or reject context confirmation",
         implemented: true,
     },
     KeyBinding {
@@ -68,22 +68,22 @@ pub const DEFAULT_KEYBINDINGS: &[KeyBinding] = &[
     },
     KeyBinding {
         key: "Tab",
-        action: "cycle mode on empty draft",
+        action: "empty draft cycles modes; non-empty draft shows or accepts completion",
         implemented: true,
     },
     KeyBinding {
         key: "Enter",
-        action: "submit selected command or draft",
+        action: "submit the draft or selected read-only item",
         implemented: true,
     },
     KeyBinding {
         key: "Up / Down",
-        action: "browse history or AI selections; Down starts a new saved draft from non-empty draft mode",
+        action: "browse saved drafts, history, or AI selections",
         implemented: true,
     },
     KeyBinding {
         key: "Ctrl-R",
-        action: "history search placeholder",
+        action: "search history with the configured picker",
         implemented: true,
     },
     KeyBinding {
@@ -93,27 +93,27 @@ pub const DEFAULT_KEYBINDINGS: &[KeyBinding] = &[
     },
     KeyBinding {
         key: "Ctrl-X Ctrl-E",
-        action: "external editor",
+        action: "open the configured external editor",
         implemented: true,
     },
     KeyBinding {
         key: "Ctrl-X Ctrl-F",
-        action: "file picker placeholder",
+        action: "open the file picker",
         implemented: true,
     },
     KeyBinding {
         key: "Ctrl-X Ctrl-T",
-        action: "template picker placeholder",
+        action: "open the template picker",
         implemented: true,
     },
     KeyBinding {
         key: "Ctrl-X Ctrl-B",
-        action: "git branch picker placeholder",
+        action: "open the git branch picker",
         implemented: true,
     },
     KeyBinding {
         key: "Ctrl-X Ctrl-V",
-        action: "environment variable picker placeholder",
+        action: "open the environment variable picker",
         implemented: true,
     },
 ];

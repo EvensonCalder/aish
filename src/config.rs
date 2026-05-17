@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
@@ -334,11 +335,75 @@ impl DirectoryLayout {
             &self.cache,
             &self.runtime_cache,
         ] {
-            fs::create_dir_all(dir)
-                .with_context(|| format!("failed to create directory {}", dir.display()))?;
+            create_private_dir_all(dir)?;
         }
         Ok(())
     }
+}
+
+pub fn create_private_dir_all(dir: &Path) -> Result<()> {
+    fs::create_dir_all(dir)
+        .with_context(|| format!("failed to create directory {}", dir.display()))?;
+    set_private_dir_permissions(dir)
+}
+
+#[cfg(unix)]
+pub fn set_private_dir_permissions(dir: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::set_permissions(dir, fs::Permissions::from_mode(0o700)).with_context(|| {
+        format!(
+            "failed to set private directory permissions {}",
+            dir.display()
+        )
+    })
+}
+
+#[cfg(not(unix))]
+pub fn set_private_dir_permissions(_dir: &Path) -> Result<()> {
+    Ok(())
+}
+
+#[cfg(unix)]
+pub fn set_private_file_permissions(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+        .with_context(|| format!("failed to set private file permissions {}", path.display()))
+}
+
+#[cfg(not(unix))]
+pub fn set_private_file_permissions(_path: &Path) -> Result<()> {
+    Ok(())
+}
+
+pub fn write_private_file(path: &Path, bytes: &[u8]) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        create_private_dir_all(parent)?;
+    }
+    write_private_file_inner(path, bytes)?;
+    set_private_file_permissions(path)
+}
+
+#[cfg(unix)]
+fn write_private_file_inner(path: &Path, bytes: &[u8]) -> Result<()> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .mode(0o600)
+        .open(path)
+        .with_context(|| format!("failed to write private file {}", path.display()))?;
+    file.write_all(bytes)
+        .with_context(|| format!("failed to write private file {}", path.display()))
+}
+
+#[cfg(not(unix))]
+fn write_private_file_inner(path: &Path, bytes: &[u8]) -> Result<()> {
+    fs::write(path, bytes)
+        .with_context(|| format!("failed to write private file {}", path.display()))
 }
 
 pub fn default_aish_dir() -> PathBuf {
@@ -407,12 +472,9 @@ pub fn load_config(path: &Path) -> Result<Config> {
 }
 
 pub fn save_config(path: &Path, config: &Config) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create config directory {}", parent.display()))?;
-    }
     let raw = toml::to_string_pretty(config).context("failed to serialize config")?;
-    fs::write(path, raw).with_context(|| format!("failed to write config {}", path.display()))?;
+    write_private_file(path, raw.as_bytes())
+        .with_context(|| format!("failed to write config {}", path.display()))?;
     Ok(())
 }
 
@@ -628,6 +690,26 @@ mod tests {
         assert_eq!(layout.events, root.join("logs/events.jsonl"));
         assert!(layout.runtime_cache.is_dir());
         assert_eq!(config.storage.home, layout.root);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            for dir in [
+                &layout.root,
+                &layout.history,
+                &layout.templates,
+                &layout.secrets,
+                &layout.logs,
+                &layout.cache,
+                &layout.runtime_cache,
+            ] {
+                let mode = fs::metadata(dir).unwrap().permissions().mode() & 0o777;
+                assert_eq!(mode, 0o700, "directory is not private: {}", dir.display());
+            }
+            let mode = fs::metadata(&layout.config).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
     }
 
     #[test]

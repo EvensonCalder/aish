@@ -360,8 +360,8 @@ fn complete_typo_tier(
         return complete_non_first_token_typos_for_line_with_indexed_options(
             &job.line,
             job.cursor,
-            &history,
-            &templates,
+            history,
+            templates,
             job.options,
         );
     }
@@ -371,7 +371,7 @@ fn complete_typo_tier(
         &job.line,
         job.cursor,
         &[],
-        &templates,
+        templates,
         job.options,
     );
     thread::scope(|scope| {

@@ -429,8 +429,8 @@ fn home_default_template_persists() {
 }
 
 #[test]
-fn key_and_sync_placeholders() {
-    run_script("key_and_sync_placeholders.exp");
+fn key_encryption_sync_safe_failures() {
+    run_script("key_encryption_sync_safe_failures.exp");
 }
 
 #[test]
@@ -489,8 +489,8 @@ fn home_default_key_clear_removes_stored_key() {
 }
 
 #[test]
-fn home_default_encrypt_placeholder_noops() {
-    run_script("home_default_encrypt_placeholder_noops.exp");
+fn home_default_encrypt_on_migrates_storage() {
+    run_script("home_default_encrypt_on_migrates_storage.exp");
 }
 
 #[test]

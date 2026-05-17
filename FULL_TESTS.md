@@ -260,9 +260,9 @@ Use a fresh isolated `AISH_HOME` when possible so history-based suggestions are 
 | PRIV-004 | Type `# TODO: manual test note`. | The note is stored as a note and not executed by the backend shell. | Confirm no shell error. |
 | PRIV-005 | Run `#log 20`. | Recent events are shown and sensitive-looking values are redacted. | Paste output. |
 | PRIV-006 | Run `#model test-model`, `#base-url http://127.0.0.1:9/v1`, and `#env-key AISH_TEST_KEY`. | AI config persists and secrets are not printed. | Paste `#config` output. |
-| PRIV-007 | Run `#key set`. | Current placeholder reports that key storage is not implemented, without taking over the terminal. | Paste output. |
+| PRIV-007 | Run `#key set` before configuring an encryption key fingerprint. | Aish reports that the encryption key is not configured and does not print or store any secret. | Paste output. |
 | PRIV-008 | Run `#key clear`. | Existing key file is removed if present; missing key is handled safely. | Paste output. |
-| PRIV-009 | Run `#encrypt on` and `#encrypt off`. | Current placeholders warn conservatively and do not claim encryption is active. | Paste output. |
+| PRIV-009 | Run `#encrypt on` without a configured key, then run `#encrypt off` in an isolated home. | Missing-key usage is reported safely; disabling encryption either reports plaintext mode or leaves the session usable without secret output. | Paste output. |
 
 ## Templates
 
@@ -278,7 +278,7 @@ Use a fresh isolated `AISH_HOME` when possible so history-based suggestions are 
 | TPL-008 | Run `#template rm <id>`. | Template is removed and no stale entry remains. | Paste output. |
 | TPL-009 | Exit and relaunch with the same `AISH_HOME`, then inspect templates with `#template find <query>` or the JSONL store. | Template persistence matches the previous operations. | Paste output. |
 | TPL-010 | Run `#mt echo {something}`, type `echo something`, then accept completion. | Aish completes to `echo {something}` even though braces were not typed, and unresolved placeholder execution is blocked until edited. | Paste output. |
-| TPL-011 | Store `#mt echo {a} {older}`, then store `#mt echo {a} {b} {c}`. Type `echo {a} {something}` and accept completion. | Newer structural template completion wins and accepts `echo {a} {b} {c}`; generic placeholder/history fallbacks do not override it. | Paste output. |
+| TPL-011 | Store `#mt echo {a} {older}`, then store `#mt echo {a} {b} {c}`. Type `echo {a} {something}` and accept completion. With the default `completion.tab_accept="word"`, press `Tab` again until the full template is accepted, or set `#completion tab-accept full` first. | Newer structural template completion wins and completes to `echo {a} {b} {c}`; generic placeholder/history fallbacks do not override it. | Paste output. |
 
 ## External Editor And Paste Review
 
@@ -359,16 +359,19 @@ Use only disposable repositories.
 
 ## Encryption And GPG
 
-Encryption is currently incomplete and must not be overclaimed.
+Use an isolated `AISH_HOME` and an isolated `GNUPGHOME` with disposable keys for any test that enables encryption. Never use a personal key or personal `~/.aish` for destructive encryption tests.
 
 | ID | What To Do | Expected Behavior | Evidence |
 | --- | --- | --- | --- |
-| ENC-001 | Run `#key set`. | Reports that key storage is not implemented yet. | Paste output. |
+| ENC-001 | Before configuring encryption, run `#key set`. | Aish reports that an encryption key is not configured and does not print or persist a secret. | Paste output. |
 | ENC-002 | Run `#key clear`. | Removes an existing key file if present, or safely reports none. | Paste output. |
-| ENC-003 | Run `#encrypt on`. | Warns conservatively and does not claim encrypted storage is active. | Paste output. |
-| ENC-004 | Run `#encrypt off`. | Safe placeholder behavior is clear. | Paste output. |
+| ENC-003 | Configure a disposable GPG key and run `#encrypt on <fingerprint>`. | Managed history, notes, drafts, AI history, and templates migrate to `*.jsonl.gpg`; plaintext JSONL files are removed after successful encryption; the Git history warning names the explicit rewrite flow. | Paste output and file listing. |
+| ENC-004 | While encryption is enabled, run commands/templates/notes, then inspect storage. | New writes are encrypted through the background writer and no plaintext managed JSONL files are left behind after flush/exit. | Paste output and file listing. |
 | ENC-005 | Run real `gpg` or `gpg --version` from Aish. | GPG-related passthrough does not wedge Aish. | Paste output or describe. |
-| ENC-006 | Future only: after encryption implementation, use an isolated test GPG home and test key storage, unlock, encrypted writes, and locked-history behavior. | No plaintext secrets leak and pinentry has safe terminal control. | Future evidence. |
+| ENC-006 | With `#env-key AISH_TEST_KEY` set and the environment variable present before launch, run `#key set`, then relaunch without the variable and submit an AI request against a disposable endpoint if available. | The API key is stored encrypted, never printed, and can be used only after GPG decrypt succeeds. | Paste sanitized output. |
+| ENC-007 | Run `#encrypt rotate <second-fingerprint>` if a second disposable key exists. | Existing encrypted managed storage is decrypted and re-encrypted for the new fingerprint. | Paste output and file listing. |
+| ENC-008 | Run `#encrypt off`. | Pending encrypted writes flush, managed storage decrypts back to plaintext JSONL, and future writes use plaintext files. | Paste output and file listing. |
+| ENC-009 | Run `#encrypt rewrite-history plan`. | Aish prints the destructive risk, target key, scope, and the explicit confirmed run command without rewriting history. | Paste output. |
 
 ## Visual, Terminal, And Accessibility Checks
 
@@ -399,21 +402,21 @@ These checks cannot be fully replaced by automation because they depend on human
 
 | ID | Source | What Remains Human |
 | --- | --- | --- |
-| HUMAN-001 | `MUNUAL_TESTS.md` H-001 | Inline completion contrast and readability across themes. |
-| HUMAN-002 | `MUNUAL_TESTS.md` H-002 | Narrow-terminal visual polish across fonts and terminal emulators. |
-| HUMAN-003 | `MUNUAL_TESTS.md` H-003 | Whether full vs word `Tab` acceptance feels intuitive. |
-| HUMAN-004 | `MUNUAL_TESTS.md` H-004 | Real OS clipboard and bracketed paste behavior. |
-| HUMAN-005 | `MUNUAL_TESTS.md` H-005/H-006 | Real editor success and failure behavior. |
-| HUMAN-006 | `MUNUAL_TESTS.md` H-007 | Real `fzf` layout and key handling. |
-| HUMAN-007 | `MUNUAL_TESTS.md` H-008 | Broad full-screen program passthrough across platforms. |
-| HUMAN-008 | `MUNUAL_TESTS.md` H-009 | Real AI endpoint, network, auth, and rate-limit behavior. |
-| HUMAN-009 | `MUNUAL_TESTS.md` H-010 | Future real GPG encryption and pinentry. |
-| HUMAN-010 | `MUNUAL_TESTS.md` H-011 | Fish behavior across macOS and Linux fish versions. |
-| HUMAN-011 | `MUNUAL_TESTS.md` H-012 | Cross-terminal smoke tests. |
-| HUMAN-012 | `MUNUAL_TESTS.md` H-013 | Production-shaped home behavior. |
-| HUMAN-013 | `MUNUAL_TESTS.md` H-014/H-015 | Real private git remote auth and conflict recovery. |
-| HUMAN-014 | `MUNUAL_TESTS.md` H-016 | Accessibility perception. |
-| HUMAN-015 | `MUNUAL_TESTS.md` H-017 | Abnormal terminal and child-process interruption. |
+| HUMAN-001 | `MANUAL_TESTS.md` H-001 | Inline completion contrast and readability across themes. |
+| HUMAN-002 | `MANUAL_TESTS.md` H-002 | Narrow-terminal visual polish across fonts and terminal emulators. |
+| HUMAN-003 | `MANUAL_TESTS.md` H-003 | Whether full vs word `Tab` acceptance feels intuitive. |
+| HUMAN-004 | `MANUAL_TESTS.md` H-004 | Real OS clipboard and bracketed paste behavior. |
+| HUMAN-005 | `MANUAL_TESTS.md` H-005/H-006 | Real editor success and failure behavior. |
+| HUMAN-006 | `MANUAL_TESTS.md` H-007 | Real `fzf` layout and key handling. |
+| HUMAN-007 | `MANUAL_TESTS.md` H-008 | Broad full-screen program passthrough across platforms. |
+| HUMAN-008 | `MANUAL_TESTS.md` H-009 | Real AI endpoint, network, auth, and rate-limit behavior. |
+| HUMAN-009 | `MANUAL_TESTS.md` H-010 | Real GPG encryption and pinentry. |
+| HUMAN-010 | `MANUAL_TESTS.md` H-011 | Fish behavior across macOS and Linux fish versions. |
+| HUMAN-011 | `MANUAL_TESTS.md` H-012 | Cross-terminal smoke tests. |
+| HUMAN-012 | `MANUAL_TESTS.md` H-013 | Production-shaped home behavior. |
+| HUMAN-013 | `MANUAL_TESTS.md` H-014/H-015 | Real private git remote auth and conflict recovery. |
+| HUMAN-014 | `MANUAL_TESTS.md` H-016 | Accessibility perception. |
+| HUMAN-015 | `MANUAL_TESTS.md` H-017 | Abnormal terminal and child-process interruption. |
 
 ## Failure Record Template
 

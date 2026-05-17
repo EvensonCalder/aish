@@ -22,7 +22,7 @@ use crate::completion_worker::{CompletionJob, CompletionTier, CompletionWorker};
 use crate::config::PromptConfig;
 use crate::config::{
     self, AiConfig, CompletionConfig, CompletionMode, CompletionTabAccept, ContextConfig,
-    EditorConfig, EncryptionConfig, PasteConfig, SyncConfig,
+    EditorConfig, EncryptionConfig, PasteConfig, SyncConfig, write_private_file,
 };
 use crate::context::{
     build_contextual_ai_prompt, is_dangerous_context_command, run_context_command,
@@ -68,6 +68,7 @@ use crate::templates::{
     remove_templates_by_id, replace_template_by_id, template_placeholders,
 };
 
+mod help;
 mod private_commands;
 mod prompt;
 mod prompt_command;
@@ -2863,7 +2864,7 @@ fn run_encryption_history_rewrite(
 
 fn write_history_rewrite_script(root: &Path, state: &AppState) -> Result<PathBuf> {
     let script_dir = root.join("cache/runtime");
-    fs::create_dir_all(&script_dir).with_context(|| {
+    config::create_private_dir_all(&script_dir).with_context(|| {
         format!(
             "failed to create rewrite script directory {}",
             script_dir.display()
@@ -2871,14 +2872,14 @@ fn write_history_rewrite_script(root: &Path, state: &AppState) -> Result<PathBuf
     })?;
     let script_path = script_dir.join("encrypt-rewrite-history.sh");
     let mut script = String::from(
-        "#!/bin/sh\nset -eu\ngpg_program=${AISH_REWRITE_GPG:-gpg}\nrecipient=${AISH_REWRITE_RECIPIENT:?}\nreencrypt_file() {\n  plain=$1\n  enc=$plain.gpg\n  if [ -f \"$plain\" ] && [ -f \"$enc\" ]; then\n    printf '%s\\n' \"both plaintext and encrypted files exist: $plain\" >&2\n    exit 3\n  fi\n  if [ -f \"$plain\" ]; then\n    \"$gpg_program\" --batch --yes --no-tty --trust-model always --encrypt --recipient \"$recipient\" --output \"$enc.tmp\" \"$plain\"\n    mv \"$enc.tmp\" \"$enc\"\n    rm -f \"$plain\"\n  elif [ -f \"$enc\" ]; then\n    tmp=\"$enc.plain.$$\"\n    \"$gpg_program\" --yes --decrypt \"$enc\" > \"$tmp\"\n    \"$gpg_program\" --batch --yes --no-tty --trust-model always --encrypt --recipient \"$recipient\" --output \"$enc.tmp\" \"$tmp\"\n    rm -f \"$tmp\"\n    mv \"$enc.tmp\" \"$enc\"\n  fi\n}\n",
+        "#!/bin/sh\nset -eu\numask 077\ngpg_program=${AISH_REWRITE_GPG:-gpg}\nrecipient=${AISH_REWRITE_RECIPIENT:?}\ntmp_dir=$(mktemp -d \"${TMPDIR:-/tmp}/aish-rewrite.XXXXXX\")\ncleanup() {\n  rm -rf \"$tmp_dir\"\n}\ntrap cleanup EXIT HUP INT TERM\nreencrypt_file() {\n  plain=$1\n  enc=$plain.gpg\n  if [ -f \"$plain\" ] && [ -f \"$enc\" ]; then\n    printf '%s\\n' \"both plaintext and encrypted files exist: $plain\" >&2\n    exit 3\n  fi\n  if [ -f \"$plain\" ]; then\n    \"$gpg_program\" --batch --yes --no-tty --trust-model always --encrypt --recipient \"$recipient\" --output \"$enc.tmp\" \"$plain\"\n    mv \"$enc.tmp\" \"$enc\"\n    rm -f \"$plain\"\n  elif [ -f \"$enc\" ]; then\n    tmp=\"$tmp_dir/plain\"\n    rm -f \"$tmp\"\n    \"$gpg_program\" --yes --decrypt \"$enc\" > \"$tmp\"\n    \"$gpg_program\" --batch --yes --no-tty --trust-model always --encrypt --recipient \"$recipient\" --output \"$enc.tmp\" \"$tmp\"\n    rm -f \"$tmp\"\n    mv \"$enc.tmp\" \"$enc\"\n  fi\n}\n",
     );
     for relative in managed_relative_storage_paths(root, state)? {
         script.push_str("reencrypt_file ");
         script.push_str(&shell_single_quote(&relative));
         script.push('\n');
     }
-    fs::write(&script_path, script)
+    write_private_file(&script_path, script.as_bytes())
         .with_context(|| format!("failed to write rewrite script {}", script_path.display()))?;
     Ok(script_path)
 }

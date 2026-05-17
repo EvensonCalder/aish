@@ -7,6 +7,7 @@ use anyhow::{Context, Result, bail};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, is_raw_mode_enabled};
 use serde::{Serialize, de::DeserializeOwned};
 
+use crate::config::{create_private_dir_all, set_private_file_permissions, write_private_file};
 use crate::history::{JsonlLineError, JsonlLoad};
 
 pub fn encryption_git_history_warning() -> &'static str {
@@ -334,7 +335,7 @@ pub fn atomic_gpg_encrypt_bytes(
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
     {
-        fs::create_dir_all(parent).with_context(|| {
+        create_private_dir_all(parent).with_context(|| {
             format!(
                 "failed to create encrypted output parent: {}",
                 parent.display()
@@ -362,6 +363,7 @@ pub fn atomic_gpg_encrypt_bytes(
             paths.final_path.display()
         )
     })?;
+    set_private_file_permissions(&paths.final_path)?;
     Ok(())
 }
 
@@ -569,7 +571,7 @@ fn load_jsonl_bytes<T: DeserializeOwned>(path: &Path, bytes: &[u8]) -> Result<Js
 
 fn atomic_plaintext_write(path: &Path, bytes: &[u8]) -> Result<()> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).with_context(|| {
+        create_private_dir_all(parent).with_context(|| {
             format!("failed to create plaintext directory {}", parent.display())
         })?;
     }
@@ -579,7 +581,7 @@ fn atomic_plaintext_write(path: &Path, bytes: &[u8]) -> Result<()> {
             .map(|extension| format!("{extension}.tmp"))
             .unwrap_or_else(|| "tmp".to_string()),
     );
-    fs::write(&tmp, bytes)
+    write_private_file(&tmp, bytes)
         .with_context(|| format!("failed to write plaintext temp file {}", tmp.display()))?;
     fs::rename(&tmp, path).with_context(|| {
         format!(
@@ -588,6 +590,7 @@ fn atomic_plaintext_write(path: &Path, bytes: &[u8]) -> Result<()> {
             tmp.display()
         )
     })?;
+    set_private_file_permissions(path)?;
     Ok(())
 }
 
@@ -841,6 +844,11 @@ mod tests {
         );
         assert!(!paths.plaintext_tmp.exists());
         assert!(!paths.encrypted_tmp.exists());
+        #[cfg(unix)]
+        {
+            let mode = fs::metadata(&final_path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
     }
 
     #[test]
@@ -900,6 +908,15 @@ mod tests {
 
         assert!(!path.exists());
         assert!(encrypted_path(&path).exists());
+        #[cfg(unix)]
+        {
+            let mode = fs::metadata(encrypted_path(&path))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o600);
+        }
         assert_eq!(loaded.errors, []);
         assert_eq!(loaded.items.len(), 2);
         assert_eq!(loaded.items[0]["command"], "pwd");

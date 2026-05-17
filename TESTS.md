@@ -18,19 +18,17 @@ git diff --check
 
 Current test inventory:
 
-- 383 library unit tests.
-- 23 draft execution integration tests.
+- 490 library unit tests.
+- 26 draft execution integration tests.
 - 1 first-run integration test.
-- 32 tmux screen-capture integration tests.
-- 9 of the tmux tests are manual-equivalent workflows that replaced deterministic rows from `MUNUAL_TESTS.md`: real-world shell commands, prompt editing keys, completion UX mechanics, private commands/notes, templates/editor/default home, AI/context/sync config, local sync, `less` passthrough smoke, and startup failure messages.
-- 9 active bash PTY integration tests.
-- 2 active zsh PTY integration tests.
-- 2 opt-in fish PTY integration tests, gated by `AISH_TEST_FISH=1` until fish support is validated across macOS and Linux distributions.
-- 106 expect-driven end-to-end interactive scenarios.
+- 44 tmux screen-capture integration tests.
+- 9 of the tmux tests are manual-equivalent workflows that replaced deterministic rows from `MANUAL_TESTS.md`: real-world shell commands, prompt editing keys, completion UX mechanics, private commands/notes, templates/editor/default home, AI/context/sync config, local sync, `less` passthrough smoke, and startup failure messages.
+- 21 PTY integration tests, including default bash/zsh coverage and fish cases that skip unless fish opt-in prerequisites are available.
+- 114 expect-driven end-to-end interactive scenarios.
 - Expect scenarios are serialized inside `expect_runner` because they launch real interactive terminals; parallel execution created false `no prompt` and Tcl/expect crash failures that did not match actual single-user operation.
 - Expect scenarios force `commit.gpgsign=false` through `GIT_CONFIG_COUNT` so temporary local git repositories do not depend on a developer's global GPG/pinentry setup.
 - Tmux screen-capture tests are serialized inside `tmux_capture` for the same reason: they launch real terminal panes and assert screen state.
-- `MUNUAL_TESTS.md` now contains only human-only checks; deterministic manual workflows should be added to tmux/expect/Rust instead of expanding the human checklist.
+- `MANUAL_TESTS.md` now contains only human-only checks; deterministic manual workflows should be added to tmux/expect/Rust instead of expanding the human checklist.
 - Most tmux tests assert final visible rows; longer backend-specific workflows capture pane scrollback so normal scrolling does not make earlier command output disappear from the assertion window.
 - Tmux screen-capture tests use an isolated short `TMUX_TMPDIR` under `/tmp` so they do not attach to a user's tmux server or exceed Unix socket path limits on macOS.
 - Tmux screen-capture tests skip cleanly when `tmux` is unavailable or cannot create a local session.
@@ -77,15 +75,15 @@ Expect scenarios are the acceptance layer for user-visible terminal behavior. Th
 | Shell continuation UX | `dquote_continuation`, `squote_continuation`, `backslash_continuation`, `ctrl_c_cancels_continuation`, `tmux_ctrl_c_cancels_continuation_and_shell_recovers`, `no_backend_ps2_leak` | Covered | Add heredoc-style continuation if it becomes user-facing. |
 | Prompt/control keys | `ctrl_l_clear_screen`, `tmux_ctrl_l_clears_visible_screen_and_keeps_prompt_usable`, `tmux_shell_clear_command_redraws_prompt_on_first_line`, `readline_editing_keys`, `tmux_manual_prompt_editing_keys_match_visible_terminal_behavior`, `tmux_narrow_long_input_redraw_does_not_duplicate_prompt`, `tmux_unicode_output_matches_real_terminal_screen`, `terminal_resize`, `escape_clears_draft`, `tmux_escape_clears_draft_and_shell_recovers`, `ctrl_x_unknown_chord_cancels`, `ctrl_d_exits`, `tmux_ctrl_d_exits_session_without_leftover_pane`, `exit_command`, `tmux_exit_command_terminates_session_without_leftover_pane` | Covered | Add new prompt-control scenarios only for observed regressions. |
 | Mode switching and read-only behavior | `empty_tab_cycles_modes`, `tmux_mode_redraw_preserves_prior_output_and_shell_recovers`, `history_mode_execute`, `tmux_history_mode_executes_selected_command`, `history_persists_across_restarts`, `home_default_history_persists`, `home_default_history_trim_persists`, `draft_persists_across_restarts`, `home_default_draft_persists`, `read_only_edit_copies_to_draft`, `ai_mode_executes_sequence`, `home_default_ai_mode_executes_sequence`, `ai_mode_edit_copies_to_draft`, `home_default_ai_mode_edit_copies_to_draft`, `output_then_redraw_interactions` | Covered | Add more mode redraw regressions only for observed failures. |
-| Completion UI | `completion_accept_single`, `completion_panel_multiple`, `completion_inline_off_accepts_first`, `completion_tab_accept_word`, `completion_no_matches_panel`, `tmux_completion_no_matches_panel_remains_usable`, `completion_right_accepts_first`, `tmux_completion_right_accepts_first_and_executes`, `tmux_inline_completion_matches_bash_backend_real_terminal_screen`, `tmux_inline_completion_matches_zsh_backend_real_terminal_screen`, `tmux_manual_completion_workflow_matches_visible_terminal_behavior`, `completion_config_persists`, `completion_first_token_source_order`, `home_default_completion_ui`, `output_then_redraw_interactions` | Covered for bash/zsh by default | Fish backend completion remains opt-in with `AISH_TEST_FISH=1` until cross-platform fish behavior is validated. Completion rows intentionally skip the inline candidate and render only remaining suffixes. |
+| Completion UI | `completion_accept_single`, `completion_panel_multiple`, `completion_inline_off_accepts_first`, `completion_tab_accept_word`, `completion_no_matches_panel`, `tmux_completion_no_matches_remains_quiet_and_usable`, `completion_right_accepts_first`, `tmux_completion_right_accepts_first_and_executes`, `completion_typo_correction_accepts_whole_command`, `completion_directory_typo_accepts_local_directory`, `template_completion_placeholder_name`, `tmux_template_completion_accepts_placeholder_name_as_protected_draft`, `tmux_completion_auto_panel_does_not_leak_to_scrollback`, `tmux_completion_panel_at_bottom_does_not_repeat_in_scrollback`, `tmux_completion_panel_is_cleared_before_enter_executes`, `tmux_inline_completion_matches_bash_backend_real_terminal_screen`, `tmux_inline_completion_matches_zsh_backend_real_terminal_screen`, `tmux_manual_completion_workflow_matches_visible_terminal_behavior`, `completion_config_persists`, `completion_first_token_source_order`, `home_default_completion_ui`, `output_then_redraw_interactions` | Covered for bash/zsh by default | Fish backend completion remains opt-in with `AISH_TEST_FISH=1` until cross-platform fish behavior is validated. Completion rows show full replacement commands for non-inline candidates and elide by word boundary in narrow terminals. |
 | Picker cancellation UX | `history_picker_cancel_preserves_draft`, `home_default_history_picker_cancel_preserves_draft`, `file_picker_cancel_preserves_draft`, `home_default_file_picker_cancel_preserves_draft`, `template_picker_cancel_preserves_draft`, `home_default_template_picker_cancel_preserves_draft`, `git_branch_picker_cancel_preserves_draft`, `home_default_git_branch_picker_cancel_preserves_draft`, `env_var_picker_cancel_preserves_draft`, `env_var_picker_uses_backend_environment`, `home_default_env_var_picker_cancel_preserves_draft`, `tmux_picker_cancellation_message_starts_on_own_line` | Covered | Add picker success-path expect scenarios only when picker replacement UI changes; Rust tests cover replacement logic. |
-| Private command UX and diagnostics | `first_run_doctor`, `home_default_first_run_doctor`, `home_default_config_persists`, `home_default_ai_key_source_redacts_secret`, `invalid_config_startup`, `home_default_invalid_config_startup`, `home_missing_fails_cleanly`, `aish_home_empty_uses_home`, `aish_home_relative_fails_cleanly`, `home_unwritable_fails_cleanly`, `home_path_with_spaces_works`, `home_aish_path_file_fails_cleanly`, `tmux_manual_startup_failures_are_readable_in_terminal`, `help_lists_commands`, `unknown_private_command`, `private_command_safe_failures`, `status_doctor_config`, `tmux_status_command_is_visible_and_shell_recovers`, `tmux_manual_private_config_notes_workflow_matches_visible_terminal_behavior`, `key_and_sync_placeholders`, `key_clear_removes_stored_key`, `ai_config_persists` | Covered | Add new safe-failure scenarios when new private commands are added. |
+| Private command UX and diagnostics | `first_run_doctor`, `home_default_first_run_doctor`, `home_default_config_persists`, `home_default_ai_key_source_redacts_secret`, `invalid_config_startup`, `home_default_invalid_config_startup`, `home_missing_fails_cleanly`, `aish_home_empty_uses_home`, `aish_home_relative_fails_cleanly`, `home_unwritable_fails_cleanly`, `home_path_with_spaces_works`, `home_aish_path_file_fails_cleanly`, `tmux_manual_startup_failures_are_readable_in_terminal`, `help_lists_commands`, `unknown_private_command`, `private_command_safe_failures`, `status_doctor_config`, `tmux_status_command_is_visible_and_shell_recovers`, `tmux_manual_private_config_notes_workflow_matches_visible_terminal_behavior`, `key_encryption_sync_safe_failures`, `key_clear_removes_stored_key`, `ai_config_persists` | Covered | Add new safe-failure scenarios when new private commands are added. |
 | Notes, context, and logs | `notes_are_swallowed`, `home_default_notes_are_swallowed`, `tmux_manual_private_config_notes_workflow_matches_visible_terminal_behavior`, `context_config_persists`, `context_off_blocks_pseudopipe`, `context_confirm_off_runs_immediately`, `context_confirmation_skip`, `context_dangerous_refusal`, `context_dangerous_still_prompts_when_confirm_off`, `context_truncation_reports_limit`, `tmux_manual_ai_context_and_sync_config_match_visible_terminal_behavior`, `home_default_context_dangerous_refusal`, `log_shows_context_skip`, `home_default_event_log_persists` | Covered | Add new context scenarios only for observed regressions. |
 | Templates | `template_use_executes`, `template_crud`, `template_placeholder_blocks_execution`, `home_default_template_persists`, `tmux_manual_templates_editor_and_default_home_match_visible_terminal_behavior` | Covered | Add completion/template interaction if UI changes. |
-| Editor and paste flows | `external_editor_roundtrip`, `home_default_external_editor_roundtrip`, `external_editor_failure_preserves_draft`, `home_default_external_editor_failure_preserves_draft`, `tmux_manual_templates_editor_and_default_home_match_visible_terminal_behavior`, `tmux_editor_and_paste_review_render_cleanly`, `editor_hash_content_bypasses_parser`, `multiline_paste_editor_review`, `home_default_multiline_paste_editor_review` | Covered | Real OS clipboard and full-screen editor behavior remains human-only in `MUNUAL_TESTS.md`. |
-| Sync | `key_and_sync_placeholders`, `home_default_sync_config_persists`, `home_default_startup_sync_runs`, `home_default_startup_sync_unsupported_schedule`, `home_default_startup_sync_failure_logs`, `home_default_startup_sync_disabled_noops`, `home_default_sync_push_local_remote`, `sync_push_local_remote`, `sync_push_failure_logs`, `sync_push_conflict_logs`, `tmux_manual_ai_context_and_sync_config_match_visible_terminal_behavior`, `tmux_manual_sync_local_remote_matches_visible_terminal_behavior` | Covered | Real remote auth and human conflict review remain manual-only. |
+| Editor and paste flows | `external_editor_roundtrip`, `home_default_external_editor_roundtrip`, `external_editor_failure_preserves_draft`, `home_default_external_editor_failure_preserves_draft`, `tmux_manual_templates_editor_and_default_home_match_visible_terminal_behavior`, `tmux_editor_and_paste_review_render_cleanly`, `editor_hash_content_bypasses_parser`, `multiline_paste_editor_review`, `home_default_multiline_paste_editor_review` | Covered | Real OS clipboard and full-screen editor behavior remains human-only in `MANUAL_TESTS.md`. |
+| Sync | `key_encryption_sync_safe_failures`, `home_default_sync_config_persists`, `home_default_startup_sync_runs`, `home_default_startup_sync_unsupported_schedule`, `home_default_startup_sync_failure_logs`, `home_default_startup_sync_disabled_noops`, `home_default_sync_push_local_remote`, `sync_push_local_remote`, `sync_push_failure_logs`, `sync_push_conflict_logs`, `tmux_manual_ai_context_and_sync_config_match_visible_terminal_behavior`, `tmux_manual_sync_local_remote_matches_visible_terminal_behavior` | Covered | Real remote auth and human conflict review remain manual-only. |
 | Passthrough/interactive programs | `passthrough_less`, `tmux_manual_passthrough_less_recovers_prompt_when_available` when `less` is available, `tmux_python_repl_passthrough_recovers_prompt_when_available` when `python3` is available, `tmux_stdin_and_gpg_like_passthrough_recovers_prompt`, backend interrupt recovery through `pty_backend_wait_callback_can_interrupt_long_running_commands`; key forwarding is Rust-covered | Partial | Broader real interactive programs remain human-only because alternate-screen and job-control behavior vary by environment. |
-| Encryption/GPG | `key_clear_removes_stored_key`, `home_default_key_clear_removes_stored_key`, `home_default_encrypt_placeholder_noops`, `key_and_sync_placeholders` | Partial | Add end-to-end fake GPG or test-key flow before claiming encryption completion. |
+| Encryption/GPG | `key_clear_removes_stored_key`, `home_default_key_clear_removes_stored_key`, `home_default_encrypt_on_migrates_storage`, `key_encryption_sync_safe_failures`; Rust coverage for `key_set_encrypts_env_api_key_without_printing_secret`, `ai_prompt_uses_gpg_stored_key_when_env_key_is_missing`, `encrypt_on_migrates_plaintext_storage_and_persists_config`, `encrypt_rotate_reencrypts_existing_storage_and_persists_fingerprint`, `encrypt_off_decrypts_storage_and_persists_config`, `encrypted_writes_use_gpg_files_without_plaintext_jsonl`, `encrypted_history_append_does_not_block_command_completion`, `encrypted_completion_uses_cached_templates_without_gpg_on_keypress`, and rewrite-history planning/script safety | Mostly covered with fake GPG | Real passphrase-protected key and pinentry behavior remains human-only in `MANUAL_TESTS.md`. Async startup unlock remains a known gap. |
 
 ## Feature Coverage
 
@@ -122,6 +120,8 @@ Implemented:
 - Sync config persistence under `$HOME/.aish/config.toml` when `AISH_HOME` is unset, without scheduler files.
 - Event log persistence under `$HOME/.aish/logs/events.jsonl` when `AISH_HOME` is unset.
 - Missing config creates default `config.toml`.
+- First-run managed directories are private on Unix where supported.
+- Config files are written with private file permissions on Unix where supported.
 - Invalid config returns a readable error.
 - Invalid `$HOME/.aish/config.toml` returns a readable error when `AISH_HOME` is unset.
 - Draft config defaults: `persist = true`, `sync = false`.
@@ -244,8 +244,8 @@ Status:
 
 Known gaps:
 
-- PTY output is not yet integrated as a separate event-loop source.
-- Timer/background events are not implemented.
+- Command-running PTY output is exposed through explicit output/idle callbacks and real output streams before command completion.
+- Timer/background support currently exists as frontend tick wakeups and encrypted-write events; future scheduled background work is not implemented.
 - Raw terminal behavior is covered by expect scenarios and tmux pane-capture regressions for portable workflows; add new tmux coverage only when final-screen behavior matters.
 
 ### Core Modes
@@ -273,7 +273,7 @@ Tests:
 - `pty::tests::parses_marker_cwd_when_present`
 - `execute_draft_updates_current_cwd_from_backend_shell`
 - `app::tests::output_ring_keeps_latest_entries_up_to_capacity`
-- `execute_draft_sends_command_to_backend_and_resets_state`
+- `execute_draft_sends_command_to_backend_and_opens_blank_draft`
 
 Status:
 
@@ -281,8 +281,6 @@ Status:
 
 Known gaps:
 
-- Selected history index is implemented for regular history mode only.
-- Selected AI session/item state is not implemented.
 - Prompt variable coverage is limited to `{user}`, `{host}`, `{cwd}`, `{basename}`, `{mode}`, and `{last_status}`.
 
 ### Draft Input Editor
@@ -329,7 +327,7 @@ Implemented:
 - AI prompts are parsed and routed to the AI request pipeline.
 - AI prompts with context pseudo-pipe syntax are parsed and can execute controlled context collection.
 - Visual continuation lines for `#` prompts and `#mt` template creation can be normalized by a pure parser helper.
-- Context pseudo-pipe commands are not executed yet.
+- Context pseudo-pipe commands execute only through the controlled context collector after config, confirmation, and danger checks.
 - Unknown private commands are not sent to shell.
 - Unknown private commands suggest the nearest implemented command when there is a close match.
 - Minimal private commands: `#help`, `#status`, `#config`, `#doctor`, `#model`, `#base-url`, `#env-key`, `#key set`, `#key clear`, `#context`, `#completion`, `#log`, `#editor`, `#mt`, `#template find`, `#template show`, `#template use`, `#template rm`, `#template replace`, `#encrypt`, `#set-remote`, `#push`, `#sync`, `#exit`, `#quit`, `#history <count>`.
@@ -340,12 +338,12 @@ Implemented:
 - `Ctrl-X Ctrl-E` resolves to an external-editor launch action without editing draft state.
 - `Ctrl-X` advanced picker chords resolve to launch actions without editing draft state before the picker returns a selection.
 - `#status` reports the default keybinding count.
-- AI configuration commands `#model`, `#base-url`, and `#env-key` persist to `config.toml`; `#base-url` stores the normalized final chat-completions URL; `#key` commands remain placeholders for Phase 18 and do not store, read, or remove secrets yet.
+- AI configuration commands `#model`, `#base-url`, and `#env-key` persist to `config.toml`; `#base-url` stores the normalized final chat-completions URL; `#key set` stores the current configured environment API key with GPG when an encryption key fingerprint is configured, and `#key clear` removes the encrypted key file.
 - AI helpers normalize chat-completions URLs, read API keys from configured environment variables, build strict JSON-only chat request bodies, and parse/validate structured AI item JSON without relying on newline boundaries.
 - AI session helpers persist parsed AI items to `ai.jsonl`, rebuild command indexes, and switch to `%` AI mode at the first command from the new session.
 - Direct `# prompt` AI requests are wired to the configured chat-completions request path; missing config reports a readable error without crashing or mutating AI history.
 - Context configuration persists `#context on|off`, `#context confirm on|off`, and `#context <bytes>` to `config.toml`; context confirmation stores a pending prompt and accepts `Y`/`Enter` or skips with `n`/`Esc`/`Ctrl-C`.
-- Context pseudo-pipe helpers run context commands through a controlled `/bin/sh -c` subprocess, capture stdout and stderr, cap output by configured byte limit, disclose truncation, detect dangerous command patterns, and build contextual AI prompts with common secret token shapes redacted from command/output context.
+- Context pseudo-pipe helpers run context commands through a controlled `/bin/sh -c` subprocess, capture stdout and stderr, enforce byte caps and timeouts, disclose truncation/timeouts, detect dangerous command patterns, and build contextual AI prompts with common secret token shapes redacted from command/output context.
 - Event log helpers append to `logs/events.jsonl`, trim to 1000 events by default, redact common secret token shapes, record config update errors, record secret/encryption-adjacent changes such as `#key clear`, record sync config changes, and `#log <count>` prints recent events.
 - Sync config commands persist remote, schedule/off state, and category toggles for AI/history/templates/drafts without running git or creating scheduler files.
 - Sync lock helper atomically creates a lock file, rejects a second holder, writes metadata, and removes the lock on drop.
@@ -372,7 +370,7 @@ Implemented:
 - Alternate-screen buffer detection tracks common enter/exit CSI sequences (`?47`, `?1047`, `?1049`) and ignores unrelated terminal styling escapes.
 - Passthrough prompt-return detection requires process exit and normal-screen state before Aish redraws its prompt after an interactive command.
 - Shell integration rollup is covered across bash marker integration, zsh hooks, opt-in fish events, foreground passthrough for allowlisted interactive commands, and local temporary git sync integration tests.
-- `#encrypt on` warns that existing plaintext may remain in git history and that Aish will not rewrite history automatically, while encryption remains otherwise unimplemented.
+- `#encrypt on [key]` resolves a stable GPG fingerprint, migrates managed JSONL storage to encrypted `*.jsonl.gpg` files, removes plaintext JSONL files after successful encryption, warns about Git history, and starts a serialized background encrypted writer.
 - Dangerous context pseudo-pipe commands have expect coverage proving refusal skips execution and leaves the target file intact.
 - Prompt redraw after ordinary command output has both a Rust virtual-screen regression and a real `tmux` pane-capture regression proving repeated final visible shell output remains above the next prompt in actual use; the tmux scripts run the Cargo-provided `CARGO_BIN_EXE_aish` binary via `AISH_BIN` so they cannot accidentally validate a stale `target/debug/aish`.
 - Common real-world shell workflows have expect and backend-specific tmux coverage proving Aish passes through persistent `cd`, `mkdir`, file redirection, `cat | grep`, quoted arguments, exported environment variables, file tests, failing commands, and recovery after failure across bash and zsh by default; fish coverage is opt-in with `AISH_TEST_FISH=1`.
@@ -382,7 +380,7 @@ Implemented:
 - Representative private-command safe failures have expect coverage for invalid history/log/template/context/sync usage, followed by a backend command proving the session remains usable.
 - Unicode command output has real `tmux` pane-capture coverage so UTF-8 behavior is checked against final visible terminal state without relying on Tcl/expect Unicode handling.
 - Terminal size has expect coverage proving startup outer terminal rows/columns propagate to backend child commands via `stty size`; runtime backend resize is covered by PTY integration.
-- `#key set` remains a placeholder, while `#key clear` removes the encrypted key file if present and logs the action without printing stored secret content.
+- `#key set` encrypts the current configured environment API key without printing the secret, while `#key clear` removes the encrypted key file if present and logs the action.
 - `#completion` reports current completion config and persists `#completion max <count>`, `#completion inline on|off`, and `#completion tab-accept full|word`.
 - Live inline ghost completion, configurable full/word `Tab` acceptance, and width-aware candidate row elision are implemented with Rust, expect, and tmux coverage.
 - Completion has pure current-token detection helpers that handle first-token classification, non-first-token classification, quoted whitespace, escaped whitespace, cursor-in-line contexts, path-like tokens, and UTF-8 cursor snapping.
@@ -435,7 +433,7 @@ Implemented:
 - Template placeholders support `{name}`, `{name:description}`, and `{name...}` syntax.
 - Template use copies rendered content to a protected template draft and blocks execution while placeholders remain unresolved.
 - Template draft editing treats unresolved placeholders as spans: outside Backspace/Delete removes the whole placeholder, while editing inside expands the draft to plain editable text.
-- Encryption and sync commands are recognized as placeholders but do not change files, encryption state, remotes, or run git commands yet.
+- Encryption commands can change managed storage encryption state through GPG-backed migration/rotation/decryption; sync commands persist remote/schedule/category state and `#push` runs the conservative git flow.
 - `#context` reports and persists current context configuration.
 - `#config` prints read-only runtime configuration and does not create missing storage files.
 - `#doctor` prints read-only diagnostics and does not create missing storage files.
@@ -466,9 +464,12 @@ Tests:
 - `keybindings::tests::default_keybindings_include_common_and_advanced_bindings`
 - `keybindings::tests::default_keybindings_distinguish_implemented_and_reserved_bindings`
 - `terminal::tests::esc_clears_draft_and_returns_to_draft_mode`
-- `terminal::tests::ctrl_r_returns_history_search_placeholder_without_editing_draft`
+- `terminal::tests::ctrl_r_returns_history_search_action_without_editing_draft`
 - `terminal::tests::ctrl_x_prefix_resolves_editor_chord_to_launch_action`
-- `terminal::tests::ctrl_x_prefix_resolves_other_advanced_chords_to_placeholders`
+- `terminal::tests::ctrl_x_prefix_resolves_file_picker_chord_to_launch_action`
+- `terminal::tests::ctrl_x_prefix_resolves_template_picker_chord_to_launch_action`
+- `terminal::tests::ctrl_x_prefix_resolves_git_branch_picker_chord_to_launch_action`
+- `terminal::tests::ctrl_x_prefix_resolves_env_var_picker_chord_to_launch_action`
 - `terminal::tests::run_external_editor_replaces_draft_after_success`
 - `terminal::tests::run_external_editor_keeps_draft_after_editor_failure`
 - `terminal::tests::run_external_editor_reports_missing_editor`
@@ -494,6 +495,7 @@ Tests:
 - `app::tests::ai_prompt_with_context_blocks_dangerous_command_even_without_confirmation`
 - `app::tests::answer_context_confirmation_can_skip_pending_command`
 - `context::tests::contextual_ai_prompt_redacts_common_secret_shapes`
+- `context::tests::run_context_command_enforces_timeout`
 - `app::tests::private_log_prints_recent_events`
 - `app::tests::private_log_reports_usage_or_missing_storage`
 - `app::tests::ai_config_write_errors_are_logged`
@@ -510,11 +512,22 @@ Tests:
 - `app::tests::store_ai_session_from_items_persists_and_selects_first_command`
 - `app::tests::store_ai_session_from_items_without_commands_stays_in_draft`
 - `app::tests::ai_prompt_reports_config_error_without_crashing`
-- `app::tests::key_commands_report_placeholders_without_secret_side_effects`
+- `app::tests::key_commands_report_current_state_without_secret_side_effects`
 - `app::tests::key_clear_removes_stored_encrypted_key_and_logs_event`
+- `app::tests::key_set_encrypts_env_api_key_without_printing_secret`
+- `app::tests::ai_prompt_uses_gpg_stored_key_when_env_key_is_missing`
+- `app::tests::encrypt_on_migrates_plaintext_storage_and_persists_config`
+- `app::tests::encrypt_rotate_reencrypts_existing_storage_and_persists_fingerprint`
+- `app::tests::encrypt_off_decrypts_storage_and_persists_config`
+- `app::tests::encrypted_writes_use_gpg_files_without_plaintext_jsonl`
+- `app::tests::encrypted_history_append_does_not_block_command_completion`
+- `app::tests::encrypted_completion_uses_cached_templates_without_gpg_on_keypress`
+- `app::tests::encrypt_rewrite_history_plan_reports_manual_confirmed_flow`
+- `app::tests::encrypt_rewrite_history_run_requires_clean_git_worktree`
+- `app::tests::encrypt_rewrite_history_script_keeps_decrypted_temp_outside_rewrite_tree`
 - `app::tests::sync_config_commands_persist_without_running_git`
 - `app::tests::sync_category_toggle_rejects_invalid_usage_without_persisting`
-- `app::tests::subsystem_commands_report_placeholders`
+- `app::tests::subsystem_commands_report_current_state`
 - `app::tests::private_editor_reports_resolution_without_launching_editor`
 - `editor::tests::resolve_editor_prefers_config_command`
 - `editor::tests::resolve_editor_uses_visual_before_editor`
@@ -531,8 +544,8 @@ Tests:
 - `app::tests::editor_draft_renders_as_opaque_summary`
 - `app::tests::run_editor_roundtrip_replaces_draft_after_success`
 - `app::tests::run_editor_roundtrip_keeps_original_draft_after_editor_failure`
-- `app::tests::template_commands_report_placeholders_without_storage_side_effects`
-- `app::tests::encryption_and_sync_commands_report_placeholders_without_side_effects`
+- `app::tests::template_commands_report_usage_for_invalid_input`
+- `app::tests::encryption_and_sync_commands_report_current_state_without_side_effects`
 - `app::tests::private_history_without_count_prints_usage`
 - `app::tests::private_exit_requests_app_exit`
 - `app::tests::unknown_private_command_prints_suggestion`
@@ -638,9 +651,10 @@ Status:
 
 Known gaps:
 
-- Encryption/key-storage features remain intentionally incomplete until real GPG-backed flows are wired.
+- Async encrypted startup unlock is not implemented; encrypted history/template loading is synchronous.
+- Real passphrase/pinentry GPG behavior is human-only; fake-GPG command boundaries and storage migration are automated.
 - Key rebinding remains incomplete.
-- PTY output/timer event sources are still not modeled as independent central loop sources.
+- Future scheduled background work is not attached to tick events yet.
 
 ### Regular History Storage
 
@@ -685,7 +699,6 @@ Status:
 Known gaps:
 
 - Regular history has a newest-first in-memory browse index; search-specific indexes are not implemented.
-- AI command source persistence is not implemented because AI execution is not implemented.
 
 ### Draft History Storage
 
@@ -709,8 +722,7 @@ Status:
 
 Known gaps:
 
-- Startup loading into a structured in-memory store is not implemented yet.
-- Draft browsing behavior is not implemented yet.
+- Draft history browsing is implemented for saved drafts; no additional search-specific draft index exists yet.
 
 ### Note Storage
 
@@ -769,9 +781,8 @@ Status:
 
 Known gaps:
 
-- Direct AI prompts use the chat-completions request pipeline when configured.
 - Live network/provider behavior is intentionally not covered by automated tests.
-- GPG-backed secret fallback for AI credentials remains incomplete.
+- Stored GPG API-key fallback is fake-GPG covered; real passphrase/pinentry fallback remains human-only.
 
 ### JSONL Storage Helpers
 
@@ -782,6 +793,7 @@ Implemented:
 - `rewrite_jsonl`.
 - Missing file loads as empty.
 - Corrupt lines are reported and skipped.
+- JSONL parent directories and files are private on Unix where supported.
 
 Tests:
 
@@ -887,7 +899,7 @@ Status:
 Implemented:
 
 - A Rust integration harness runs `expect` scenarios against the built `aish` binary with isolated `AISH_HOME` directories.
-- Interactive smoke coverage now checks real terminal input/output for basic command execution, cwd persistence, mode cycling, private command safety, help output, status/config/doctor diagnostics, notes, context confirmation skip, event log output, clear screen, exit paths, completion, readline-style editing keys, unknown `Ctrl-X` chord cancellation, history execution, persisted history trimming, AI command sequencing, AI config persistence and key-source redaction, read-only edit-copy behavior, template execution, template CRUD, unresolved template blocking, external editor roundtrip, editor hash-content parser bypass, multiline paste editor-review warning/execution, key/encryption/sync no-op safety, quote continuation, backslash continuation, Ctrl-C continuation cancellation, and backend prompt leak prevention.
+- Interactive smoke coverage now checks real terminal input/output for basic command execution, cwd persistence, mode cycling, private command safety, help output, status/config/doctor diagnostics, notes, context confirmation skip, event log output, clear screen, exit paths, completion, readline-style editing keys, unknown `Ctrl-X` chord cancellation, history execution, persisted history trimming, AI command sequencing, AI config persistence and key-source redaction, read-only edit-copy behavior, template execution, template CRUD, unresolved template blocking, external editor roundtrip, editor hash-content parser bypass, multiline paste editor-review warning/execution, key/encryption/sync safe-failure behavior, quote continuation, backslash continuation, Ctrl-C continuation cancellation, and backend prompt leak prevention.
 - Each new user-facing interactive feature should now receive both Rust-level tests and at least one expect scenario when it affects real terminal behavior.
 
 Tests:
@@ -911,7 +923,7 @@ Tests:
 - `expect_runner::completion_tab_accept_word`
 - `expect_runner::history_mode_execute`
 - `expect_runner::template_use_executes`
-- `expect_runner::key_and_sync_placeholders`
+- `expect_runner::key_encryption_sync_safe_failures`
 - `expect_runner::key_clear_removes_stored_key`
 - `expect_runner::status_doctor_config`
 - `expect_runner::notes_are_swallowed`

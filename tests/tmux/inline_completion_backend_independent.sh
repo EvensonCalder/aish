@@ -5,7 +5,12 @@ SESSION="aish-inline-backend-$$"
 HOME_DIR="/tmp/aish-tmux-inline-home-$$"
 WORK_DIR="/tmp/aish-tmux-inline-work-$$"
 : "${AISH_BIN:?AISH_BIN must point to the aish binary under test}"
-trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; rm -rf "$HOME_DIR" "$WORK_DIR"' EXIT INT TERM
+cleanup() {
+    tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true
+    sleep 0.2
+    rm -rf "$HOME_DIR" "$WORK_DIR" || true
+}
+trap cleanup EXIT INT TERM
 
 mkdir -p "$HOME_DIR/.aish" "$WORK_DIR"
 if [ "${AISH_BACKEND_SHELL:-}" ]; then

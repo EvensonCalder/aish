@@ -2,20 +2,20 @@ use std::io::Write;
 
 use anyhow::Result;
 
-use crate::commands::{IMPLEMENTED_PRIVATE_COMMANDS, suggest_private_command};
+use crate::commands::suggest_private_command;
 use crate::history::ai_command_indices;
 use crate::input::InputBuffer;
-use crate::keybindings::default_keybindings;
 use crate::modes::Mode;
 use crate::templates::{TemplateEntry, apply_template_values_with_usage, template_placeholders};
 
 use super::{
-    AppState, clear_stored_key, load_ai_sessions_for_state, parse_key_command, parse_template_body,
-    parse_template_find_query, parse_template_subcommand_args, parse_template_values,
-    prompt_command, run_manual_sync_push, set_stored_key, set_sync_remote, set_sync_schedule,
-    show_event_log, template_usage, trim_history_for_state, update_ai_config_field,
-    update_completion_config, update_context_config, update_encryption_config, write_config_report,
-    write_doctor_report, write_editor_report, write_status_report,
+    AppState, clear_stored_key, help, load_ai_sessions_for_state, parse_key_command,
+    parse_template_body, parse_template_find_query, parse_template_subcommand_args,
+    parse_template_values, prompt_command, run_manual_sync_push, set_stored_key, set_sync_remote,
+    set_sync_schedule, show_event_log, template_usage, trim_history_for_state,
+    update_ai_config_field, update_completion_config, update_context_config,
+    update_encryption_config, write_config_report, write_doctor_report, write_editor_report,
+    write_status_report,
 };
 
 pub(super) fn execute_private_command(
@@ -28,26 +28,7 @@ pub(super) fn execute_private_command(
         "exit" | "quit" => {
             state.exit_requested = true;
         }
-        "help" => {
-            writeln!(
-                out,
-                "Aish private commands: {}",
-                IMPLEMENTED_PRIVATE_COMMANDS
-                    .iter()
-                    .map(|name| format!("#{name}"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )?;
-            writeln!(out, "Default keybindings:")?;
-            for binding in default_keybindings() {
-                let status = if binding.implemented {
-                    "implemented"
-                } else {
-                    "reserved"
-                };
-                writeln!(out, "{} [{}] - {}", binding.key, status, binding.action)?;
-            }
-        }
+        "help" => help::write_help(out, args)?,
         "status" => write_status_report(state, out)?,
         "config" => write_config_report(state, out)?,
         "doctor" => write_doctor_report(state, out)?,

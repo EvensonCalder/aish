@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 
-use crate::commands::IMPLEMENTED_PRIVATE_COMMANDS;
+use crate::commands::{HELP_TOPICS, IMPLEMENTED_PRIVATE_COMMANDS};
 use crate::config::CompletionTabAccept;
 use crate::display_width::{
     display_width, truncate_end_with_ellipsis, truncate_start_with_ellipsis,
@@ -478,6 +478,7 @@ fn private_command_argument_candidates(
         ("completion", ["mode"]) => &["auto", "tab", "off"],
         ("completion", ["inline" | "fuzzy"]) => &["on", "off"],
         ("completion", ["tab-accept"]) => &["full", "word"],
+        ("help", []) => HELP_TOPICS,
         ("key", []) => &["set", "clear"],
         ("prompt", []) => &["draft", "history", "ai", "reset"],
         ("context", []) => &["on", "off", "confirm"],
@@ -1554,7 +1555,7 @@ fn render_completion_candidate_for_width(
         return String::new();
     }
     let label = completion_candidate_label(candidate);
-    let label_width = display_width(&label);
+    let label_width = display_width(label);
     if width <= label_width {
         return truncate_with_ellipsis(label, width);
     }

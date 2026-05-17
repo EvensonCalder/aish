@@ -343,6 +343,7 @@ Behavior:
 - If `context.confirm = true`, Aish asks before executing the context command.
 - If `context.confirm = false`, Aish may execute context commands without prompting, but should still force confirmation or block clearly dangerous commands.
 - Output is capped at `context.max_bytes` bytes.
+- Context commands are timeout-limited; timed-out subprocesses should be terminated, including their process group where supported.
 - Truncation must be disclosed to AI and optionally to the user.
 
 Confirmation example:
@@ -1005,6 +1006,8 @@ templates/templates.jsonl.gpg
 
 Plaintext files should not remain on disk by default after encryption is enabled, except transient temp files that are securely removed as best effort.
 
+Managed storage directories should be private on Unix where supported. Config, JSONL, encrypted storage, sync lock, and temporary rewrite-script files should be written with private file permissions where supported.
+
 JSONL is preferred for append-only human-diffable storage.
 
 ---
@@ -1173,8 +1176,8 @@ Commands:
 #sync off
 #sync ai on|off
 #sync history on|off
-#sync template on|off
-#sync draft on|off
+#sync templates on|off
+#sync drafts on|off
 ```
 
 Policy:
@@ -1259,7 +1262,7 @@ Behavior:
 Initial command set:
 
 ```text
-#help
+#help [commands|keys|ai|completion|templates|sync|encryption|config]
 #status
 #config
 #doctor
@@ -1301,7 +1304,7 @@ Initial command set:
 #template rm <id>
 #template replace <id> <template-body>
 
-#editor <command...>
+#editor
 
 #encrypt on|rotate|rewrite-history|off
 
@@ -1311,9 +1314,14 @@ Initial command set:
 #sync off
 #sync ai on|off
 #sync history on|off
-#sync template on|off
-#sync draft on|off
+#sync templates on|off
+#sync drafts on|off
 ```
+
+`#help` must print grouped in-terminal help for private commands, keybindings,
+AI prompt forms, notes, completion, templates, sync, encryption, and
+configuration/diagnostics. `#help <topic>` prints only that topic. Unknown help
+topics must show a usage line and must not reach the backend shell.
 
 `#doctor` should check:
 

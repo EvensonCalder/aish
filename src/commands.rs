@@ -43,6 +43,17 @@ pub const IMPLEMENTED_PRIVATE_COMMANDS: &[&str] = &[
     "editor",
 ];
 
+pub const HELP_TOPICS: &[&str] = &[
+    "commands",
+    "keys",
+    "ai",
+    "completion",
+    "templates",
+    "sync",
+    "encryption",
+    "config",
+];
+
 pub fn parse_line(line: &str) -> ParsedLine<'_> {
     if !line.starts_with('#') {
         return ParsedLine::Ordinary(line);

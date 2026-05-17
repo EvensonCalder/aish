@@ -35,6 +35,20 @@ fn append_and_load_jsonl_items() {
     assert_eq!(loaded.items.len(), 2);
     assert_eq!(loaded.items[0].command, "pwd");
     assert_eq!(loaded.items[1].exit_code, Some(1));
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir_mode = fs::metadata(path.parent().unwrap())
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        let file_mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(dir_mode, 0o700);
+        assert_eq!(file_mode, 0o600);
+    }
 }
 
 #[test]
@@ -90,6 +104,14 @@ fn rewrite_jsonl_replaces_existing_contents() {
     let loaded = load_jsonl::<TestEntry>(&path).unwrap();
     assert_eq!(loaded.items.len(), 1);
     assert_eq!(loaded.items[0].command, "new");
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let file_mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(file_mode, 0o600);
+    }
 }
 
 #[test]
