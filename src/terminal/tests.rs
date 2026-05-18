@@ -1773,6 +1773,37 @@ fn pending_context_confirmation_keys_return_confirmation_actions() {
 }
 
 #[test]
+fn pending_private_output_confirmation_keys_return_confirmation_actions() {
+    let mut state = AppState {
+        pending_private_output: Some(crate::app::PendingPrivateOutput {
+            label: "history".to_string(),
+            output: "git status\n".to_string(),
+            sink: crate::app::PrivateOutputSink::Pipe {
+                command: "wc -l".to_string(),
+            },
+        }),
+        ..AppState::default()
+    };
+
+    assert_eq!(
+        apply_key_to_state(key(KeyCode::Char('y')), &mut state),
+        KeyAction::ConfirmPrivateOutput(true)
+    );
+    assert_eq!(
+        apply_key_to_state(key(KeyCode::Enter), &mut state),
+        KeyAction::ConfirmPrivateOutput(true)
+    );
+    assert_eq!(
+        apply_key_to_state(key(KeyCode::Char('n')), &mut state),
+        KeyAction::ConfirmPrivateOutput(false)
+    );
+    assert_eq!(
+        apply_key_to_state(key(KeyCode::Esc), &mut state),
+        KeyAction::ConfirmPrivateOutput(false)
+    );
+}
+
+#[test]
 fn esc_clears_draft_and_returns_to_draft_mode() {
     let mut state = AppState {
         mode: Mode::History,

@@ -16,6 +16,7 @@ mod execution;
 mod help;
 mod history_ops;
 mod private_commands;
+mod private_output;
 mod prompt;
 mod prompt_command;
 mod reports;
@@ -50,6 +51,9 @@ pub use execution::execute_draft;
 #[cfg(test)]
 pub(crate) use execution::{foreground_shell_args, record_completed_command, write_command_output};
 use history_ops::{load_ai_sessions_for_state, trim_history_for_state};
+pub use private_output::{
+    PendingPrivateOutput, PrivateOutputSink, answer_private_output_confirmation,
+};
 use template_args::{
     parse_template_body, parse_template_find_query, parse_template_subcommand_args,
     parse_template_values, template_usage,

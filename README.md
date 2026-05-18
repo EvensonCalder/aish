@@ -283,8 +283,16 @@ Context:
 History, notes, and templates:
 
 ```text
+#history list [>|>> <path> | | <command>]
+#history search <query>
 #history <count>
+#ai list [>|>> <path> | | <command>]
+#ai search <query>
+#draft list [>|>> <path> | | <command>]
+#draft search <query>
 #mt <template-body>
+#template list [>|>> <path> | | <command>]
+#template search <query>
 #template find <query>
 #template show <id>
 #template use <id> [key=value ...]
@@ -350,6 +358,15 @@ Context pseudo-pipe prompts use this form:
 # explain this < command producing context
 ```
 
+List pseudo-pipe exports use this form:
+
+```text
+#history list > /tmp/aish-history.txt
+#template list | grep deploy
+```
+
+`#history list`, `#ai list`, `#draft list`, and `#template list` print one command or template body per line. With `>` or `>>`, Aish writes the list directly to the target file with private file permissions where supported. With `|`, Aish feeds the list to the shell command on stdin. Both export forms require confirmation because the output can contain private history, AI output, drafts, templates, or secrets.
+
 Context safety rules:
 
 - Context collection is enabled by default.
@@ -408,7 +425,7 @@ Find it, then use the printed ID:
 #template use tpl-0123456789abcdef from=dist user=deploy host=example.com to=/srv/app
 ```
 
-Aish intentionally does not provide a `#template list` command. Full inspection, grep, redirection, and history-oriented cleanup should happen against the template JSONL file in the Aish home directory.
+Use `#template list` for one template body per line, `#template search <query>` for matching bodies, or `#template find <query>` when you need the stable `tpl-...` ID for `show`, `use`, `rm`, or `replace`.
 
 Placeholders:
 

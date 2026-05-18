@@ -38,7 +38,7 @@ use super::startup_unlock::{
     EncryptedStartupData, EncryptedStartupPaths, EncryptedStartupUnlock, UnlockMode,
     load_encrypted_startup_data,
 };
-use super::{PromptTemplates, configured_encryption_key, unix_timestamp};
+use super::{PendingPrivateOutput, PromptTemplates, configured_encryption_key, unix_timestamp};
 
 pub(crate) const OUTPUT_RING_CAPACITY: usize = 100;
 
@@ -105,6 +105,7 @@ pub struct AppState {
     pub pending_locked_templates: Vec<TemplateEntry>,
     pub sync_config: SyncConfig,
     pub pending_context: Option<PendingContextPrompt>,
+    pub pending_private_output: Option<PendingPrivateOutput>,
     pub completion_panel: Vec<String>,
     pub completion_inline: Option<InlineCompletion>,
     pub completion_worker: Option<CompletionWorker>,
@@ -203,6 +204,7 @@ impl Default for AppState {
             pending_locked_templates: Vec::new(),
             sync_config: SyncConfig::default(),
             pending_context: None,
+            pending_private_output: None,
             completion_panel: Vec::new(),
             completion_inline: None,
             completion_worker: None,

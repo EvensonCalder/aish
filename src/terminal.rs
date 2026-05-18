@@ -8,8 +8,8 @@ use crossterm::execute;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, is_raw_mode_enabled, size};
 
 use crate::app::{
-    AppState, answer_context_confirmation, execute_draft, run_exit_sync_if_enabled,
-    save_draft_if_configured,
+    AppState, answer_context_confirmation, answer_private_output_confirmation, execute_draft,
+    run_exit_sync_if_enabled, save_draft_if_configured,
 };
 use crate::config::CompletionMode;
 use crate::display_width::{visual_line_count, visual_position};
@@ -68,6 +68,7 @@ pub enum KeyAction {
     AdvancedKeyPlaceholder(&'static str),
     Submit,
     ConfirmContext(bool),
+    ConfirmPrivateOutput(bool),
     CompleteOrShow,
     AcceptCompletion,
     PreviousDraft,
@@ -250,6 +251,7 @@ fn should_apply_completion_event_update(state: &AppState) -> bool {
     state.completion_config.enabled
         && state.completion_config.mode() != CompletionMode::Off
         && state.pending_context.is_none()
+        && state.pending_private_output.is_none()
         && !state.has_pending_key_prefix()
         && state.mode == crate::modes::Mode::Draft
         && !state.draft_from_editor
@@ -365,6 +367,13 @@ fn handle_key(
             write!(out, "\r\n")?;
             let mut display_out = CrLfWriter::new(out);
             answer_context_confirmation(state, accepted, &mut display_out, command_timeout)?;
+        }
+        KeyAction::ConfirmPrivateOutput(accepted) => {
+            move_to_rendered_end(state, out, terminal_display_width())?;
+            invalidate_render_anchor(state);
+            write!(out, "\r\n")?;
+            let mut display_out = CrLfWriter::new(out);
+            answer_private_output_confirmation(state, accepted, &mut display_out, command_timeout)?;
         }
         KeyAction::ForwardToBackend(bytes) => {
             backend.write_raw(&bytes)?;
@@ -799,6 +808,17 @@ pub fn apply_key_to_state(key: KeyEvent, state: &mut AppState) -> KeyAction {
             (_, KeyCode::Char('n' | 'N')) => KeyAction::ConfirmContext(false),
             (_, KeyCode::Esc) => KeyAction::ConfirmContext(false),
             (KeyModifiers::CONTROL, KeyCode::Char('c')) => KeyAction::ConfirmContext(false),
+            _ => KeyAction::Continue,
+        };
+    }
+
+    if state.pending_private_output.is_some() {
+        return match (key.modifiers, key.code) {
+            (_, KeyCode::Enter) => KeyAction::ConfirmPrivateOutput(true),
+            (_, KeyCode::Char('y' | 'Y')) => KeyAction::ConfirmPrivateOutput(true),
+            (_, KeyCode::Char('n' | 'N')) => KeyAction::ConfirmPrivateOutput(false),
+            (_, KeyCode::Esc) => KeyAction::ConfirmPrivateOutput(false),
+            (KeyModifiers::CONTROL, KeyCode::Char('c')) => KeyAction::ConfirmPrivateOutput(false),
             _ => KeyAction::Continue,
         };
     }

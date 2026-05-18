@@ -3,11 +3,14 @@ use std::io::Write;
 use anyhow::Result;
 
 use crate::commands::suggest_private_command;
-use crate::history::ai_command_indices;
+use crate::history::{AiItemKind, ai_command_indices};
 use crate::input::InputBuffer;
 use crate::modes::Mode;
 use crate::templates::{TemplateEntry, apply_template_values_with_usage, template_placeholders};
 
+use super::private_output::{
+    list_output_from_commands, parse_list_output_sink, write_or_confirm_private_output,
+};
 use super::{
     AppState, clear_stored_key, help, load_ai_sessions_for_state, parse_key_command,
     parse_template_body, parse_template_find_query, parse_template_subcommand_args,
@@ -47,7 +50,9 @@ pub(super) fn execute_private_command(
         "completion" => update_completion_config(state, out, args)?,
         "log" => show_event_log(state, out, args)?,
         "editor" => write_editor_report(state, out)?,
-        "history" => trim_history_command(state, out, args)?,
+        "history" => history_command(state, out, args)?,
+        "ai" => ai_command(state, out, args)?,
+        "draft" => draft_command(state, out, args)?,
         "mt" => create_template_command(state, out, args)?,
         "template" => {
             let keep_draft = template_command(state, out, args)?;
@@ -87,6 +92,192 @@ fn unlock_encrypted_storage_command(state: &mut AppState, out: &mut impl Write) 
     Ok(())
 }
 
+const HISTORY_USAGE: &str =
+    "usage: #history search <query> | #history list [>|>> <path> | | <command>] | #history <count>";
+const AI_USAGE: &str = "usage: #ai search <query> | #ai list [>|>> <path> | | <command>]";
+const DRAFT_USAGE: &str = "usage: #draft search <query> | #draft list [>|>> <path> | | <command>]";
+
+fn history_command(state: &mut AppState, out: &mut impl Write, args: &str) -> Result<()> {
+    match args.split_whitespace().next() {
+        Some("list") => history_list_command(state, out, args),
+        Some("search") => history_search_command(state, out, args),
+        _ => trim_history_command(state, out, args),
+    }
+}
+
+fn history_list_command(state: &mut AppState, out: &mut impl Write, args: &str) -> Result<()> {
+    if state.encrypted_storage_is_locked() {
+        writeln!(out, "history is still unlocking; run #unlock")?;
+        return Ok(());
+    }
+    let rest = subcommand_rest(args, "list").unwrap_or_default();
+    let sink = match parse_list_output_sink(rest, state.current_cwd.as_deref()) {
+        Ok(sink) => sink,
+        Err(_) => {
+            writeln!(out, "{HISTORY_USAGE}")?;
+            return Ok(());
+        }
+    };
+    let output = list_output_from_commands(
+        state
+            .regular_history
+            .iter()
+            .rev()
+            .map(|entry| entry.command.as_str()),
+    );
+    write_or_confirm_private_output(state, out, "history", output, sink)
+}
+
+fn history_search_command(state: &mut AppState, out: &mut impl Write, args: &str) -> Result<()> {
+    if state.encrypted_storage_is_locked() {
+        writeln!(out, "history is still unlocking; run #unlock")?;
+        return Ok(());
+    }
+    let Some(query) = search_query(args) else {
+        writeln!(out, "{HISTORY_USAGE}")?;
+        return Ok(());
+    };
+    let output = list_output_from_commands(
+        state
+            .regular_history
+            .iter()
+            .rev()
+            .filter(|entry| entry.command.contains(query))
+            .map(|entry| entry.command.as_str()),
+    );
+    out.write_all(output.as_bytes())?;
+    Ok(())
+}
+
+fn ai_command(state: &mut AppState, out: &mut impl Write, args: &str) -> Result<()> {
+    match args.split_whitespace().next() {
+        Some("list") => ai_list_command(state, out, args),
+        Some("search") => ai_search_command(state, out, args),
+        _ => {
+            writeln!(out, "{AI_USAGE}")?;
+            Ok(())
+        }
+    }
+}
+
+fn ai_list_command(state: &mut AppState, out: &mut impl Write, args: &str) -> Result<()> {
+    if state.encrypted_storage_is_locked() {
+        writeln!(out, "history is still unlocking; run #unlock")?;
+        return Ok(());
+    }
+    let rest = subcommand_rest(args, "list").unwrap_or_default();
+    let sink = match parse_list_output_sink(rest, state.current_cwd.as_deref()) {
+        Ok(sink) => sink,
+        Err(_) => {
+            writeln!(out, "{AI_USAGE}")?;
+            return Ok(());
+        }
+    };
+    let commands = ai_command_texts_newest(state);
+    let output = list_output_from_commands(commands);
+    write_or_confirm_private_output(state, out, "ai", output, sink)
+}
+
+fn ai_search_command(state: &mut AppState, out: &mut impl Write, args: &str) -> Result<()> {
+    if state.encrypted_storage_is_locked() {
+        writeln!(out, "history is still unlocking; run #unlock")?;
+        return Ok(());
+    }
+    let Some(query) = search_query(args) else {
+        writeln!(out, "{AI_USAGE}")?;
+        return Ok(());
+    };
+    let output = list_output_from_commands(
+        ai_command_texts_newest(state)
+            .into_iter()
+            .filter(|command| command.contains(query)),
+    );
+    out.write_all(output.as_bytes())?;
+    Ok(())
+}
+
+fn draft_command(state: &mut AppState, out: &mut impl Write, args: &str) -> Result<()> {
+    match args.split_whitespace().next() {
+        Some("list") => draft_list_command(state, out, args),
+        Some("search") => draft_search_command(state, out, args),
+        _ => {
+            writeln!(out, "{DRAFT_USAGE}")?;
+            Ok(())
+        }
+    }
+}
+
+fn draft_list_command(state: &mut AppState, out: &mut impl Write, args: &str) -> Result<()> {
+    if state.encrypted_storage_is_locked() {
+        writeln!(out, "drafts are still unlocking; run #unlock")?;
+        return Ok(());
+    }
+    let rest = subcommand_rest(args, "list").unwrap_or_default();
+    let sink = match parse_list_output_sink(rest, state.current_cwd.as_deref()) {
+        Ok(sink) => sink,
+        Err(_) => {
+            writeln!(out, "{DRAFT_USAGE}")?;
+            return Ok(());
+        }
+    };
+    let output = list_output_from_commands(
+        state
+            .draft_history
+            .iter()
+            .rev()
+            .map(|entry| entry.text.as_str()),
+    );
+    write_or_confirm_private_output(state, out, "draft", output, sink)
+}
+
+fn draft_search_command(state: &mut AppState, out: &mut impl Write, args: &str) -> Result<()> {
+    if state.encrypted_storage_is_locked() {
+        writeln!(out, "drafts are still unlocking; run #unlock")?;
+        return Ok(());
+    }
+    let Some(query) = search_query(args) else {
+        writeln!(out, "{DRAFT_USAGE}")?;
+        return Ok(());
+    };
+    let output = list_output_from_commands(
+        state
+            .draft_history
+            .iter()
+            .rev()
+            .filter(|entry| entry.text.contains(query))
+            .map(|entry| entry.text.as_str()),
+    );
+    out.write_all(output.as_bytes())?;
+    Ok(())
+}
+
+fn ai_command_texts_newest(state: &AppState) -> Vec<&str> {
+    let indices = ai_command_indices(&state.ai_sessions);
+    indices
+        .iter()
+        .rev()
+        .filter_map(|index| {
+            let session = state.ai_sessions.get(index.session_index)?;
+            let item = session.items.get(index.item_index)?;
+            (item.kind == AiItemKind::Command).then_some(item.text.as_str())
+        })
+        .collect()
+}
+
+fn search_query(args: &str) -> Option<&str> {
+    let query = subcommand_rest(args, "search")?.trim();
+    (!query.is_empty()).then_some(query)
+}
+
+fn subcommand_rest<'a>(args: &'a str, subcommand: &str) -> Option<&'a str> {
+    let args = args.trim_start();
+    let rest = args.strip_prefix(subcommand)?;
+    if rest.chars().next().is_some_and(|ch| !ch.is_whitespace()) {
+        return None;
+    }
+    Some(rest.trim_start())
+}
+
 fn trim_history_command(state: &mut AppState, out: &mut impl Write, args: &str) -> Result<()> {
     if state.encrypted_storage_is_locked() {
         writeln!(out, "history is still unlocking; run #unlock")?;
@@ -111,7 +302,7 @@ fn trim_history_command(state: &mut AppState, out: &mut impl Write, args: &str) 
             )?;
         }
         (Ok(_), _, _) => writeln!(out, "history storage is not configured")?,
-        (Err(_), _, _) => writeln!(out, "usage: #history <count>")?,
+        (Err(_), _, _) => writeln!(out, "{HISTORY_USAGE}")?,
     }
     Ok(())
 }
@@ -136,17 +327,13 @@ fn create_template_command(state: &mut AppState, out: &mut impl Write, args: &st
 fn template_command(state: &mut AppState, out: &mut impl Write, args: &str) -> Result<bool> {
     let mut keep_draft = false;
     let subcommand = args.split_whitespace().next();
-    if state.encrypted_storage_is_locked() && !matches!(subcommand, Some("list") | None) {
+    if state.encrypted_storage_is_locked() && subcommand.is_some() {
         writeln!(out, "templates are still unlocking; run #unlock")?;
         return Ok(false);
     }
     match subcommand {
-        Some("list") => {
-            writeln!(
-                out,
-                "template listing is intentionally not supported; use #template find <query> or inspect the template store file"
-            )?;
-        }
+        Some("list") => template_list_command(state, out, args)?,
+        Some("search") => template_search_command(state, out, args)?,
         Some("find") => template_find_command(state, out, args)?,
         Some("rm") => template_rm_command(state, out, args)?,
         Some("replace") => template_replace_command(state, out, args)?,
@@ -157,6 +344,53 @@ fn template_command(state: &mut AppState, out: &mut impl Write, args: &str) -> R
         _ => writeln!(out, "{}", template_usage())?,
     }
     Ok(keep_draft)
+}
+
+fn template_list_command(state: &mut AppState, out: &mut impl Write, args: &str) -> Result<()> {
+    let rest = subcommand_rest(args, "list").unwrap_or_default();
+    let sink = match parse_list_output_sink(rest, state.current_cwd.as_deref()) {
+        Ok(sink) => sink,
+        Err(_) => {
+            writeln!(out, "{}", template_usage())?;
+            return Ok(());
+        }
+    };
+    if state.template_store_path.is_some() {
+        let loaded = state.load_templates()?;
+        let output = list_output_from_commands(
+            loaded
+                .items
+                .iter()
+                .rev()
+                .map(|template| template.body.as_str()),
+        );
+        write_or_confirm_private_output(state, out, "template", output, sink)?;
+    } else {
+        writeln!(out, "template storage is not configured")?;
+    }
+    Ok(())
+}
+
+fn template_search_command(state: &mut AppState, out: &mut impl Write, args: &str) -> Result<()> {
+    let Some(query) = search_query(args) else {
+        writeln!(out, "{}", template_usage())?;
+        return Ok(());
+    };
+    if state.template_store_path.is_some() {
+        let loaded = state.load_templates()?;
+        let output = list_output_from_commands(
+            loaded
+                .items
+                .iter()
+                .rev()
+                .filter(|template| template.id().contains(query) || template.body.contains(query))
+                .map(|template| template.body.as_str()),
+        );
+        out.write_all(output.as_bytes())?;
+    } else {
+        writeln!(out, "template storage is not configured")?;
+    }
+    Ok(())
 }
 
 fn template_find_command(state: &mut AppState, out: &mut impl Write, args: &str) -> Result<()> {

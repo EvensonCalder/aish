@@ -208,6 +208,13 @@ fn rendered_text_before_cursor(state: &AppState) -> String {
         };
         return format!("{}{}", state.prompt_prefix(), marker);
     }
+    if state.pending_private_output.is_some() {
+        return format!(
+            "{}{}",
+            state.prompt_prefix(),
+            "[private output export confirmation: Y/n]"
+        );
+    }
     match state.mode {
         crate::modes::Mode::History => format!(
             "{}{}",

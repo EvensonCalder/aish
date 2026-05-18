@@ -85,6 +85,13 @@ impl AppState {
             };
             return format!("{}{}", self.prompt_prefix(), marker);
         }
+        if self.pending_private_output.is_some() {
+            return format!(
+                "{}{}",
+                self.prompt_prefix(),
+                "[private output export confirmation: Y/n]"
+            );
+        }
         let text = match self.mode {
             Mode::History => self
                 .selected_history_command()
@@ -141,6 +148,17 @@ impl AppState {
                 0,
                 display_width(&format!("{}{}", self.prompt_prefix(), marker)).min(u16::MAX as usize)
                     as u16,
+            );
+        }
+        if self.pending_private_output.is_some() {
+            return (
+                0,
+                display_width(&format!(
+                    "{}{}",
+                    self.prompt_prefix(),
+                    "[private output export confirmation: Y/n]"
+                ))
+                .min(u16::MAX as usize) as u16,
             );
         }
         let rendered_before_cursor = match self.mode {

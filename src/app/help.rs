@@ -76,8 +76,16 @@ const COMMAND_HELP: &[HelpEntry] = &[
         description: "show editor configuration and resolution",
     },
     HelpEntry {
-        usage: "#history <count>",
-        description: "trim stored shell and AI history",
+        usage: "#history list | #history search <query> | #history <count>",
+        description: "list, search, or trim stored shell history",
+    },
+    HelpEntry {
+        usage: "#ai list | #ai search <query>",
+        description: "list or search stored AI command suggestions",
+    },
+    HelpEntry {
+        usage: "#draft list | #draft search <query>",
+        description: "list or search saved drafts",
     },
     HelpEntry {
         usage: "#mt <template-body>",
@@ -121,6 +129,10 @@ const AI_HELP: &[HelpEntry] = &[
     HelpEntry {
         usage: "# <prompt> < <command>",
         description: "ask with captured command output as context",
+    },
+    HelpEntry {
+        usage: "#ai list | #ai search <query>",
+        description: "list or search stored AI command suggestions",
     },
     HelpEntry {
         usage: "#model [name]",
@@ -244,6 +256,14 @@ const TEMPLATE_HELP: &[HelpEntry] = &[
         description: "store a reusable template",
     },
     HelpEntry {
+        usage: "#template list",
+        description: "list template bodies one per line",
+    },
+    HelpEntry {
+        usage: "#template search <query>",
+        description: "search template bodies one per line",
+    },
+    HelpEntry {
         usage: "#template find <query>",
         description: "find templates by id or body text",
     },
@@ -357,8 +377,12 @@ const CONFIG_HELP: &[HelpEntry] = &[
         description: "show recent Aish event log entries",
     },
     HelpEntry {
-        usage: "#history <count>",
-        description: "trim stored shell and AI history",
+        usage: "#history list | #history search <query> | #history <count>",
+        description: "list, search, or trim stored shell history",
+    },
+    HelpEntry {
+        usage: "#draft list | #draft search <query>",
+        description: "list or search saved drafts",
     },
 ];
 

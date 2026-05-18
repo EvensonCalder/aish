@@ -29,6 +29,14 @@ pub fn execute_draft(
         state.mode = Mode::Draft;
         return Ok(());
     }
+    if state.pending_private_output.is_some() {
+        writeln!(
+            out,
+            "private output export confirmation is pending; answer Y or n"
+        )?;
+        state.mode = Mode::Draft;
+        return Ok(());
+    }
 
     if state.draft.is_empty() && state.mode == Mode::History {
         state.copy_selected_history_to_draft();

@@ -63,7 +63,7 @@ printf '%s\n' "$CAPTURE_ONE"
 
 printf '%s\n' "$CAPTURE_ONE" | rg -q "$HOME_DIR/.aish"
 printf '%s\n' "$CAPTURE_ONE" | rg -q '^template stored: tpl-[0-9a-f]+$'
-printf '%s\n' "$CAPTURE_ONE" | rg -q '^template listing is intentionally not supported'
+printf '%s\n' "$CAPTURE_ONE" | rg -q '^echo template-tmux-ok$'
 printf '%s\n' "$CAPTURE_ONE" | rg -q '^template tpl-[0-9a-f]+.*template-tmux-ok$'
 printf '%s\n' "$CAPTURE_ONE" | rg -q '^template copied to draft: tpl-[0-9a-f]+$'
 printf '%s\n' "$CAPTURE_ONE" | rg -q '^template-tmux-ok$'

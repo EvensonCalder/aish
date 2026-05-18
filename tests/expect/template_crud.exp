@@ -13,7 +13,7 @@ aish_wait_prompt
 
 aish_send "#template list"
 aish_enter
-aish_expect "template listing is intentionally not supported"
+aish_expect "echo old-template"
 aish_wait_prompt
 
 aish_send "#template find old-template"

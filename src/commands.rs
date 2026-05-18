@@ -33,6 +33,8 @@ pub const IMPLEMENTED_PRIVATE_COMMANDS: &[&str] = &[
     "paste",
     "exit",
     "quit",
+    "ai",
+    "draft",
     "history",
     "mt",
     "template",

@@ -9,7 +9,7 @@ aish_spawn
 
 aish_send "#history nope"
 aish_enter
-aish_expect "usage: #history <count>"
+aish_expect "usage: #history search <query>"
 aish_wait_prompt
 
 aish_send "#log nope"
@@ -29,7 +29,7 @@ aish_wait_prompt
 
 aish_send "#template rm"
 aish_enter
-aish_expect {usage: #template find <query> | #template show <id> | #template use <id> [key=value...] | #template rm <id> | #template replace <id> <body>}
+aish_expect {usage: #template search <query> | #template list [>|>> <path> | | <command>] | #template find <query>}
 aish_wait_prompt
 
 aish_send "#context invalid option"

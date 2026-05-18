@@ -1160,12 +1160,17 @@ fn private_command_completion_includes_nested_arguments() {
             .iter()
             .map(|candidate| candidate.replacement.as_str())
             .collect::<Vec<_>>(),
-        ["find", "rm", "replace", "show", "use"]
+        ["find", "list", "rm", "replace", "search", "show", "use"]
     );
-    assert!(
-        !template_candidates
+
+    let history_candidates =
+        complete_private_command_line("#history ", "#history ".len(), usize::MAX);
+    assert_eq!(
+        history_candidates
             .iter()
-            .any(|candidate| candidate.replacement == "list")
+            .map(|candidate| candidate.replacement.as_str())
+            .collect::<Vec<_>>(),
+        ["list", "search"]
     );
 
     let encrypt_candidates =

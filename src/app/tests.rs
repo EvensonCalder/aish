@@ -16,7 +16,7 @@ use crate::encryption::{
 };
 use crate::history::{
     AiCommandIndex, AiItem, AiItemKind, AiSession, HistoryEntry, HistorySource, NoteEntry,
-    append_jsonl, load_jsonl,
+    ai_command_indices, append_jsonl, load_jsonl,
 };
 use crate::log::{DEFAULT_MAX_EVENTS, EventLevel, append_event, load_events};
 use crate::modes::Mode;
@@ -291,6 +291,29 @@ fn prompt_line_renders_pending_context_confirmation() {
     assert_eq!(
         state.render_prompt_line(),
         "> [dangerous context confirmation: Y/n]"
+    );
+    assert_eq!(
+        state.terminal_cursor_column(),
+        display_width(&state.render_prompt_line()) as u16
+    );
+}
+
+#[test]
+fn prompt_line_renders_pending_private_output_confirmation() {
+    let state = AppState {
+        pending_private_output: Some(PendingPrivateOutput {
+            label: "history".to_string(),
+            output: "git status\n".to_string(),
+            sink: PrivateOutputSink::Pipe {
+                command: "wc -l".to_string(),
+            },
+        }),
+        ..AppState::default()
+    };
+
+    assert_eq!(
+        state.render_prompt_line(),
+        "> [private output export confirmation: Y/n]"
     );
     assert_eq!(
         state.terminal_cursor_column(),
@@ -2519,9 +2542,11 @@ fn mt_command_persists_template_entry() {
 }
 
 #[test]
-fn template_list_is_intentionally_unsupported() {
+fn template_list_prints_template_bodies_newest_first() {
     let temp = tempfile::tempdir().unwrap();
     let template_path = temp.path().join("templates/templates.jsonl");
+    append_template(&template_path, &TemplateEntry::new("rsync {from} {to}")).unwrap();
+    append_template(&template_path, &TemplateEntry::new("tail -f {file}")).unwrap();
     let mut state = AppState {
         template_store_path: Some(template_path),
         ..AppState::default()
@@ -2539,7 +2564,7 @@ fn template_list_is_intentionally_unsupported() {
     .unwrap();
 
     let output = String::from_utf8(output).unwrap();
-    assert!(output.contains("template listing is intentionally not supported"));
+    assert_eq!(output, "tail -f {file}\nrsync {from} {to}\n");
     assert_eq!(state.last_status, None);
     assert!(state.draft.is_empty());
 }
@@ -4421,9 +4446,281 @@ fn private_history_without_count_prints_usage() {
     assert!(
         String::from_utf8(output)
             .unwrap()
-            .contains("usage: #history <count>")
+            .contains("usage: #history search <query>")
     );
     assert!(state.draft.is_empty());
+}
+
+#[test]
+fn private_list_commands_print_newest_commands_one_per_line() {
+    let temp = tempfile::tempdir().unwrap();
+    let sessions = vec![AiSession {
+        id: "ai-1".to_string(),
+        t: 1,
+        prompt: "prompt".to_string(),
+        ctx: false,
+        model: "model".to_string(),
+        items: vec![
+            AiItem {
+                kind: AiItemKind::Command,
+                text: "ls -la".to_string(),
+                name: None,
+            },
+            AiItem {
+                kind: AiItemKind::Template,
+                text: "ignored {template}".to_string(),
+                name: None,
+            },
+            AiItem {
+                kind: AiItemKind::Command,
+                text: "cargo test".to_string(),
+                name: None,
+            },
+        ],
+    }];
+    let mut state = AppState {
+        regular_history: vec![
+            HistoryEntry {
+                t: 1,
+                command: "pwd".to_string(),
+                exit_code: Some(0),
+                source: HistorySource::User,
+            },
+            HistoryEntry {
+                t: 2,
+                command: "git status".to_string(),
+                exit_code: Some(0),
+                source: HistorySource::User,
+            },
+        ],
+        draft_history: vec![
+            DraftEntry {
+                t: 1,
+                text: "echo one\ncontinued".to_string(),
+            },
+            DraftEntry {
+                t: 2,
+                text: "echo two".to_string(),
+            },
+        ],
+        ai_command_indices: ai_command_indices(&sessions),
+        ai_sessions: sessions,
+        template_store_path: Some(temp.path().join("templates.jsonl")),
+        templates: vec![
+            TemplateEntry::new("rsync {from} {to}"),
+            TemplateEntry::new("git commit -m {message}"),
+        ],
+        ..AppState::default()
+    };
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+
+    state.draft.insert_str("#history list");
+    let mut output = Vec::new();
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+    assert_eq!(String::from_utf8(output).unwrap(), "git status\npwd\n");
+
+    state.draft.insert_str("#ai list");
+    let mut output = Vec::new();
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+    assert_eq!(String::from_utf8(output).unwrap(), "cargo test\nls -la\n");
+
+    state.draft.insert_str("#draft list");
+    let mut output = Vec::new();
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+    assert_eq!(
+        String::from_utf8(output).unwrap(),
+        "echo two\necho one\\ncontinued\n"
+    );
+
+    state.draft.insert_str("#template list");
+    let mut output = Vec::new();
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+    assert_eq!(
+        String::from_utf8(output).unwrap(),
+        "git commit -m {message}\nrsync {from} {to}\n"
+    );
+}
+
+#[test]
+fn private_search_commands_print_matching_commands_one_per_line() {
+    let mut state = AppState {
+        regular_history: vec![
+            HistoryEntry {
+                t: 1,
+                command: "pwd".to_string(),
+                exit_code: Some(0),
+                source: HistorySource::User,
+            },
+            HistoryEntry {
+                t: 2,
+                command: "git status".to_string(),
+                exit_code: Some(0),
+                source: HistorySource::User,
+            },
+        ],
+        draft_history: vec![DraftEntry {
+            t: 1,
+            text: "git diff".to_string(),
+        }],
+        templates: vec![TemplateEntry::new("git commit -m {message}")],
+        template_store_path: Some(PathBuf::from("/tmp/aish-test-templates.jsonl")),
+        ..AppState::default()
+    };
+    let sessions = vec![AiSession {
+        id: "ai-1".to_string(),
+        t: 1,
+        prompt: "prompt".to_string(),
+        ctx: false,
+        model: "model".to_string(),
+        items: vec![AiItem {
+            kind: AiItemKind::Command,
+            text: "git log --oneline".to_string(),
+            name: None,
+        }],
+    }];
+    state.ai_command_indices = ai_command_indices(&sessions);
+    state.ai_sessions = sessions;
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+
+    for (line, expected) in [
+        ("#history search git", "git status\n"),
+        ("#ai search log", "git log --oneline\n"),
+        ("#draft search diff", "git diff\n"),
+        ("#template search commit", "git commit -m {message}\n"),
+    ] {
+        state.draft.insert_str(line);
+        let mut output = Vec::new();
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+        assert_eq!(String::from_utf8(output).unwrap(), expected);
+    }
+}
+
+#[test]
+fn private_list_redirection_requires_confirmation_before_writing() {
+    let temp = tempfile::tempdir().unwrap();
+    let export_path = temp.path().join("history.txt");
+    let mut state = AppState {
+        current_cwd: Some(temp.path().to_path_buf()),
+        regular_history: vec![
+            HistoryEntry {
+                t: 1,
+                command: "pwd".to_string(),
+                exit_code: Some(0),
+                source: HistorySource::User,
+            },
+            HistoryEntry {
+                t: 2,
+                command: "git status".to_string(),
+                exit_code: Some(0),
+                source: HistorySource::User,
+            },
+        ],
+        ..AppState::default()
+    };
+    state.draft.insert_str("#history list > history.txt");
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.contains("aish will export 2 history line(s)"));
+    assert!(output.contains("Export list output? [Y/n]"));
+    assert!(!export_path.exists());
+    assert!(state.pending_private_output.is_some());
+
+    let mut output = Vec::new();
+    answer_private_output_confirmation(&mut state, true, &mut output, Duration::from_secs(5))
+        .unwrap();
+
+    assert_eq!(
+        fs::read_to_string(export_path).unwrap(),
+        "git status\npwd\n"
+    );
+    assert!(
+        String::from_utf8(output)
+            .unwrap()
+            .contains("exported 2 history line(s)")
+    );
+    assert!(state.pending_private_output.is_none());
+}
+
+#[test]
+fn private_list_pipe_feeds_confirmed_output_to_shell_stdin() {
+    let mut state = AppState {
+        regular_history: vec![
+            HistoryEntry {
+                t: 1,
+                command: "pwd".to_string(),
+                exit_code: Some(0),
+                source: HistorySource::User,
+            },
+            HistoryEntry {
+                t: 2,
+                command: "git status".to_string(),
+                exit_code: Some(0),
+                source: HistorySource::User,
+            },
+        ],
+        ..AppState::default()
+    };
+    state.draft.insert_str("#history list | wc -l");
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    assert!(state.pending_private_output.is_some());
+    let mut output = Vec::new();
+    answer_private_output_confirmation(&mut state, true, &mut output, Duration::from_secs(5))
+        .unwrap();
+
+    assert!(
+        String::from_utf8(output).unwrap().contains('2'),
+        "wc output should include the exported line count"
+    );
 }
 
 #[test]
