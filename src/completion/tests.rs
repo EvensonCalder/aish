@@ -134,6 +134,24 @@ fn complete_path_uses_relative_directory_prefix() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn complete_path_marks_symlinked_directories_with_trailing_slash() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir(temp.path().join("target-dir")).unwrap();
+    std::os::unix::fs::symlink("target-dir", temp.path().join("linked-dir")).unwrap();
+
+    assert_eq!(
+        complete_path("linked", temp.path()),
+        [CompletionCandidate {
+            display: "linked-dir/".to_string(),
+            replacement: "linked-dir/".to_string(),
+            is_dir: true,
+            source: CompletionSource::Path,
+        }]
+    );
+}
+
 #[test]
 fn complete_path_preserves_opening_quote_in_replacement_only() {
     let temp = tempfile::tempdir().unwrap();

@@ -200,14 +200,24 @@ fn read_path_entries(search_dir: &Path) -> Vec<PathEntry> {
         let Ok(name) = entry.file_name().into_string() else {
             continue;
         };
-        let is_dir = entry
-            .file_type()
-            .map(|file_type| file_type.is_dir())
-            .unwrap_or(false);
+        let is_dir = path_entry_is_directory(&entry);
         path_entries.push(PathEntry { name, is_dir });
     }
     path_entries.sort_by(|left, right| left.name.cmp(&right.name));
     path_entries
+}
+
+fn path_entry_is_directory(entry: &fs::DirEntry) -> bool {
+    if entry
+        .file_type()
+        .map(|file_type| file_type.is_dir())
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    fs::metadata(entry.path())
+        .map(|metadata| metadata.is_dir())
+        .unwrap_or(false)
 }
 
 fn prune_path_completion_cache(cache: &mut HashMap<PathBuf, PathCompletionCacheEntry>) {
