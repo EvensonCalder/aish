@@ -208,15 +208,16 @@ fn template_replace_command(state: &mut AppState, out: &mut impl Write, args: &s
             if state.template_store_path.is_some() {
                 let entry = TemplateEntry::new(body);
                 let new_id = entry.id();
-                let removal = state
-                    .replace_template_by_id(id, entry)?
-                    .expect("template store path was checked");
-                writeln!(
-                    out,
-                    "template replaced: {id} -> {new_id} (removed {})",
-                    removal.removed
-                )?;
-                write_template_errors(out, removal.errors.len())?;
+                if let Some(removal) = state.replace_template_by_id(id, entry)? {
+                    writeln!(
+                        out,
+                        "template replaced: {id} -> {new_id} (removed {})",
+                        removal.removed
+                    )?;
+                    write_template_errors(out, removal.errors.len())?;
+                } else {
+                    writeln!(out, "template storage is not configured")?;
+                }
             } else {
                 writeln!(out, "template storage is not configured")?;
             }

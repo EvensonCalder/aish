@@ -411,7 +411,14 @@ pub fn commit_plan(message: &str) -> Option<GitCommandPlan> {
 }
 
 pub fn default_sync_commit_plan() -> GitCommandPlan {
-    commit_plan("sync aish data").expect("default sync commit message is non-empty")
+    GitCommandPlan {
+        program: "git".to_string(),
+        args: vec![
+            "commit".to_string(),
+            "-m".to_string(),
+            "sync aish data".to_string(),
+        ],
+    }
 }
 
 pub fn push_plan() -> GitCommandPlan {
