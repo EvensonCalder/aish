@@ -1076,6 +1076,159 @@ fn complete_non_first_token_for_line_keeps_whole_history_suffix() {
 }
 
 #[test]
+fn complete_non_first_token_for_line_preserves_quoted_history_suffix() {
+    let temp = tempfile::tempdir().unwrap();
+    let history = vec![HistoryEntry {
+        t: 1,
+        command: "git commit -m \"hello world\" -- file.txt".to_string(),
+        exit_code: Some(0),
+        source: crate::history::HistorySource::User,
+    }];
+
+    let candidates = complete_non_first_token_for_line_with_options(
+        "git commit -m h",
+        "git commit -m h".len(),
+        temp.path(),
+        &history,
+        &[],
+        CompletionOptions::default(),
+    );
+
+    assert_eq!(
+        candidates.first(),
+        Some(&CompletionCandidate {
+            display: "\"hello world\" -- file.txt".to_string(),
+            replacement: "\"hello world\" -- file.txt".to_string(),
+            is_dir: false,
+            source: CompletionSource::History,
+        })
+    );
+
+    let quoted_candidates = complete_non_first_token_for_line_with_options(
+        "git commit -m \"h",
+        "git commit -m \"h".len(),
+        temp.path(),
+        &history,
+        &[],
+        CompletionOptions::default(),
+    );
+
+    assert_eq!(
+        quoted_candidates.first(),
+        Some(&CompletionCandidate {
+            display: "\"hello world\" -- file.txt".to_string(),
+            replacement: "\"hello world\" -- file.txt".to_string(),
+            is_dir: false,
+            source: CompletionSource::History,
+        })
+    );
+}
+
+#[test]
+fn complete_non_first_token_for_line_preserves_mixed_quoted_history_suffix() {
+    let temp = tempfile::tempdir().unwrap();
+    let history = vec![HistoryEntry {
+        t: 1,
+        command: "cmd a\"b c\"d next".to_string(),
+        exit_code: Some(0),
+        source: crate::history::HistorySource::User,
+    }];
+
+    let candidates = complete_non_first_token_for_line_with_options(
+        "cmd ab",
+        "cmd ab".len(),
+        temp.path(),
+        &history,
+        &[],
+        CompletionOptions {
+            match_threshold_percent: 100,
+            ..CompletionOptions::default()
+        },
+    );
+
+    assert_eq!(
+        candidates.first(),
+        Some(&CompletionCandidate {
+            display: "a\"b c\"d next".to_string(),
+            replacement: "a\"b c\"d next".to_string(),
+            is_dir: false,
+            source: CompletionSource::History,
+        })
+    );
+}
+
+#[test]
+fn complete_non_first_token_preserves_quoted_history_argument() {
+    let temp = tempfile::tempdir().unwrap();
+    let history = vec![HistoryEntry {
+        t: 1,
+        command: "git commit -m \"hello world\"".to_string(),
+        exit_code: Some(0),
+        source: crate::history::HistorySource::User,
+    }];
+
+    assert_eq!(
+        complete_non_first_token("h", temp.path(), &history, &[]),
+        [CompletionCandidate {
+            display: "\"hello world\"".to_string(),
+            replacement: "\"hello world\"".to_string(),
+            is_dir: false,
+            source: CompletionSource::History,
+        }]
+    );
+
+    assert_eq!(
+        complete_non_first_token("\"h", temp.path(), &history, &[]),
+        [CompletionCandidate {
+            display: "\"hello world\"".to_string(),
+            replacement: "\"hello world\"".to_string(),
+            is_dir: false,
+            source: CompletionSource::History,
+        }]
+    );
+}
+
+#[test]
+fn complete_non_first_token_preserves_escaped_space_history_argument() {
+    let temp = tempfile::tempdir().unwrap();
+    let history = vec![HistoryEntry {
+        t: 1,
+        command: "printf '<%s>\\n' hello\\ world".to_string(),
+        exit_code: Some(0),
+        source: crate::history::HistorySource::User,
+    }];
+
+    assert_eq!(
+        complete_non_first_token("h", temp.path(), &history, &[]),
+        [CompletionCandidate {
+            display: "hello\\ world".to_string(),
+            replacement: "hello\\ world".to_string(),
+            is_dir: false,
+            source: CompletionSource::History,
+        }]
+    );
+
+    let candidates = complete_non_first_token_for_line_with_options(
+        "printf '<%s>\\n' hello\\ w",
+        "printf '<%s>\\n' hello\\ w".len(),
+        temp.path(),
+        &history,
+        &[],
+        CompletionOptions::default(),
+    );
+
+    assert_eq!(
+        candidates.first(),
+        Some(&CompletionCandidate {
+            display: "hello\\ world".to_string(),
+            replacement: "hello\\ world".to_string(),
+            is_dir: false,
+            source: CompletionSource::History,
+        })
+    );
+}
+
+#[test]
 fn matches_completion_prefix_can_ignore_spaces() {
     assert!(matches_completion_prefix("git status", "g s", true));
     assert!(!matches_completion_prefix("git status", "g s", false));
@@ -1535,10 +1688,74 @@ fn accept_completion_word_mode_stops_at_next_word_for_non_prefix_replacement() {
 }
 
 #[test]
+fn accept_completion_word_mode_keeps_quoted_shell_word_intact() {
+    let line = "git commit -m h";
+    let token = current_token_context(line, line.len());
+    let candidate = CompletionCandidate {
+        display: "\"hello world\" -- file.txt".to_string(),
+        replacement: "\"hello world\" -- file.txt".to_string(),
+        is_dir: false,
+        source: CompletionSource::History,
+    };
+
+    assert_eq!(
+        accept_completion_with_mode(line, &token, &candidate, CompletionTabAccept::Word),
+        AcceptedCompletion {
+            line: "git commit -m \"hello world\"".to_string(),
+            cursor: "git commit -m \"hello world\"".len(),
+        }
+    );
+
+    let quoted_line = "git commit -m \"h";
+    let quoted_token = current_token_context(quoted_line, quoted_line.len());
+
+    assert_eq!(
+        accept_completion_with_mode(
+            quoted_line,
+            &quoted_token,
+            &candidate,
+            CompletionTabAccept::Word,
+        ),
+        AcceptedCompletion {
+            line: "git commit -m \"hello world\"".to_string(),
+            cursor: "git commit -m \"hello world\"".len(),
+        }
+    );
+}
+
+#[test]
+fn accept_completion_word_mode_keeps_escaped_space_shell_word_intact() {
+    let line = "printf '<%s>\\n' h";
+    let token = current_token_context(line, line.len());
+    let candidate = CompletionCandidate {
+        display: "hello\\ world next".to_string(),
+        replacement: "hello\\ world next".to_string(),
+        is_dir: false,
+        source: CompletionSource::History,
+    };
+
+    assert_eq!(
+        accept_completion_with_mode(line, &token, &candidate, CompletionTabAccept::Word),
+        AcceptedCompletion {
+            line: "printf '<%s>\\n' hello\\ world".to_string(),
+            cursor: "printf '<%s>\\n' hello\\ world".len(),
+        }
+    );
+}
+
+#[test]
 fn command_arguments_preserve_quoted_argument_spaces() {
     assert_eq!(
         command_arguments("git commit -m 'hello world' -- file"),
         ["commit", "-m", "hello world", "--", "file"]
+    );
+}
+
+#[test]
+fn shell_like_words_remove_quotes_and_escapes_for_matching() {
+    assert_eq!(
+        split_shell_like_words("cmd a\"b c\"d 'x y'z hello\\ world \"a\\\"b\" \"a\\ b\""),
+        ["cmd", "ab cd", "x yz", "hello world", "a\"b", "a\\ b"]
     );
 }
 

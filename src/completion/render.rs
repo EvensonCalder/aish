@@ -173,25 +173,71 @@ fn accepted_replacement(
         CompletionTabAccept::Full => candidate.replacement.clone(),
         CompletionTabAccept::Word => {
             let Some(suffix) = candidate.replacement.strip_prefix(&token.text) else {
-                return accepted_word_suffix(&candidate.replacement).to_string();
+                return accepted_word_suffix("", &candidate.replacement).to_string();
             };
-            format!("{}{}", token.text, accepted_word_suffix(suffix))
+            format!(
+                "{}{}",
+                token.text,
+                accepted_word_suffix(&token.text, suffix)
+            )
         }
     }
 }
 
-fn accepted_word_suffix(suffix: &str) -> &str {
+fn accepted_word_suffix<'a>(prefix: &str, suffix: &'a str) -> &'a str {
+    let mut state = QuoteScanState::after(prefix);
     let mut seen_non_whitespace = false;
     for (index, ch) in suffix.char_indices() {
-        if ch.is_whitespace() {
+        let outside_whitespace = state.quote.is_none() && !state.escaped && ch.is_whitespace();
+        if outside_whitespace {
             if seen_non_whitespace {
                 return &suffix[..index];
             }
         } else {
             seen_non_whitespace = true;
         }
+        state.advance(ch);
     }
     suffix
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct QuoteScanState {
+    quote: Option<char>,
+    escaped: bool,
+}
+
+impl QuoteScanState {
+    fn after(prefix: &str) -> Self {
+        let mut state = Self::default();
+        for ch in prefix.chars() {
+            state.advance(ch);
+        }
+        state
+    }
+
+    fn advance(&mut self, ch: char) {
+        if self.escaped {
+            self.escaped = false;
+            return;
+        }
+        match self.quote {
+            Some(active) if ch == active => {
+                self.quote = None;
+            }
+            Some('"') if ch == '\\' => {
+                self.escaped = true;
+            }
+            Some(_) => {}
+            None if ch == '\\' => {
+                self.escaped = true;
+            }
+            None if ch == '\'' || ch == '"' => {
+                self.quote = Some(ch);
+            }
+            None => {}
+        }
+    }
 }
 
 fn completion_source_label(source: CompletionSource) -> &'static str {

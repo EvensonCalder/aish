@@ -1130,6 +1130,7 @@ Update: completion now uses layered, non-blocking live discovery. Cheap local pa
   - [x] `#completion match-threshold <0-100>`
   - [x] `#completion typo-threshold <0-100>`
 - [x] Treat `completion.match_threshold_percent` as a structural word-position match rate, not typo correction.
+- [x] Preserve raw shell words for history/template completion display and insertion while using quote-removed shell-like values for matching, including quoted arguments, mixed quoted segments, and escaped spaces.
 - [x] Keep typo correction separate behind `completion.typo_threshold_percent`.
 - [x] Accepting a typo-correction candidate replaces the mistyped command with the corrected template/history command.
 - [x] Keep live completion non-blocking by sending history work to a versioned worker and ignoring stale events.
@@ -1160,6 +1161,7 @@ Update: completion now uses layered, non-blocking live discovery. Cheap local pa
 - [x] Pure and terminal tests for structural template completion where typing a placeholder name without braces accepts the raw `{placeholder}` form.
 - [x] Pure tests for private command nested argument completion and typo-correction acceptance.
 - [x] Pure acceptance tests for full-suggestion and word-boundary acceptance, including quoted arguments and candidates with spaces.
+- [x] Pure and expect regression tests proving quoted and escaped history arguments remain one shell word when displayed and accepted.
 - [x] Terminal rendering tests proving the inline ghost is display-only, refreshes while typing, uses subdued styling, does not move the real cursor, and does not mutate draft text.
 - [x] Terminal state tests proving stale inline suggestions clear after editing, cursor movement, mode changes, command execution, and no-match completion.
 - [x] Panel rendering tests for `completion.max_results`, narrow terminal widths, full-command rows, input-column alignment, source labels, no wrapping, and word-boundary `...` elision.

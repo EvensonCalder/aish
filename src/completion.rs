@@ -25,7 +25,11 @@ use matching::{
     typo_similarity_percent, word_prefix_matches, words_match_threshold,
     words_match_threshold_with_typos,
 };
-use parser::{command_arguments, split_shell_like_words};
+#[cfg(test)]
+use parser::command_arguments;
+use parser::{
+    ShellWord, command_argument_words, shell_like_words, shell_word_value, split_shell_like_words,
+};
 pub(crate) use path::scan_path_executables;
 use path::{
     complete_path_executables, complete_path_with_options, order_path_candidates_for_completion,
@@ -75,7 +79,8 @@ pub struct CompletionCandidate {
 pub(crate) struct IndexedHistoryEntry {
     pub(crate) entry: HistoryEntry,
     pub(crate) words: Vec<String>,
-    pub(crate) arguments: Vec<String>,
+    pub(crate) raw_words: Vec<String>,
+    pub(crate) arguments: Vec<ShellWord>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -260,13 +265,14 @@ pub(crate) fn index_history_entries(
     history_newest_first
         .iter()
         .cloned()
-        .map(|entry| IndexedHistoryEntry {
-            words: split_shell_like_words(&entry.command),
-            arguments: command_arguments(&entry.command)
-                .into_iter()
-                .map(str::to_string)
-                .collect(),
-            entry,
+        .map(|entry| {
+            let words = shell_like_words(&entry.command);
+            IndexedHistoryEntry {
+                raw_words: words.iter().map(|word| word.raw.clone()).collect(),
+                arguments: words.iter().skip(1).cloned().collect(),
+                words: words.into_iter().map(|word| word.value).collect(),
+                entry,
+            }
         })
         .collect()
 }
@@ -809,7 +815,7 @@ fn complete_structural_history_for_line_indexed(
             continue;
         }
 
-        let replacement = join_words(&indexed.words[current_word_index..]);
+        let replacement = join_words(&indexed.raw_words[current_word_index..]);
 
         if replacement == token.text || !seen.insert(replacement.clone()) {
             continue;
@@ -928,18 +934,19 @@ fn complete_history_arguments(
 ) -> Vec<CompletionCandidate> {
     let mut seen = HashSet::new();
     let mut candidates = Vec::new();
+    let prefix = shell_word_match_text(prefix);
     for entry in history_newest_first {
-        for argument in command_arguments(&entry.command) {
+        for argument in command_argument_words(&entry.command) {
             if matches_completion_prefix_with_threshold(
-                argument,
-                prefix,
+                &argument.value,
+                &prefix,
                 ignore_spaces,
                 match_threshold_percent,
-            ) && seen.insert(argument.to_string())
+            ) && seen.insert(argument.raw.clone())
             {
                 candidates.push(CompletionCandidate {
-                    display: argument.to_string(),
-                    replacement: argument.to_string(),
+                    display: argument.raw.clone(),
+                    replacement: argument.raw,
                     is_dir: false,
                     source: CompletionSource::History,
                 });
@@ -957,18 +964,19 @@ fn complete_history_arguments_indexed(
 ) -> Vec<CompletionCandidate> {
     let mut seen = HashSet::new();
     let mut candidates = Vec::new();
+    let prefix = shell_word_match_text(prefix);
     for indexed in history_newest_first {
         for argument in &indexed.arguments {
             if matches_completion_prefix_with_threshold(
-                argument,
-                prefix,
+                &argument.value,
+                &prefix,
                 ignore_spaces,
                 match_threshold_percent,
-            ) && seen.insert(argument.clone())
+            ) && seen.insert(argument.raw.clone())
             {
                 candidates.push(CompletionCandidate {
-                    display: argument.clone(),
-                    replacement: argument.clone(),
+                    display: argument.raw.clone(),
+                    replacement: argument.raw.clone(),
                     is_dir: false,
                     source: CompletionSource::History,
                 });
@@ -976,6 +984,10 @@ fn complete_history_arguments_indexed(
         }
     }
     candidates
+}
+
+fn shell_word_match_text(token: &str) -> String {
+    shell_word_value(token)
 }
 
 pub(crate) fn dedupe_completion_candidates(candidates: &mut Vec<CompletionCandidate>) {

@@ -2,6 +2,12 @@ use std::path::{Path, PathBuf};
 
 use super::TokenContext;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ShellWord {
+    pub(crate) raw: String,
+    pub(crate) value: String,
+}
+
 pub fn current_token_context(line: &str, cursor: usize) -> TokenContext {
     let cursor = cursor.min(line.len());
     let cursor = previous_char_boundary(line, cursor);
@@ -69,70 +75,41 @@ pub fn is_path_like_token(token: &str) -> bool {
         || token.contains('/')
 }
 
-pub(crate) fn command_arguments(command: &str) -> Vec<&str> {
-    let mut arguments = Vec::new();
-    let mut token_start = 0;
-    let mut quote: Option<char> = None;
-    let mut escaped = false;
-    let mut token_index = 0;
-    let mut token_seen = false;
-
-    for (index, ch) in command.char_indices() {
-        if escaped {
-            escaped = false;
-            token_seen = true;
-            continue;
-        }
-        match quote {
-            Some(active) if ch == active => {
-                quote = None;
-                token_seen = true;
-            }
-            Some(_) => {
-                if ch == '\\' && quote == Some('"') {
-                    escaped = true;
-                }
-                token_seen = true;
-            }
-            None if ch == '\\' => {
-                escaped = true;
-                token_seen = true;
-            }
-            None if ch == '\'' || ch == '"' => {
-                quote = Some(ch);
-                token_seen = true;
-            }
-            None if ch.is_whitespace() => {
-                if token_seen {
-                    if token_index > 0 {
-                        arguments.push(command[token_start..index].trim_matches(['\'', '"']));
-                    }
-                    token_index += 1;
-                }
-                token_seen = false;
-                token_start = index + ch.len_utf8();
-            }
-            None => {
-                token_seen = true;
-            }
-        }
-    }
-
-    if token_seen && token_index > 0 {
-        arguments.push(command[token_start..].trim_matches(['\'', '"']));
-    }
-    arguments
-}
-
-pub(crate) fn split_shell_like_words(command: &str) -> Vec<String> {
-    command_arguments_with_first(command)
+#[cfg(test)]
+pub(crate) fn command_arguments(command: &str) -> Vec<String> {
+    command_word_ranges(command)
         .into_iter()
-        .map(str::to_string)
+        .skip(1)
+        .map(|(start, end)| shell_word_value(&command[start..end]))
         .collect()
 }
 
-pub(crate) fn command_arguments_with_first(command: &str) -> Vec<&str> {
-    let mut words = Vec::new();
+pub(crate) fn split_shell_like_words(command: &str) -> Vec<String> {
+    shell_like_words(command)
+        .into_iter()
+        .map(|word| word.value)
+        .collect()
+}
+
+pub(crate) fn shell_like_words(command: &str) -> Vec<ShellWord> {
+    command_word_ranges(command)
+        .into_iter()
+        .map(|(start, end)| {
+            let raw = command[start..end].to_string();
+            ShellWord {
+                value: shell_word_value(&raw),
+                raw,
+            }
+        })
+        .collect()
+}
+
+pub(crate) fn command_argument_words(command: &str) -> Vec<ShellWord> {
+    shell_like_words(command).into_iter().skip(1).collect()
+}
+
+fn command_word_ranges(command: &str) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::new();
     let mut token_start = 0;
     let mut quote: Option<char> = None;
     let mut escaped = false;
@@ -165,7 +142,7 @@ pub(crate) fn command_arguments_with_first(command: &str) -> Vec<&str> {
             }
             None if ch.is_whitespace() => {
                 if token_seen {
-                    words.push(command[token_start..index].trim_matches(['\'', '"']));
+                    ranges.push((token_start, index));
                 }
                 token_seen = false;
                 token_start = index + ch.len_utf8();
@@ -177,9 +154,59 @@ pub(crate) fn command_arguments_with_first(command: &str) -> Vec<&str> {
     }
 
     if token_seen {
-        words.push(command[token_start..].trim_matches(['\'', '"']));
+        ranges.push((token_start, command.len()));
     }
-    words
+    ranges
+}
+
+pub(crate) fn shell_word_value(raw: &str) -> String {
+    let mut value = String::with_capacity(raw.len());
+    let mut chars = raw.chars().peekable();
+    let mut quote: Option<char> = None;
+
+    while let Some(ch) = chars.next() {
+        match quote {
+            Some('\'') if ch == '\'' => {
+                quote = None;
+            }
+            Some('\'') => {
+                value.push(ch);
+            }
+            Some('"') if ch == '"' => {
+                quote = None;
+            }
+            Some('"') if ch == '\\' => match chars.peek().copied() {
+                Some('$' | '`' | '"' | '\\') => {
+                    value.push(chars.next().unwrap());
+                }
+                Some('\n') => {
+                    chars.next();
+                }
+                _ => {
+                    value.push(ch);
+                }
+            },
+            Some('"') => {
+                value.push(ch);
+            }
+            None if ch == '\'' || ch == '"' => {
+                quote = Some(ch);
+            }
+            None if ch == '\\' => match chars.next() {
+                Some('\n') => {}
+                Some(next) => value.push(next),
+                None => value.push(ch),
+            },
+            None => {
+                value.push(ch);
+            }
+            Some(_) => {
+                value.push(ch);
+            }
+        }
+    }
+
+    value
 }
 
 pub(crate) fn strip_opening_quote(token: &str) -> (&str, &str) {

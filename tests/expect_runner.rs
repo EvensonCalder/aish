@@ -299,6 +299,11 @@ fn completion_tab_accept_word() {
 }
 
 #[test]
+fn completion_history_quoted_word() {
+    run_script("completion_history_quoted_word.exp");
+}
+
+#[test]
 fn completion_no_matches_panel() {
     run_script("completion_no_matches_panel.exp");
 }

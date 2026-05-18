@@ -1,0 +1,27 @@
+#!/usr/bin/env expect
+# History completion must preserve a quoted shell word when accepting one word.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "printf '<%s>\\n' \"hello world\""
+aish_enter
+aish_expect "<hello world>"
+aish_wait_prompt
+
+aish_send "#completion tab-accept word"
+aish_enter
+aish_expect "completion.tab_accept=word"
+aish_wait_prompt
+
+aish_send "printf '<%s>\\n' \"h"
+aish_expect "> printf '<%s>\\n' \"hello world\""
+aish_send "\t"
+aish_expect "> printf '<%s>\\n' \"hello world\""
+aish_enter
+aish_expect "<hello world>"
+aish_wait_prompt
+
+aish_quit
