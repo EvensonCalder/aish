@@ -55,7 +55,7 @@ pub(super) fn shell_launch(configured_shell: &str) -> ShellLaunch {
         "fish" => (
             fish_launch_args(&program),
             format!(
-                "stty -echo; set -g fish_greeting; function fish_title; end; function __aish_preexec --on-event fish_preexec; printf '\n{start_marker}\\t%s\n' $argv[1]; end; function fish_prompt; printf '\n{ready_marker}\\t%s\\t%s\n' $status $PWD; end; function fish_right_prompt; end; function fish_mode_prompt; end; fish_prompt\n"
+                "stty -echo; set -g fish_greeting; function fish_title; end; function __aish_preexec --on-event fish_preexec; printf '\n{start_marker}\\t%s\n' $argv[1]; end; function __aish_emit_ready; printf '\n{ready_marker}\\t%s\\t%s\n' $status $PWD; end; function __aish_postexec --on-event fish_postexec; __aish_emit_ready; end; function fish_prompt; end; function fish_right_prompt; end; function fish_mode_prompt; end; __aish_emit_ready\n"
             ),
             ShellIntegration::FishEvents,
         ),

@@ -64,13 +64,20 @@ impl PtyOutputFilter {
     }
 
     pub(super) fn flush_pending(&mut self) -> Vec<u8> {
-        if self.pending.is_empty() || self.command_complete || self.pending_may_be_internal_marker()
-        {
+        if self.command_complete {
             return Vec::new();
         }
-        let segment = std::mem::take(&mut self.pending);
         let mut output = Vec::new();
-        self.push_segment(segment, &mut output);
+        if !self.pending.is_empty() {
+            if self.pending_may_be_internal_marker() {
+                return Vec::new();
+            }
+            let segment = std::mem::take(&mut self.pending);
+            self.push_segment(segment, &mut output);
+        }
+        if self.pending.is_empty() {
+            self.flush_fish_held_segment(&mut output);
+        }
         output
     }
 

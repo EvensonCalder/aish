@@ -359,7 +359,7 @@ Implemented:
 - Marker-based shell integration now emits and parses command-start markers, with shell-quoting tests and PTY coverage that bash reports `started_command` without leaking internal markers into history.
 - Bash marker integration has PTY coverage for prompt-ready initial cwd, command-start reporting, command-finish exit status, and cwd reporting after command execution.
 - Zsh hook integration has PTY coverage for `preexec` command-start reporting, `precmd` finish status, and cwd reporting after command execution when `/bin/zsh` is available.
-- Fish event integration has launch/unit coverage for `fish_preexec` and `fish_prompt` setup plus opt-in PTY coverage for command-start, finish status, cwd reporting, and command-token-like output preservation when `AISH_TEST_FISH=1` is set.
+- Fish event integration has launch/unit coverage for `fish_preexec`, `fish_postexec`, explicit ready emission, and prompt suppression setup plus opt-in PTY coverage for command-start, finish status, cwd reporting, streaming output, config inheritance, and command-token-like output preservation when `AISH_TEST_FISH=1` is set.
 - Allowlisted interactive commands can run in a foreground passthrough path with raw mode disabled; `less` has skip-safe expect coverage when available.
 - Interactive passthrough command detection covers common fullscreen tools, REPLs, shells, stdin-oriented commands such as `gpg` and `cat`, basenames, shell quoting, assignments, and wrappers such as `sudo`, `env`, `command`, and `exec`.
 - Alternate-screen buffer detection tracks common enter/exit CSI sequences (`?47`, `?1047`, `?1049`) and ignores unrelated terminal styling escapes.

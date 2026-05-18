@@ -73,6 +73,8 @@ fn fish_launch_uses_event_functions_after_user_config() {
     }
     assert_eq!(launch.integration, ShellIntegration::FishEvents);
     assert!(launch.init_command.contains("--on-event fish_preexec"));
+    assert!(launch.init_command.contains("--on-event fish_postexec"));
+    assert!(launch.init_command.contains("__aish_emit_ready"));
     assert!(launch.init_command.contains("function fish_prompt"));
     assert!(!launch.args.contains(&"--noprofile".to_string()));
     assert!(!launch.args.contains(&"--no-config".to_string()));
@@ -290,6 +292,19 @@ fn fish_output_filter_drops_cursor_repaint_duplicate_before_plain_output() {
     let output = filter.push(raw.as_bytes());
 
     assert_eq!(String::from_utf8(output).unwrap(), "beta\r\n");
+}
+
+#[test]
+fn fish_output_filter_flushes_held_repaint_output_on_idle() {
+    let mut filter = PtyOutputFilter::shell_events(true);
+    let start = current_start_marker();
+    let raw = format!("{start}\tsleep 1\r\n\x1b[30m\x0fstreamed\r\n");
+
+    assert!(filter.push(raw.as_bytes()).is_empty());
+
+    let output = filter.flush_pending();
+
+    assert_eq!(output, b"\x1b[30m\x0fstreamed\r\n");
 }
 
 #[test]

@@ -745,7 +745,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 - [ ] Fish integration:
   - [x] prompt/event functions
   - [x] cwd reporting
-  - [ ] Investigate Linux fish 3.7.0 opt-in PTY timeout observed with `AISH_TEST_FISH=1 cargo test --test pty_backend -- --nocapture`: fish startup did not produce Aish's ready marker before the test timeout.
+  - [x] Fix Linux fish 3.7.0 opt-in PTY timeout: ready markers now emit from `fish_postexec`/explicit init output instead of `fish_prompt`, avoiding fish prompt truncation in 80-column PTYs.
   - [ ] Promote fish from opt-in experimental support only after validation across macOS and representative Linux distributions.
 - [x] Detect interactive commands for passthrough:
   - [x] command allowlist
