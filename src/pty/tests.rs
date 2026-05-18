@@ -19,10 +19,10 @@ fn resolves_configured_shell_before_environment() {
 fn shell_command_builder_inherits_current_directory() {
     let cwd = env::current_dir().unwrap();
     let launch = shell_launch("/bin/bash");
-    let command = shell_command_builder(&launch);
+    let command = shell_command_builder(&launch, None);
 
     assert_eq!(
-        command.get_cwd().map(|cwd| cwd.as_os_str()),
+        command.get_current_dir().map(|cwd| cwd.as_os_str()),
         Some(cwd.as_os_str())
     );
 }

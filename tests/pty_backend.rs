@@ -304,6 +304,34 @@ fn pty_backend_passthrough_enables_child_echo_and_restores_backend_echo_off() {
     assert!(!displayed.contains("__aish_passthrough_status"));
 }
 
+#[test]
+fn pty_backend_external_child_owns_foreground_process_group() {
+    let _guard = pty_test_guard();
+    if !command_available("python3") {
+        return;
+    }
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+
+    let result = backend
+        .run_command(
+            "python3 -c 'import os; print(f\"isatty={int(os.isatty(0))} pgrp={os.getpgrp()} tpgid={os.tcgetpgrp(0)}\")'",
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+    assert_eq!(result.exit_code, 0);
+    let line = result.output.trim();
+    assert!(line.starts_with("isatty=1 "), "{result:?}");
+    let pgrp = field_value(line, "pgrp=").unwrap();
+    let tpgid = field_value(line, "tpgid=").unwrap();
+    assert_eq!(pgrp, tpgid, "{result:?}");
+}
+
+fn field_value<'a>(line: &'a str, prefix: &str) -> Option<&'a str> {
+    line.split_whitespace()
+        .find_map(|part| part.strip_prefix(prefix))
+}
+
 fn stty_has_flag(output: &str, flag: &str) -> bool {
     output
         .split(|ch: char| ch.is_whitespace() || ch == ';')
@@ -540,6 +568,23 @@ fn pty_backend_does_not_confuse_user_output_with_prompt_marker() {
 
     assert_eq!(result.exit_code, 0);
     assert_eq!(result.output.trim(), "before __AISH_STATUS__ after");
+}
+
+#[test]
+fn pty_backend_ignores_bogus_writes_to_control_fd() {
+    let _guard = pty_test_guard();
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+
+    let result = backend
+        .run_command(
+            "printf 'before-bogus-control\\n'; eval \"printf '__AISH_READY__\\\\t0\\\\t/tmp\\\\n' >&$AISH_CONTROL_FD\"; sleep 1; printf 'after-bogus-control\\n'",
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+    assert_eq!(result.exit_code, 0);
+    assert!(result.output.contains("before-bogus-control"), "{result:?}");
+    assert!(result.output.contains("after-bogus-control"), "{result:?}");
 }
 
 #[test]
@@ -897,4 +942,14 @@ fn find_shell(candidates: &[&'static str]) -> Option<&'static str> {
 
 fn fish_backend_tests_enabled() -> bool {
     env::var_os("AISH_TEST_FISH").is_some()
+}
+
+fn command_available(program: &str) -> bool {
+    std::process::Command::new(program)
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
 }

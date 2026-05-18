@@ -3,18 +3,53 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::Result;
+#[cfg(not(unix))]
 use crossterm::event::{self, Event};
-use crossterm::terminal::is_raw_mode_enabled;
+use crossterm::terminal::{is_raw_mode_enabled, size};
 
 use crate::commands::{ParsedLine, parse_line};
 use crate::history::{HistoryEntry, HistorySource, NoteEntry};
 use crate::modes::Mode;
-use crate::pty::{BackendShellClosed, PtyBackend, PtyCommandEvent};
+use crate::pty::{BackendShellClosed, PtyBackend, PtyCommandEvent, pty_size};
+#[cfg(not(unix))]
 use crate::shell_integration::passthrough_key_bytes;
 use crate::templates::template_placeholders;
 
 use super::context_prompt::{submit_ai_prompt, submit_ai_prompt_with_context};
 use super::{AppState, OutputEntry, private_commands};
+
+struct DisplayWriter<'a, W: Write> {
+    inner: &'a mut W,
+    convert_lf: bool,
+    previous_was_cr: bool,
+}
+
+impl<'a, W: Write> DisplayWriter<'a, W> {
+    fn new(inner: &'a mut W) -> Self {
+        Self {
+            inner,
+            convert_lf: is_raw_mode_enabled().unwrap_or(false),
+            previous_was_cr: false,
+        }
+    }
+}
+
+impl<W: Write> Write for DisplayWriter<'_, W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        for &byte in buf {
+            if self.convert_lf && byte == b'\n' && !self.previous_was_cr {
+                self.inner.write_all(b"\r")?;
+            }
+            self.inner.write_all(&[byte])?;
+            self.previous_was_cr = byte == b'\r';
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
 
 pub fn execute_draft(
     state: &mut AppState,
@@ -24,13 +59,18 @@ pub fn execute_draft(
 ) -> Result<()> {
     state.cancel_live_completion();
     if state.pending_context.is_some() {
-        writeln!(out, "context confirmation is pending; answer Y or n")?;
+        let mut display_out = DisplayWriter::new(out);
+        writeln!(
+            display_out,
+            "context confirmation is pending; answer Y or n"
+        )?;
         state.mode = Mode::Draft;
         return Ok(());
     }
     if state.pending_private_output.is_some() {
+        let mut display_out = DisplayWriter::new(out);
         writeln!(
-            out,
+            display_out,
             "private output export confirmation is pending; answer Y or n"
         )?;
         state.mode = Mode::Draft;
@@ -57,10 +97,11 @@ pub fn execute_draft(
             return Ok(());
         }
         let ai_line = format!("# {prompt}");
+        let mut display_out = DisplayWriter::new(out);
         match parse_line(&ai_line) {
-            ParsedLine::AiPrompt(prompt) => submit_ai_prompt(state, prompt, out)?,
+            ParsedLine::AiPrompt(prompt) => submit_ai_prompt(state, prompt, &mut display_out)?,
             ParsedLine::AiPromptWithContext { prompt, command } => {
-                submit_ai_prompt_with_context(state, prompt, command, out, timeout)?;
+                submit_ai_prompt_with_context(state, prompt, command, &mut display_out, timeout)?;
             }
             _ => unreachable!("AI editor drafts are submitted as AI prompts"),
         }
@@ -70,8 +111,9 @@ pub fn execute_draft(
     if state.draft_from_template {
         let unresolved = template_placeholders(&command);
         if !unresolved.is_empty() {
+            let mut display_out = DisplayWriter::new(out);
             writeln!(
-                out,
+                display_out,
                 "cannot execute unresolved template placeholders: {}",
                 unresolved.join(", ")
             )?;
@@ -79,61 +121,63 @@ pub fn execute_draft(
             return Ok(());
         }
     }
-    if !state.draft_from_editor {
-        match parse_line(&command) {
-            ParsedLine::Ordinary(_) => {}
-            ParsedLine::EmptyPrivate => {
-                writeln!(out, "empty Aish command")?;
-                state.clear_draft_for_new_draft();
-                return Ok(());
-            }
-            ParsedLine::Note { tag, text } => {
-                state.append_note(NoteEntry {
-                    tag,
-                    text: text.to_string(),
-                })?;
-                writeln!(out, "note stored")?;
-                state.clear_draft_for_new_draft();
-                return Ok(());
-            }
-            ParsedLine::Private { name, args } => {
-                if let Err(err) = private_commands::execute_private_command(state, out, name, args)
-                {
-                    writeln!(out, "Error: {err}")?;
-                    let _ =
-                        state.append_event(crate::log::EventLevel::Error, "private command failed");
-                    state.clear_draft_for_new_draft();
-                }
-                return Ok(());
-            }
-            ParsedLine::AiPrompt(prompt) => {
-                submit_ai_prompt(state, prompt, out)?;
-                state.clear_draft_preserving_mode();
-                return Ok(());
-            }
-            ParsedLine::AiPromptWithContext { prompt, command } => {
-                submit_ai_prompt_with_context(state, prompt, command, out, timeout)?;
-                state.clear_draft_preserving_mode();
-                return Ok(());
-            }
-        }
-    }
-
-    if !state.draft_from_editor {
-        let continuation = backend.input_needs_more_lines(&command)?;
-        if continuation.needs_more {
-            state.continuation_prompt = continuation.prompt;
-            state.draft.insert_str("\n");
-            state.mode = Mode::Draft;
+    match parse_line(&command) {
+        ParsedLine::Ordinary(_) => {}
+        ParsedLine::EmptyPrivate => {
+            let mut display_out = DisplayWriter::new(out);
+            writeln!(display_out, "empty Aish command")?;
+            state.clear_draft_for_new_draft();
             return Ok(());
         }
-        state.save_current_draft_if_needed()?;
+        ParsedLine::Note { tag, text } => {
+            state.append_note(NoteEntry {
+                tag,
+                text: text.to_string(),
+            })?;
+            let mut display_out = DisplayWriter::new(out);
+            writeln!(display_out, "note stored")?;
+            state.clear_draft_for_new_draft();
+            return Ok(());
+        }
+        ParsedLine::Private { name, args } => {
+            let mut display_out = DisplayWriter::new(out);
+            if let Err(err) =
+                private_commands::execute_private_command(state, &mut display_out, name, args)
+            {
+                writeln!(display_out, "Error: {err}")?;
+                let _ = state.append_event(crate::log::EventLevel::Error, "private command failed");
+                state.clear_draft_for_new_draft();
+            }
+            return Ok(());
+        }
+        ParsedLine::AiPrompt(prompt) => {
+            let mut display_out = DisplayWriter::new(out);
+            submit_ai_prompt(state, prompt, &mut display_out)?;
+            state.clear_draft_preserving_mode();
+            return Ok(());
+        }
+        ParsedLine::AiPromptWithContext { prompt, command } => {
+            let mut display_out = DisplayWriter::new(out);
+            submit_ai_prompt_with_context(state, prompt, command, &mut display_out, timeout)?;
+            state.clear_draft_preserving_mode();
+            return Ok(());
+        }
     }
 
+    let continuation = backend.input_needs_more_lines(&command)?;
+    if continuation.needs_more {
+        state.continuation_prompt = continuation.prompt;
+        state.draft.insert_str("\n");
+        state.mode = Mode::Draft;
+        return Ok(());
+    }
+    state.save_current_draft_if_needed()?;
+
     state.mode = Mode::CommandRunning;
+    let mut bridge = ForegroundPtyBridge::enter(backend)?;
     let result = match backend
         .run_command_passthrough_with_event_callback(&command, |backend, event| {
-            handle_command_running_event(backend, out, event)
+            handle_command_running_event(&mut bridge, backend, out, event)
         }) {
         Ok(result) => result,
         Err(error) if error.downcast_ref::<BackendShellClosed>().is_some() => {
@@ -202,41 +246,138 @@ pub(crate) fn record_completed_command(
     Ok(())
 }
 
-fn forward_terminal_input_to_backend(backend: &mut PtyBackend) -> Result<bool> {
-    if !is_raw_mode_enabled().unwrap_or(false) {
-        return Ok(false);
+struct ForegroundPtyBridge {
+    last_size: Option<(u16, u16)>,
+    #[cfg(unix)]
+    stdin: Option<UnixStdinBridge>,
+}
+
+impl ForegroundPtyBridge {
+    fn enter(backend: &mut PtyBackend) -> Result<Self> {
+        let mut bridge = Self {
+            last_size: None,
+            #[cfg(unix)]
+            stdin: UnixStdinBridge::enter()?,
+        };
+        bridge.sync_size(backend)?;
+        Ok(bridge)
     }
 
-    let mut marker_may_need_reissue = false;
-    while event::poll(Duration::from_millis(0))? {
-        match event::read()? {
-            Event::Key(key) => {
-                if matches!(
-                    (key.modifiers, key.code),
-                    (
-                        crossterm::event::KeyModifiers::CONTROL,
-                        crossterm::event::KeyCode::Char('c' | 'd')
-                    )
-                ) {
-                    marker_may_need_reissue = true;
+    fn pump(&mut self, backend: &mut PtyBackend) -> Result<bool> {
+        self.forward_stdin(backend)?;
+        self.sync_size(backend)?;
+        Ok(false)
+    }
+
+    fn sync_size(&mut self, backend: &mut PtyBackend) -> Result<()> {
+        let current = size()?;
+        if self.last_size != Some(current) {
+            backend.resize(pty_size(current.0, current.1))?;
+            self.last_size = Some(current);
+        }
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    fn forward_stdin(&mut self, backend: &mut PtyBackend) -> Result<()> {
+        if let Some(stdin) = &mut self.stdin {
+            stdin.forward_available(backend)?;
+        }
+        Ok(())
+    }
+
+    #[cfg(not(unix))]
+    fn forward_stdin(&mut self, backend: &mut PtyBackend) -> Result<()> {
+        if !is_raw_mode_enabled().unwrap_or(false) {
+            return Ok(());
+        }
+
+        while event::poll(Duration::from_millis(0))? {
+            match event::read()? {
+                Event::Key(key) => {
+                    if let Some(bytes) = passthrough_key_bytes(key) {
+                        backend.write_raw(&bytes)?;
+                    }
                 }
-                if let Some(bytes) = passthrough_key_bytes(key) {
-                    backend.write_raw(&bytes)?;
+                Event::Paste(text) => {
+                    backend.write_raw(&text)?;
                 }
+                Event::Resize(cols, rows) => {
+                    backend.resize(pty_size(cols, rows))?;
+                    self.last_size = Some((cols, rows));
+                }
+                _ => {}
             }
-            Event::Paste(text) => {
-                backend.write_raw(&text)?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+struct UnixStdinBridge {
+    fd: libc::c_int,
+    original_flags: libc::c_int,
+}
+
+#[cfg(unix)]
+impl UnixStdinBridge {
+    fn enter() -> Result<Option<Self>> {
+        if !is_raw_mode_enabled().unwrap_or(false) {
+            return Ok(None);
+        }
+        let fd = libc::STDIN_FILENO;
+        let original_flags = fcntl_getfl(fd)?;
+        fcntl_setfl(fd, original_flags | libc::O_NONBLOCK)?;
+        Ok(Some(Self { fd, original_flags }))
+    }
+
+    fn forward_available(&mut self, backend: &mut PtyBackend) -> Result<()> {
+        let mut buf = [0_u8; 4096];
+        loop {
+            let read =
+                unsafe { libc::read(self.fd, buf.as_mut_ptr().cast::<libc::c_void>(), buf.len()) };
+            if read > 0 {
+                backend.write_raw_bytes(&buf[..read as usize])?;
+                continue;
             }
-            Event::Resize(cols, rows) => {
-                backend.resize(crate::pty::pty_size(cols, rows))?;
+            if read == 0 {
+                return Ok(());
             }
-            _ => {}
+            let err = std::io::Error::last_os_error();
+            match err.kind() {
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted => return Ok(()),
+                _ => return Err(err.into()),
+            }
         }
     }
-    Ok(marker_may_need_reissue)
+}
+
+#[cfg(unix)]
+impl Drop for UnixStdinBridge {
+    fn drop(&mut self) {
+        let _ = fcntl_setfl(self.fd, self.original_flags);
+    }
+}
+
+#[cfg(unix)]
+fn fcntl_getfl(fd: libc::c_int) -> Result<libc::c_int> {
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags < 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
+    Ok(flags)
+}
+
+#[cfg(unix)]
+fn fcntl_setfl(fd: libc::c_int, flags: libc::c_int) -> Result<()> {
+    if unsafe { libc::fcntl(fd, libc::F_SETFL, flags) } < 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
+    Ok(())
 }
 
 fn handle_command_running_event(
+    bridge: &mut ForegroundPtyBridge,
     backend: &mut PtyBackend,
     out: &mut impl Write,
     event: PtyCommandEvent<'_>,
@@ -247,9 +388,7 @@ fn handle_command_running_event(
             out.flush()?;
             Ok(false)
         }
-        PtyCommandEvent::PollInput | PtyCommandEvent::Idle => {
-            forward_terminal_input_to_backend(backend)
-        }
+        PtyCommandEvent::PollInput | PtyCommandEvent::Idle => bridge.pump(backend),
     }
 }
 
@@ -278,26 +417,6 @@ pub(crate) fn write_command_output(out: &mut impl Write, output: &str) -> Result
 }
 
 fn write_command_output_bytes(out: &mut impl Write, output: &[u8]) -> Result<()> {
-    // PTY output is already terminal protocol. Adding display framing here can
-    // corrupt commands like `clear`: ESC[H ESC[2J followed by an Aish-added LF
-    // moves the prompt to row 1, leaving a blank first row.
     out.write_all(output)?;
-    if output_clears_visible_screen_bytes(output) {
-        write!(out, "\x1b[H")?;
-    }
     Ok(())
-}
-
-fn output_clears_visible_screen_bytes(output: &[u8]) -> bool {
-    output_clears_visible_screen(&String::from_utf8_lossy(output))
-}
-
-fn output_clears_visible_screen(output: &str) -> bool {
-    output.contains("\x1b[2J")
-        || output.contains("\x1bc")
-        || (output_contains_cursor_home(output) && output.contains("\x1b[J"))
-}
-
-fn output_contains_cursor_home(output: &str) -> bool {
-    output.contains("\x1b[H") || output.contains("\x1b[;H") || output.contains("\x1b[1;1H")
 }

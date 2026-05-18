@@ -299,14 +299,14 @@ fn execute_draft_does_not_send_line_leading_hash_to_backend_shell() {
 }
 
 #[test]
-fn editor_draft_can_send_line_leading_hash_to_shell() {
+fn editor_draft_line_leading_hash_uses_private_parser() {
     let _guard = pty_execution_guard();
     let temp = tempfile::tempdir().unwrap();
     let session = prepare_editor_file(temp.path(), "").unwrap();
     let marker = temp.path().join("editor-raw-ran");
     std::fs::write(
         &session.path,
-        format!("# shell comment\ntouch {}", marker.display()),
+        format!("#nosuch\ntouch {}", marker.display()),
     )
     .unwrap();
     let mut state = AppState::default();
@@ -322,8 +322,10 @@ fn editor_draft_can_send_line_leading_hash_to_shell() {
     )
     .unwrap();
 
-    assert!(marker.exists());
-    assert_eq!(state.last_status, Some(0));
+    let output = String::from_utf8(output).unwrap();
+    assert!(!marker.exists());
+    assert!(output.contains("Aish command not implemented yet: #nosuch"));
+    assert_eq!(state.last_status, None);
     assert!(!state.draft_from_editor);
     assert!(state.draft.is_empty());
 }

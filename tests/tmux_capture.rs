@@ -260,6 +260,27 @@ fn tmux_shell_clear_command_redraws_prompt_on_first_line() {
 }
 
 #[test]
+fn tmux_bash_then_clear_redraws_prompt_and_cursor_on_first_line() {
+    let Some(captured) = run_tmux_script("bash_then_clear_cursor.sh") else {
+        return;
+    };
+    assert!(
+        !captured.contains("nested bash command text"),
+        "captured pane still contained nested bash command text: {captured:?}"
+    );
+    assert_first_non_empty_line(&captured, 0);
+    assert_line_prefix(&captured, "cursor=");
+    let cursor = captured
+        .lines()
+        .find_map(|line| line.strip_prefix("cursor="))
+        .unwrap_or_default();
+    assert!(
+        cursor.ends_with(" 0"),
+        "cursor after bash then clear should be on row 0: {captured:?}"
+    );
+}
+
+#[test]
 fn tmux_completion_no_matches_remains_quiet_and_usable() {
     let Some(captured) = run_tmux_script("completion_no_matches.sh") else {
         return;
@@ -578,6 +599,15 @@ fn tmux_unknown_tui_passthrough_recovers_prompt() {
     };
     assert_line_present(&captured, "unknown-tui-key:x");
     assert_line_present(&captured, "after-unknown-tui");
+}
+
+#[test]
+fn tmux_passthrough_forwards_raw_function_key_bytes() {
+    let Some(captured) = run_tmux_script("passthrough_raw_key_sequences.sh") else {
+        return;
+    };
+    assert_line_prefix(&captured, "raw-key-hex:1b");
+    assert_line_present(&captured, "after-raw-key");
 }
 
 #[test]

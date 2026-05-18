@@ -990,36 +990,33 @@ fn ai_prompt_reports_config_error_without_crashing() {
 }
 
 #[test]
-fn command_output_does_not_add_newline_after_clear_home_sequence() {
+fn command_output_preserves_clear_home_sequence_verbatim() {
     let mut output = Vec::new();
 
     write_command_output(&mut output, "\x1b[H\x1b[2J\x1b[3J\x1b[H").unwrap();
 
     assert_eq!(
         String::from_utf8(output).unwrap(),
-        "\x1b[H\x1b[2J\x1b[3J\x1b[H\x1b[H"
+        "\x1b[H\x1b[2J\x1b[3J\x1b[H"
     );
 }
 
 #[test]
-fn command_output_does_not_add_newline_after_common_clear_sequence() {
+fn command_output_preserves_common_clear_sequence_verbatim() {
     let mut output = Vec::new();
 
     write_command_output(&mut output, "\x1b[H\x1b[2J").unwrap();
 
-    assert_eq!(String::from_utf8(output).unwrap(), "\x1b[H\x1b[2J\x1b[H");
+    assert_eq!(String::from_utf8(output).unwrap(), "\x1b[H\x1b[2J");
 }
 
 #[test]
-fn command_output_homes_cursor_after_terminfo_clear_sequence() {
+fn command_output_preserves_terminfo_clear_sequence_verbatim() {
     let mut output = Vec::new();
 
     write_command_output(&mut output, "\x1b[3J\x1b[H\x1b[2J").unwrap();
 
-    assert_eq!(
-        String::from_utf8(output).unwrap(),
-        "\x1b[3J\x1b[H\x1b[2J\x1b[H"
-    );
+    assert_eq!(String::from_utf8(output).unwrap(), "\x1b[3J\x1b[H\x1b[2J");
 }
 
 #[test]
@@ -1509,6 +1506,77 @@ fn ordinary_shell_exit_requests_clean_app_exit() {
     assert!(state.exit_requested);
     assert!(state.draft.is_empty());
     assert!(!output.contains("backend shell PTY closed"));
+}
+
+#[test]
+fn editor_draft_private_command_uses_aish_parser() {
+    let mut state = AppState::default();
+    state.draft.insert_str("#status");
+    state.draft_from_editor = true;
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.contains("Aish status"));
+    assert!(state.draft.is_empty());
+    assert!(!state.draft_from_editor);
+}
+
+#[test]
+fn editor_draft_shell_command_is_saved_to_regular_history() {
+    let temp = tempfile::tempdir().unwrap();
+    let regular_path = temp.path().join("history/regular.jsonl");
+    let mut state = AppState {
+        regular_history_path: Some(regular_path.clone()),
+        ..AppState::default()
+    };
+    state.draft.insert_str("printf 'editor-history\\n'");
+    state.draft_from_editor = true;
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    let loaded = load_jsonl::<HistoryEntry>(&regular_path).unwrap();
+    assert_eq!(loaded.items.len(), 1);
+    assert_eq!(loaded.items[0].command, "printf 'editor-history\\n'");
+    assert_eq!(loaded.items[0].exit_code, Some(0));
+}
+
+#[test]
+fn editor_draft_still_checks_shell_continuation() {
+    let mut state = AppState::default();
+    state.draft.insert_str("printf 'unterminated");
+    state.draft_from_editor = true;
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    assert_eq!(state.mode, Mode::Draft);
+    assert!(state.draft.as_str().ends_with('\n'));
+    assert!(state.continuation_prompt.is_some());
+    assert!(String::from_utf8(output).unwrap().is_empty());
 }
 
 #[test]

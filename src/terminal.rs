@@ -189,8 +189,7 @@ pub fn run(
             }
             TerminalEvent::Paste(text) => {
                 if apply_paste_to_state(&text, state) == PasteAction::Submit {
-                    let mut display_out = CrLfWriter::new(out);
-                    execute_draft(state, backend, &mut display_out, command_timeout)?;
+                    execute_draft(state, backend, out, command_timeout)?;
                     if state.exit_requested {
                         persist_draft_and_flush_before_exit(state, out)?;
                         return Ok(());
@@ -354,8 +353,7 @@ fn handle_key(
                 move_to_rendered_end(state, out, terminal_display_width())?;
                 invalidate_render_anchor(state);
                 write!(out, "\r\n")?;
-                let mut display_out = CrLfWriter::new(out);
-                execute_draft(state, backend, &mut display_out, command_timeout)?;
+                execute_draft(state, backend, out, command_timeout)?;
                 if state.exit_requested {
                     return Ok(true);
                 }

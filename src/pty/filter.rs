@@ -53,6 +53,21 @@ impl PtyOutputFilter {
         }
     }
 
+    pub(super) fn control_stream(filter_fish_repaint: bool, started_command: Option<&str>) -> Self {
+        Self {
+            marker: String::new(),
+            pending: Vec::new(),
+            deferred_separator: Vec::new(),
+            fish: filter_fish_repaint.then_some(FishOutputFilter {
+                command_active: true,
+                started_command: started_command.map(str::to_string),
+                held_segment: None,
+            }),
+            command_complete: false,
+            ready_completes_command: false,
+        }
+    }
+
     pub(super) fn push(&mut self, chunk: &[u8]) -> Vec<u8> {
         self.pending.extend_from_slice(chunk);
         let mut output = Vec::new();
@@ -352,7 +367,7 @@ fn command_contains_repaint_token(command: &str, line: &str) -> bool {
     {
         return command.contains(line);
     }
-    let line = line.trim_matches(['\'', '"', ';']);
+    let line = line.trim_matches(['\'', '"', ';', '|', '&', '<', '>']);
     let tokens: Vec<&str> = command
         .split(|ch: char| ch.is_whitespace() || matches!(ch, ';' | '|' | '&' | '<' | '>'))
         .map(|part| part.trim_matches(['\'', '"']))
@@ -372,7 +387,7 @@ fn is_fish_command_repaint_token(line: &str, command: &str) -> bool {
     if line.is_empty() || line == command || command.starts_with(line) {
         return true;
     }
-    let line = line.trim_matches(['\'', '"', ';']);
+    let line = line.trim_matches(['\'', '"', ';', '|', '&', '<', '>']);
     if line.is_empty() {
         return true;
     }

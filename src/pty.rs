@@ -1,18 +1,20 @@
 use std::fmt;
-use std::io::{Read, Write};
-use std::sync::mpsc::{self, Receiver};
+use std::io::Write;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
-use portable_pty::{MasterPty, NativePtySystem, PtySize, PtySystem};
 
+mod control;
 mod filter;
 mod launch;
 mod parser;
 mod protocol;
 mod syntax;
+#[cfg(unix)]
+mod unix_backend;
 
-use filter::PtyOutputFilter;
+use control::{CONTROL_FD, ControlChannel, ControlChannelClosed};
+use filter::{PtyOutputFilter, clean_fish_repaint_lines};
 pub use launch::resolve_shell;
 use launch::{ShellLaunch, shell_command_builder, shell_launch};
 use parser::{
@@ -21,6 +23,8 @@ use parser::{
 };
 use protocol::{next_marker, ready_marker, start_marker, status_marker_command};
 use syntax::input_needs_more_lines;
+#[cfg(unix)]
+use unix_backend::UnixPtyBackend;
 
 #[cfg(test)]
 use std::env;
@@ -40,13 +44,22 @@ pub struct CommandResult {
 }
 
 pub struct PtyBackend {
-    master: Box<dyn MasterPty + Send>,
+    pty: UnixPtyBackend,
     writer: Box<dyn Write + Send>,
-    output: Receiver<Vec<u8>>,
-    child: Box<dyn portable_pty::Child + Send + Sync>,
+    control: Option<ControlChannel>,
+    control_pending: Vec<u8>,
+    control_started_command: Option<String>,
     initial_cwd: Option<String>,
     shell_program: String,
     integration: ShellIntegration,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PtySize {
+    pub rows: u16,
+    pub cols: u16,
+    pub pixel_width: u16,
+    pub pixel_height: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -108,51 +121,53 @@ enum PtyReadEvent<'a> {
     Idle,
 }
 
+enum BackendReadEvent {
+    Pty(Vec<u8>),
+    Control,
+    Timeout,
+    Closed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ControlReady {
+    exit_code: i32,
+    cwd: String,
+    started_command: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ControlEvent {
+    Start(String),
+    Ready { exit_code: i32, cwd: String },
+}
+
 impl PtyBackend {
     pub fn spawn(configured_shell: &str) -> Result<Self> {
         let launch = shell_launch(configured_shell);
-        let pty_system = NativePtySystem::default();
-        let pair = pty_system
-            .openpty(default_pty_size())
-            .context("failed to create PTY")?;
+        let (control, child_control) = if launch.integration.supports_control_channel() {
+            let (control, child_control) = ControlChannel::create()?;
+            (Some(control), Some(child_control))
+        } else {
+            (None, None)
+        };
 
-        let command = shell_command_builder(&launch);
+        let command = shell_command_builder(&launch, control.as_ref().map(|_| CONTROL_FD));
+        let pty = UnixPtyBackend::spawn(
+            command,
+            default_pty_size(),
+            child_control.as_ref().map(|control| control.raw_fd()),
+        )
+        .with_context(|| format!("failed to spawn backend shell {}", launch.program))?;
+        drop(child_control);
 
-        let child = pair
-            .slave
-            .spawn_command(command)
-            .with_context(|| format!("failed to spawn backend shell {}", launch.program))?;
-        let mut reader = pair
-            .master
-            .try_clone_reader()
-            .context("failed to clone PTY reader")?;
-        let writer = pair
-            .master
-            .take_writer()
-            .context("failed to open PTY writer")?;
-        drop(pair.slave);
-
-        let (tx, rx) = mpsc::channel();
-        std::thread::spawn(move || {
-            let mut buf = [0_u8; 4096];
-            loop {
-                match reader.read(&mut buf) {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        if tx.send(buf[..n].to_vec()).is_err() {
-                            break;
-                        }
-                    }
-                    Err(_) => break,
-                }
-            }
-        });
+        let writer = pty.clone_writer()?;
 
         let mut backend = Self {
-            master: pair.master,
-            writer,
-            output: rx,
-            child,
+            pty,
+            writer: Box::new(writer),
+            control,
+            control_pending: Vec::new(),
+            control_started_command: None,
             initial_cwd: None,
             shell_program: launch.program.clone(),
             integration: launch.integration,
@@ -163,10 +178,17 @@ impl PtyBackend {
 
     fn initialize_shell(&mut self, launch: &ShellLaunch) -> Result<()> {
         self.write_raw(&launch.init_command)?;
-        let mut on_wait = no_wait;
-        let raw = self.read_until_ready(Duration::from_secs(5), &mut on_wait)?;
-        self.initial_cwd = parse_ready_cwd(&raw);
+        if self.uses_control_channel() {
+            let (raw, ready) =
+                self.read_until_control_ready(Some(Duration::from_secs(5)), |_, _| Ok(()))?;
+            self.initial_cwd = Some(ready.cwd).or_else(|| parse_ready_cwd(&raw));
+        } else {
+            let mut on_wait = no_wait;
+            let raw = self.read_until_ready(Duration::from_secs(5), &mut on_wait)?;
+            self.initial_cwd = parse_ready_cwd(&raw);
+        }
         let _ = self.drain_for(Duration::from_millis(150));
+        let _ = self.drain_control_events();
         Ok(())
     }
 
@@ -179,16 +201,20 @@ impl PtyBackend {
     }
 
     pub fn resize(&mut self, size: PtySize) -> Result<()> {
-        self.master.resize(size).context("failed to resize PTY")
+        self.pty.resize(size)
     }
 
     pub fn size(&self) -> Result<PtySize> {
-        self.master.get_size().context("failed to read PTY size")
+        self.pty.size()
     }
 
     pub fn write_raw(&mut self, text: &str) -> Result<()> {
+        self.write_raw_bytes(text.as_bytes())
+    }
+
+    pub fn write_raw_bytes(&mut self, bytes: &[u8]) -> Result<()> {
         self.writer
-            .write_all(text.as_bytes())
+            .write_all(bytes)
             .context("failed to write to PTY")?;
         self.writer.flush().context("failed to flush PTY")?;
         Ok(())
@@ -212,7 +238,9 @@ impl PtyBackend {
         F: FnMut(&mut Self) -> Result<bool>,
     {
         if self.uses_shell_events() {
-            if self.shell_events_require_marker_for(command) {
+            if self.uses_control_channel() {
+                return self.run_command_with_shell_events(command, timeout, &mut on_wait);
+            } else if self.shell_events_require_marker_for(command) {
                 return self.run_command_with_marker(command, timeout, &mut on_wait);
             }
             return self.run_command_with_shell_events(command, timeout, &mut on_wait);
@@ -276,10 +304,17 @@ impl PtyBackend {
         let backend_command = if timeout.is_none() {
             self.passthrough_backend_command(command)
         } else {
-            command.to_string()
+            self.shell_event_backend_command(command)
         };
         if self.uses_shell_events() {
-            if self.shell_events_require_marker_for(command) {
+            if self.uses_control_channel() {
+                return self.run_command_with_shell_events_streaming(
+                    command,
+                    &backend_command,
+                    timeout,
+                    on_event,
+                );
+            } else if self.shell_events_require_marker_for(command) {
                 return self.run_command_with_marker_events(
                     command,
                     &backend_command,
@@ -301,10 +336,29 @@ impl PtyBackend {
     fn passthrough_backend_command(&self, command: &str) -> String {
         let command = command.trim_end_matches('\n');
         match self.integration {
-            ShellIntegration::ZshHooks | ShellIntegration::FishEvents => command.to_string(),
+            ShellIntegration::ZshHooks | ShellIntegration::FishEvents => {
+                self.wrap_multiline_shell_event_command(command)
+            }
             ShellIntegration::BashPromptCommand | ShellIntegration::MarkerCommand => format!(
                 " stty echo; {{\n{command}\n}}; __aish_passthrough_status=$?; stty -echo; __aish_preserve_status \"$__aish_passthrough_status\""
             ),
+        }
+    }
+
+    fn shell_event_backend_command(&self, command: &str) -> String {
+        self.wrap_multiline_shell_event_command(command.trim_end_matches('\n'))
+    }
+
+    fn wrap_multiline_shell_event_command(&self, command: &str) -> String {
+        if !command.contains('\n') {
+            return command.to_string();
+        }
+        match self.integration {
+            ShellIntegration::BashPromptCommand | ShellIntegration::ZshHooks => {
+                format!("{{\n{command}\n}}")
+            }
+            ShellIntegration::FishEvents => format!("begin\n{command}\nend"),
+            ShellIntegration::MarkerCommand => command.to_string(),
         }
     }
 
@@ -315,6 +369,10 @@ impl PtyBackend {
                 | ShellIntegration::ZshHooks
                 | ShellIntegration::FishEvents
         )
+    }
+
+    fn uses_control_channel(&self) -> bool {
+        self.control.is_some()
     }
 
     fn shell_events_require_marker_for(&self, command: &str) -> bool {
@@ -490,15 +548,15 @@ impl PtyBackend {
                 .map(|deadline| deadline.saturating_duration_since(now))
                 .unwrap_or_else(|| Duration::from_millis(50))
                 .min(Duration::from_millis(50));
-            match self.output.recv_timeout(remaining) {
-                Ok(chunk) => {
+            match self.read_next_event(remaining, false)? {
+                BackendReadEvent::Pty(chunk) => {
                     data.extend_from_slice(&chunk);
                     on_event(self, PtyReadEvent::Chunk(&chunk))?;
                 }
-                Err(mpsc::RecvTimeoutError::Timeout) => {
+                BackendReadEvent::Timeout | BackendReadEvent::Control => {
                     on_event(self, PtyReadEvent::Idle)?;
                 }
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                BackendReadEvent::Closed => {
                     return Err(BackendShellClosed.into());
                 }
             }
@@ -515,9 +573,21 @@ impl PtyBackend {
         F: FnMut(&mut Self) -> Result<bool>,
     {
         let _ = self.drain_for(Duration::from_millis(25));
-        self.write_raw(command)?;
-        if !command.ends_with('\n') {
+        let backend_command = self.shell_event_backend_command(command);
+        self.prepare_control_command()?;
+        self.write_raw(&backend_command)?;
+        if !backend_command.ends_with('\n') {
             self.write_raw("\n")?;
+        }
+
+        if self.uses_control_channel() {
+            let (raw, ready) = self.read_until_control_ready(Some(timeout), |backend, event| {
+                if let PtyReadEvent::Idle = event {
+                    let _ = on_wait(backend)?;
+                }
+                Ok(())
+            })?;
+            return Ok(self.command_result_from_control(command, &backend_command, raw, ready));
         }
 
         let raw = self.read_until_ready(timeout, on_wait)?;
@@ -548,9 +618,51 @@ impl PtyBackend {
         F: FnMut(&mut Self, PtyCommandEvent<'_>) -> Result<bool>,
     {
         let _ = self.drain_for(Duration::from_millis(25));
+        self.prepare_control_command()?;
         self.write_raw(backend_command)?;
         if !backend_command.ends_with('\n') {
             self.write_raw("\n")?;
+        }
+
+        if self.uses_control_channel() {
+            let mut output_filter = timeout.is_some().then(|| {
+                PtyOutputFilter::control_stream(
+                    self.integration == ShellIntegration::FishEvents,
+                    Some(command.trim_end_matches('\n')),
+                )
+            });
+            let (raw, ready) = self.read_until_control_ready(timeout, |backend, event| {
+                match event {
+                    PtyReadEvent::Chunk(chunk) => {
+                        if let Some(output_filter) = &mut output_filter {
+                            let display = output_filter.push(chunk);
+                            if !display.is_empty() {
+                                let _ = on_event(backend, PtyCommandEvent::Output(&display))?;
+                            }
+                        } else {
+                            let _ = on_event(backend, PtyCommandEvent::Output(chunk))?;
+                        }
+                        let _ = on_event(backend, PtyCommandEvent::PollInput)?;
+                    }
+                    PtyReadEvent::Idle => {
+                        if let Some(output_filter) = &mut output_filter {
+                            let display = output_filter.flush_pending();
+                            if !display.is_empty() {
+                                let _ = on_event(backend, PtyCommandEvent::Output(&display))?;
+                            }
+                        }
+                        let _ = on_event(backend, PtyCommandEvent::Idle)?;
+                    }
+                }
+                Ok(())
+            })?;
+            if let Some(output_filter) = &mut output_filter {
+                let display = output_filter.flush_pending();
+                if !display.is_empty() {
+                    let _ = on_event(self, PtyCommandEvent::Output(&display))?;
+                }
+            }
+            return Ok(self.command_result_from_control(command, backend_command, raw, ready));
         }
 
         let raw = self.read_until_ready_streaming(timeout, on_event)?;
@@ -617,17 +729,281 @@ impl PtyBackend {
         })
     }
 
+    fn read_until_control_ready<F>(
+        &mut self,
+        timeout: Option<Duration>,
+        mut on_event: F,
+    ) -> Result<(String, ControlReady)>
+    where
+        F: FnMut(&mut Self, PtyReadEvent<'_>) -> Result<()>,
+    {
+        let deadline = timeout.map(|timeout| Instant::now() + timeout);
+        let mut data = Vec::new();
+        loop {
+            if let Some(ready) = self.next_control_ready()? {
+                self.drain_available_pty_output(&mut data, &mut on_event)?;
+                return Ok((String::from_utf8_lossy(&data).into_owned(), ready));
+            }
+            let now = Instant::now();
+            if let Some(deadline) = deadline
+                && now >= deadline
+            {
+                bail!("timed out waiting for backend shell control marker");
+            }
+            let remaining = deadline
+                .map(|deadline| deadline.saturating_duration_since(now))
+                .unwrap_or_else(|| Duration::from_millis(10))
+                .min(Duration::from_millis(10));
+            match self.read_next_event(remaining, true)? {
+                BackendReadEvent::Pty(chunk) => {
+                    data.extend_from_slice(&chunk);
+                    on_event(self, PtyReadEvent::Chunk(&chunk))?;
+                }
+                BackendReadEvent::Control | BackendReadEvent::Timeout => {
+                    on_event(self, PtyReadEvent::Idle)?;
+                }
+                BackendReadEvent::Closed => {
+                    return Err(BackendShellClosed.into());
+                }
+            }
+        }
+    }
+
+    fn drain_available_pty_output<F>(&mut self, data: &mut Vec<u8>, on_event: &mut F) -> Result<()>
+    where
+        F: FnMut(&mut Self, PtyReadEvent<'_>) -> Result<()>,
+    {
+        loop {
+            match self.read_next_event(Duration::from_millis(0), false)? {
+                BackendReadEvent::Pty(chunk) => {
+                    data.extend_from_slice(&chunk);
+                    on_event(self, PtyReadEvent::Chunk(&chunk))?;
+                }
+                BackendReadEvent::Timeout | BackendReadEvent::Control => return Ok(()),
+                BackendReadEvent::Closed => return Err(BackendShellClosed.into()),
+            }
+        }
+    }
+
+    fn prepare_control_command(&mut self) -> Result<()> {
+        if self.uses_control_channel() {
+            let _ = self.drain_control_events()?;
+            self.control_started_command = None;
+        }
+        Ok(())
+    }
+
+    fn next_control_ready(&mut self) -> Result<Option<ControlReady>> {
+        for event in self.drain_control_events()? {
+            match event {
+                ControlEvent::Start(command) => {
+                    self.control_started_command = (!command.is_empty()).then_some(command);
+                }
+                ControlEvent::Ready { exit_code, cwd } => {
+                    return Ok(Some(ControlReady {
+                        exit_code,
+                        cwd,
+                        started_command: self.control_started_command.take(),
+                    }));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    fn drain_control_events(&mut self) -> Result<Vec<ControlEvent>> {
+        self.read_control_available()?;
+
+        let mut events = Vec::new();
+        while let Some(end) = self.control_pending.iter().position(|byte| *byte == b'\n') {
+            let line: Vec<u8> = self.control_pending.drain(..=end).collect();
+            let line = String::from_utf8_lossy(&line);
+            if let Some(event) = parse_control_event(&line) {
+                events.push(event);
+            }
+        }
+        Ok(events)
+    }
+
+    fn read_control_available(&mut self) -> Result<()> {
+        if let Some(control) = &mut self.control {
+            match control.read_available() {
+                Ok(chunks) => {
+                    for chunk in chunks {
+                        self.control_pending.extend_from_slice(&chunk);
+                    }
+                }
+                Err(error) if error.downcast_ref::<ControlChannelClosed>().is_some() => {
+                    return Err(BackendShellClosed.into());
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(())
+    }
+
+    fn command_result_from_control(
+        &self,
+        command: &str,
+        backend_command: &str,
+        raw: String,
+        ready: ControlReady,
+    ) -> CommandResult {
+        let started_command = if backend_command == command {
+            ready
+                .started_command
+                .or_else(|| Some(command.trim_end_matches('\n').to_string()))
+        } else {
+            Some(command.trim_end_matches('\n').to_string())
+        };
+        let output = self.output_from_control_raw(&raw, started_command.as_deref());
+        CommandResult {
+            command: command.trim_end_matches('\n').to_string(),
+            started_command,
+            output,
+            exit_code: ready.exit_code,
+            cwd: Some(ready.cwd),
+        }
+    }
+
+    fn output_from_control_raw(&self, raw: &str, started_command: Option<&str>) -> String {
+        let normalized = normalize_pty_newlines(raw);
+        if self.integration != ShellIntegration::FishEvents {
+            return normalized.trim_start_matches('\n').to_string();
+        }
+
+        let output_ended_with_newline = normalized.ends_with('\n');
+        let mut lines: Vec<String> = normalized.lines().map(str::to_string).collect();
+        lines = clean_fish_repaint_lines(lines, started_command);
+        while lines.first().is_some_and(|line| line.is_empty()) {
+            lines.remove(0);
+        }
+        while lines.last().is_some_and(|line| line.is_empty()) {
+            lines.pop();
+        }
+        if lines.is_empty() {
+            String::new()
+        } else if output_ended_with_newline {
+            format!("{}\n", lines.join("\n"))
+        } else {
+            lines.join("\n")
+        }
+    }
+
     fn drain_for(&mut self, duration: Duration) -> String {
         let deadline = Instant::now() + duration;
         let mut data = Vec::new();
         while Instant::now() < deadline {
-            match self.output.recv_timeout(Duration::from_millis(10)) {
-                Ok(chunk) => data.extend(chunk),
-                Err(_) => break,
+            match self.read_next_event(Duration::from_millis(10), self.uses_control_channel()) {
+                Ok(BackendReadEvent::Pty(chunk)) => data.extend(chunk),
+                Ok(BackendReadEvent::Control | BackendReadEvent::Timeout) => break,
+                Ok(BackendReadEvent::Closed) | Err(_) => break,
             }
         }
         String::from_utf8_lossy(&data).into_owned()
     }
+
+    fn read_next_event(
+        &mut self,
+        timeout: Duration,
+        include_control: bool,
+    ) -> Result<BackendReadEvent> {
+        let pty_fd = self.pty.raw_fd();
+        let mut fds = [
+            libc::pollfd {
+                fd: pty_fd,
+                events: libc::POLLIN | libc::POLLHUP | libc::POLLERR,
+                revents: 0,
+            },
+            libc::pollfd {
+                fd: self
+                    .control
+                    .as_ref()
+                    .filter(|_| include_control)
+                    .map(ControlChannel::raw_fd)
+                    .unwrap_or(-1),
+                events: libc::POLLIN | libc::POLLHUP | libc::POLLERR,
+                revents: 0,
+            },
+        ];
+        let nfds = if include_control && self.control.is_some() {
+            2
+        } else {
+            1
+        };
+        let timeout_ms = duration_to_poll_timeout_ms(timeout);
+        loop {
+            let ready = unsafe { libc::poll(fds.as_mut_ptr(), nfds, timeout_ms) };
+            if ready > 0 {
+                break;
+            }
+            if ready == 0 {
+                return Ok(BackendReadEvent::Timeout);
+            }
+            let err = std::io::Error::last_os_error();
+            if err.kind() != std::io::ErrorKind::Interrupted {
+                return Err(err).context("failed to poll PTY");
+            }
+        }
+
+        let control_ready = nfds == 2 && pollfd_has_event(fds[1].revents);
+        if pollfd_has_event(fds[0].revents) {
+            let event = match self.pty.read_chunk()? {
+                Some(chunk) if chunk.is_empty() => Ok(BackendReadEvent::Timeout),
+                Some(chunk) => Ok(BackendReadEvent::Pty(chunk)),
+                None => Ok(BackendReadEvent::Closed),
+            };
+            if control_ready {
+                self.read_control_available()?;
+            }
+            return event;
+        }
+
+        if control_ready {
+            self.read_control_available()?;
+            return Ok(BackendReadEvent::Control);
+        }
+
+        Ok(BackendReadEvent::Timeout)
+    }
+}
+
+impl ShellIntegration {
+    fn supports_control_channel(self) -> bool {
+        matches!(
+            self,
+            ShellIntegration::BashPromptCommand
+                | ShellIntegration::ZshHooks
+                | ShellIntegration::FishEvents
+        )
+    }
+}
+
+fn parse_control_event(line: &str) -> Option<ControlEvent> {
+    let line = line.trim_matches(['\r', '\n']);
+    let start_prefix = format!("{}\t", start_marker());
+    if let Some(command) = line.strip_prefix(&start_prefix) {
+        return Some(ControlEvent::Start(command.to_string()));
+    }
+
+    let ready_prefix = format!("{}\t", ready_marker());
+    let rest = line.strip_prefix(&ready_prefix)?;
+    let mut parts = rest.splitn(2, '\t');
+    let exit_code = parts.next()?.trim().parse::<i32>().ok()?;
+    let cwd = parts.next()?.trim_end().to_string();
+    (!cwd.is_empty()).then_some(ControlEvent::Ready { exit_code, cwd })
+}
+
+fn normalize_pty_newlines(raw: &str) -> String {
+    raw.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+fn pollfd_has_event(revents: i16) -> bool {
+    revents & (libc::POLLIN | libc::POLLHUP | libc::POLLERR) != 0
+}
+
+fn duration_to_poll_timeout_ms(duration: Duration) -> libc::c_int {
+    duration.as_millis().min(libc::c_int::MAX as u128) as libc::c_int
 }
 
 pub fn pty_size(cols: u16, rows: u16) -> PtySize {
@@ -652,12 +1028,6 @@ fn default_pty_size() -> PtySize {
             .filter(|rows| *rows > 0)
             .unwrap_or(24),
     )
-}
-
-impl Drop for PtyBackend {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-    }
 }
 
 fn no_wait(_: &mut PtyBackend) -> Result<bool> {
