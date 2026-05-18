@@ -12,7 +12,8 @@ use crate::display_width::display_width;
 use crate::editor::EditorCommand;
 use crate::encrypted_writer::EncryptedWriteQueue;
 use crate::encryption::{
-    append_encrypted_jsonl, gpg_decrypt_file, load_encrypted_jsonl, rewrite_encrypted_jsonl,
+    append_encrypted_jsonl, atomic_gpg_encrypt_bytes, gpg_decrypt_file, load_encrypted_jsonl,
+    rewrite_encrypted_jsonl,
 };
 use crate::history::{
     AiCommandIndex, AiItem, AiItemKind, AiSession, HistoryEntry, HistorySource, NoteEntry,
@@ -50,6 +51,29 @@ fn write_fake_gpg(temp: &tempfile::TempDir) -> PathBuf {
     write_executable_file(
         &fake_gpg,
         "#!/bin/sh\nmode=encrypt\nout=\"\"\ninput=\"\"\nrecipient=\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"\nlast=\"\"\nfor arg in \"$@\"; do\n  last=\"$arg\"\n  if [ \"$arg\" = \"--version\" ]; then printf 'fake gpg\\n'; exit 0; fi\ndone\nfor arg in \"$@\"; do\n  if [ \"$arg\" = \"--list-keys\" ]; then\n    fpr='AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'\n    uid='Test User <test@example.invalid>'\n    case \"$last\" in\n      *BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB*|second@example.invalid) fpr='BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB'; uid='Second User <second@example.invalid>' ;;\n    esac\n    printf '%s\\n' 'pub:u:255:22:1111111111111111:1:::u:::scESC::::::23::0:'\n    printf 'fpr:::::::::%s:\\n' \"$fpr\"\n    printf 'uid:u::::1::hash::%s:::::::::0:\\n' \"$uid\"\n    exit 0\n  fi\ndone\nwhile [ \"$#\" -gt 0 ]; do\n  case \"$1\" in\n    --decrypt) mode=decrypt ;;\n    --output) shift; out=\"$1\" ;;\n    --recipient) shift; recipient=\"$1\" ;;\n    --trust-model|--pinentry-mode) shift ;;\n    --batch|--yes|--no-tty|--encrypt|--with-colons|--fingerprint|error) ;;\n    *) input=\"$1\" ;;\n  esac\n  shift\ndone\nif [ \"$mode\" = decrypt ]; then\n  count=$(grep -c '^recipient:' \"$input\" || true)\n  if [ \"$count\" -gt 1 ]; then\n    printf 'gpg: WARNING: multiple plaintexts seen\\n' >&2\n    printf 'gpg: decryption failed: Bad data\\n' >&2\n    exit 2\n  fi\n  sed '1{/^recipient:/d;}' \"$input\"\nelse\n  { printf 'recipient:%s\\n' \"$recipient\"; cat \"$input\"; } > \"$out\"\nfi\n",
+    );
+    fake_gpg
+}
+
+#[cfg(unix)]
+fn write_decrypt_marker_fake_gpg(temp: &tempfile::TempDir, fail_decrypt_marker: &Path) -> PathBuf {
+    let fake_gpg = temp.path().join("marker-gpg");
+    write_executable_file(
+        &fake_gpg,
+        format!(
+            "#!/bin/sh\nmode=encrypt\nout=\"\"\ninput=\"\"\nrecipient=\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"\nwhile [ \"$#\" -gt 0 ]; do\n  case \"$1\" in\n    --decrypt) mode=decrypt ;;\n    --output) shift; out=\"$1\" ;;\n    --recipient) shift; recipient=\"$1\" ;;\n    --trust-model|--pinentry-mode) shift ;;\n    --batch|--yes|--no-tty|--encrypt|always|error) ;;\n    *) input=\"$1\" ;;\n  esac\n  shift\ndone\nif [ \"$mode\" = decrypt ]; then\n  if [ -f '{}' ]; then\n    printf 'decrypt disabled\\n' >&2\n    exit 9\n  fi\n  sed '1{{/^recipient:/d;}}' \"$input\"\nelse\n  {{ printf 'recipient:%s\\n' \"$recipient\"; cat \"$input\"; }} > \"$out\"\nfi\n",
+            fail_decrypt_marker.display()
+        ),
+    );
+    fake_gpg
+}
+
+#[cfg(unix)]
+fn write_failing_ai_encrypt_gpg(temp: &tempfile::TempDir) -> PathBuf {
+    let fake_gpg = temp.path().join("fail-ai-encrypt-gpg");
+    write_executable_file(
+        &fake_gpg,
+        "#!/bin/sh\nmode=encrypt\nout=\"\"\ninput=\"\"\nrecipient=\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"\nlast=\"\"\nfor arg in \"$@\"; do\n  last=\"$arg\"\n  if [ \"$arg\" = \"--version\" ]; then printf 'fake gpg\\n'; exit 0; fi\ndone\nfor arg in \"$@\"; do\n  if [ \"$arg\" = \"--list-keys\" ]; then\n    printf '%s\\n' 'pub:u:255:22:1111111111111111:1:::u:::scESC::::::23::0:'\n    printf '%s\\n' 'fpr:::::::::AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA:'\n    printf '%s\\n' 'uid:u::::1::hash::Test User <test@example.invalid>::::::::::0:'\n    exit 0\n  fi\ndone\nwhile [ \"$#\" -gt 0 ]; do\n  case \"$1\" in\n    --decrypt) mode=decrypt ;;\n    --output) shift; out=\"$1\" ;;\n    --recipient) shift; recipient=\"$1\" ;;\n    --trust-model|--pinentry-mode) shift ;;\n    --batch|--yes|--no-tty|--encrypt|--with-colons|--fingerprint|always|error) ;;\n    *) input=\"$1\" ;;\n  esac\n  shift\ndone\nif [ \"$mode\" = decrypt ]; then\n  sed '1{/^recipient:/d;}' \"$input\"\nelse\n  case \"$out\" in\n    *history/ai.jsonl.gpg.tmp) printf 'planned encrypt failure\\n' >&2; exit 9 ;;\n  esac\n  { printf 'recipient:%s\\n' \"$recipient\"; cat \"$input\"; } > \"$out\"\nfi\n",
     );
     fake_gpg
 }
@@ -3152,6 +3176,78 @@ fn encrypt_on_migrates_plaintext_storage_and_persists_config() {
 
 #[test]
 #[cfg(unix)]
+fn encrypt_on_restores_plaintext_storage_when_migration_fails() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let fake_gpg = write_failing_ai_encrypt_gpg(&temp);
+    unsafe {
+        std::env::set_var("AISH_GPG", &fake_gpg);
+    }
+    let config_path = temp.path().join("config.toml");
+    let regular_path = temp.path().join("history/regular.jsonl");
+    let ai_path = temp.path().join("history/ai.jsonl");
+    config::save_config(&config_path, &config::Config::default()).unwrap();
+    append_jsonl(
+        &regular_path,
+        &HistoryEntry {
+            t: 1,
+            command: "pwd".to_string(),
+            exit_code: Some(0),
+            source: HistorySource::User,
+        },
+    )
+    .unwrap();
+    append_jsonl(
+        &ai_path,
+        &AiSession {
+            id: "ai-1".to_string(),
+            t: 2,
+            prompt: "list".to_string(),
+            ctx: false,
+            model: "test".to_string(),
+            items: vec![AiItem {
+                kind: AiItemKind::Command,
+                text: "ls".to_string(),
+                name: None,
+            }],
+        },
+    )
+    .unwrap();
+    let mut state = AppState {
+        config_path: Some(config_path.clone()),
+        regular_history_path: Some(regular_path.clone()),
+        ai_history_path: Some(ai_path.clone()),
+        ..AppState::default()
+    };
+    state.draft.insert_str("#encrypt on test@example.invalid");
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    unsafe {
+        std::env::remove_var("AISH_GPG");
+    }
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.contains("Error: GPG encryption failed"));
+    assert!(regular_path.exists());
+    assert!(ai_path.exists());
+    assert!(!crate::encryption::encrypted_path(&regular_path).exists());
+    assert!(!crate::encryption::encrypted_path(&ai_path).exists());
+    let loaded = load_jsonl::<HistoryEntry>(&regular_path).unwrap();
+    assert_eq!(loaded.items[0].command, "pwd");
+    let ai_loaded = load_jsonl::<AiSession>(&ai_path).unwrap();
+    assert_eq!(ai_loaded.items[0].prompt, "list");
+}
+
+#[test]
+#[cfg(unix)]
 fn encrypt_rotate_reencrypts_existing_storage_and_persists_fingerprint() {
     let _guard = ENV_LOCK.lock().unwrap();
     let temp = tempfile::tempdir().unwrap();
@@ -3161,6 +3257,7 @@ fn encrypt_rotate_reencrypts_existing_storage_and_persists_fingerprint() {
     }
     let config_path = temp.path().join("config.toml");
     let regular_path = temp.path().join("history/regular.jsonl");
+    let key_path = temp.path().join("secrets/key.json.gpg");
     let mut config = config::Config::default();
     config.encryption.enabled = true;
     config.encryption.key_fingerprint = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string();
@@ -3177,9 +3274,17 @@ fn encrypt_rotate_reencrypts_existing_storage_and_persists_fingerprint() {
         }],
     )
     .unwrap();
+    atomic_gpg_encrypt_bytes(
+        fake_gpg.display().to_string(),
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        &key_path,
+        br#"{"env_key":"AISH_TEST_API_KEY","value":"secret-test-key"}"#,
+    )
+    .unwrap();
     let mut state = AppState {
         config_path: Some(config_path.clone()),
         regular_history_path: Some(regular_path.clone()),
+        secret_key_path: Some(key_path.clone()),
         encryption_config: config.encryption,
         ..AppState::default()
     };
@@ -3213,6 +3318,11 @@ fn encrypt_rotate_reencrypts_existing_storage_and_persists_fingerprint() {
     );
     let encrypted = fs::read_to_string(crate::encryption::encrypted_path(&regular_path)).unwrap();
     assert!(encrypted.starts_with("recipient:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\n"));
+    let encrypted_key = fs::read_to_string(&key_path).unwrap();
+    assert!(encrypted_key.starts_with("recipient:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\n"));
+    let decrypted_key = gpg_decrypt_file(fake_gpg.display().to_string(), &key_path).unwrap();
+    let record: StoredApiKey = serde_json::from_slice(&decrypted_key).unwrap();
+    assert_eq!(record.value, "secret-test-key");
     assert!(!regular_path.exists());
 }
 
@@ -3319,6 +3429,72 @@ fn encrypted_history_append_does_not_block_command_completion() {
             .unwrap();
     assert_eq!(loaded.items.len(), 1);
     assert_eq!(loaded.items[0].command, "echo async-encrypted-history");
+}
+
+#[test]
+#[cfg(unix)]
+fn encrypted_history_trim_refreshes_writer_cache_before_next_append() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let fail_decrypt_marker = temp.path().join("fail-decrypt");
+    let fake_gpg = write_decrypt_marker_fake_gpg(&temp, &fail_decrypt_marker);
+    unsafe {
+        std::env::set_var("AISH_GPG", &fake_gpg);
+    }
+    let regular_path = temp.path().join("history/regular.jsonl");
+    let ai_path = temp.path().join("history/ai.jsonl");
+    rewrite_encrypted_jsonl(
+        fake_gpg.display().to_string(),
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        &regular_path,
+        &[
+            HistoryEntry {
+                t: 1,
+                command: "old".to_string(),
+                exit_code: Some(0),
+                source: HistorySource::User,
+            },
+            HistoryEntry {
+                t: 2,
+                command: "keep".to_string(),
+                exit_code: Some(0),
+                source: HistorySource::User,
+            },
+        ],
+    )
+    .unwrap();
+    let mut state = AppState {
+        regular_history_path: Some(regular_path.clone()),
+        ai_history_path: Some(ai_path),
+        encryption_config: EncryptionConfig {
+            enabled: true,
+            key_fingerprint: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
+            startup_unlock: config::EncryptionStartupUnlockMode::Lazy,
+            recipient: String::new(),
+        },
+        encrypted_writer: Some(EncryptedWriteQueue::start(
+            fake_gpg.display().to_string(),
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
+            HashMap::new(),
+        )),
+        ..AppState::default()
+    };
+
+    trim_history_for_state(&state, 1).unwrap();
+    fs::write(&fail_decrypt_marker, b"fail future decrypts\n").unwrap();
+    record_completed_command(&mut state, "new".to_string(), String::new(), 0, false).unwrap();
+    state.flush_encrypted_writes().unwrap();
+    fs::remove_file(&fail_decrypt_marker).unwrap();
+    let loaded =
+        load_encrypted_jsonl::<HistoryEntry>(fake_gpg.display().to_string(), &regular_path)
+            .unwrap();
+
+    unsafe {
+        std::env::remove_var("AISH_GPG");
+    }
+    assert_eq!(loaded.items.len(), 2);
+    assert_eq!(loaded.items[0].command, "keep");
+    assert_eq!(loaded.items[1].command, "new");
 }
 
 #[test]

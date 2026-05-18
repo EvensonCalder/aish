@@ -40,6 +40,9 @@ enum EncryptedWriteJob {
         path: PathBuf,
         bytes: Vec<u8>,
     },
+    ReplaceCache {
+        entries: HashMap<PathBuf, Vec<u8>>,
+    },
     Invalidate {
         paths: Vec<PathBuf>,
     },
@@ -125,6 +128,15 @@ impl EncryptedWriteQueue {
             .context("encrypted write queue is not running")
     }
 
+    pub fn replace_cache(&self, entries: HashMap<PathBuf, Vec<u8>>) -> Result<()> {
+        if entries.is_empty() {
+            return Ok(());
+        }
+        self.sender
+            .send(EncryptedWriteJob::ReplaceCache { entries })
+            .context("encrypted write queue is not running")
+    }
+
     pub fn flush(&self) -> Result<()> {
         let (reply, receiver) = mpsc::channel();
         self.sender
@@ -207,6 +219,11 @@ fn run_worker(
             EncryptedWriteJob::Invalidate { paths } => {
                 for path in paths {
                     cache.remove(&path);
+                }
+            }
+            EncryptedWriteJob::ReplaceCache { entries } => {
+                for (path, bytes) in entries {
+                    cache.insert(path, bytes);
                 }
             }
             EncryptedWriteJob::Flush { reply } => {

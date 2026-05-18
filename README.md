@@ -521,11 +521,11 @@ Current behavior:
 - A full GPG key fingerprint is the stable key identity. An email/user ID is accepted only when GPG resolves it to exactly one public key.
 - `#encrypt on` migrates managed history, notes, drafts, AI history, and templates to `*.jsonl.gpg` files and removes the plaintext JSONL files after successful encryption.
 - If encryption is already enabled and the target fingerprint changes, Aish decrypts the existing managed encrypted files and re-encrypts them for the new fingerprint.
-- `#encrypt rotate <key>` explicitly re-encrypts current managed storage for a new fingerprint.
+- `#encrypt rotate <key>` explicitly re-encrypts current managed storage for a new fingerprint. If `secrets/key.json.gpg` exists, the stored API key is re-encrypted for the new fingerprint too.
 - `#encrypt unlock-mode lazy|prompt` selects startup behavior. `lazy` starts immediately and unlocks old encrypted history/templates in the background when possible; `prompt` requires interactive GPG/pinentry unlock before the Aish prompt opens.
 - Future writes go to encrypted JSONL files while encryption is enabled. Normal history, draft, note, AI, and template appends are queued through a serialized background encrypted writer so command output and prompt redraws do not wait for GPG. Appends update one complete encrypted JSONL payload from the unlocked plaintext cache rather than concatenating multiple GPG messages.
 - Aish flushes pending encrypted writes before exit, `#push`, `#history`, `#encrypt off`, key rotation, and confirmed history rewrite. A background write completion wakes the frontend tick path and refreshes live completion UI.
-- Direct decrypt operations that may need a passphrase, including stored-key fallback, `#encrypt off`, key rotation, and confirmed history rewrite, enter a dedicated unlock passthrough state. Aish clears stale completion UI, yields terminal control to GPG/pinentry, sets `GPG_TTY` when possible, and restores the previous Aish mode when the operation completes or fails.
+- Direct decrypt operations that may need a passphrase, including stored-key fallback, `#encrypt off`, key rotation, and confirmed history rewrite, enter a dedicated unlock passthrough state. Aish clears stale completion UI, yields terminal control to GPG/pinentry, sets `GPG_TTY` when possible, and restores the previous Aish mode when the operation completes or fails. Current-storage encryption changes snapshot managed files first and restore them if a migration step fails.
 - In lazy startup mode, Aish tries to unlock history/templates in the background using noninteractive GPG so startup does not block on passphrase entry. If `gpg-agent` can decrypt without prompting, history/templates load automatically. If a passphrase is needed, old history/templates stay locked, history/AI views can show `history is still unlocking...`, and `#unlock` runs the interactive GPG/pinentry passthrough.
 - Commands entered before lazy startup unlock completes remain usable. If old encrypted storage is still locked, new appends are buffered in memory and merged into encrypted storage when `#unlock` succeeds; old data-dependent views stay locked until then.
 - `#encrypt off` decrypts managed encrypted JSONL files back to plaintext and disables encrypted writes.
@@ -553,7 +553,7 @@ To rotate to a new key:
 #encrypt rotate FEDCBA9876543210FEDCBA9876543210FEDCBA98
 ```
 
-This rewrites current managed storage by decrypting with the available old private key and encrypting to the new fingerprint. Git history is not rewritten automatically.
+This rewrites current managed storage by decrypting with the available old private key and encrypting to the new fingerprint. If a stored API key exists, it is re-encrypted for the new fingerprint. Git history is not rewritten automatically.
 
 To inspect the manual Git history rewrite flow:
 

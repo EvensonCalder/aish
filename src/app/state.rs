@@ -811,6 +811,13 @@ impl AppState {
         Ok(())
     }
 
+    pub fn replace_encrypted_writer_cache(&self, entries: HashMap<PathBuf, Vec<u8>>) -> Result<()> {
+        if let Some(writer) = &self.encrypted_writer {
+            writer.replace_cache(entries)?;
+        }
+        Ok(())
+    }
+
     pub fn drain_encrypted_write_events(&mut self) -> bool {
         let Some(writer) = &self.encrypted_writer else {
             return false;

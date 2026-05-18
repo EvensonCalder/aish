@@ -13,8 +13,7 @@ use crate::config::{
 use crate::encryption::{
     atomic_gpg_encrypt_bytes, encrypted_path, encryption_git_history_warning,
     enter_gpg_terminal_passthrough, existing_jsonl_bytes, gpg_decrypt_file, gpg_program,
-    migrate_gpg_jsonl_to_plaintext, migrate_plaintext_jsonl_to_gpg, reencrypt_gpg_jsonl,
-    resolve_gpg_key_fingerprint,
+    migrate_plaintext_jsonl_to_gpg, reencrypt_gpg_jsonl, resolve_gpg_key_fingerprint,
 };
 use crate::log::EventLevel;
 use crate::sync::GitCommandPlan;
@@ -203,17 +202,31 @@ fn enable_encryption(
     }
 
     let fingerprint = resolve_gpg_key_fingerprint(gpg_program(), &selector)?;
-    state.flush_encrypted_writes()?;
-    let encrypted_cache =
-        state.run_unlock_passthrough(|state| encrypted_writer_cache_from_storage(state))?;
     let current_key = configured_encryption_key(&state.encryption_config).to_string();
-    let summary = state.run_unlock_passthrough(|state| {
-        rewrite_storage_for_encryption_key(state, &current_key, &fingerprint)
-    })?;
-    set_encryption_config(state, |config| {
-        config.encryption.enabled = true;
-        config.encryption.key_fingerprint = fingerprint.clone();
-        config.encryption.recipient.clear();
+    state.flush_encrypted_writes()?;
+    let (encrypted_cache, summary) = state.run_unlock_passthrough(|state| {
+        let managed = ManagedStorageSnapshot::capture(state)?;
+        let stored_key = if current_key != fingerprint {
+            StoredKeySnapshot::capture(state)?
+        } else {
+            None
+        };
+        let encrypted_cache = managed.encrypted_writer_cache();
+        let summary = run_with_storage_rollback(&managed, stored_key.as_ref(), || {
+            let mut summary = managed.rewrite_for_encryption_key(&current_key, &fingerprint)?;
+            if let Some(stored_key) = stored_key.as_ref()
+                && stored_key.reencrypt_if_needed(&current_key, &fingerprint)?
+            {
+                summary.stored_key_reencrypted += 1;
+            }
+            set_encryption_config(state, |config| {
+                config.encryption.enabled = true;
+                config.encryption.key_fingerprint = fingerprint.clone();
+                config.encryption.recipient.clear();
+            })?;
+            Ok(summary)
+        })?;
+        Ok((encrypted_cache, summary))
     })?;
     state.start_encrypted_writer_with_cache(encrypted_cache);
     writeln!(out, "{}", encryption_git_history_warning())?;
@@ -248,18 +261,32 @@ fn rotate_encryption_key(
         return Ok(());
     };
 
+    let current_key = configured_encryption_key(&state.encryption_config).to_string();
     let fingerprint = resolve_gpg_key_fingerprint(gpg_program(), selector)?;
     state.flush_encrypted_writes()?;
-    let encrypted_cache =
-        state.run_unlock_passthrough(|state| encrypted_writer_cache_from_storage(state))?;
-    let current_key = configured_encryption_key(&state.encryption_config).to_string();
-    let summary = state.run_unlock_passthrough(|state| {
-        rewrite_storage_for_encryption_key(state, &current_key, &fingerprint)
-    })?;
-    set_encryption_config(state, |config| {
-        config.encryption.enabled = true;
-        config.encryption.key_fingerprint = fingerprint.clone();
-        config.encryption.recipient.clear();
+    let (encrypted_cache, summary) = state.run_unlock_passthrough(|state| {
+        let managed = ManagedStorageSnapshot::capture(state)?;
+        let stored_key = if current_key != fingerprint {
+            StoredKeySnapshot::capture(state)?
+        } else {
+            None
+        };
+        let encrypted_cache = managed.encrypted_writer_cache();
+        let summary = run_with_storage_rollback(&managed, stored_key.as_ref(), || {
+            let mut summary = managed.rewrite_for_encryption_key(&current_key, &fingerprint)?;
+            if let Some(stored_key) = stored_key.as_ref()
+                && stored_key.reencrypt_if_needed(&current_key, &fingerprint)?
+            {
+                summary.stored_key_reencrypted += 1;
+            }
+            set_encryption_config(state, |config| {
+                config.encryption.enabled = true;
+                config.encryption.key_fingerprint = fingerprint.clone();
+                config.encryption.recipient.clear();
+            })?;
+            Ok(summary)
+        })?;
+        Ok((encrypted_cache, summary))
     })?;
     state.start_encrypted_writer_with_cache(encrypted_cache);
     writeln!(out, "encryption=on")?;
@@ -275,11 +302,26 @@ fn disable_encryption(state: &mut AppState, out: &mut impl Write) -> Result<()> 
     }
 
     state.flush_encrypted_writes()?;
-    state.stop_encrypted_writer();
-    state.run_unlock_passthrough(|state| migrate_storage_to_plaintext(state))?;
-    set_encryption_config(state, |config| {
-        config.encryption.enabled = false;
-    })?;
+    let mut restart_cache = None;
+    let result = state.run_unlock_passthrough(|state| {
+        let managed = ManagedStorageSnapshot::capture(state)?;
+        restart_cache = Some(managed.encrypted_writer_cache());
+        state.stop_encrypted_writer();
+        run_with_storage_rollback(&managed, None, || {
+            managed.migrate_to_plaintext()?;
+            set_encryption_config(state, |config| {
+                config.encryption.enabled = false;
+            })
+        })
+    });
+    if let Err(error) = result {
+        if state.encryption_config.enabled
+            && let Some(cache) = restart_cache
+        {
+            state.start_encrypted_writer_with_cache(cache);
+        }
+        return Err(error);
+    }
     writeln!(out, "encryption=off")?;
     writeln!(
         out,
@@ -319,42 +361,294 @@ struct EncryptionRewriteSummary {
     reencrypted: usize,
     already_encrypted: usize,
     missing: usize,
+    stored_key_reencrypted: usize,
 }
 
-fn rewrite_storage_for_encryption_key(
-    state: &AppState,
-    old_key: &str,
-    new_key: &str,
-) -> Result<EncryptionRewriteSummary> {
-    let mut summary = EncryptionRewriteSummary::default();
-    for path in encrypted_storage_paths(state) {
-        let encrypted = encrypted_path(&path);
-        match (path.exists(), encrypted.exists()) {
-            (true, true) => {
-                anyhow::bail!(
-                    "both plaintext and encrypted storage exist for {}; resolve this before changing encryption keys",
-                    path.display()
-                );
-            }
-            (true, false) => {
-                if migrate_plaintext_jsonl_to_gpg(gpg_program(), new_key, &path)? {
-                    summary.plaintext_encrypted += 1;
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ManagedStorageFileSnapshot {
+    Missing {
+        plaintext_path: PathBuf,
+        encrypted_path: PathBuf,
+    },
+    Plaintext {
+        plaintext_path: PathBuf,
+        encrypted_path: PathBuf,
+        plaintext_bytes: Vec<u8>,
+    },
+    Encrypted {
+        plaintext_path: PathBuf,
+        encrypted_path: PathBuf,
+        encrypted_bytes: Vec<u8>,
+        plaintext_bytes: Vec<u8>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ManagedStorageSnapshot {
+    files: Vec<ManagedStorageFileSnapshot>,
+}
+
+impl ManagedStorageSnapshot {
+    fn capture(state: &AppState) -> Result<Self> {
+        let program = gpg_program();
+        let mut files = Vec::new();
+        for plaintext_path in encrypted_storage_paths(state) {
+            let encrypted_path = encrypted_path(&plaintext_path);
+            match (plaintext_path.exists(), encrypted_path.exists()) {
+                (true, true) => {
+                    anyhow::bail!(
+                        "both plaintext and encrypted storage exist for {}; resolve this before changing encryption keys",
+                        plaintext_path.display()
+                    );
                 }
-            }
-            (false, true) if old_key != new_key => {
-                if reencrypt_gpg_jsonl(gpg_program(), new_key, &path)? {
-                    summary.reencrypted += 1;
+                (true, false) => {
+                    let plaintext_bytes = fs::read(&plaintext_path).with_context(|| {
+                        format!("failed to read plaintext file {}", plaintext_path.display())
+                    })?;
+                    files.push(ManagedStorageFileSnapshot::Plaintext {
+                        plaintext_path,
+                        encrypted_path,
+                        plaintext_bytes,
+                    });
                 }
-            }
-            (false, true) => {
-                summary.already_encrypted += 1;
-            }
-            (false, false) => {
-                summary.missing += 1;
+                (false, true) => {
+                    let encrypted_bytes = fs::read(&encrypted_path).with_context(|| {
+                        format!("failed to read encrypted file {}", encrypted_path.display())
+                    })?;
+                    let plaintext_bytes = gpg_decrypt_file(&program, &encrypted_path)
+                        .with_context(|| {
+                            format!(
+                                "failed to decrypt encrypted JSONL file {}",
+                                encrypted_path.display()
+                            )
+                        })?;
+                    files.push(ManagedStorageFileSnapshot::Encrypted {
+                        plaintext_path,
+                        encrypted_path,
+                        encrypted_bytes,
+                        plaintext_bytes,
+                    });
+                }
+                (false, false) => {
+                    files.push(ManagedStorageFileSnapshot::Missing {
+                        plaintext_path,
+                        encrypted_path,
+                    });
+                }
             }
         }
+        Ok(Self { files })
     }
-    Ok(summary)
+
+    fn encrypted_writer_cache(&self) -> HashMap<PathBuf, Vec<u8>> {
+        self.files
+            .iter()
+            .map(|file| match file {
+                ManagedStorageFileSnapshot::Missing { plaintext_path, .. } => {
+                    (plaintext_path.clone(), Vec::new())
+                }
+                ManagedStorageFileSnapshot::Plaintext {
+                    plaintext_path,
+                    plaintext_bytes,
+                    ..
+                }
+                | ManagedStorageFileSnapshot::Encrypted {
+                    plaintext_path,
+                    plaintext_bytes,
+                    ..
+                } => (plaintext_path.clone(), plaintext_bytes.clone()),
+            })
+            .collect()
+    }
+
+    fn rewrite_for_encryption_key(
+        &self,
+        old_key: &str,
+        new_key: &str,
+    ) -> Result<EncryptionRewriteSummary> {
+        let program = gpg_program();
+        let mut summary = EncryptionRewriteSummary::default();
+        for file in &self.files {
+            match file {
+                ManagedStorageFileSnapshot::Missing { .. } => {
+                    summary.missing += 1;
+                }
+                ManagedStorageFileSnapshot::Plaintext {
+                    plaintext_path,
+                    encrypted_path,
+                    plaintext_bytes,
+                } => {
+                    atomic_gpg_encrypt_bytes(
+                        program.clone(),
+                        new_key,
+                        encrypted_path,
+                        plaintext_bytes,
+                    )?;
+                    remove_file_if_present(plaintext_path)?;
+                    summary.plaintext_encrypted += 1;
+                }
+                ManagedStorageFileSnapshot::Encrypted {
+                    encrypted_path,
+                    plaintext_bytes,
+                    ..
+                } if old_key != new_key => {
+                    atomic_gpg_encrypt_bytes(
+                        program.clone(),
+                        new_key,
+                        encrypted_path,
+                        plaintext_bytes,
+                    )?;
+                    summary.reencrypted += 1;
+                }
+                ManagedStorageFileSnapshot::Encrypted { .. } => {
+                    summary.already_encrypted += 1;
+                }
+            }
+        }
+        Ok(summary)
+    }
+
+    fn migrate_to_plaintext(&self) -> Result<()> {
+        for file in &self.files {
+            match file {
+                ManagedStorageFileSnapshot::Missing { .. } => {}
+                ManagedStorageFileSnapshot::Plaintext { .. } => {}
+                ManagedStorageFileSnapshot::Encrypted {
+                    plaintext_path,
+                    encrypted_path,
+                    plaintext_bytes,
+                    ..
+                } => {
+                    write_private_file(plaintext_path, plaintext_bytes)?;
+                    remove_file_if_present(encrypted_path)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn restore(&self) -> Result<()> {
+        for file in &self.files {
+            match file {
+                ManagedStorageFileSnapshot::Missing {
+                    plaintext_path,
+                    encrypted_path,
+                } => {
+                    remove_file_if_present(plaintext_path)?;
+                    remove_file_if_present(encrypted_path)?;
+                }
+                ManagedStorageFileSnapshot::Plaintext {
+                    plaintext_path,
+                    encrypted_path,
+                    plaintext_bytes,
+                } => {
+                    write_private_file(plaintext_path, plaintext_bytes)?;
+                    remove_file_if_present(encrypted_path)?;
+                }
+                ManagedStorageFileSnapshot::Encrypted {
+                    plaintext_path,
+                    encrypted_path,
+                    encrypted_bytes,
+                    ..
+                } => {
+                    write_private_file(encrypted_path, encrypted_bytes)?;
+                    remove_file_if_present(plaintext_path)?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum StoredKeySnapshot {
+    Missing {
+        path: PathBuf,
+    },
+    Encrypted {
+        path: PathBuf,
+        encrypted_bytes: Vec<u8>,
+        plaintext_bytes: Vec<u8>,
+    },
+}
+
+impl StoredKeySnapshot {
+    fn capture(state: &AppState) -> Result<Option<Self>> {
+        let Some(path) = &state.secret_key_path else {
+            return Ok(None);
+        };
+        if !path.exists() {
+            return Ok(Some(Self::Missing { path: path.clone() }));
+        }
+        let encrypted_bytes = fs::read(path)
+            .with_context(|| format!("failed to read encrypted stored key {}", path.display()))?;
+        let plaintext_bytes = gpg_decrypt_file(gpg_program(), path)
+            .with_context(|| format!("failed to decrypt stored key {}", path.display()))?;
+        Ok(Some(Self::Encrypted {
+            path: path.clone(),
+            encrypted_bytes,
+            plaintext_bytes,
+        }))
+    }
+
+    fn reencrypt_if_needed(&self, old_key: &str, new_key: &str) -> Result<bool> {
+        if old_key == new_key {
+            return Ok(false);
+        }
+        let Self::Encrypted {
+            path,
+            plaintext_bytes,
+            ..
+        } = self
+        else {
+            return Ok(false);
+        };
+        atomic_gpg_encrypt_bytes(gpg_program(), new_key, path, plaintext_bytes)?;
+        Ok(true)
+    }
+
+    fn restore(&self) -> Result<()> {
+        match self {
+            Self::Missing { path } => remove_file_if_present(path),
+            Self::Encrypted {
+                path,
+                encrypted_bytes,
+                ..
+            } => write_private_file(path, encrypted_bytes),
+        }
+    }
+}
+
+fn run_with_storage_rollback<T>(
+    managed: &ManagedStorageSnapshot,
+    stored_key: Option<&StoredKeySnapshot>,
+    operation: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    match operation() {
+        Ok(value) => Ok(value),
+        Err(error) => {
+            let restore_result = managed.restore().and_then(|()| {
+                if let Some(stored_key) = stored_key {
+                    stored_key.restore()?;
+                }
+                Ok(())
+            });
+            if let Err(restore_error) = restore_result {
+                anyhow::bail!(
+                    "{error}; additionally failed to restore encryption storage after the error: {restore_error}"
+                );
+            }
+            Err(error)
+        }
+    }
+}
+
+fn remove_file_if_present(path: &Path) -> Result<()> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err).with_context(|| format!("failed to remove file {}", path.display())),
+    }
 }
 
 fn write_encryption_rewrite_summary(
@@ -368,6 +662,11 @@ fn write_encryption_rewrite_summary(
     )?;
     writeln!(out, "reencrypted_files={}", summary.reencrypted)?;
     writeln!(out, "already_encrypted_files={}", summary.already_encrypted)?;
+    writeln!(
+        out,
+        "stored_key_reencrypted={}",
+        summary.stored_key_reencrypted
+    )?;
     Ok(())
 }
 
@@ -465,6 +764,11 @@ fn run_encryption_history_rewrite(
     }
 
     let fingerprint = resolve_gpg_key_fingerprint(gpg_program(), key_selector)?;
+    let stored_key = if current_key != fingerprint {
+        state.run_unlock_passthrough(|state| StoredKeySnapshot::capture(state))?
+    } else {
+        None
+    };
     let script_path = write_history_rewrite_script(&root, state)?;
     let backup_ref = format!(
         "aish/rewrite-backup/{}-{}",
@@ -498,9 +802,14 @@ fn run_encryption_history_rewrite(
         );
     }
 
-    let untracked = state.run_unlock_passthrough(|state| {
+    let mut untracked = state.run_unlock_passthrough(|state| {
         rewrite_untracked_storage_for_encryption_key(state, &root, &current_key, &fingerprint)
     })?;
+    if let Some(stored_key) = stored_key.as_ref()
+        && stored_key.reencrypt_if_needed(&current_key, &fingerprint)?
+    {
+        untracked.stored_key_reencrypted += 1;
+    }
     set_encryption_config(state, |config| {
         config.encryption.enabled = true;
         config.encryption.key_fingerprint = fingerprint.clone();
@@ -649,13 +958,6 @@ fn managed_relative_storage_paths(root: &Path, state: &AppState) -> Result<Vec<S
 
 fn shell_single_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
-}
-
-fn migrate_storage_to_plaintext(state: &AppState) -> Result<()> {
-    for path in encrypted_storage_paths(state) {
-        migrate_gpg_jsonl_to_plaintext(gpg_program(), path)?;
-    }
-    Ok(())
 }
 
 fn encrypted_storage_paths(state: &AppState) -> Vec<PathBuf> {

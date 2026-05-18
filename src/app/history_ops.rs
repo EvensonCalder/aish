@@ -1,6 +1,10 @@
 use anyhow::Result;
 
-use crate::encryption::{gpg_program, load_encrypted_jsonl, rewrite_encrypted_jsonl};
+use std::collections::HashMap;
+
+use crate::encryption::{
+    gpg_program, jsonl_bytes, load_encrypted_jsonl, rewrite_encrypted_jsonl_bytes,
+};
 use crate::history::{
     AiItemKind, AiSession, HistoryEntry, TrimHistoryLoad, load_jsonl, trim_combined_history,
 };
@@ -49,19 +53,24 @@ pub(super) fn trim_history_for_state(state: &AppState, count: usize) -> Result<T
     }
     trimmed_ai_sessions.reverse();
 
-    rewrite_encrypted_jsonl(
+    let regular_bytes = jsonl_bytes(&trimmed_regular, regular_path)?;
+    let ai_bytes = jsonl_bytes(&trimmed_ai_sessions, ai_path)?;
+    rewrite_encrypted_jsonl_bytes(
         gpg_program(),
         configured_encryption_key(&state.encryption_config),
         regular_path,
-        &trimmed_regular,
+        &regular_bytes,
     )?;
-    rewrite_encrypted_jsonl(
+    rewrite_encrypted_jsonl_bytes(
         gpg_program(),
         configured_encryption_key(&state.encryption_config),
         ai_path,
-        &trimmed_ai_sessions,
+        &ai_bytes,
     )?;
-    state.invalidate_encrypted_writer_cache(vec![regular_path.clone(), ai_path.clone()])?;
+    state.replace_encrypted_writer_cache(HashMap::from([
+        (regular_path.clone(), regular_bytes),
+        (ai_path.clone(), ai_bytes),
+    ]))?;
 
     Ok(TrimHistoryLoad {
         regular,
