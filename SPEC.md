@@ -778,6 +778,8 @@ For non-first-token completion:
 - History argument candidates are ordered newest to oldest.
 - File/path candidates must accurately represent the underlying filesystem entry.
 - File/path matching should use the shell word value for lookup while preserving safe shell input on acceptance. Quoted and backslash-escaped typed paths must continue to match, and accepted replacements must escape unquoted shell metacharacters or close the user's current quote style. Leading `~/` should expand to HOME only when the `~` is unquoted and unescaped; quoted or escaped `~/` is a literal path component.
+- File/path matching may resolve missing intermediate directory components component-wise. It should prefer exact existing directory components, then directory-prefix matches, then directory typo correction when `completion.fuzzy = true`; accepted replacements must still preserve shell-safe quoting/escaping for Bash, Zsh, and Fish.
+- Hidden path entries should be ordered after visible entries for the same path query without hiding them entirely.
 - Regular files must not be presented as directories.
 - Symbolic links that resolve to directories should be presented as directory candidates.
 - Directory candidates should use a trailing `/` so users can distinguish them from files.

@@ -152,6 +152,7 @@ Important rules:
 - Structural history/template matches use `completion.match_threshold_percent` as a word-position match rate. The default is `50`, so one matching word out of two typed words is enough.
 - Completion lexes shell-like words for matching while preserving the original history/template text for display and insertion. Quoted or escaped arguments such as `"hello world"`, `a"b c"d`, and `hello\ world` remain one shell word when accepted.
 - Filesystem path completion matches against the shell word value, so quoted or backslash-escaped spaces work while typing. Accepted path replacements are escaped or quote-closed for the current word style instead of inserting raw shell metacharacters. `~/` is treated as HOME only when the leading `~` is unquoted and unescaped.
+- Path completion can resolve missing intermediate directory components by exact directory descent, directory-prefix matches, and directory typo correction when fuzzy completion is enabled. Hidden entries are shown after visible entries for the same query.
 - Typo correction is separate and uses `completion.typo_threshold_percent`; accepting a typo candidate replaces the mistyped command with the corrected command.
 - `# ` AI prompts stay quiet. `#cmd` input only offers Aish private command names, and private command arguments use the same completion UI for nested subcommands such as `#completion mode tab` or `#encrypt rewrite-history plan`.
 
@@ -162,7 +163,7 @@ Completion sources:
 - After a trailing space, Aish uses structural template/history matches and does not show unrelated filesystem entries for the empty token.
 - Template completions use newest stored templates first.
 - Paths preserve directory prefixes and mark directories with `/`. Matching local directories are kept ahead of lower-priority argument/history fallbacks, and recent directory scans are cached briefly while typing.
-- With `completion.fuzzy=true`, Aish can also correct local directory typos such as `./srd` to `./src/`.
+- With `completion.fuzzy=true`, Aish can also correct local directory typos such as `./srd` to `./src/` and intermediate path typos such as `srd/ma` to `src/main.rs`.
 - Live completion is layered: cheap local path candidates can be found immediately, template/history/PATH executable matching arrives from a background worker, and slower typo-correction results can update the same UI later. Stale worker results are ignored when the input changes.
 
 Configuration:

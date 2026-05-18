@@ -13,6 +13,7 @@ use super::{
 
 const PATH_COMPLETION_CACHE_MAX_AGE: Duration = Duration::from_millis(250);
 const PATH_COMPLETION_CACHE_MAX_DIRS: usize = 128;
+const PATH_COMPLETION_MAX_COMPONENT_BASES: usize = 32;
 
 pub fn complete_path(token: &str, cwd: &Path) -> Vec<CompletionCandidate> {
     complete_path_internal(token, cwd, None)
@@ -39,29 +40,75 @@ fn complete_path_internal(
         return Vec::new();
     };
     let literal_leading_tilde = token_value.starts_with("~/") && !home_tilde_active;
-    let entries = cached_path_entries(&search_dir);
+    let bases = if search_dir.is_dir() {
+        vec![PathCompletionBase {
+            search_dir,
+            display_dir: dir_token.to_string(),
+        }]
+    } else {
+        component_completion_bases(
+            dir_token,
+            cwd,
+            home_tilde_active,
+            typo_options.unwrap_or_default(),
+        )
+    };
 
+    let mut candidates =
+        complete_path_from_bases(&bases, prefix, quote, literal_leading_tilde, typo_options);
+    sort_path_candidates(&mut candidates);
+    dedupe_completion_candidates(&mut candidates);
+    candidates
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PathCompletionBase {
+    search_dir: PathBuf,
+    display_dir: String,
+}
+
+fn complete_path_from_bases(
+    bases: &[PathCompletionBase],
+    prefix: &str,
+    quote: Option<char>,
+    literal_leading_tilde: bool,
+    typo_options: Option<CompletionOptions>,
+) -> Vec<CompletionCandidate> {
     let mut candidates = Vec::new();
-    for entry in &entries {
-        if !entry.name.starts_with(prefix) {
-            continue;
+    let mut seen_prefix_directory = false;
+
+    for base in bases {
+        let entries = cached_path_entries(&base.search_dir);
+        for entry in &entries {
+            if !entry.name.starts_with(prefix) {
+                continue;
+            }
+            if entry.is_dir {
+                seen_prefix_directory = true;
+            }
+            let display = format_path_display(&base.display_dir, &entry.name, entry.is_dir);
+            candidates.push(CompletionCandidate {
+                replacement: path_replacement(quote, &display, literal_leading_tilde),
+                display,
+                is_dir: entry.is_dir,
+                source: CompletionSource::Path,
+            });
         }
-        let suffix = if entry.is_dir { "/" } else { "" };
-        let display = format!("{dir_token}{}{suffix}", entry.name);
-        let replacement = path_replacement(quote, &display, literal_leading_tilde);
-        candidates.push(CompletionCandidate {
-            display,
-            replacement,
-            is_dir: entry.is_dir,
-            source: CompletionSource::Path,
-        });
     }
 
-    let has_prefix_directory = candidates.iter().any(|candidate| candidate.is_dir);
-    if !has_prefix_directory
-        && let Some(options) = typo_options
-        && options.fuzzy_enabled
-    {
+    if seen_prefix_directory {
+        return candidates;
+    }
+
+    let Some(options) = typo_options else {
+        return candidates;
+    };
+    if !options.fuzzy_enabled {
+        return candidates;
+    }
+
+    for base in bases {
+        let entries = cached_path_entries(&base.search_dir);
         for entry in &entries {
             if !entry.is_dir
                 || entry.name.starts_with(prefix)
@@ -69,7 +116,7 @@ fn complete_path_internal(
             {
                 continue;
             }
-            let display = format!("{dir_token}{}/", entry.name);
+            let display = format_path_display(&base.display_dir, &entry.name, true);
             candidates.push(CompletionCandidate {
                 replacement: path_replacement(quote, &display, literal_leading_tilde),
                 display,
@@ -78,9 +125,162 @@ fn complete_path_internal(
             });
         }
     }
-    candidates.sort_by(|left, right| left.display.cmp(&right.display));
-    dedupe_completion_candidates(&mut candidates);
+
     candidates
+}
+
+fn component_completion_bases(
+    dir_token: &str,
+    cwd: &Path,
+    expand_home_tilde: bool,
+    options: CompletionOptions,
+) -> Vec<PathCompletionBase> {
+    let Some(root) = component_completion_root(dir_token, cwd, expand_home_tilde) else {
+        return Vec::new();
+    };
+    let mut bases = vec![PathCompletionBase {
+        search_dir: root.search_dir,
+        display_dir: root.display_dir,
+    }];
+
+    for component in root.components {
+        let mut next = Vec::new();
+        for base in &bases {
+            next.extend(intermediate_directory_matches(base, &component, options));
+            if next.len() >= PATH_COMPLETION_MAX_COMPONENT_BASES {
+                break;
+            }
+        }
+        dedupe_path_completion_bases(&mut next);
+        next.truncate(PATH_COMPLETION_MAX_COMPONENT_BASES);
+        if next.is_empty() {
+            return Vec::new();
+        }
+        bases = next;
+    }
+
+    bases
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ComponentCompletionRoot {
+    search_dir: PathBuf,
+    display_dir: String,
+    components: Vec<String>,
+}
+
+fn component_completion_root(
+    dir_token: &str,
+    cwd: &Path,
+    expand_home_tilde: bool,
+) -> Option<ComponentCompletionRoot> {
+    let trimmed = dir_token.trim_end_matches('/');
+    if trimmed.is_empty() {
+        return Some(ComponentCompletionRoot {
+            search_dir: cwd.to_path_buf(),
+            display_dir: String::new(),
+            components: Vec::new(),
+        });
+    }
+
+    if expand_home_tilde && let Some(rest) = trimmed.strip_prefix("~/") {
+        let home = std::env::var_os("HOME").map(PathBuf::from)?;
+        return Some(ComponentCompletionRoot {
+            search_dir: home,
+            display_dir: "~/".to_string(),
+            components: path_components(rest),
+        });
+    }
+
+    if trimmed == "~" {
+        return Some(ComponentCompletionRoot {
+            search_dir: cwd.to_path_buf(),
+            display_dir: String::new(),
+            components: vec!["~".to_string()],
+        });
+    }
+
+    if let Some(rest) = trimmed.strip_prefix('/') {
+        return Some(ComponentCompletionRoot {
+            search_dir: PathBuf::from("/"),
+            display_dir: "/".to_string(),
+            components: path_components(rest),
+        });
+    }
+
+    Some(ComponentCompletionRoot {
+        search_dir: cwd.to_path_buf(),
+        display_dir: String::new(),
+        components: path_components(trimmed),
+    })
+}
+
+fn path_components(value: &str) -> Vec<String> {
+    value
+        .split('/')
+        .filter(|component| !component.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn intermediate_directory_matches(
+    base: &PathCompletionBase,
+    component: &str,
+    options: CompletionOptions,
+) -> Vec<PathCompletionBase> {
+    if component.is_empty() {
+        return vec![base.clone()];
+    }
+
+    let exact_path = base.search_dir.join(component);
+    if exact_path.is_dir() {
+        return vec![PathCompletionBase {
+            search_dir: exact_path,
+            display_dir: format_path_display(&base.display_dir, component, true),
+        }];
+    }
+
+    let entries = cached_path_entries(&base.search_dir);
+    let mut matches = Vec::new();
+    for entry in &entries {
+        if !entry.is_dir || !entry.name.starts_with(component) {
+            continue;
+        }
+        matches.push(PathCompletionBase {
+            search_dir: base.search_dir.join(&entry.name),
+            display_dir: format_path_display(&base.display_dir, &entry.name, true),
+        });
+    }
+
+    if !matches.is_empty() || !options.fuzzy_enabled {
+        sort_path_completion_bases(&mut matches);
+        return matches;
+    }
+
+    for entry in &entries {
+        if !entry.is_dir
+            || entry.name.starts_with(component)
+            || !directory_typo_matches(&entry.name, component, options)
+        {
+            continue;
+        }
+        matches.push(PathCompletionBase {
+            search_dir: base.search_dir.join(&entry.name),
+            display_dir: format_path_display(&base.display_dir, &entry.name, true),
+        });
+    }
+    sort_path_completion_bases(&mut matches);
+    matches
+}
+
+fn format_path_display(display_dir: &str, name: &str, is_dir: bool) -> String {
+    let mut display = String::with_capacity(display_dir.len() + name.len() + usize::from(is_dir));
+    display.push_str(display_dir);
+    display.push_str(name);
+    if is_dir {
+        display.push('/');
+    }
+    display
 }
 
 fn home_tilde_expansion_is_active(raw_token: &str) -> bool {
@@ -233,6 +433,43 @@ fn prune_path_completion_cache(cache: &mut HashMap<PathBuf, PathCompletionCacheE
         };
         cache.remove(&oldest);
     }
+}
+
+fn sort_path_candidates(candidates: &mut [CompletionCandidate]) {
+    candidates.sort_by(|left, right| {
+        path_candidate_is_hidden(left)
+            .cmp(&path_candidate_is_hidden(right))
+            .then(left.display.cmp(&right.display))
+    });
+}
+
+fn path_candidate_is_hidden(candidate: &CompletionCandidate) -> bool {
+    last_path_component(&candidate.display).is_some_and(|component| {
+        component.starts_with('.') && component != "." && component != ".."
+    })
+}
+
+fn sort_path_completion_bases(bases: &mut [PathCompletionBase]) {
+    bases.sort_by(|left, right| {
+        path_display_dir_is_hidden(&left.display_dir)
+            .cmp(&path_display_dir_is_hidden(&right.display_dir))
+            .then(left.display_dir.cmp(&right.display_dir))
+    });
+}
+
+fn path_display_dir_is_hidden(display_dir: &str) -> bool {
+    last_path_component(display_dir.trim_end_matches('/')).is_some_and(|component| {
+        component.starts_with('.') && component != "." && component != ".."
+    })
+}
+
+fn last_path_component(path: &str) -> Option<&str> {
+    path.rsplit('/').find(|component| !component.is_empty())
+}
+
+fn dedupe_path_completion_bases(bases: &mut Vec<PathCompletionBase>) {
+    let mut seen = HashSet::new();
+    bases.retain(|base| seen.insert((base.search_dir.clone(), base.display_dir.clone())));
 }
 
 fn directory_typo_matches(candidate: &str, typed: &str, options: CompletionOptions) -> bool {

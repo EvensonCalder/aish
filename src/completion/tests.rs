@@ -134,6 +134,107 @@ fn complete_path_uses_relative_directory_prefix() {
     );
 }
 
+#[test]
+fn complete_path_completes_prefix_intermediate_directory_component() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir(temp.path().join("src")).unwrap();
+    std::fs::write(temp.path().join("src/main.rs"), "").unwrap();
+
+    assert_eq!(
+        complete_path("sr/ma", temp.path()),
+        [CompletionCandidate {
+            display: "src/main.rs".to_string(),
+            replacement: "src/main.rs".to_string(),
+            is_dir: false,
+            source: CompletionSource::Path,
+        }]
+    );
+}
+
+#[test]
+fn complete_path_corrects_typo_intermediate_directory_component() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir(temp.path().join("src")).unwrap();
+    std::fs::write(temp.path().join("src/main.rs"), "").unwrap();
+
+    assert_eq!(
+        complete_path("srd/ma", temp.path()),
+        [CompletionCandidate {
+            display: "src/main.rs".to_string(),
+            replacement: "src/main.rs".to_string(),
+            is_dir: false,
+            source: CompletionSource::Path,
+        }]
+    );
+}
+
+#[test]
+fn complete_non_first_token_intermediate_directory_typos_respect_fuzzy_switch() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir(temp.path().join("src")).unwrap();
+    std::fs::write(temp.path().join("src/main.rs"), "").unwrap();
+
+    let candidates = complete_non_first_token_for_line_with_options(
+        "cat srd/ma",
+        "cat srd/ma".len(),
+        temp.path(),
+        &[],
+        &[],
+        CompletionOptions {
+            fuzzy_enabled: false,
+            ..CompletionOptions::default()
+        },
+    );
+
+    assert!(candidates.is_empty());
+}
+
+#[test]
+fn complete_non_first_token_intermediate_directory_prefixes_ignore_fuzzy_switch() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir(temp.path().join("src")).unwrap();
+    std::fs::write(temp.path().join("src/main.rs"), "").unwrap();
+
+    let candidates = complete_non_first_token_for_line_with_options(
+        "cat sr/ma",
+        "cat sr/ma".len(),
+        temp.path(),
+        &[],
+        &[],
+        CompletionOptions {
+            fuzzy_enabled: false,
+            ..CompletionOptions::default()
+        },
+    );
+
+    assert_eq!(
+        candidates,
+        [CompletionCandidate {
+            display: "src/main.rs".to_string(),
+            replacement: "src/main.rs".to_string(),
+            is_dir: false,
+            source: CompletionSource::Path,
+        }]
+    );
+}
+
+#[test]
+fn complete_path_preserves_relative_dot_prefix_for_component_completion() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir(temp.path().join("src")).unwrap();
+    std::fs::write(temp.path().join("src/main.rs"), "").unwrap();
+
+    assert_eq!(
+        complete_path("./sr/ma", temp.path()),
+        [CompletionCandidate {
+            display: "./src/main.rs".to_string(),
+            replacement: "./src/main.rs".to_string(),
+            is_dir: false,
+            source: CompletionSource::Path,
+        }]
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn complete_path_marks_symlinked_directories_with_trailing_slash() {
@@ -260,6 +361,31 @@ fn complete_path_does_not_expand_quoted_or_escaped_literal_tilde() {
             is_dir: false,
             source: CompletionSource::Path,
         }]
+    );
+}
+
+#[test]
+fn complete_path_orders_hidden_entries_after_visible_entries() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::write(temp.path().join(".alpha"), "").unwrap();
+    std::fs::write(temp.path().join("beta"), "").unwrap();
+
+    assert_eq!(
+        complete_path("", temp.path()),
+        [
+            CompletionCandidate {
+                display: "beta".to_string(),
+                replacement: "beta".to_string(),
+                is_dir: false,
+                source: CompletionSource::Path,
+            },
+            CompletionCandidate {
+                display: ".alpha".to_string(),
+                replacement: ".alpha".to_string(),
+                is_dir: false,
+                source: CompletionSource::Path,
+            },
+        ]
     );
 }
 
