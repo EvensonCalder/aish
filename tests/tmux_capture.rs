@@ -378,9 +378,10 @@ fn tmux_ctrl_d_exits_session_without_leftover_pane() {
     let Some(captured) = run_tmux_script("ctrl_d_exits.sh") else {
         return;
     };
+    assert_line_present(&captured, "__AISH_AFTER_CTRL_D__");
     assert!(
-        captured.trim().is_empty(),
-        "ctrl-d exit script should not leave pane output: {captured:?}"
+        captured.contains("exit"),
+        "ctrl-d exit should render an exit marker before closing: {captured:?}"
     );
 }
 

@@ -1513,6 +1513,27 @@ fn enter_and_empty_ctrl_d_return_actions() {
 }
 
 #[test]
+fn empty_ctrl_d_prints_exit_and_final_newline() {
+    let mut state = AppState::default();
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    assert!(
+        handle_key(
+            ctrl('d'),
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap()
+    );
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.ends_with("exit\r\n"), "output was {output:?}");
+}
+
+#[test]
 fn submit_moves_cursor_to_prompt_line_end_before_newline() {
     let mut state = AppState::default();
     state.draft.insert_str("echo hello");

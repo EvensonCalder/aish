@@ -8,6 +8,7 @@ aish_spawn
 
 # Ctrl-D
 aish_send "\x04"
+aish_expect "exit"
 expect {
     eof     {}
     timeout { puts stderr "aish did not exit on Ctrl-D"; exit 4 }

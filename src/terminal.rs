@@ -280,7 +280,10 @@ fn handle_key(
     }
     let refresh_completion = !matches!(action, KeyAction::CompleteOrShow);
     match action {
-        KeyAction::Exit => return Ok(true),
+        KeyAction::Exit => {
+            render_ctrl_d_exit(state, out, had_completion_ui)?;
+            return Ok(true);
+        }
         KeyAction::ClearScreen => {
             clear_screen_for_redraw(state, out)?;
         }
@@ -459,6 +462,21 @@ fn clear_screen_for_redraw(state: &mut AppState, out: &mut impl Write) -> Result
         Clear(ClearType::Purge),
         MoveTo(0, 0)
     )?;
+    Ok(())
+}
+
+fn render_ctrl_d_exit(
+    state: &mut AppState,
+    out: &mut impl Write,
+    had_completion_ui: bool,
+) -> Result<()> {
+    if had_completion_ui {
+        redraw(state, out)?;
+    }
+    move_to_rendered_end(state, out, terminal_display_width())?;
+    invalidate_render_anchor(state);
+    write!(out, "exit\r\n")?;
+    out.flush()?;
     Ok(())
 }
 
