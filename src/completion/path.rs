@@ -208,12 +208,14 @@ fn read_path_entries(search_dir: &Path) -> Vec<PathEntry> {
 }
 
 fn path_entry_is_directory(entry: &fs::DirEntry) -> bool {
-    if entry
-        .file_type()
-        .map(|file_type| file_type.is_dir())
-        .unwrap_or(false)
-    {
+    let Ok(file_type) = entry.file_type() else {
+        return false;
+    };
+    if file_type.is_dir() {
         return true;
+    }
+    if !file_type.is_symlink() {
+        return false;
     }
     fs::metadata(entry.path())
         .map(|metadata| metadata.is_dir())
