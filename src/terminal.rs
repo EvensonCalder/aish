@@ -475,7 +475,7 @@ fn render_ctrl_d_exit(
     }
     move_to_rendered_end(state, out, terminal_display_width())?;
     invalidate_render_anchor(state);
-    write!(out, "exit\r\n")?;
+    write!(out, "\r\nexit\r\n")?;
     out.flush()?;
     Ok(())
 }

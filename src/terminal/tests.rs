@@ -1513,7 +1513,7 @@ fn enter_and_empty_ctrl_d_return_actions() {
 }
 
 #[test]
-fn empty_ctrl_d_prints_exit_and_final_newline() {
+fn empty_ctrl_d_prints_exit_on_own_line_and_final_newline() {
     let mut state = AppState::default();
     let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
     let mut output = Vec::new();
@@ -1530,6 +1530,10 @@ fn empty_ctrl_d_prints_exit_and_final_newline() {
     );
 
     let output = String::from_utf8(output).unwrap();
+    assert!(
+        output.contains("\r\nexit\r\n"),
+        "exit should start on its own line: {output:?}"
+    );
     assert!(output.ends_with("exit\r\n"), "output was {output:?}");
 }
 
