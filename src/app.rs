@@ -19,6 +19,7 @@ mod private_commands;
 mod prompt;
 mod prompt_command;
 mod reports;
+mod selection_state;
 pub mod startup_unlock;
 mod sync_commands;
 mod template_args;
