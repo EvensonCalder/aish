@@ -251,10 +251,14 @@ impl AppState {
             && (coalesce_ms == 0
                 || final_tier_seen
                 || now.saturating_duration_since(first_seen) >= Duration::from_millis(coalesce_ms));
-        ready.then(|| {
+        if ready {
             self.completion_display_not_before = None;
-            self.pending_completion_update.take().unwrap().candidates
-        })
+            return self
+                .pending_completion_update
+                .take()
+                .map(|update| update.candidates);
+        }
+        None
     }
 
     pub fn cached_live_completion_candidates_with_max_results(
@@ -323,10 +327,8 @@ impl AppState {
     }
 
     fn ensure_completion_worker(&mut self) -> &CompletionWorker {
-        if self.completion_worker.is_none() {
-            self.completion_worker = Some(CompletionWorker::start());
-        }
-        self.completion_worker.as_ref().unwrap()
+        self.completion_worker
+            .get_or_insert_with(CompletionWorker::start)
     }
 
     fn should_enqueue_async_completion(&self, line: &str, cursor: usize) -> bool {

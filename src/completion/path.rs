@@ -4,11 +4,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 
+use super::matching::{edit_distance_chars, typo_similarity_percent};
 use super::parser::{resolve_search_dir, shell_word_value, split_path_token};
 use super::{
     CompletionCandidate, CompletionOptions, CompletionSource,
     complete_first_token_executables_from_names_with_options, dedupe_completion_candidates,
-    edit_distance_chars, typo_similarity_percent,
 };
 
 const PATH_COMPLETION_CACHE_MAX_AGE: Duration = Duration::from_millis(250);

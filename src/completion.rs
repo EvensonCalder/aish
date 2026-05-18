@@ -1,17 +1,31 @@
-use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::history::HistoryEntry;
 use crate::templates::TemplateEntry;
 
+mod arguments;
+mod first_token;
 mod index;
 mod matching;
 mod parser;
 mod path;
 mod private;
+mod ranking;
 mod render;
+mod structural;
 mod types;
+mod typo;
 
+pub use first_token::{
+    complete_first_token, complete_first_token_executables_with_options,
+    complete_first_token_history_with_options, complete_first_token_templates_with_options,
+    complete_first_token_with_options,
+};
+pub(crate) use first_token::{
+    complete_first_token_executables_from_names_with_options,
+    complete_first_token_history_with_indexed_options,
+    complete_first_token_templates_with_indexed_options,
+};
 pub(crate) use index::{
     IndexedHistoryEntry, IndexedTemplateEntry, index_history_entries, index_template_entries,
 };
@@ -19,101 +33,38 @@ pub use matching::{matches_completion_prefix, matches_completion_prefix_with_thr
 pub use parser::{current_token_context, is_path_like_token};
 pub use path::complete_path;
 pub use private::{complete_private_command_line, complete_private_commands};
+pub use ranking::limit_candidates;
 pub use render::{
     accept_completion, accept_completion_with_mode, ghost_completion_suffix,
     render_completion_candidates, render_completion_candidates_for_width, truncate_with_ellipsis,
 };
+pub use structural::{
+    complete_structural_history_for_line_with_options,
+    complete_structural_templates_for_line_with_options,
+};
 pub use types::{
     AcceptedCompletion, CompletionCandidate, CompletionOptions, CompletionSource, TokenContext,
 };
+pub(crate) use typo::complete_non_first_token_typos_for_line_with_indexed_options;
+pub use typo::{
+    complete_first_token_typos_with_options, complete_non_first_token_typos_for_line_with_options,
+    complete_typo_candidates_for_line_with_options,
+};
 
-use matching::{
-    edit_distance_chars, join_words, template_placeholder_words, template_replacement_for_index,
-    template_words_match_threshold, template_words_match_threshold_with_typos,
-    typo_similarity_percent, word_prefix_matches, words_match_threshold,
-    words_match_threshold_with_typos,
+use arguments::{
+    complete_history_arguments, complete_history_arguments_indexed, complete_template_placeholders,
+    complete_template_placeholders_indexed,
 };
 #[cfg(test)]
-use parser::command_arguments;
-use parser::{command_argument_words, shell_word_value, split_shell_like_words};
+use parser::{command_arguments, split_shell_like_words};
 pub(crate) use path::scan_path_executables;
 use path::{
-    complete_path_executables, complete_path_with_options, order_path_candidates_for_completion,
-    split_path_candidates,
+    complete_path_with_options, order_path_candidates_for_completion, split_path_candidates,
 };
-
-pub fn complete_first_token(
-    prefix: &str,
-    templates: &[TemplateEntry],
-    history_newest_first: &[HistoryEntry],
-    path_dirs: &[PathBuf],
-) -> Vec<CompletionCandidate> {
-    complete_first_token_with_options(
-        prefix,
-        templates,
-        history_newest_first,
-        path_dirs,
-        CompletionOptions {
-            max_results: usize::MAX,
-            ignore_spaces: false,
-            fuzzy_enabled: true,
-            match_threshold_percent: 50,
-            typo_threshold_percent: 80,
-        },
-    )
-}
-
-pub fn complete_first_token_with_options(
-    prefix: &str,
-    templates: &[TemplateEntry],
-    history_newest_first: &[HistoryEntry],
-    path_dirs: &[PathBuf],
-    options: CompletionOptions,
-) -> Vec<CompletionCandidate> {
-    if prefix.is_empty() {
-        return Vec::new();
-    }
-    let mut candidates = Vec::new();
-    let mut seen_templates = HashSet::new();
-    for template in templates.iter().rev() {
-        if matches_completion_prefix_with_threshold(
-            &template.body,
-            prefix,
-            options.ignore_spaces,
-            options.match_threshold_percent,
-        ) && seen_templates.insert(template.id())
-        {
-            candidates.push(CompletionCandidate {
-                display: template.body.clone(),
-                replacement: template.body.clone(),
-                is_dir: false,
-                source: CompletionSource::Template,
-            });
-        }
-    }
-
-    let mut seen_history = HashSet::new();
-    for entry in history_newest_first {
-        if matches_completion_prefix_with_threshold(
-            &entry.command,
-            prefix,
-            options.ignore_spaces,
-            options.match_threshold_percent,
-        ) && seen_history.insert(entry.command.as_str())
-        {
-            candidates.push(CompletionCandidate {
-                display: entry.command.clone(),
-                replacement: entry.command.clone(),
-                is_dir: false,
-                source: CompletionSource::History,
-            });
-        }
-    }
-
-    let mut executable_candidates = complete_path_executables(prefix, path_dirs);
-    candidates.append(&mut executable_candidates);
-    limit_candidates(candidates, options.max_results)
-}
+pub(crate) use ranking::{dedupe_completion_candidates, rank_completion_candidates};
+use structural::{
+    complete_structural_history_for_line_indexed, complete_structural_templates_for_line_indexed,
+};
 
 pub fn complete_non_first_token(
     token: &str,
@@ -184,64 +135,6 @@ pub fn complete_non_first_token_for_line_with_options(
         &indexed_templates,
         options,
     )
-}
-
-pub(crate) fn complete_first_token_history_with_indexed_options(
-    prefix: &str,
-    history_newest_first: &[IndexedHistoryEntry],
-    options: CompletionOptions,
-) -> Vec<CompletionCandidate> {
-    if prefix.is_empty() {
-        return Vec::new();
-    }
-    let mut seen_history = HashSet::new();
-    let mut candidates = Vec::new();
-    for indexed in history_newest_first {
-        if matches_completion_prefix_with_threshold(
-            &indexed.entry.command,
-            prefix,
-            options.ignore_spaces,
-            options.match_threshold_percent,
-        ) && seen_history.insert(indexed.entry.command.as_str())
-        {
-            candidates.push(CompletionCandidate {
-                display: indexed.entry.command.clone(),
-                replacement: indexed.entry.command.clone(),
-                is_dir: false,
-                source: CompletionSource::History,
-            });
-        }
-    }
-    limit_candidates(candidates, options.max_results)
-}
-
-pub(crate) fn complete_first_token_templates_with_indexed_options(
-    prefix: &str,
-    templates: &[IndexedTemplateEntry],
-    options: CompletionOptions,
-) -> Vec<CompletionCandidate> {
-    if prefix.is_empty() {
-        return Vec::new();
-    }
-    let mut candidates = Vec::new();
-    let mut seen_templates = HashSet::new();
-    for indexed in templates.iter().rev() {
-        if matches_completion_prefix_with_threshold(
-            &indexed.entry.body,
-            prefix,
-            options.ignore_spaces,
-            options.match_threshold_percent,
-        ) && seen_templates.insert(indexed.id.as_str())
-        {
-            candidates.push(CompletionCandidate {
-                display: indexed.entry.body.clone(),
-                replacement: indexed.entry.body.clone(),
-                is_dir: false,
-                source: CompletionSource::Template,
-            });
-        }
-    }
-    limit_candidates(candidates, options.max_results)
 }
 
 pub(crate) fn complete_non_first_token_for_line_with_indexed_options(
@@ -327,48 +220,6 @@ pub(crate) fn complete_non_first_token_for_line_with_indexed_options(
     limit_candidates(candidates, options.max_results)
 }
 
-pub fn complete_structural_history_for_line_with_options(
-    line: &str,
-    cursor: usize,
-    history_newest_first: &[HistoryEntry],
-    options: CompletionOptions,
-) -> Vec<CompletionCandidate> {
-    let token = current_token_context(line, cursor);
-    let indexed_history = index_history_entries(history_newest_first);
-    limit_candidates(
-        complete_structural_history_for_line_indexed(
-            line,
-            cursor,
-            &token,
-            &indexed_history,
-            options.ignore_spaces,
-            options.match_threshold_percent,
-        ),
-        options.max_results,
-    )
-}
-
-pub fn complete_structural_templates_for_line_with_options(
-    line: &str,
-    cursor: usize,
-    templates: &[TemplateEntry],
-    options: CompletionOptions,
-) -> Vec<CompletionCandidate> {
-    let token = current_token_context(line, cursor);
-    let indexed_templates = index_template_entries(templates);
-    limit_candidates(
-        complete_structural_templates_for_line_indexed(
-            line,
-            cursor,
-            &token,
-            &indexed_templates,
-            options.ignore_spaces,
-            options.match_threshold_percent,
-        ),
-        options.max_results,
-    )
-}
-
 pub fn complete_history_arguments_for_token_with_options(
     token: &str,
     history_newest_first: &[HistoryEntry],
@@ -399,57 +250,6 @@ pub fn complete_template_placeholders_for_token_with_options(
         ),
         options.max_results,
     )
-}
-
-pub fn complete_first_token_history_with_options(
-    prefix: &str,
-    history_newest_first: &[HistoryEntry],
-    options: CompletionOptions,
-) -> Vec<CompletionCandidate> {
-    let indexed_history = index_history_entries(history_newest_first);
-    complete_first_token_history_with_indexed_options(prefix, &indexed_history, options)
-}
-
-pub fn complete_first_token_templates_with_options(
-    prefix: &str,
-    templates: &[TemplateEntry],
-    options: CompletionOptions,
-) -> Vec<CompletionCandidate> {
-    let indexed_templates = index_template_entries(templates);
-    complete_first_token_templates_with_indexed_options(prefix, &indexed_templates, options)
-}
-
-pub fn complete_first_token_executables_with_options(
-    prefix: &str,
-    path_dirs: &[PathBuf],
-    options: CompletionOptions,
-) -> Vec<CompletionCandidate> {
-    if prefix.is_empty() {
-        return Vec::new();
-    }
-    let executables = scan_path_executables(path_dirs);
-    complete_first_token_executables_from_names_with_options(prefix, &executables, options)
-}
-
-pub(crate) fn complete_first_token_executables_from_names_with_options(
-    prefix: &str,
-    executables: &[String],
-    options: CompletionOptions,
-) -> Vec<CompletionCandidate> {
-    if prefix.is_empty() {
-        return Vec::new();
-    }
-    let candidates = executables
-        .iter()
-        .filter(|name| name.starts_with(prefix))
-        .map(|name| CompletionCandidate {
-            display: name.clone(),
-            replacement: name.clone(),
-            is_dir: false,
-            source: CompletionSource::Executable,
-        })
-        .collect();
-    limit_candidates(candidates, options.max_results)
 }
 
 pub fn complete_non_first_token_fallbacks_for_line_with_options(
@@ -489,503 +289,6 @@ pub fn complete_non_first_token_fallbacks_for_line_with_options(
     candidates.extend(file_candidates);
     dedupe_completion_candidates(&mut candidates);
     limit_candidates(candidates, options.max_results)
-}
-
-pub fn complete_first_token_typos_with_options(
-    prefix: &str,
-    history_newest_first: &[HistoryEntry],
-    templates: &[TemplateEntry],
-    options: CompletionOptions,
-) -> Vec<CompletionCandidate> {
-    let indexed_history = index_history_entries(history_newest_first);
-    let indexed_templates = index_template_entries(templates);
-    complete_first_token_typos_with_indexed_options(
-        prefix,
-        &indexed_history,
-        &indexed_templates,
-        options,
-    )
-}
-
-pub fn complete_non_first_token_typos_for_line_with_options(
-    line: &str,
-    cursor: usize,
-    history_newest_first: &[HistoryEntry],
-    templates: &[TemplateEntry],
-    options: CompletionOptions,
-) -> Vec<CompletionCandidate> {
-    let indexed_history = index_history_entries(history_newest_first);
-    let indexed_templates = index_template_entries(templates);
-    complete_non_first_token_typos_for_line_with_indexed_options(
-        line,
-        cursor,
-        &indexed_history,
-        &indexed_templates,
-        options,
-    )
-}
-
-pub(crate) fn complete_non_first_token_typos_for_line_with_indexed_options(
-    line: &str,
-    cursor: usize,
-    history_newest_first: &[IndexedHistoryEntry],
-    templates: &[IndexedTemplateEntry],
-    options: CompletionOptions,
-) -> Vec<CompletionCandidate> {
-    if !options.fuzzy_enabled {
-        return Vec::new();
-    }
-    let token = current_token_context(line, cursor);
-    if token.is_first_token {
-        return complete_first_token_typos_with_indexed_options(
-            &token.text,
-            history_newest_first,
-            templates,
-            options,
-        );
-    }
-    complete_typo_candidates_for_line_with_indexed_options(
-        line,
-        cursor,
-        history_newest_first,
-        templates,
-        options,
-    )
-}
-
-pub(crate) fn complete_first_token_typos_with_indexed_options(
-    prefix: &str,
-    history_newest_first: &[IndexedHistoryEntry],
-    templates: &[IndexedTemplateEntry],
-    options: CompletionOptions,
-) -> Vec<CompletionCandidate> {
-    if !options.fuzzy_enabled {
-        return Vec::new();
-    }
-    if prefix.is_empty() {
-        return Vec::new();
-    }
-    let mut candidates = Vec::new();
-    let mut seen_templates = HashSet::new();
-    for indexed in templates.iter().rev() {
-        let Some(first_word) = indexed.words.first() else {
-            continue;
-        };
-        if word_prefix_matches(first_word, prefix, options.ignore_spaces)
-            || typo_similarity_percent(first_word, prefix, options.ignore_spaces)
-                < options.typo_threshold_percent
-        {
-            continue;
-        }
-        if seen_templates.insert(indexed.id.as_str()) {
-            candidates.push(CompletionCandidate {
-                display: indexed.entry.body.clone(),
-                replacement: indexed.entry.body.clone(),
-                is_dir: false,
-                source: CompletionSource::TemplateTypo,
-            });
-        }
-    }
-    let mut seen_history = HashSet::new();
-    for indexed in history_newest_first {
-        let Some(first_word) = indexed.words.first() else {
-            continue;
-        };
-        if word_prefix_matches(first_word, prefix, options.ignore_spaces)
-            || typo_similarity_percent(first_word, prefix, options.ignore_spaces)
-                < options.typo_threshold_percent
-        {
-            continue;
-        }
-        if seen_history.insert(indexed.entry.command.as_str()) {
-            candidates.push(CompletionCandidate {
-                display: indexed.entry.command.clone(),
-                replacement: indexed.entry.command.clone(),
-                is_dir: false,
-                source: CompletionSource::HistoryTypo,
-            });
-        }
-    }
-    limit_candidates(candidates, options.max_results)
-}
-
-fn complete_structural_templates_for_line_indexed(
-    line: &str,
-    cursor: usize,
-    token: &TokenContext,
-    templates: &[IndexedTemplateEntry],
-    ignore_spaces: bool,
-    match_threshold_percent: usize,
-) -> Vec<CompletionCandidate> {
-    if cursor != line.len() {
-        return Vec::new();
-    }
-    let words_before_cursor = split_shell_like_words(&line[..cursor]);
-    if words_before_cursor.is_empty() {
-        return Vec::new();
-    }
-    let current_word_index = if token.text.is_empty() {
-        words_before_cursor.len()
-    } else {
-        words_before_cursor.len().saturating_sub(1)
-    };
-    let mut seen = HashSet::new();
-    let mut candidates = Vec::new();
-
-    for indexed in templates.iter().rev() {
-        if indexed.words.len() <= current_word_index {
-            continue;
-        }
-        if !template_words_match_threshold(
-            &indexed.words,
-            &words_before_cursor,
-            ignore_spaces,
-            match_threshold_percent,
-        ) {
-            continue;
-        }
-
-        let replacement = template_replacement_for_index(
-            &indexed.words,
-            current_word_index,
-            token,
-            ignore_spaces,
-            match_threshold_percent,
-        );
-
-        if replacement == token.text || !seen.insert(replacement.clone()) {
-            continue;
-        }
-        candidates.push(CompletionCandidate {
-            display: indexed.entry.body.clone(),
-            replacement,
-            is_dir: false,
-            source: CompletionSource::Template,
-        });
-    }
-    candidates
-}
-
-fn complete_structural_history_for_line_indexed(
-    line: &str,
-    cursor: usize,
-    token: &TokenContext,
-    history_newest_first: &[IndexedHistoryEntry],
-    ignore_spaces: bool,
-    match_threshold_percent: usize,
-) -> Vec<CompletionCandidate> {
-    if cursor != line.len() {
-        return Vec::new();
-    }
-    let words_before_cursor = split_shell_like_words(&line[..cursor]);
-    if words_before_cursor.is_empty() {
-        return Vec::new();
-    }
-    let current_word_index = if token.text.is_empty() {
-        words_before_cursor.len()
-    } else {
-        words_before_cursor.len().saturating_sub(1)
-    };
-    let mut seen = HashSet::new();
-    let mut candidates = Vec::new();
-
-    for indexed in history_newest_first {
-        if indexed.words.len() <= current_word_index {
-            continue;
-        }
-        if !words_match_threshold(
-            &indexed.words,
-            &words_before_cursor,
-            ignore_spaces,
-            match_threshold_percent,
-        ) {
-            continue;
-        }
-
-        let replacement = join_words(&indexed.raw_words[current_word_index..]);
-
-        if replacement == token.text || !seen.insert(replacement.clone()) {
-            continue;
-        }
-        candidates.push(CompletionCandidate {
-            display: replacement.clone(),
-            replacement,
-            is_dir: false,
-            source: CompletionSource::History,
-        });
-    }
-    candidates
-}
-
-pub fn complete_typo_candidates_for_line_with_options(
-    line: &str,
-    cursor: usize,
-    history_newest_first: &[HistoryEntry],
-    templates: &[TemplateEntry],
-    options: CompletionOptions,
-) -> Vec<CompletionCandidate> {
-    let indexed_history = index_history_entries(history_newest_first);
-    let indexed_templates = index_template_entries(templates);
-    complete_typo_candidates_for_line_with_indexed_options(
-        line,
-        cursor,
-        &indexed_history,
-        &indexed_templates,
-        options,
-    )
-}
-
-fn complete_typo_candidates_for_line_with_indexed_options(
-    line: &str,
-    cursor: usize,
-    history_newest_first: &[IndexedHistoryEntry],
-    templates: &[IndexedTemplateEntry],
-    options: CompletionOptions,
-) -> Vec<CompletionCandidate> {
-    if !options.fuzzy_enabled {
-        return Vec::new();
-    }
-    let token = current_token_context(line, cursor);
-    let words_before_cursor = split_shell_like_words(&line[..cursor.min(line.len())]);
-    if words_before_cursor.is_empty() {
-        return Vec::new();
-    }
-    let current_word_index = if token.text.is_empty() {
-        words_before_cursor.len()
-    } else {
-        words_before_cursor.len().saturating_sub(1)
-    };
-
-    let mut candidates = Vec::new();
-    let mut seen_templates = HashSet::new();
-    for indexed in templates.iter().rev() {
-        if indexed.words.len() <= current_word_index {
-            continue;
-        }
-        if !template_words_match_threshold_with_typos(
-            &indexed.words,
-            &words_before_cursor,
-            options.ignore_spaces,
-            options.match_threshold_percent,
-            options.typo_threshold_percent,
-        ) {
-            continue;
-        }
-        let replacement = indexed.entry.body.clone();
-        if replacement == line || !seen_templates.insert(indexed.id.as_str()) {
-            continue;
-        }
-        candidates.push(CompletionCandidate {
-            display: indexed.entry.body.clone(),
-            replacement,
-            is_dir: false,
-            source: CompletionSource::TemplateTypo,
-        });
-    }
-
-    let mut seen_history = HashSet::new();
-    for indexed in history_newest_first {
-        if indexed.words.len() <= current_word_index {
-            continue;
-        }
-        if !words_match_threshold_with_typos(
-            &indexed.words,
-            &words_before_cursor,
-            options.ignore_spaces,
-            options.match_threshold_percent,
-            options.typo_threshold_percent,
-        ) {
-            continue;
-        }
-        let replacement = indexed.entry.command.clone();
-        if replacement == line || !seen_history.insert(indexed.entry.command.as_str()) {
-            continue;
-        }
-        candidates.push(CompletionCandidate {
-            display: indexed.entry.command.clone(),
-            replacement,
-            is_dir: false,
-            source: CompletionSource::HistoryTypo,
-        });
-    }
-
-    dedupe_completion_candidates(&mut candidates);
-    limit_candidates(candidates, options.max_results)
-}
-
-fn complete_history_arguments(
-    prefix: &str,
-    history_newest_first: &[HistoryEntry],
-    ignore_spaces: bool,
-    match_threshold_percent: usize,
-) -> Vec<CompletionCandidate> {
-    let mut seen = HashSet::new();
-    let mut candidates = Vec::new();
-    let prefix = shell_word_match_text(prefix);
-    for entry in history_newest_first {
-        for argument in command_argument_words(&entry.command) {
-            if matches_completion_prefix_with_threshold(
-                &argument.value,
-                &prefix,
-                ignore_spaces,
-                match_threshold_percent,
-            ) && seen.insert(argument.raw.clone())
-            {
-                candidates.push(CompletionCandidate {
-                    display: argument.raw.clone(),
-                    replacement: argument.raw,
-                    is_dir: false,
-                    source: CompletionSource::History,
-                });
-            }
-        }
-    }
-    candidates
-}
-
-fn complete_history_arguments_indexed(
-    prefix: &str,
-    history_newest_first: &[IndexedHistoryEntry],
-    ignore_spaces: bool,
-    match_threshold_percent: usize,
-) -> Vec<CompletionCandidate> {
-    let mut seen = HashSet::new();
-    let mut candidates = Vec::new();
-    let prefix = shell_word_match_text(prefix);
-    for indexed in history_newest_first {
-        for argument in &indexed.arguments {
-            if matches_completion_prefix_with_threshold(
-                &argument.value,
-                &prefix,
-                ignore_spaces,
-                match_threshold_percent,
-            ) && seen.insert(argument.raw.clone())
-            {
-                candidates.push(CompletionCandidate {
-                    display: argument.raw.clone(),
-                    replacement: argument.raw.clone(),
-                    is_dir: false,
-                    source: CompletionSource::History,
-                });
-            }
-        }
-    }
-    candidates
-}
-
-fn shell_word_match_text(token: &str) -> String {
-    shell_word_value(token)
-}
-
-pub(crate) fn dedupe_completion_candidates(candidates: &mut Vec<CompletionCandidate>) {
-    let mut seen = HashSet::new();
-    candidates.retain(|candidate| {
-        seen.insert((
-            candidate.source,
-            candidate.replacement.clone(),
-            candidate.display.clone(),
-        ))
-    });
-}
-
-pub(crate) fn rank_completion_candidates(candidates: &mut [CompletionCandidate]) {
-    candidates.sort_by_key(completion_candidate_rank);
-}
-
-fn completion_candidate_rank(candidate: &CompletionCandidate) -> u8 {
-    if candidate.source == CompletionSource::Path && candidate.is_dir {
-        return 18;
-    }
-    completion_source_rank(candidate.source)
-}
-
-fn completion_source_rank(source: CompletionSource) -> u8 {
-    match source {
-        CompletionSource::PrivateCommand => 0,
-        CompletionSource::TemplateTypo => 9,
-        CompletionSource::Template => 10,
-        CompletionSource::HistoryTypo => 19,
-        CompletionSource::History => 20,
-        CompletionSource::Executable => 30,
-        CompletionSource::TemplatePlaceholder => 40,
-        CompletionSource::Path => 50,
-    }
-}
-
-fn complete_template_placeholders(
-    prefix: &str,
-    templates: &[TemplateEntry],
-    ignore_spaces: bool,
-    match_threshold_percent: usize,
-) -> Vec<CompletionCandidate> {
-    let mut seen = HashSet::new();
-    let mut candidates = Vec::new();
-    for template in templates {
-        for placeholder in template_placeholder_words(&template.body) {
-            if (matches_completion_prefix_with_threshold(
-                &placeholder.raw,
-                prefix,
-                ignore_spaces,
-                match_threshold_percent,
-            ) || matches_completion_prefix_with_threshold(
-                &placeholder.name,
-                prefix,
-                ignore_spaces,
-                match_threshold_percent,
-            )) && seen.insert(placeholder.raw.clone())
-            {
-                candidates.push(CompletionCandidate {
-                    display: placeholder.raw.clone(),
-                    replacement: placeholder.raw,
-                    is_dir: false,
-                    source: CompletionSource::TemplatePlaceholder,
-                });
-            }
-        }
-    }
-    candidates
-}
-
-fn complete_template_placeholders_indexed(
-    prefix: &str,
-    templates: &[IndexedTemplateEntry],
-    ignore_spaces: bool,
-    match_threshold_percent: usize,
-) -> Vec<CompletionCandidate> {
-    let mut seen = HashSet::new();
-    let mut candidates = Vec::new();
-    for indexed in templates {
-        for placeholder in &indexed.placeholders {
-            if (matches_completion_prefix_with_threshold(
-                &placeholder.raw,
-                prefix,
-                ignore_spaces,
-                match_threshold_percent,
-            ) || matches_completion_prefix_with_threshold(
-                &placeholder.name,
-                prefix,
-                ignore_spaces,
-                match_threshold_percent,
-            )) && seen.insert(placeholder.raw.clone())
-            {
-                candidates.push(CompletionCandidate {
-                    display: placeholder.raw.clone(),
-                    replacement: placeholder.raw.clone(),
-                    is_dir: false,
-                    source: CompletionSource::TemplatePlaceholder,
-                });
-            }
-        }
-    }
-    candidates
-}
-
-pub fn limit_candidates(
-    mut candidates: Vec<CompletionCandidate>,
-    max_results: usize,
-) -> Vec<CompletionCandidate> {
-    candidates.truncate(max_results);
-    candidates
 }
 
 #[cfg(test)]

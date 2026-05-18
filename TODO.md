@@ -90,7 +90,7 @@ Status as of the latest full review:
 - [x] Read key events.
 - [x] Read paste events.
 - [x] Restore terminal on panic/exit where practical.
-- [ ] Implement central event loop:
+- [x] Implement central event loop:
   - [x] keyboard events
   - [x] paste events
   - [x] explicit frontend event source for keyboard, paste, resize, ignored terminal events, and tick wakeups
@@ -560,7 +560,7 @@ Status: implemented for v0.1.0 via external `fzf`. Picker actions are intentiona
 
 ### Tasks
 
-- [ ] Implement AI config:
+- [x] Implement AI config:
   - [x] `#base-url`
   - [x] `#model`
   - [x] `#env-key`
@@ -1185,7 +1185,7 @@ These are research-backed design directions from comparing Aish with Nushell. Th
 
 - [ ] Evaluate a span-first completion protocol. Aish already tracks raw/value/start/end for shell-like words; a future design could extend that into candidate edits with explicit replacement ranges instead of inferring edits from the current token string.
 - [ ] Evaluate richer semantic completion candidates. A future candidate model could separate replacement text, display text, candidate kind, edit range, append-space behavior, score, and match indices. This may make rendering, accepting, deduping, and ranking less coupled.
-- [ ] Evaluate splitting completion into provider modules behind a small internal trait, such as private commands, paths, executables, templates, history, and typo correction. The goal would be easier testing and tuning without changing user-visible behavior.
+- [x] Evaluate splitting completion into provider modules. Aish now keeps first-token, argument/placeholder, structural, typo, ranking, private-command, path, parser, render, and shared type logic in separate completion modules. A provider trait is deferred until it removes real complexity.
 - [ ] Evaluate a dedicated matcher abstraction for structural prefix matching, typo correction, and path component matching. Keep Aish's current structural threshold and typo threshold semantics unless a replacement is proven clearer and faster.
 - [ ] Evaluate component-wise path completion inspired by Nushell's path handling: exact-directory descent, `~` and platform prefix handling, hidden-file ordering, and match indices. Shell quoting must remain Bash/Zsh/Fish-compatible and cannot copy Nushell's escaping rules directly.
 - [ ] Evaluate a more explicit conservative continuation lexer. It may track quote, escaped newline, and obvious unmatched delimiter state, but it must not become a full POSIX/Bash/Zsh/Fish parser or override backend shell semantics.
