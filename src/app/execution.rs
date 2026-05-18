@@ -132,7 +132,7 @@ pub fn execute_draft(
     }
 
     state.mode = Mode::CommandRunning;
-    if !state.draft_from_editor && is_interactive_passthrough_command(&command) {
+    if is_interactive_passthrough_command(&command) {
         let exit_code = run_foreground_interactive_command(state, backend, &command)?;
         record_completed_command(state, command, String::new(), exit_code, executing_ai)?;
         return Ok(());

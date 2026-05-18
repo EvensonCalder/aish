@@ -299,6 +299,51 @@ fn editor_draft_can_send_line_leading_hash_to_shell() {
 }
 
 #[test]
+#[cfg(unix)]
+fn editor_draft_interactive_command_can_run_in_foreground() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let _guard = pty_execution_guard();
+    let temp = tempfile::tempdir().unwrap();
+    let command_path = temp.path().join("less");
+    let marker_path = temp.path().join("editor-foreground-ran");
+    std::fs::write(
+        &command_path,
+        format!(
+            "#!/bin/sh\nif [ -t 1 ]; then printf 'backend pty output\\n'; fi\nprintf ran > {}\n",
+            marker_path.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&command_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mut state = AppState::default();
+    state.replace_draft_from_editor_text(command_path.display().to_string());
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(marker_path.exists());
+    assert!(!output.contains("backend pty output"));
+    assert_eq!(state.last_status, Some(0));
+    assert_eq!(state.output_ring.len(), 1);
+    assert_eq!(
+        state.output_ring[0].command,
+        command_path.display().to_string()
+    );
+    assert_eq!(state.output_ring[0].output, "");
+    assert!(!state.draft_from_editor);
+    assert!(state.draft.is_empty());
+}
+
+#[test]
 #[allow(unused_variables)]
 fn editor_draft_sends_multiline_backslash_continuation_to_shell() {
     let _guard = pty_execution_guard();
