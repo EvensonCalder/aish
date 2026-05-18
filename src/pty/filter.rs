@@ -1,4 +1,4 @@
-use super::{READY_MARKER, START_MARKER};
+use super::{ready_marker, start_marker};
 
 pub(super) struct PtyOutputFilter {
     marker: String,
@@ -116,13 +116,15 @@ impl PtyOutputFilter {
         let line = cleaned
             .trim_matches(['\r', '\n'])
             .trim_start_matches([' ', '\t']);
-        if let Some(command) = line.strip_prefix(&format!("{START_MARKER}\t")) {
+        let start_marker = start_marker();
+        let ready_marker = ready_marker();
+        if let Some(command) = line.strip_prefix(&format!("{start_marker}\t")) {
             return Some(InternalMarker::Start(command.trim_end().to_string()));
         }
-        if line.starts_with(START_MARKER) {
+        if line.starts_with(start_marker) {
             return Some(InternalMarker::Start(String::new()));
         }
-        if line.starts_with(READY_MARKER) {
+        if line.starts_with(ready_marker) {
             return Some(InternalMarker::Ready);
         }
         if !self.marker.is_empty() && line.starts_with(&self.marker) {
@@ -135,8 +137,8 @@ impl PtyOutputFilter {
         let text = String::from_utf8_lossy(&self.pending);
         let cleaned = strip_terminal_control_sequences(&text);
         let line = cleaned.trim_start_matches([' ', '\t']);
-        line_starts_or_could_be_prefix(line, START_MARKER)
-            || line_starts_or_could_be_prefix(line, READY_MARKER)
+        line_starts_or_could_be_prefix(line, start_marker())
+            || line_starts_or_could_be_prefix(line, ready_marker())
             || !self.marker.is_empty() && line_starts_or_could_be_prefix(line, &self.marker)
     }
 

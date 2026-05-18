@@ -1,6 +1,6 @@
 #!/usr/bin/env expect
 # An input that ends in a backslash should become a continuation draft via the
-# backend shell's own syntax check, then execute as a single command.
+# stable Aish lexical continuation check, then execute as a single command.
 
 set timeout 10
 source [file dirname [info script]]/_lib.exp

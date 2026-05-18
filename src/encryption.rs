@@ -85,6 +85,7 @@ pub fn list_matching_gpg_public_keys(
             "--with-colons",
             "--fingerprint",
             "--list-keys",
+            "--",
             selector,
         ])
         .output()
@@ -184,6 +185,7 @@ pub fn gpg_encrypt_plan(
             recipient.to_string(),
             "--output".to_string(),
             output.as_ref().display().to_string(),
+            "--".to_string(),
             input.as_ref().display().to_string(),
         ],
     }
@@ -214,7 +216,7 @@ pub fn gpg_decrypt_file(gpg_program: impl AsRef<str>, input: impl AsRef<Path>) -
     let input_arg = input.display().to_string();
     let terminal = enter_gpg_terminal_passthrough()?;
     let mut command = Command::new(program);
-    command.args(["--yes", "--decrypt", &input_arg]);
+    command.args(["--yes", "--decrypt", "--", &input_arg]);
     terminal.prepare_command(&mut command);
     let output = command
         .output()
@@ -247,6 +249,7 @@ pub fn gpg_decrypt_file_noninteractive(
             "--pinentry-mode",
             "error",
             "--decrypt",
+            "--",
             &input_arg,
         ])
         .output()
@@ -847,6 +850,22 @@ mod tests {
     }
 
     #[test]
+    fn resolve_gpg_key_fingerprint_passes_selector_after_option_boundary() {
+        let temp = tempfile::tempdir().unwrap();
+        let fake_gpg = temp.path().join("fake-gpg");
+        write_executable(
+            &fake_gpg,
+            "#!/bin/sh\nwhile [ \"$#\" -gt 0 ]; do\n  if [ \"$1\" = '--list-keys' ]; then\n    shift\n    [ \"$1\" = '--' ] || { printf 'missing option boundary\\n' >&2; exit 9; }\n    shift\n    [ \"$1\" = '--looks-like-option' ] || { printf 'unexpected selector: %s\\n' \"$1\" >&2; exit 10; }\n    printf '%s\\n' 'pub:u:255:22:1111111111111111:1:::u:::scESC::::::23::0:'\n    printf '%s\\n' 'fpr:::::::::AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA:'\n    exit 0\n  fi\n  shift\ndone\nexit 2\n",
+        );
+
+        let fingerprint =
+            resolve_gpg_key_fingerprint(fake_gpg.display().to_string(), "--looks-like-option")
+                .unwrap();
+
+        assert_eq!(fingerprint, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+    }
+
+    #[test]
     fn resolve_gpg_key_fingerprint_rejects_ambiguous_selector() {
         let temp = tempfile::tempdir().unwrap();
         let fake_gpg = temp.path().join("fake-gpg");
@@ -919,6 +938,7 @@ mod tests {
                 "test@example.invalid",
                 "--output",
                 "plain.txt.gpg",
+                "--",
                 "plain.txt"
             ]
         );
@@ -950,7 +970,7 @@ mod tests {
         fs::write(&encrypted, "decrypted bytes").unwrap();
         write_executable(
             &fake_gpg,
-            "#!/bin/sh\nif [ \"${GPG_TTY:-}\" != '/dev/pts/aish-test' ]; then\n  printf 'unexpected GPG_TTY: %s\\n' \"${GPG_TTY:-}\" >&2\n  exit 7\nfi\nif [ \"$1\" = '--yes' ] && [ \"$2\" = '--decrypt' ]; then\n  cat \"$3\"\n  exit 0\nfi\nprintf 'unexpected args\\n' >&2\nexit 2\n",
+            "#!/bin/sh\nif [ \"${GPG_TTY:-}\" != '/dev/pts/aish-test' ]; then\n  printf 'unexpected GPG_TTY: %s\\n' \"${GPG_TTY:-}\" >&2\n  exit 7\nfi\nif [ \"$1\" = '--yes' ] && [ \"$2\" = '--decrypt' ] && [ \"$3\" = '--' ]; then\n  cat \"$4\"\n  exit 0\nfi\nprintf 'unexpected args\\n' >&2\nexit 2\n",
         );
         let old_gpg_tty = std::env::var_os("GPG_TTY");
         unsafe {
@@ -977,7 +997,7 @@ mod tests {
         fs::write(&encrypted, "cached decrypt").unwrap();
         write_executable(
             &fake_gpg,
-            "#!/bin/sh\nseen_batch=0\nseen_pinentry=0\nseen_error=0\nfor arg in \"$@\"; do\n  [ \"$arg\" = '--batch' ] && seen_batch=1\n  [ \"$arg\" = '--pinentry-mode' ] && seen_pinentry=1\n  [ \"$arg\" = 'error' ] && seen_error=1\ndone\nif [ \"$seen_batch:$seen_pinentry:$seen_error\" != '1:1:1' ]; then\n  printf 'missing noninteractive flags\\n' >&2\n  exit 8\nfi\ncat \"$6\"\n",
+            "#!/bin/sh\nseen_batch=0\nseen_pinentry=0\nseen_error=0\ninput=\"\"\nfor arg in \"$@\"; do\n  [ \"$arg\" = '--batch' ] && seen_batch=1\n  [ \"$arg\" = '--pinentry-mode' ] && seen_pinentry=1\n  [ \"$arg\" = 'error' ] && seen_error=1\n  input=\"$arg\"\ndone\nif [ \"$seen_batch:$seen_pinentry:$seen_error\" != '1:1:1' ]; then\n  printf 'missing noninteractive flags\\n' >&2\n  exit 8\nfi\ncat \"$input\"\n",
         );
 
         let bytes =

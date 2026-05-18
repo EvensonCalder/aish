@@ -645,7 +645,7 @@ The app module root in `src/app.rs` wires together focused runtime modules:
 - `src/terminal.rs`: terminal event loop, key/paste handling, picker/editor boundaries, and prompt redraw positioning.
 - `src/terminal/completion_ui.rs`: live completion display, inline suffixes, Tab/Right acceptance, and completion panel state transitions.
 - `src/pty.rs`: PTY backend lifecycle, command execution, read loop, and streaming event callbacks.
-- `src/pty/`: shell launch setup, marker parsing, output filtering, and continuation syntax helpers.
+- `src/pty/`: shell launch setup, randomized marker protocol, marker parsing, output filtering, and continuation syntax helpers.
 
 ## Testing
 

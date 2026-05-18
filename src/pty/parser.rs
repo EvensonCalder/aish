@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
 
 use super::filter::{clean_fish_repaint_lines, strip_terminal_control_sequences};
-use super::{READY_MARKER, START_MARKER};
+use super::{ready_marker, start_marker};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct HookCommandResult {
@@ -34,8 +34,9 @@ fn marker_has_complete_status(raw: &str, marker: &str, marker_pos: usize) -> Opt
 
 pub(super) fn start_marker_command(command: &str) -> String {
     let display_command = command.trim_end_matches('\n').replace(['\r', '\n'], "\\n");
+    let start_marker = start_marker();
     format!(
-        " printf '\n{START_MARKER}\t%s\n' {}\n",
+        " printf '\n{start_marker}\t%s\n' {}\n",
         shell_single_quote(&display_command)
     )
 }
@@ -79,7 +80,7 @@ pub(super) fn parse_marker_output(
 }
 
 fn parse_started_command(output: &str) -> Option<String> {
-    let prefix = format!("{START_MARKER}\t");
+    let prefix = format!("{}\t", start_marker());
     output
         .lines()
         .filter_map(|line| line.strip_prefix(&prefix))
@@ -97,7 +98,7 @@ fn strip_marker_separator(output: &str) -> &str {
 }
 
 pub(super) fn parse_ready_cwd(raw: &str) -> Option<String> {
-    let prefix = format!("{READY_MARKER}\t");
+    let prefix = format!("{}\t", ready_marker());
     let normalized = normalize_pty_newlines(raw);
     complete_normalized_lines(&normalized)
         .into_iter()
@@ -140,13 +141,13 @@ fn parse_ready_status_output_inner(
     for line in complete_normalized_lines(&raw) {
         let cleaned_marker_line = strip_terminal_control_sequences(line);
         let marker_line = cleaned_marker_line.trim_start();
-        if let Some(command) = marker_line.strip_prefix(&format!("{START_MARKER}\t")) {
+        if let Some(command) = marker_line.strip_prefix(&format!("{}\t", start_marker())) {
             current_started_command = Some(command.to_string());
             saw_start_marker = true;
             command_output_lines.clear();
             continue;
         }
-        if let Some(rest) = marker_line.strip_prefix(&format!("{READY_MARKER}\t")) {
+        if let Some(rest) = marker_line.strip_prefix(&format!("{}\t", ready_marker())) {
             if let Some(fields) = parse_ready_marker_fields(rest)
                 && let Some(status) = fields.status
             {
@@ -274,8 +275,8 @@ pub(super) fn clean_marker_echo(output: &str, marker: &str) -> String {
 
 fn is_internal_marker_echo_line(line: &str, marker: &str) -> bool {
     let text = line.trim_end_matches('\n');
-    text.contains(READY_MARKER)
-        || text.contains(START_MARKER)
+    text.contains(ready_marker())
+        || text.contains(start_marker())
         || text.contains("__aish_status=$?") && text.contains(marker)
 }
 

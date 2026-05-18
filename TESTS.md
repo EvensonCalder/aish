@@ -146,12 +146,12 @@ Implemented:
 
 - `portable-pty` backend.
 - Shell resolution: configured shell, `$SHELL`, `/bin/bash` fallback.
-- Bash clean startup flags: `--noprofile --norc`.
+- Bash interactive startup loads user `.bashrc` before Aish injects prompt integration.
 - PTY pair creation and shell spawn.
 - PTY master read thread.
 - PTY writes.
 - Prompt/command completion marker.
-- Per-command unique marker to avoid collision with user output.
+- Session-randomized integration markers plus per-command status markers to avoid collision with user output.
 - Marker parsing waits for marker plus exit status and line ending.
 - Marker parsing handles echoed marker injection commands.
 - PTY CRLF output normalization.
@@ -411,8 +411,8 @@ Implemented:
 - Phase 10 paste review is represented as opaque editor drafts rather than a separate inline paste editor.
 - Single-line paste copies read-only history/AI selections to draft before inserting pasted text.
 - Editor draft submission preserves multi-line backslash continuation and lets the backend shell interpret it.
-- Ordinary drafts use the configured backend shell's own `-n` syntax check to detect incomplete quote input before PTY submission, preserving `echo "` and `echo '` continuation behavior without hand-parsing shell quotes in Aish.
-- Ordinary drafts also detect odd trailing backslashes as shell line continuations because interactive shells continue those lines even though `bash -n` accepts the synthetic trailing newline used by syntax checks.
+- Ordinary drafts use stable lexical continuation detection before PTY submission, preserving `echo "`, `echo '`, and odd trailing backslash behavior without depending on backend shell error text.
+- Aish intentionally does not fully parse Bash/Zsh/Fish grammar for continuation; complex shell constructs remain the backend shell's responsibility.
 - Multi-line draft redraw emits CRLF line breaks in raw terminal mode, tracks the previously rendered block height, and suppresses backend `PS2`/`PROMPT2` so shell continuation prompts do not leak into executed command output.
 - Ordinary and editor draft history preserve backslash continuations as one submitted command string.
 - Optional shell logical splitter helper splits simple lines while preserving backslash continuations; it is not wired into default history behavior.

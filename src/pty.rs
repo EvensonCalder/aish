@@ -1,7 +1,4 @@
 use std::io::{Read, Write};
-use std::path::Path;
-use std::process::{Command as ProcessCommand, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
@@ -11,6 +8,7 @@ use portable_pty::{MasterPty, NativePtySystem, PtySize, PtySystem};
 mod filter;
 mod launch;
 mod parser;
+mod protocol;
 mod syntax;
 
 use filter::PtyOutputFilter;
@@ -20,20 +18,16 @@ use parser::{
     marker_status_is_complete, parse_marker_output, parse_ready_cwd, parse_ready_status_output,
     parse_ready_status_output_with_prompt_separator, start_marker_command,
 };
-use syntax::{
-    ends_with_shell_line_continuation, is_incomplete_shell_syntax, shell_continuation_prompt,
-};
+use protocol::{next_marker, ready_marker, start_marker, status_marker_command};
+use syntax::input_needs_more_lines;
 
 #[cfg(test)]
 use std::env;
 
 #[cfg(test)]
 use parser::{HookCommandResult, clean_marker_echo};
-
-const MARKER_PREFIX: &str = "__AISH_STATUS__";
-const READY_MARKER: &str = "__AISH_READY__";
-const START_MARKER: &str = "__AISH_START__";
-static NEXT_MARKER_ID: AtomicU64 = AtomicU64::new(1);
+#[cfg(test)]
+use protocol::{READY_MARKER, START_MARKER};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandResult {
@@ -189,61 +183,7 @@ impl PtyBackend {
     }
 
     pub fn input_needs_more_lines(&self, input: &str) -> Result<ContinuationCheck> {
-        if ends_with_shell_line_continuation(input) {
-            return Ok(ContinuationCheck {
-                needs_more: true,
-                prompt: Some("> ".to_string()),
-            });
-        }
-
-        let shell_name = Path::new(&self.shell_program)
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or_default();
-        let mut command = ProcessCommand::new(&self.shell_program);
-        match shell_name {
-            "bash" => {
-                command.args(["--noprofile", "--norc", "-n"]);
-            }
-            "zsh" => {
-                command.args(["-f", "-n"]);
-            }
-            _ => {
-                return Ok(ContinuationCheck {
-                    needs_more: false,
-                    prompt: None,
-                });
-            }
-        }
-
-        let mut child = command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn()
-            .with_context(|| format!("failed to syntax-check input with {}", self.shell_program))?;
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin
-                .write_all(input.as_bytes())
-                .context("failed to write input to shell syntax check")?;
-            stdin
-                .write_all(b"\n")
-                .context("failed to finish shell syntax check input")?;
-        }
-        let output = child
-            .wait_with_output()
-            .context("failed to read shell syntax check result")?;
-        if output.status.success() {
-            return Ok(ContinuationCheck {
-                needs_more: false,
-                prompt: None,
-            });
-        }
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        Ok(ContinuationCheck {
-            needs_more: is_incomplete_shell_syntax(&stderr),
-            prompt: shell_continuation_prompt(&stderr),
-        })
+        input_needs_more_lines(&self.shell_program, input)
     }
 
     pub fn run_command(&mut self, command: &str, timeout: Duration) -> Result<CommandResult> {
@@ -337,9 +277,7 @@ impl PtyBackend {
         let _ = self.drain_for(Duration::from_millis(25));
         let marker = next_marker();
         let start_command = start_marker_command(command);
-        let marker_command = format!(
-            " __aish_status=$?; command -v __aish_run_prompt_command >/dev/null 2>&1 && __aish_run_prompt_command >/dev/null 2>&1; printf '\\n%s%s\\t%s\\n' '{marker}' \"$__aish_status\" \"$PWD\"; sh -c \"exit $__aish_status\"\n"
-        );
+        let marker_command = status_marker_command(&marker);
         if !command.contains('\n') {
             self.write_raw(&start_command)?;
         }
@@ -373,9 +311,7 @@ impl PtyBackend {
         let _ = self.drain_for(Duration::from_millis(25));
         let marker = next_marker();
         let start_command = start_marker_command(command);
-        let marker_command = format!(
-            " __aish_status=$?; command -v __aish_run_prompt_command >/dev/null 2>&1 && __aish_run_prompt_command >/dev/null 2>&1; printf '\\n%s%s\\t%s\\n' '{marker}' \"$__aish_status\" \"$PWD\"; sh -c \"exit $__aish_status\"\n"
-        );
+        let marker_command = status_marker_command(&marker);
         if !command.contains('\n') {
             self.write_raw(&start_command)?;
         }
@@ -655,11 +591,6 @@ impl Drop for PtyBackend {
 
 fn no_wait(_: &mut PtyBackend) -> Result<bool> {
     Ok(false)
-}
-
-fn next_marker() -> String {
-    let id = NEXT_MARKER_ID.fetch_add(1, Ordering::Relaxed);
-    format!("{MARKER_PREFIX}{id}__")
 }
 
 #[cfg(test)]

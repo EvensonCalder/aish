@@ -1,4 +1,13 @@
 use super::*;
+use std::path::Path;
+
+fn current_ready_marker() -> &'static str {
+    ready_marker()
+}
+
+fn current_start_marker() -> &'static str {
+    start_marker()
+}
 
 #[test]
 fn resolves_configured_shell_before_environment() {
@@ -110,21 +119,28 @@ fn parser_normalizes_pty_newlines() {
 
 #[test]
 fn parser_reads_ready_marker_cwd() {
-    let raw = format!("noise\r\n{READY_MARKER}\t/tmp/aish\r\n");
+    let ready = current_ready_marker();
+    let raw = format!("noise\r\n{ready}\t/tmp/aish\r\n");
     assert_eq!(parse_ready_cwd(&raw).as_deref(), Some("/tmp/aish"));
     assert_eq!(parse_ready_cwd(READY_MARKER), None);
+    assert_eq!(
+        parse_ready_cwd(&format!("noise\r\n{READY_MARKER}\t/tmp/legacy\r\n")),
+        None
+    );
 }
 
 #[test]
 fn parser_reads_ready_marker_cwd_when_status_is_present() {
-    let raw = format!("noise\r\n{READY_MARKER}\t0\t/tmp/aish\r\n");
+    let ready = current_ready_marker();
+    let raw = format!("noise\r\n{ready}\t0\t/tmp/aish\r\n");
     assert_eq!(parse_ready_cwd(&raw).as_deref(), Some("/tmp/aish"));
 }
 
 #[test]
 fn parser_waits_for_complete_ready_marker_line() {
-    let status_only = format!("{READY_MARKER}\t0");
-    let partial_cwd = format!("{READY_MARKER}\t0\t/tmp/aish");
+    let ready = current_ready_marker();
+    let status_only = format!("{ready}\t0");
+    let partial_cwd = format!("{ready}\t0\t/tmp/aish");
 
     assert_eq!(parse_ready_cwd(&status_only), None);
     assert_eq!(parse_ready_cwd(&partial_cwd), None);
@@ -136,15 +152,15 @@ fn parser_waits_for_complete_ready_marker_line() {
 
 #[test]
 fn parser_strips_terminal_controls_from_ready_marker_cwd() {
-    let raw = format!("noise\r\n\x1b[K{READY_MARKER}\t0\t/tmp/aish\x1b[K\r\n");
+    let ready = current_ready_marker();
+    let raw = format!("noise\r\n\x1b[K{ready}\t0\t/tmp/aish\x1b[K\r\n");
     assert_eq!(parse_ready_cwd(&raw).as_deref(), Some("/tmp/aish"));
 }
 
 #[test]
 fn parser_ignores_ready_marker_in_echoed_init_command() {
-    let raw = format!(
-        "stty -echo; printf '\\n{READY_MARKER}\\t%s\\n' \"$PWD\"\r\n{READY_MARKER}\t/tmp/aish\r\n"
-    );
+    let ready = current_ready_marker();
+    let raw = format!("stty -echo; printf '\\n{ready}\\t%s\\n' \"$PWD\"\r\n{ready}\t/tmp/aish\r\n");
     assert_eq!(parse_ready_cwd(&raw).as_deref(), Some("/tmp/aish"));
 }
 
@@ -161,7 +177,8 @@ fn parser_uses_real_marker_when_command_echo_contains_marker() {
 #[test]
 fn parser_reads_start_marker_for_marker_shells() {
     let marker = "__AISH_STATUS__123__";
-    let raw = format!("{START_MARKER}\tprintf hello\nhello\n{marker}0\t/tmp\n");
+    let start = current_start_marker();
+    let raw = format!("{start}\tprintf hello\nhello\n{marker}0\t/tmp\n");
     let (output, status, cwd, started) = parse_marker_output(&raw, marker).unwrap();
 
     assert_eq!(output, "hello");
@@ -181,8 +198,9 @@ fn start_marker_command_quotes_shell_text_and_normalizes_multiline_display() {
 
 #[test]
 fn clean_marker_echo_hides_ready_marker_lines() {
+    let ready = current_ready_marker();
     let output = clean_marker_echo(
-        &format!("echoed\n{READY_MARKER}\t/tmp/aish\nvisible"),
+        &format!("echoed\n{ready}\t/tmp/aish\nvisible"),
         "__AISH_STATUS__1__",
     );
 
@@ -191,8 +209,9 @@ fn clean_marker_echo_hides_ready_marker_lines() {
 
 #[test]
 fn clean_marker_echo_removes_prompt_ready_separators() {
+    let ready = current_ready_marker();
     let output = clean_marker_echo(
-        &format!("one\n\n{READY_MARKER}\t0\t/tmp/aish\ntwo\n\n{READY_MARKER}\t0\t/tmp/aish\n"),
+        &format!("one\n\n{ready}\t0\t/tmp/aish\ntwo\n\n{ready}\t0\t/tmp/aish\n"),
         "__AISH_STATUS__1__",
     );
 
@@ -201,8 +220,9 @@ fn clean_marker_echo_removes_prompt_ready_separators() {
 
 #[test]
 fn clean_marker_echo_preserves_user_blank_before_prompt_separator() {
+    let ready = current_ready_marker();
     let output = clean_marker_echo(
-        &format!("one\n\n\n{READY_MARKER}\t0\t/tmp/aish\n"),
+        &format!("one\n\n\n{ready}\t0\t/tmp/aish\n"),
         "__AISH_STATUS__1__",
     );
 
@@ -213,9 +233,10 @@ fn clean_marker_echo_preserves_user_blank_before_prompt_separator() {
 fn output_filter_hides_marker_lines_and_their_separator() {
     let marker = "__AISH_STATUS__123__";
     let mut filter = PtyOutputFilter::marker(marker);
+    let start = current_start_marker();
 
-    let output = filter
-        .push(format!("\r\n{START_MARKER}\techo hi\r\nhi\r\n\r\n{marker}0\t/tmp\r\n").as_bytes());
+    let output =
+        filter.push(format!("\r\n{start}\techo hi\r\nhi\r\n\r\n{marker}0\t/tmp\r\n").as_bytes());
 
     assert_eq!(String::from_utf8(output).unwrap(), "hi\r\n");
 }
@@ -246,8 +267,10 @@ fn output_filter_preserves_carriage_return_progress() {
 #[test]
 fn fish_output_filter_streams_only_command_output_between_markers() {
     let mut filter = PtyOutputFilter::shell_events(true);
+    let start = current_start_marker();
+    let ready = current_ready_marker();
     let raw = format!(
-        "prompt repaint\r\n{START_MARKER}\tprintf 'fish-ok\\n'\r\nfish-ok\r\n{READY_MARKER}\t0\t/tmp/aish\r\nnext prompt\r\n"
+        "prompt repaint\r\n{start}\tprintf 'fish-ok\\n'\r\nfish-ok\r\n{ready}\t0\t/tmp/aish\r\nnext prompt\r\n"
     );
 
     let output = filter.push(raw.as_bytes());
@@ -258,8 +281,10 @@ fn fish_output_filter_streams_only_command_output_between_markers() {
 #[test]
 fn fish_output_filter_drops_cursor_repaint_duplicate_before_plain_output() {
     let mut filter = PtyOutputFilter::shell_events(true);
+    let start = current_start_marker();
+    let ready = current_ready_marker();
     let raw = format!(
-        "{START_MARKER}\tcat c/i | grep beta\r\n\x1b[50Cbeta\r\nbeta\r\n{READY_MARKER}\t0\t/tmp/aish\r\n"
+        "{start}\tcat c/i | grep beta\r\n\x1b[50Cbeta\r\nbeta\r\n{ready}\t0\t/tmp/aish\r\n"
     );
 
     let output = filter.push(raw.as_bytes());
@@ -270,9 +295,10 @@ fn fish_output_filter_drops_cursor_repaint_duplicate_before_plain_output() {
 #[test]
 fn fish_output_filter_preserves_carriage_return_progress_inside_command() {
     let mut filter = PtyOutputFilter::shell_events(true);
-    let raw = format!(
-        "{START_MARKER}\tprintf progress\r\nprogress 1\rprogress 2\r\n{READY_MARKER}\t0\t/tmp/aish\r\n"
-    );
+    let start = current_start_marker();
+    let ready = current_ready_marker();
+    let raw =
+        format!("{start}\tprintf progress\r\nprogress 1\rprogress 2\r\n{ready}\t0\t/tmp/aish\r\n");
 
     let output = filter.push(raw.as_bytes());
 
@@ -281,7 +307,9 @@ fn fish_output_filter_preserves_carriage_return_progress_inside_command() {
 
 #[test]
 fn parse_ready_status_output_reads_status_cwd_and_filters_hook_lines() {
-    let raw = format!("{START_MARKER}\techo hello\nhello\n{READY_MARKER}\t7\t/tmp/aish\n");
+    let start = current_start_marker();
+    let ready = current_ready_marker();
+    let raw = format!("{start}\techo hello\nhello\n{ready}\t7\t/tmp/aish\n");
 
     assert_eq!(
         parse_ready_status_output(&raw, false).unwrap(),
@@ -296,9 +324,9 @@ fn parse_ready_status_output_reads_status_cwd_and_filters_hook_lines() {
 
 #[test]
 fn parse_ready_status_output_preserves_user_output_line_breaks() {
-    let raw = format!(
-        "{START_MARKER}\tprintf first\\nsecond\\n\nfirst\nsecond\n{READY_MARKER}\t0\t/tmp/aish\n"
-    );
+    let start = current_start_marker();
+    let ready = current_ready_marker();
+    let raw = format!("{start}\tprintf first\\nsecond\\n\nfirst\nsecond\n{ready}\t0\t/tmp/aish\n");
 
     let parsed = parse_ready_status_output(&raw, false).unwrap();
 
@@ -307,12 +335,14 @@ fn parse_ready_status_output_preserves_user_output_line_breaks() {
 
 #[test]
 fn parse_ready_status_output_ignores_prompt_noise_around_command_markers() {
+    let start = current_start_marker();
+    let ready = current_ready_marker();
     let raw = format!(
         "old prompt\n\
-             {READY_MARKER}\t0\n\
-             {START_MARKER}\tprintf hi\n\
+             {ready}\t0\n\
+             {start}\tprintf hi\n\
              hi\n\
-             {READY_MARKER}\t0\t/tmp/aish\n\
+             {ready}\t0\t/tmp/aish\n\
              user precmd noise\n\
              prompt> \n"
     );
@@ -325,9 +355,31 @@ fn parse_ready_status_output_ignores_prompt_noise_around_command_markers() {
 }
 
 #[test]
-fn parse_ready_status_output_can_filter_fish_repaint_sequences() {
+fn parse_ready_status_output_preserves_legacy_marker_text_from_user_output() {
+    let start = current_start_marker();
+    let ready = current_ready_marker();
     let raw = format!(
-        "{START_MARKER}\tprintf 'fish-ok\\n'\n\
+        "{start}\tprintf marker\n\
+             {READY_MARKER}\t0\t/tmp/fake\n\
+             real\n\
+             {ready}\t0\t/tmp/aish\n"
+    );
+
+    let parsed = parse_ready_status_output(&raw, false).unwrap();
+
+    assert_eq!(
+        parsed.output,
+        format!("{READY_MARKER}\t0\t/tmp/fake\nreal\n")
+    );
+    assert_eq!(parsed.cwd, "/tmp/aish");
+}
+
+#[test]
+fn parse_ready_status_output_can_filter_fish_repaint_sequences() {
+    let start = current_start_marker();
+    let ready = current_ready_marker();
+    let raw = format!(
+        "{start}\tprintf 'fish-ok\\n'\n\
              printf \n\
              \x1b[50C\x1b[?2004l\x1b[?2031l\x1b[>4;0m\x1b>'fish-ok\\n'\n\
              \x1b[61C\x1b[18Dprintf 'fish-ok\\n'\n\
@@ -339,7 +391,7 @@ fn parse_ready_status_output_can_filter_fish_repaint_sequences() {
              \u{23ce} \n\
              \x1b[K\x1b]0;~/aish\x07\x1b[m\x1b[?2004h\x1b[?2031h\x1b[>4;1m\x1b=\x1b[K\n\
              \x1b[43C\n\
-             {READY_MARKER}\t0\t/tmp/aish\n"
+             {ready}\t0\t/tmp/aish\n"
     );
 
     let parsed = parse_ready_status_output(&raw, true).unwrap();
@@ -353,14 +405,16 @@ fn parse_ready_status_output_can_filter_fish_repaint_sequences() {
 
 #[test]
 fn fish_repaint_filter_preserves_plain_output_matching_command_suffix() {
+    let start = current_start_marker();
+    let ready = current_ready_marker();
     let raw = format!(
-        "{START_MARKER}\tcat common/items.txt | grep beta\n\
+        "{start}\tcat common/items.txt | grep beta\n\
              \x1b[50Ccommon/items.txt\n\
              \x1b[50C|\n\
              \x1b[50Cgrep\n\
              \x1b[50Cbeta\n\
              beta\n\
-             {READY_MARKER}\t0\t/tmp/aish\n"
+             {ready}\t0\t/tmp/aish\n"
     );
 
     let parsed = parse_ready_status_output(&raw, true).unwrap();
@@ -370,11 +424,13 @@ fn fish_repaint_filter_preserves_plain_output_matching_command_suffix() {
 
 #[test]
 fn fish_repaint_filter_removes_semicolon_command_fragments() {
+    let start = current_start_marker();
+    let ready = current_ready_marker();
     let raw = format!(
-        "{START_MARKER}\ttest -f c/i; and echo file-exists\n\
+        "{start}\ttest -f c/i; and echo file-exists\n\
              c/i;\n\
              file-exists\n\
-             {READY_MARKER}\t0\t/tmp/aish\n"
+             {ready}\t0\t/tmp/aish\n"
     );
 
     let parsed = parse_ready_status_output(&raw, true).unwrap();
@@ -384,11 +440,13 @@ fn fish_repaint_filter_removes_semicolon_command_fragments() {
 
 #[test]
 fn fish_repaint_filter_removes_variable_command_fragments() {
+    let start = current_start_marker();
+    let ready = current_ready_marker();
     let raw = format!(
-        "{START_MARKER}\tprintf '%s\\n' $AISH_FISH_RC_ENV\n\
+        "{start}\tprintf '%s\\n' $AISH_FISH_RC_ENV\n\
              $AISH_FISH_RC_ENV\n\
              env-from-fish-config\n\
-             {READY_MARKER}\t0\t/tmp/aish\n"
+             {ready}\t0\t/tmp/aish\n"
     );
 
     let parsed = parse_ready_status_output(&raw, true).unwrap();
@@ -397,25 +455,45 @@ fn fish_repaint_filter_removes_variable_command_fragments() {
 }
 
 #[test]
-fn incomplete_shell_syntax_detection_uses_shell_error_text() {
-    assert!(is_incomplete_shell_syntax(
-        "bash: unexpected EOF while looking for matching `\"'"
-    ));
-    assert!(is_incomplete_shell_syntax("zsh: parse error: unmatched \""));
-    assert!(!is_incomplete_shell_syntax(
-        "syntax error near unexpected token `fi'"
-    ));
+fn continuation_detection_uses_stable_lexical_state_not_shell_errors() {
+    let quoted = input_needs_more_lines("/bin/bash", "echo \"").unwrap();
+    assert!(quoted.needs_more);
+    assert_eq!(quoted.prompt.as_deref(), Some("dquote> "));
+
+    let single = input_needs_more_lines("/bin/zsh", "echo '").unwrap();
+    assert!(single.needs_more);
+    assert_eq!(single.prompt.as_deref(), Some("quote> "));
+
+    let shell_block = input_needs_more_lines("/usr/bin/fish", "if true").unwrap();
+    assert!(!shell_block.needs_more);
 }
 
 #[test]
 fn line_continuation_detects_odd_trailing_backslashes() {
-    assert!(ends_with_shell_line_continuation("echo aa \\"));
-    assert!(!ends_with_shell_line_continuation("echo aa \\\\"));
-    assert!(!ends_with_shell_line_continuation("echo aa"));
+    assert!(
+        input_needs_more_lines("/bin/bash", "echo aa \\")
+            .unwrap()
+            .needs_more
+    );
+    assert!(
+        !input_needs_more_lines("/bin/bash", "echo aa \\\\")
+            .unwrap()
+            .needs_more
+    );
+    assert!(
+        !input_needs_more_lines("/bin/bash", "echo aa")
+            .unwrap()
+            .needs_more
+    );
+    assert!(
+        !input_needs_more_lines("/bin/bash", "echo 'aa\\'")
+            .unwrap()
+            .needs_more
+    );
 }
 
 #[test]
-fn bash_syntax_check_detects_incomplete_input_without_hanging() {
+fn bash_continuation_check_detects_incomplete_lexical_input_without_hanging() {
     let backend = PtyBackend::spawn("/bin/bash").unwrap();
 
     let continued = backend.input_needs_more_lines("echo aa \\").unwrap();
@@ -436,7 +514,7 @@ fn bash_syntax_check_detects_incomplete_input_without_hanging() {
 }
 
 #[test]
-fn zsh_syntax_check_detects_incomplete_input_without_hanging() {
+fn zsh_continuation_check_detects_incomplete_lexical_input_without_hanging() {
     if !Path::new("/bin/zsh").exists() {
         return;
     }
@@ -465,4 +543,12 @@ fn marker_status_requires_digits_and_line_end() {
         "hello\r\n__AISH_STATUS__123__0\r\n",
         marker
     ));
+}
+
+#[test]
+fn marker_command_preserves_status_without_external_sh() {
+    let command = status_marker_command("__AISH_STATUS__test__");
+
+    assert!(command.contains("__aish_preserve_status"));
+    assert!(!command.contains("sh -c"));
 }

@@ -1,34 +1,78 @@
-pub(super) fn is_incomplete_shell_syntax(stderr: &str) -> bool {
-    let stderr = stderr.to_ascii_lowercase();
-    stderr.contains("unexpected eof")
-        || stderr.contains("unexpected end of file")
-        || stderr.contains("unmatched \"")
-        || stderr.contains("unmatched '")
-        || stderr.contains("parse error near `\\n'")
-        || stderr.contains("parse error near `\n'")
-        || stderr.contains("parse error: unmatched")
+use anyhow::Result;
+
+use super::ContinuationCheck;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ShellLexicalState {
+    Normal,
+    SingleQuoted,
+    DoubleQuoted,
 }
 
-pub(super) fn shell_continuation_prompt(stderr: &str) -> Option<String> {
-    let stderr = stderr.to_ascii_lowercase();
-    if stderr.contains("unmatched \"") || stderr.contains("matching `\"'") {
-        return Some("dquote> ".to_string());
-    }
-    if stderr.contains("unmatched '") || stderr.contains("matching `''") {
-        return Some("quote> ".to_string());
-    }
-    if is_incomplete_shell_syntax(&stderr) {
-        return Some("> ".to_string());
-    }
-    None
+pub(super) fn input_needs_more_lines(
+    _shell_program: &str,
+    input: &str,
+) -> Result<ContinuationCheck> {
+    Ok(lexical_continuation_check(input))
 }
 
-pub(super) fn ends_with_shell_line_continuation(input: &str) -> bool {
-    let trailing_backslashes = input
-        .as_bytes()
-        .iter()
-        .rev()
-        .take_while(|&&byte| byte == b'\\')
-        .count();
-    trailing_backslashes % 2 == 1
+pub(super) fn lexical_continuation_check(input: &str) -> ContinuationCheck {
+    let state = lexical_state(input);
+    match state.quote {
+        ShellLexicalState::SingleQuoted => ContinuationCheck {
+            needs_more: true,
+            prompt: Some("quote> ".to_string()),
+        },
+        ShellLexicalState::DoubleQuoted => ContinuationCheck {
+            needs_more: true,
+            prompt: Some("dquote> ".to_string()),
+        },
+        ShellLexicalState::Normal if state.escaped => ContinuationCheck {
+            needs_more: true,
+            prompt: Some("> ".to_string()),
+        },
+        ShellLexicalState::Normal => ContinuationCheck {
+            needs_more: false,
+            prompt: None,
+        },
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LexicalState {
+    quote: ShellLexicalState,
+    escaped: bool,
+}
+
+fn lexical_state(input: &str) -> LexicalState {
+    let mut quote = ShellLexicalState::Normal;
+    let mut escaped = false;
+
+    for ch in input.chars() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+
+        match quote {
+            ShellLexicalState::Normal => match ch {
+                '\\' => escaped = true,
+                '\'' => quote = ShellLexicalState::SingleQuoted,
+                '"' => quote = ShellLexicalState::DoubleQuoted,
+                _ => {}
+            },
+            ShellLexicalState::SingleQuoted => {
+                if ch == '\'' {
+                    quote = ShellLexicalState::Normal;
+                }
+            }
+            ShellLexicalState::DoubleQuoted => match ch {
+                '\\' => escaped = true,
+                '"' => quote = ShellLexicalState::Normal,
+                _ => {}
+            },
+        }
+    }
+
+    LexicalState { quote, escaped }
 }
