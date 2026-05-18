@@ -627,7 +627,9 @@ On Unix-like systems, Aish creates managed storage directories with private dire
 
 The app module root in `src/app.rs` wires together focused runtime modules:
 
-- `src/app/state.rs`: `AppState`, output ring state, draft/history/template state transitions, and encrypted writer lifecycle.
+- `src/app/state.rs`: `AppState`, output ring state, storage-backed draft/history/template persistence, and encrypted writer lifecycle.
+- `src/app/editor_state.rs`: editor roundtrips and paste/editor draft replacement state.
+- `src/app/selection_state.rs`: history/AI selection, draft clearing, key-prefix state, and unlock passthrough mode transitions.
 - `src/app/bootstrap.rs`: startup layout/config/history/template loading and terminal launch.
 - `src/app/completion_runtime.rs`: AppState completion request/cache orchestration.
 - `src/app/config_commands.rs`: `#model`, `#base-url`, `#env-key`, `#context`, `#paste`, and `#completion` config mutations.
@@ -644,8 +646,10 @@ The app module root in `src/app.rs` wires together focused runtime modules:
 - `src/config/`: config model types, directory layout, private file permissions, root path resolution, file IO, and normalization.
 - `src/completion.rs`: completion orchestration across templates, history, paths, private commands, and typo tiers.
 - `src/completion/`: focused completion helpers for shared types, indexed history/template words, matching rules, token parsing, path/PATH scanning, private command completion, and rendering/acceptance.
-- `src/terminal.rs`: terminal event loop, key/paste handling, picker/editor boundaries, and prompt redraw positioning.
+- `src/encryption/keys.rs`: GPG public key listing, fingerprint normalization, and selector ambiguity handling.
+- `src/terminal.rs`: terminal event loop, key/paste handling, and picker/editor boundaries.
 - `src/terminal/completion_ui.rs`: live completion display, inline suffixes, Tab/Right acceptance, and completion panel state transitions.
+- `src/terminal/render.rs`: prompt redraw positioning, render anchors, cursor placement, and screen-area reservation.
 - `src/pty.rs`: PTY backend lifecycle, command execution, read loop, and streaming event callbacks.
 - `src/pty/`: shell launch setup, randomized marker protocol, marker parsing, output filtering, and continuation syntax helpers.
 
