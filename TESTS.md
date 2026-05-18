@@ -14,7 +14,7 @@ git diff --check
 
 Current test inventory:
 
-- 547 library unit tests.
+- 549 library unit tests.
 - 26 draft execution integration tests.
 - 1 first-run integration test.
 - 46 tmux screen-capture integration tests.
@@ -79,7 +79,7 @@ Expect scenarios are the acceptance layer for user-visible terminal behavior. Th
 | Editor and paste flows | `external_editor_roundtrip`, `home_default_external_editor_roundtrip`, `external_editor_failure_preserves_draft`, `home_default_external_editor_failure_preserves_draft`, `tmux_manual_templates_editor_and_default_home_match_visible_terminal_behavior`, `tmux_editor_and_paste_review_render_cleanly`, `editor_hash_content_bypasses_parser`, `multiline_paste_editor_review`, `home_default_multiline_paste_editor_review` | Covered | Real OS clipboard and full-screen editor behavior remains human-only in `MANUAL_TESTS.md`. |
 | Sync | `key_encryption_sync_safe_failures`, `home_default_sync_config_persists`, `home_default_startup_sync_runs`, `home_default_startup_sync_unsupported_schedule`, `home_default_startup_sync_failure_logs`, `home_default_startup_sync_disabled_noops`, `home_default_sync_push_local_remote`, `sync_push_local_remote`, `sync_push_failure_logs`, `sync_push_conflict_logs`, Rust startup/exit trigger tests, `tmux_manual_ai_context_and_sync_config_match_visible_terminal_behavior`, `tmux_manual_sync_local_remote_matches_visible_terminal_behavior` | Covered | Real remote auth and human conflict review remain manual-only. |
 | Passthrough/interactive programs | `passthrough_less`, `tmux_manual_passthrough_less_recovers_prompt_when_available` when `less` is available, `tmux_python_repl_passthrough_recovers_prompt_when_available` when `python3` is available, `tmux_stdin_and_gpg_like_passthrough_recovers_prompt`, `tmux_unknown_tui_passthrough_recovers_prompt`, backend interrupt recovery through `pty_backend_wait_callback_can_interrupt_long_running_commands`; key forwarding is Rust-covered | Covered for portable cases | Add focused regressions for newly reported real-world interactive programs. |
-| Encryption/GPG | `key_clear_removes_stored_key`, `home_default_key_clear_removes_stored_key`, `home_default_encrypt_on_migrates_storage`, `encrypted_startup_unlock`, `encrypt_ambiguous_key_recovers`, `key_encryption_sync_safe_failures`; Rust coverage for `key_set_encrypts_env_api_key_without_printing_secret`, `ai_prompt_uses_gpg_stored_key_when_env_key_is_missing`, `encrypt_on_migrates_plaintext_storage_and_persists_config`, `encrypt_rotate_reencrypts_existing_storage_and_persists_fingerprint`, `encrypt_off_decrypts_storage_and_persists_config`, `encrypt_unlock_mode_persists_startup_unlock_policy`, `encrypted_writes_use_gpg_files_without_plaintext_jsonl`, `encrypted_jsonl_append_does_not_decrypt_existing_file`, `encrypted_history_append_does_not_block_command_completion`, `encrypted_completion_uses_cached_templates_without_gpg_on_keypress`, lazy startup unlock merge behavior, noninteractive GPG decrypt boundaries, and rewrite-history planning/script safety | Mostly covered with fake GPG | Real passphrase-protected key and pinentry behavior remains human-only in `MANUAL_TESTS.md`. Lazy startup uses explicit `#unlock` when a passphrase is needed; prompt startup mode is implemented and still needs real-key coverage. |
+| Encryption/GPG | `key_clear_removes_stored_key`, `home_default_key_clear_removes_stored_key`, `home_default_encrypt_on_migrates_storage`, `encrypted_startup_unlock`, `encrypt_ambiguous_key_recovers`, `key_encryption_sync_safe_failures`; Rust coverage for `key_set_encrypts_env_api_key_without_printing_secret`, `ai_prompt_uses_gpg_stored_key_when_env_key_is_missing`, `encrypt_on_migrates_plaintext_storage_and_persists_config`, `encrypt_rotate_reencrypts_existing_storage_and_persists_fingerprint`, `encrypt_off_decrypts_storage_and_persists_config`, `encrypt_unlock_mode_persists_startup_unlock_policy`, `encrypted_writes_use_gpg_files_without_plaintext_jsonl`, `encrypted_jsonl_append_does_not_decrypt_existing_file`, `encrypted_history_append_does_not_block_command_completion`, `encrypted_completion_uses_cached_templates_without_gpg_on_keypress`, lazy startup unlock merge behavior, noninteractive GPG decrypt boundaries, and rewrite-history planning/script safety | Automated with fake GPG plus human real-pinentry validation | Real passphrase-protected key and pinentry behavior remains human-only in `MANUAL_TESTS.md`; latest manual validation reported no issues for lazy `#unlock` and prompt startup unlock. |
 
 ## Feature Coverage
 
@@ -657,7 +657,7 @@ Status:
 Known gaps:
 
 - Lazy startup passphrase-required unlock is explicit through `#unlock`; prompt startup unlock mode is implemented for users who want passphrase entry before the first prompt.
-- Real passphrase/pinentry GPG behavior is human-only; fake-GPG command boundaries, startup unlock fallback, append-without-decrypt behavior, and storage migration are automated.
+- Real passphrase/pinentry GPG behavior is human-only and has been manually validated; fake-GPG command boundaries, startup unlock fallback, append-without-decrypt behavior, and storage migration are automated.
 - There is no planned in-process scheduled background sync; supported automatic sync points are startup periodic checks, explicit startup sync, and exit sync.
 
 ### Regular History Storage
@@ -786,7 +786,7 @@ Status:
 Known gaps:
 
 - Live network/provider behavior is intentionally not covered by automated tests.
-- Stored GPG API-key fallback is fake-GPG covered; real passphrase/pinentry fallback remains human-only.
+- Stored GPG API-key fallback is fake-GPG covered; real passphrase/pinentry fallback remains human-only and has been manually validated.
 
 ### JSONL Storage Helpers
 
@@ -963,12 +963,12 @@ Important missing or partial areas:
 - Cross-platform passthrough validation for newly reported alternate-screen or job-control programs.
 - Fish backend validation across macOS and representative Linux distributions before it becomes default required coverage.
 - Search-specific indexes beyond the current in-memory history/template completion caches.
-- Live network AI provider behavior, real passphrase-protected GPG/pinentry behavior, and real remote sync authentication remain manual-only.
+- Live network AI provider behavior and real remote sync authentication remain manual-only. Real passphrase-protected GPG/pinentry behavior is manual-only and has been manually validated.
 
 ## Recommended Next Tests
 
 Next high-value tests to add:
 
-- Real passphrase/pinentry manual harness notes for isolated GPG keys, covering lazy `#unlock` and prompt startup unlock.
+- Additional representative-terminal sweeps for real passphrase/pinentry behavior if new terminal-specific issues are reported.
 - Additional fish tmux workflows after cross-platform fish behavior is validated.
 - Focused passthrough regressions for newly allowlisted interactive programs.

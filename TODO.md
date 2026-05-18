@@ -8,7 +8,7 @@ Status as of the latest full review:
 
 - Core interactive shell wrapper is implemented: PTY backend, raw terminal input, draft editing, continuation handling, history/AI modes, private command parsing, editor/paste flows, templates, completion, picker boundaries, AI request plumbing, context pseudo-pipe, event log, and diagnostics.
 - Rust unit/integration coverage and expect-driven real terminal coverage both exist for the implemented interactive behaviors. New user-facing terminal behavior should continue to receive both Rust-level and expect-level coverage.
-- Large intentionally incomplete areas remain: real passphrase/pinentry coverage across representative terminals and cross-platform fish validation.
+- Large intentionally incomplete areas remain: cross-platform fish validation and broader representative-terminal sweeps.
 - GPG-backed secrets and encrypted history/template storage are implemented. Startup history/template unlock supports lazy nonblocking unlock with explicit `#unlock` and prompt mode that requires GPG/pinentry before the first prompt. Normal encrypted JSONL appends use a serialized background writer, and direct GPG decrypt operations enter UnlockPassthrough so pinentry can own the terminal when needed.
 - The remaining unchecked items below are the source of truth for future work; do not skip them just because adjacent scaffolding exists.
 
@@ -668,7 +668,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
   - [x] Encrypt new appends immediately while startup storage is locked.
   - [x] Merge same-session locked entries after startup unlock without duplicating already-encrypted appends.
 - [x] Add prompt startup unlock mode for users who want GPG/pinentry before the first prompt.
-- [ ] Add real passphrase/pinentry coverage for lazy `#unlock` and prompt startup unlock.
+- [x] Add real passphrase/pinentry coverage for lazy `#unlock` and prompt startup unlock through human validation; fake-GPG automation remains the deterministic CI boundary.
 - [x] Add atomic encrypted-write helper.
 - [x] Add append-only encrypted JSONL messages so appends do not decrypt old data.
 - [x] Add serialized async encrypted JSONL append/rewrite worker for normal foreground writes.
@@ -909,7 +909,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 - [ ] `ssh` passthrough.
 - [ ] `less`/`top` alternate screen behavior.
 - [ ] `fzf` integration.
-- [ ] Pinentry behavior.
+- [x] Pinentry behavior.
 - [ ] Terminal resize.
 - [ ] Unicode input.
 - [ ] Long command editing.
