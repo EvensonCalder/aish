@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use crate::history::HistoryEntry;
 use crate::templates::TemplateEntry;
 
+mod index;
 mod matching;
 mod parser;
 mod path;
@@ -11,6 +12,9 @@ mod private;
 mod render;
 mod types;
 
+pub(crate) use index::{
+    IndexedHistoryEntry, IndexedTemplateEntry, index_history_entries, index_template_entries,
+};
 pub use matching::{matches_completion_prefix, matches_completion_prefix_with_threshold};
 pub use parser::{current_token_context, is_path_like_token};
 pub use path::complete_path;
@@ -31,36 +35,12 @@ use matching::{
 };
 #[cfg(test)]
 use parser::command_arguments;
-use parser::{
-    ShellWord, command_argument_words, shell_like_words, shell_word_value, split_shell_like_words,
-};
+use parser::{command_argument_words, shell_word_value, split_shell_like_words};
 pub(crate) use path::scan_path_executables;
 use path::{
     complete_path_executables, complete_path_with_options, order_path_candidates_for_completion,
     split_path_candidates,
 };
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct IndexedHistoryEntry {
-    pub(crate) entry: HistoryEntry,
-    pub(crate) words: Vec<String>,
-    pub(crate) raw_words: Vec<String>,
-    pub(crate) arguments: Vec<ShellWord>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct IndexedTemplateEntry {
-    pub(crate) entry: TemplateEntry,
-    pub(crate) id: String,
-    pub(crate) words: Vec<String>,
-    pub(crate) placeholders: Vec<IndexedTemplatePlaceholder>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct IndexedTemplatePlaceholder {
-    pub(crate) raw: String,
-    pub(crate) name: String,
-}
 
 pub fn complete_first_token(
     prefix: &str,
@@ -204,46 +184,6 @@ pub fn complete_non_first_token_for_line_with_options(
         &indexed_templates,
         options,
     )
-}
-
-pub(crate) fn index_history_entries(
-    history_newest_first: &[HistoryEntry],
-) -> Vec<IndexedHistoryEntry> {
-    history_newest_first
-        .iter()
-        .cloned()
-        .map(|entry| {
-            let words = shell_like_words(&entry.command);
-            IndexedHistoryEntry {
-                raw_words: words.iter().map(|word| word.raw.clone()).collect(),
-                arguments: words.iter().skip(1).cloned().collect(),
-                words: words.into_iter().map(|word| word.value).collect(),
-                entry,
-            }
-        })
-        .collect()
-}
-
-pub(crate) fn index_template_entries(templates: &[TemplateEntry]) -> Vec<IndexedTemplateEntry> {
-    templates
-        .iter()
-        .cloned()
-        .map(|entry| {
-            let placeholders = template_placeholder_words(&entry.body)
-                .into_iter()
-                .map(|placeholder| IndexedTemplatePlaceholder {
-                    raw: placeholder.raw,
-                    name: placeholder.name,
-                })
-                .collect();
-            IndexedTemplateEntry {
-                id: entry.id(),
-                words: split_shell_like_words(&entry.body),
-                placeholders,
-                entry,
-            }
-        })
-        .collect()
 }
 
 pub(crate) fn complete_first_token_history_with_indexed_options(
