@@ -4,7 +4,7 @@ set -eu
 SESSION="aish-manual-less-$$"
 HOME_DIR="/tmp/aish-tmux-manual-less-home-$$"
 : "${AISH_BIN:?AISH_BIN must point to the aish binary under test}"
-trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; rm -rf "$HOME_DIR"' EXIT INT TERM
+trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; rm -rf "$HOME_DIR" || true' EXIT INT TERM
 
 if ! command -v less >/dev/null 2>&1; then
     printf 'less not installed; skipping passthrough tmux workflow\n'

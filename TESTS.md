@@ -14,13 +14,13 @@ git diff --check
 
 Current test inventory:
 
-- 515 library unit tests.
+- 520 library unit tests.
 - 26 draft execution integration tests.
 - 1 first-run integration test.
 - 45 tmux screen-capture integration tests.
 - 9 of the tmux tests are manual-equivalent workflows that replaced deterministic rows from `MANUAL_TESTS.md`: real-world shell commands, prompt editing keys, completion UX mechanics, private commands/notes, templates/editor/default home, AI/context/sync config, local sync, `less` passthrough smoke, and startup failure messages.
 - 23 PTY integration tests, including default bash/zsh coverage and fish cases that skip unless fish opt-in prerequisites are available.
-- 116 expect-driven end-to-end interactive scenarios.
+- 117 expect-driven end-to-end interactive scenarios.
 - Expect scenarios are serialized inside `expect_runner` because they launch real interactive terminals; parallel execution created false `no prompt` and Tcl/expect crash failures that did not match actual single-user operation.
 - Expect scenarios force `commit.gpgsign=false` through `GIT_CONFIG_COUNT` so temporary local git repositories do not depend on a developer's global GPG/pinentry setup.
 - Tmux screen-capture tests are serialized inside `tmux_capture` for the same reason: they launch real terminal panes and assert screen state.
@@ -77,9 +77,9 @@ Expect scenarios are the acceptance layer for user-visible terminal behavior. Th
 | Notes, context, and logs | `notes_are_swallowed`, `home_default_notes_are_swallowed`, `tmux_manual_private_config_notes_workflow_matches_visible_terminal_behavior`, `context_config_persists`, `context_off_blocks_pseudopipe`, `context_confirm_off_runs_immediately`, `context_confirmation_skip`, `context_dangerous_refusal`, `context_dangerous_still_prompts_when_confirm_off`, `context_truncation_reports_limit`, `tmux_manual_ai_context_and_sync_config_match_visible_terminal_behavior`, `home_default_context_dangerous_refusal`, `log_shows_context_skip`, `home_default_event_log_persists` | Covered | Add new context scenarios only for observed regressions. |
 | Templates | `template_use_executes`, `template_crud`, `template_placeholder_blocks_execution`, `home_default_template_persists`, `tmux_manual_templates_editor_and_default_home_match_visible_terminal_behavior` | Covered | Add completion/template interaction if UI changes. |
 | Editor and paste flows | `external_editor_roundtrip`, `home_default_external_editor_roundtrip`, `external_editor_failure_preserves_draft`, `home_default_external_editor_failure_preserves_draft`, `tmux_manual_templates_editor_and_default_home_match_visible_terminal_behavior`, `tmux_editor_and_paste_review_render_cleanly`, `editor_hash_content_bypasses_parser`, `multiline_paste_editor_review`, `home_default_multiline_paste_editor_review` | Covered | Real OS clipboard and full-screen editor behavior remains human-only in `MANUAL_TESTS.md`. |
-| Sync | `key_encryption_sync_safe_failures`, `home_default_sync_config_persists`, `home_default_startup_sync_runs`, `home_default_startup_sync_unsupported_schedule`, `home_default_startup_sync_failure_logs`, `home_default_startup_sync_disabled_noops`, `home_default_sync_push_local_remote`, `sync_push_local_remote`, `sync_push_failure_logs`, `sync_push_conflict_logs`, `tmux_manual_ai_context_and_sync_config_match_visible_terminal_behavior`, `tmux_manual_sync_local_remote_matches_visible_terminal_behavior` | Covered | Real remote auth and human conflict review remain manual-only. |
+| Sync | `key_encryption_sync_safe_failures`, `home_default_sync_config_persists`, `home_default_startup_sync_runs`, `home_default_startup_sync_unsupported_schedule`, `home_default_startup_sync_failure_logs`, `home_default_startup_sync_disabled_noops`, `home_default_sync_push_local_remote`, `sync_push_local_remote`, `sync_push_failure_logs`, `sync_push_conflict_logs`, Rust startup/exit trigger tests, `tmux_manual_ai_context_and_sync_config_match_visible_terminal_behavior`, `tmux_manual_sync_local_remote_matches_visible_terminal_behavior` | Covered | Real remote auth and human conflict review remain manual-only. |
 | Passthrough/interactive programs | `passthrough_less`, `tmux_manual_passthrough_less_recovers_prompt_when_available` when `less` is available, `tmux_python_repl_passthrough_recovers_prompt_when_available` when `python3` is available, `tmux_stdin_and_gpg_like_passthrough_recovers_prompt`, backend interrupt recovery through `pty_backend_wait_callback_can_interrupt_long_running_commands`; key forwarding is Rust-covered | Partial | Broader real interactive programs remain human-only because alternate-screen and job-control behavior vary by environment. |
-| Encryption/GPG | `key_clear_removes_stored_key`, `home_default_key_clear_removes_stored_key`, `home_default_encrypt_on_migrates_storage`, `encrypted_startup_unlock`, `key_encryption_sync_safe_failures`; Rust coverage for `key_set_encrypts_env_api_key_without_printing_secret`, `ai_prompt_uses_gpg_stored_key_when_env_key_is_missing`, `encrypt_on_migrates_plaintext_storage_and_persists_config`, `encrypt_rotate_reencrypts_existing_storage_and_persists_fingerprint`, `encrypt_off_decrypts_storage_and_persists_config`, `encrypted_writes_use_gpg_files_without_plaintext_jsonl`, `encrypted_history_append_does_not_block_command_completion`, `encrypted_completion_uses_cached_templates_without_gpg_on_keypress`, startup unlock buffering, noninteractive GPG decrypt boundaries, and rewrite-history planning/script safety | Mostly covered with fake GPG | Real passphrase-protected key and pinentry behavior remains human-only in `MANUAL_TESTS.md`. Fully automatic startup pinentry prompting remains future work; passphrase-required startup unlock is explicit through `#unlock`. |
+| Encryption/GPG | `key_clear_removes_stored_key`, `home_default_key_clear_removes_stored_key`, `home_default_encrypt_on_migrates_storage`, `encrypted_startup_unlock`, `encrypt_ambiguous_key_recovers`, `key_encryption_sync_safe_failures`; Rust coverage for `key_set_encrypts_env_api_key_without_printing_secret`, `ai_prompt_uses_gpg_stored_key_when_env_key_is_missing`, `encrypt_on_migrates_plaintext_storage_and_persists_config`, `encrypt_rotate_reencrypts_existing_storage_and_persists_fingerprint`, `encrypt_off_decrypts_storage_and_persists_config`, `encrypt_unlock_mode_persists_startup_unlock_policy`, `encrypted_writes_use_gpg_files_without_plaintext_jsonl`, `encrypted_jsonl_append_does_not_decrypt_existing_file`, `encrypted_history_append_does_not_block_command_completion`, `encrypted_completion_uses_cached_templates_without_gpg_on_keypress`, lazy startup unlock merge behavior, noninteractive GPG decrypt boundaries, and rewrite-history planning/script safety | Mostly covered with fake GPG | Real passphrase-protected key and pinentry behavior remains human-only in `MANUAL_TESTS.md`. Lazy startup uses explicit `#unlock` when a passphrase is needed; prompt startup mode is implemented and still needs real-key coverage. |
 
 ## Feature Coverage
 
@@ -241,7 +241,7 @@ Status:
 Known gaps:
 
 - Command-running PTY output is exposed through explicit output/idle callbacks and real output streams before command completion.
-- Timer/background support currently exists as frontend tick wakeups and encrypted-write events; future scheduled background work is not implemented.
+- Timer/background support currently exists as frontend tick wakeups and encrypted-write events. Sync automatic work is intentionally limited to startup and exit boundaries rather than an in-process scheduler.
 - Raw terminal behavior is covered by expect scenarios and tmux pane-capture regressions for portable workflows; add new tmux coverage only when final-screen behavior matters.
 
 ### Core Modes
@@ -340,7 +340,7 @@ Implemented:
 - Context configuration persists `#context on|off`, `#context confirm on|off`, and `#context <bytes>` to `config.toml`; context confirmation stores a pending prompt and accepts `Y`/`Enter` or skips with `n`/`Esc`/`Ctrl-C`.
 - Context pseudo-pipe helpers run context commands through a controlled `/bin/sh -c` subprocess, capture stdout and stderr, enforce byte caps and timeouts, disclose truncation/timeouts, detect dangerous command patterns, and build contextual AI prompts with common secret token shapes redacted from command/output context.
 - Event log helpers append to `logs/events.jsonl`, trim to 1000 events by default, redact common secret token shapes, record config update errors, record secret/encryption-adjacent changes such as `#key clear`, record sync config changes, and `#log <count>` prints recent events.
-- Sync config commands persist remote, schedule/off state, and category toggles for AI/history/templates/drafts without running git or creating scheduler files.
+- Sync config commands persist remote, schedule/off state, startup/exit triggers, and category toggles for AI/history/templates/drafts without running git or creating scheduler files.
 - Sync lock helper atomically creates a lock file, rejects a second holder, writes metadata, and removes the lock on drop.
 - Managed sync `.gitignore` helper preserves user content, replaces only the Aish managed section, and is idempotent.
 - Tracked managed files warning helper identifies Aish-managed paths that may already be tracked and explicitly avoids automatic `git rm --cached` behavior.
@@ -355,7 +355,7 @@ Implemented:
 - Ctrl-L and real `clear`-style command output handling is covered with a virtual terminal screen test that interprets CR/LF and ANSI home/clear sequences, proving the final prompt renders on row 0 instead of leaving a blank first line.
 - Conservative sync flow plan helper orders pull-rebase, managed add, commit, and push steps using fixed git argument arrays without running git.
 - Manual `#push` sync is covered against a local bare git remote, including pull-rebase, managed `.gitignore` add, commit, push, and completion event logging without network access.
-- Startup `#sync <cron-expression>` behavior is covered for due and not-due schedules using a runtime timestamp file, sync lock, and local bare git remote without creating scheduler files.
+- Startup `#sync <cron-expression>` behavior is covered for due and not-due schedules using a runtime timestamp file, sync lock, and local bare git remote without creating scheduler files. Explicit startup and exit sync triggers have Rust coverage.
 - Marker-based shell integration now emits and parses command-start markers, with shell-quoting tests and PTY coverage that bash reports `started_command` without leaking internal markers into history.
 - Bash marker integration has PTY coverage for prompt-ready initial cwd, command-start reporting, command-finish exit status, and cwd reporting after command execution.
 - Zsh hook integration has PTY coverage for `preexec` command-start reporting, `precmd` finish status, and cwd reporting after command execution when `/bin/zsh` is available.
@@ -656,9 +656,9 @@ Status:
 
 Known gaps:
 
-- Fully automatic startup pinentry prompting is not implemented; passphrase-required startup unlock is explicit through `#unlock`.
-- Real passphrase/pinentry GPG behavior is human-only; fake-GPG command boundaries, startup unlock fallback, and storage migration are automated.
-- Future scheduled background work is not attached to tick events yet.
+- Lazy startup passphrase-required unlock is explicit through `#unlock`; prompt startup unlock mode is implemented for users who want passphrase entry before the first prompt.
+- Real passphrase/pinentry GPG behavior is human-only; fake-GPG command boundaries, startup unlock fallback, append-without-decrypt behavior, and storage migration are automated.
+- There is no planned in-process scheduled background sync; supported automatic sync points are startup periodic checks, explicit startup sync, and exit sync.
 
 ### Regular History Storage
 
@@ -960,8 +960,6 @@ There are no intentionally ignored tests in the current default suite. Bash and 
 
 Important missing or partial areas:
 
-- Fully automatic startup pinentry prompting without user-running `#unlock`.
-- Future scheduled background events beyond the current tick hook and encrypted-write completion events.
 - Broader automatic passthrough detection for arbitrary alternate-screen or job-control programs.
 - Fish backend validation across macOS and representative Linux distributions before it becomes default required coverage.
 - Search-specific indexes beyond the current in-memory history/template completion caches.
@@ -971,7 +969,6 @@ Important missing or partial areas:
 
 Next high-value tests to add:
 
-- Real passphrase/pinentry manual harness notes for isolated GPG keys.
-- Fully automatic startup pinentry prompting coverage if that workflow is implemented.
+- Real passphrase/pinentry manual harness notes for isolated GPG keys, covering lazy `#unlock` and prompt startup unlock.
 - Additional fish tmux workflows after cross-platform fish behavior is validated.
 - Focused passthrough regressions for newly allowlisted interactive programs.

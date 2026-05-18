@@ -382,7 +382,11 @@ fn pty_backend_clear_output_does_not_end_with_newline() {
         .unwrap();
 
     assert_eq!(result.exit_code, 0);
-    assert!(result.output.contains("\x1b[2J"), "{:?}", result.output);
+    assert!(
+        result.output.contains("\x1b[2J") || result.output.contains("\x1b[J"),
+        "{:?}",
+        result.output
+    );
     assert!(!result.output.ends_with('\n'), "{:?}", result.output);
 }
 

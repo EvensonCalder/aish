@@ -18,9 +18,9 @@ Current state:
 
 - The PTY shell wrapper, prompt rendering, draft editor, history/AI modes, private command parser, context flow, event log, templates, inline completion, external editor, multiline paste review, shell continuation handling, sync flow, diagnostics, and shell integration scaffolding are implemented and tested.
 - Expect-driven end-to-end coverage exists and is the acceptance layer for visible terminal behavior.
-- Phase 18 encryption/GPG now has GPG-backed key storage, encrypted managed JSONL storage, key rotation, explicit history rewrite planning/running, nonblocking encrypted startup unlock with explicit `#unlock`, and fake-GPG coverage. The remaining encryption gap is fully automatic startup pinentry prompting and dedicated real-key pinentry coverage.
+- Phase 18 encryption/GPG now has GPG-backed key storage, encrypted managed JSONL storage, append-only encrypted JSONL messages, key rotation, explicit history rewrite planning/running, lazy startup unlock with explicit `#unlock`, prompt startup unlock mode, and fake-GPG coverage. The remaining encryption gap is dedicated real-key pinentry coverage.
 - Configurable key rebinding is implemented through the `[keybindings]` config table with one-key and two-key sequence support.
-- Command-running PTY output is streamed through explicit output/idle callbacks. Timer/background support exists for tick wakeups and encrypted-write events; future scheduled background work is not attached yet.
+- Command-running PTY output is streamed through explicit output/idle callbacks. Timer/background support exists for tick wakeups and encrypted-write events; sync automatic triggers are intentionally limited to startup and exit boundaries.
 - Full automatic passthrough for arbitrary interactive/alternate-screen programs remains incomplete; allowlisted foreground passthrough exists.
 - Some documentation had become stale during implementation and must stay aligned with actual behavior as Phase 2 continues.
 - Fixed during Phase 2: `#completion` no longer reports the completion engine as unimplemented; it reports config and persists `#completion max <count>`, `#completion inline on|off`, and `#completion tab-accept full|word`.
@@ -34,8 +34,8 @@ Current state:
 
 This hardening pass is complete for the implemented v0.1 terminal wrapper surface. The remaining items below are explicitly deferred instead of being treated as partially complete Phase 2 fixes:
 
-- Fully automatic startup pinentry prompting stays deferred until it has real-terminal coverage with isolated keys. Current direct decrypt operations and explicit `#unlock` temporarily leave raw mode so GPG/pinentry can own the terminal.
-- Future scheduled background event sources stay deferred until a concrete feature requires them beyond current tick wakeups, encrypted-write events, and command-running PTY output callbacks.
+- Prompt startup unlock is implemented for users who want GPG/pinentry before the first prompt. Lazy startup still uses explicit `#unlock` when a passphrase is needed after startup.
+- Independent scheduled background event sources are no longer a product goal. Sync supports periodic startup checks, always-on-startup sync, and exit sync without scheduler files.
 - Automatic passthrough for arbitrary interactive programs stays deferred; the current product supports allowlisted foreground passthrough and key-forwarding tests.
 - Fish backend tests remain opt-in with `AISH_TEST_FISH=1`; bash and zsh are the default backend compatibility baseline for cross-platform CI until fish behavior is validated across macOS and Linux distributions.
 
@@ -49,7 +49,7 @@ This hardening pass is complete for the implemented v0.1 terminal wrapper surfac
 - Useless tests should be replaced by tests that prove user-visible behavior, safety boundaries, persistence, or integration correctness.
 - Do not create scheduler files.
 - Do not rewrite git history, auto-resolve sync conflicts, or remove tracked files automatically.
-- Do not overclaim automatic startup pinentry prompting, real passphrase-key coverage, or history rewrite safety beyond the implemented explicit command flow.
+- Do not overclaim real passphrase-key coverage, arbitrary pinentry behavior, or history rewrite safety beyond the implemented explicit command flow.
 - Keep `SPEC.md`, `TODO.md`, `TESTS.md`, `README.md`, and this file accurate after every feature or test change.
 
 ## Required Verification Before Phase 2 Commits
@@ -83,20 +83,21 @@ Implemented:
 - Encrypted regular history, AI history, draft history, notes, and templates.
 - No persisted plaintext search/completion indexes when encryption is enabled.
 - Atomic encrypted writes and serialized background encrypted JSONL appends.
+- Append-only encrypted JSONL messages so new writes do not decrypt old data.
 - Explicit confirmed `#encrypt rewrite-history` flow with backup branch creation.
 - Noninteractive encrypted startup unlock runs in the background so startup does not block on passphrase entry.
 - Passphrase-required startup unlock is explicit through `#unlock`, which uses the terminal-safe GPG/pinentry passthrough path.
-- New encrypted-storage appends are buffered while startup storage is locked and replayed after unlock.
+- Prompt startup unlock mode requires GPG/pinentry before the first prompt.
+- New encrypted-storage appends are encrypted immediately while lazy startup storage is locked, then merged into loaded state after unlock.
 
 Remaining tasks:
 
-- Add fully automatic startup pinentry prompting without requiring the user to run `#unlock`.
 - Add isolated real-key manual or opt-in integration coverage for passphrase-protected keys and pinentry recovery.
 
 Required tests:
 
 - Keep fake-GPG unit/integration coverage for command planning, storage migration, key storage, encrypted writes, startup unlock fallback, history rewrite script safety, and no plaintext secret leakage in output/logs.
-- Add real-terminal manual or opt-in coverage for passphrase-protected key unlock before claiming automatic startup pinentry completion.
+- Add real-terminal manual or opt-in coverage for passphrase-protected lazy `#unlock` and prompt startup unlock.
 
 ## Workstream 2: End-To-End User Workflows
 
@@ -166,7 +167,7 @@ Tasks:
 
 - Keep manual `#push` deterministic and local-testable.
 - Improve conflict messages only when tests prove the current UX is insufficient.
-- Ensure startup sync never creates scheduler files and never runs concurrently.
+- Ensure startup and exit sync never create scheduler files and never run concurrently.
 - Keep category toggles privacy-first and make documentation reflect the actual defaults.
 
 Required tests:

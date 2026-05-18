@@ -434,6 +434,11 @@ fn key_encryption_sync_safe_failures() {
 }
 
 #[test]
+fn encrypt_ambiguous_key_recovers() {
+    run_script("encrypt_ambiguous_key_recovers.exp");
+}
+
+#[test]
 fn encrypted_startup_unlock() {
     run_script("encrypted_startup_unlock.exp");
 }

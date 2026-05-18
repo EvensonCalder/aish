@@ -5,7 +5,7 @@ SESSION="aish-completion-auto-scrollback-$$"
 HOME_DIR="/tmp/aish-cas-home-$$"
 WORK_DIR="/tmp/aish-cas-work-$$"
 : "${AISH_BIN:?AISH_BIN must point to the aish binary under test}"
-trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; rm -rf "$HOME_DIR" "$WORK_DIR"' EXIT INT TERM
+trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; rm -rf "$HOME_DIR" "$WORK_DIR" || true' EXIT INT TERM
 
 mkdir -p "$HOME_DIR" "$WORK_DIR"
 touch "$WORK_DIR/alpha-one.txt" "$WORK_DIR/alpha-two.txt" "$WORK_DIR/alpha-three.txt"

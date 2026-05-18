@@ -1116,16 +1116,19 @@ sync = false
 [encryption]
 enabled = false
 key_fingerprint = ""
+startup_unlock = "lazy" # "lazy" or "prompt"
 recipient = ""
 
 [sync]
 enabled = false
 remote = ""
-cron = ""
-sync_ai = true
-sync_history = true
-sync_template = true
-sync_draft = false
+schedule = ""
+startup = false
+exit = false
+ai = false
+history = false
+templates = false
+drafts = false
 ```
 
 ### 14.1 AI URL handling
@@ -1180,8 +1183,10 @@ Commands:
 Behavior:
 
 - `[encryption].key_fingerprint` supplies the stable GPG encryption key. `[encryption].recipient` is a deprecated compatibility field.
+- `[encryption].startup_unlock` is either `lazy` or `prompt`. `lazy` starts Aish immediately and requires `#unlock` only when old encrypted data needs a passphrase. `prompt` performs interactive GPG/pinentry unlock before the first Aish prompt opens.
 - A full fingerprint is the preferred key selector. An email or user ID is accepted only when `gpg --list-keys --with-colons --fingerprint <selector>` resolves to exactly one public key.
 - `#encrypt on <key>` may set and persist the resolved fingerprint before migration.
+- `#encrypt unlock-mode lazy|prompt` updates the startup unlock policy.
 - If encryption is already enabled and the resolved fingerprint differs from the stored fingerprint, Aish decrypts existing managed encrypted files with GPG and re-encrypts them for the new fingerprint.
 - `#encrypt rotate <key>` explicitly performs the same current-storage key rotation.
 - Encrypt regular history, AI history, draft history, notes, and templates.
@@ -1190,14 +1195,16 @@ Behavior:
 - When encryption is enabled, do not store plaintext search indexes.
 - Live completion must not run GPG on each keypress. Encrypted template data should be loaded into an in-memory snapshot during unlock/startup and refreshed only by explicit template mutations or reload flows.
 - Normal encrypted JSONL appends should be serialized through a background writer. Foreground command execution updates in-memory state and enqueues persistence work; command output and prompt redraw must not wait for GPG encryption.
-- The background encrypted writer must preserve write order per Aish process, use atomic encrypted file replacement, and fail closed after a write failure until the error is surfaced and pending writes are flushed or the process is restarted.
+- Encrypted JSONL appends should add a new encrypted GPG message to the encrypted file instead of decrypting existing file contents. This allows new writes in lazy locked startup mode while old encrypted data is still unavailable.
+- The background encrypted writer must preserve write order per Aish process and fail closed after a write failure until the error is surfaced and pending writes are flushed or the process is restarted. Whole-file rewrites such as key rotation, decryption, and template removal should still use atomic encrypted file replacement.
 - Operations that need durable storage or rewrite storage globally must flush pending encrypted writes first. This includes exit, `#push`, `#history`, `#encrypt off`, key rotation, and confirmed history rewrite.
 - Encrypted-write completion and failure events are frontend background events. Draining those events should refresh live completion and redraw the prompt when needed.
 - Direct GPG decrypt operations that may need pinentry should enter `UnlockPassthrough`, clear stale live completion state, yield terminal control, set `GPG_TTY` when possible, and restore raw mode and the previous Aish mode after completion or failure.
-- Startup decrypt should first use a noninteractive background GPG attempt (`--batch --pinentry-mode error`) so startup never blocks on passphrase entry or lets pinentry fight the raw-mode UI.
-- If startup unlock succeeds because `gpg-agent` can decrypt without prompting, Aish loads history/templates, starts the encrypted writer with decrypted caches, refreshes completion, and redraws.
-- If startup unlock needs a passphrase, Aish keeps shell input usable, buffers new encrypted-storage appends in memory, shows `history is still unlocking...` in history/AI modes when needed, and exposes `#unlock`.
-- `#unlock` runs the interactive GPG/pinentry unlock path, merges loaded encrypted history/templates with buffered appends, starts the encrypted writer, and replays buffered appends before durability boundaries such as exit flush.
+- In `startup_unlock = "lazy"` mode, startup decrypt should first use a noninteractive background GPG attempt (`--batch --pinentry-mode error`) so startup never blocks on passphrase entry or lets pinentry fight the raw-mode UI.
+- If lazy startup unlock succeeds because `gpg-agent` can decrypt without prompting, Aish loads history/templates, starts or refreshes the encrypted writer with decrypted caches, refreshes completion, and redraws.
+- If lazy startup unlock needs a passphrase, Aish keeps shell input usable, encrypts new appends immediately without decrypting old data, shows `history is still unlocking...` in history/AI modes when needed, and exposes `#unlock`.
+- In `startup_unlock = "prompt"` mode, startup should run the interactive GPG/pinentry unlock path before entering raw-mode Aish UI. If unlock fails, startup fails rather than opening a prompt with locked storage.
+- `#unlock` runs the interactive GPG/pinentry unlock path, merges loaded encrypted history/templates with any same-session in-memory locked entries, and refreshes the encrypted writer.
 - `#encrypt rewrite-history plan` prints the risk and exact confirmed command for rewriting Git history.
 - `#encrypt rewrite-history run <key> --confirm-rewrite-history` is destructive by design: it requires a clean worktree, creates a backup branch, rewrites the current branch's managed storage blobs by encrypting plaintext blobs and re-encrypting old-key blobs for the target fingerprint, and never pushes automatically.
 
@@ -1254,17 +1261,17 @@ Commit messages:
 [man] sync 2026-05-11T10:00:00-07:00
 ```
 
-Startup sync check:
+Sync triggers:
 
-1. Read cron expression.
-2. Compute last scheduled sync time.
-3. Check whether a successful sync already covered that time.
-4. Check whether managed files changed.
-5. Acquire lock.
-6. Run conservative sync.
+1. `#sync <cron-expression>` persists a periodic interval that is checked only at startup. No scheduler files are created.
+2. `#sync startup on|off` controls whether `#push` runs once every startup, independent of the periodic due check.
+3. `#sync exit on|off` controls whether `#push` runs during the exit durability boundary.
+4. Multiple triggers may be enabled. A single startup invocation should not run duplicate syncs for the same trigger path.
+5. Every automatic trigger must acquire the same sync lock as manual `#push`.
+6. Every automatic trigger must use the same conservative sync plan as manual `#push`.
 7. Log success/failure.
 
-Scheduled background events beyond the current tick-driven refresh hooks are future work. They must integrate with the frontend event loop without blocking keyboard input, PTY output, or redraw.
+Aish does not run an in-process periodic scheduler and must not create scheduler files. Periodic sync means "check whether the saved interval is due when Aish starts."
 
 Recommended conservative sync:
 
@@ -1372,12 +1379,19 @@ Initial command set:
 
 #editor
 
-#encrypt on|rotate|rewrite-history|off
+#encrypt on [key-fingerprint|unique-email]
+#encrypt rotate <key-fingerprint|unique-email>
+#encrypt unlock-mode lazy|prompt
+#encrypt rewrite-history plan
+#encrypt rewrite-history run <key-fingerprint|unique-email> --confirm-rewrite-history
+#encrypt off
 
 #set-remote <git-url>
 #push
 #sync <cron-expression>
 #sync off
+#sync startup on|off
+#sync exit on|off
 #sync ai on|off
 #sync history on|off
 #sync templates on|off

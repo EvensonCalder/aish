@@ -284,7 +284,11 @@ const SYNC_HELP: &[HelpEntry] = &[
     },
     HelpEntry {
         usage: "#sync off",
-        description: "disable startup sync",
+        description: "disable periodic startup sync",
+    },
+    HelpEntry {
+        usage: "#sync startup|exit on|off",
+        description: "enable or disable sync every startup or on exit",
     },
     HelpEntry {
         usage: "#sync ai|history|templates|drafts on|off",
@@ -300,6 +304,10 @@ const ENCRYPTION_HELP: &[HelpEntry] = &[
     HelpEntry {
         usage: "#encrypt rotate <key-fingerprint|unique-email>",
         description: "decrypt with the current key and re-encrypt with the new key",
+    },
+    HelpEntry {
+        usage: "#encrypt unlock-mode lazy|prompt",
+        description: "choose lazy explicit unlock or prompt-for-passphrase startup unlock",
     },
     HelpEntry {
         usage: "#encrypt rewrite-history plan",

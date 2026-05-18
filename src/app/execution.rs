@@ -90,7 +90,13 @@ pub fn execute_draft(
                 return Ok(());
             }
             ParsedLine::Private { name, args } => {
-                private_commands::execute_private_command(state, out, name, args)?;
+                if let Err(err) = private_commands::execute_private_command(state, out, name, args)
+                {
+                    writeln!(out, "Error: {err}")?;
+                    let _ =
+                        state.append_event(crate::log::EventLevel::Error, "private command failed");
+                    state.clear_draft_for_new_draft();
+                }
                 return Ok(());
             }
             ParsedLine::AiPrompt(prompt) => {

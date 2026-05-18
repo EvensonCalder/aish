@@ -4,7 +4,7 @@ set -eu
 SESSION="aish-shell-clear-$$"
 HOME_DIR="/tmp/aish-tmux-shell-clear-home-$$"
 : "${AISH_BIN:?AISH_BIN must point to the aish binary under test}"
-trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; rm -rf "$HOME_DIR"' EXIT INT TERM
+trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; rm -rf "$HOME_DIR" || true' EXIT INT TERM
 
 mkdir -p "$HOME_DIR"
 tmux new-session -d -x 120 -y 20 -s "$SESSION" "env HOME='$HOME_DIR' AISH_HOME='$HOME_DIR/.aish' '$AISH_BIN'"

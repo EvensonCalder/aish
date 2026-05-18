@@ -5,7 +5,7 @@ SESSION="aish-rm-prompt-$$"
 HOME_DIR="/tmp/aish-rm-prompt-home-$$"
 WORK_DIR="/tmp/aish-rm-prompt-work-$$"
 : "${AISH_BIN:?AISH_BIN must point to the aish binary under test}"
-trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; rm -rf "$HOME_DIR" "$WORK_DIR"' EXIT INT TERM
+trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; rm -rf "$HOME_DIR" "$WORK_DIR" || true' EXIT INT TERM
 
 mkdir -p "$HOME_DIR" "$WORK_DIR"
 touch "$WORK_DIR/1.t"

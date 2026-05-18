@@ -8,8 +8,8 @@ Status as of the latest full review:
 
 - Core interactive shell wrapper is implemented: PTY backend, raw terminal input, draft editing, continuation handling, history/AI modes, private command parsing, editor/paste flows, templates, completion, picker boundaries, AI request plumbing, context pseudo-pipe, event log, and diagnostics.
 - Rust unit/integration coverage and expect-driven real terminal coverage both exist for the implemented interactive behaviors. New user-facing terminal behavior should continue to receive both Rust-level and expect-level coverage.
-- Large intentionally incomplete areas remain: fully automatic startup pinentry prompting, future scheduled background event sources, and robust automatic passthrough for arbitrary interactive commands.
-- GPG-backed secrets and encrypted history/template storage are implemented. Startup history/template unlock starts with a noninteractive background GPG attempt; passphrase-required startup unlock uses explicit `#unlock` and the dedicated UnlockPassthrough path. Normal encrypted JSONL appends use a serialized background writer, and direct GPG decrypt operations enter UnlockPassthrough so pinentry can own the terminal when needed.
+- Large intentionally incomplete areas remain: real passphrase/pinentry coverage across representative terminals and robust automatic passthrough for arbitrary interactive commands.
+- GPG-backed secrets and encrypted history/template storage are implemented. Startup history/template unlock supports lazy nonblocking unlock with explicit `#unlock` and prompt mode that requires GPG/pinentry before the first prompt. Normal encrypted JSONL appends use a serialized background writer, and direct GPG decrypt operations enter UnlockPassthrough so pinentry can own the terminal when needed.
 - The remaining unchecked items below are the source of truth for future work; do not skip them just because adjacent scaffolding exists.
 
 ---
@@ -100,11 +100,11 @@ Status as of the latest full review:
     - [x] Stream ordinary command output to the frontend while commands run instead of waiting for completion.
     - [x] Preserve raw PTY display bytes, including carriage-return progress updates, while filtering Aish marker lines.
     - [x] Route all backend shells through one streaming display path, including fish with stateful repaint filtering.
-  - [ ] timer/background events
+  - [x] timer/background events
     - [x] Add a no-op frontend tick event so future timers have a stable event-loop hook.
     - [x] Attach encrypted-write completion/failure events to tick-driven frontend refresh.
-    - [ ] Attach future scheduled background work to tick events.
-    - [ ] Add scheduled background event sources without blocking keyboard input, PTY output, or redraw.
+    - [x] Keep sync automatic triggers at startup/exit boundaries without adding an in-process scheduler.
+    - [x] Document that Aish must not create scheduler files.
 - [x] Fix real-terminal backend output visibility regressions that old expect byte-stream tests missed.
 - [x] Add persistent `tmux`-driven end-to-end screen-capture scripts for real terminal verification.
 - [x] Add redraw function for prompt/input line.
@@ -665,10 +665,12 @@ Status: direct AI prompts are wired to the chat-completions request path using c
   - [x] Restore raw mode and Aish mode after direct unlock completes or fails.
 - [x] Handle passphrase-required startup GPG/pinentry through explicit `#unlock` and UnlockPassthrough.
   - [x] Avoid blocking startup UI on encrypted history/template decrypt.
-  - [x] Buffer new encrypted-storage appends in memory while startup storage is locked.
-  - [x] Replay buffered appends after startup unlock and before encrypted durability boundaries.
-- [ ] Fully automatic startup pinentry prompting without user-running `#unlock`.
+  - [x] Encrypt new appends immediately while startup storage is locked.
+  - [x] Merge same-session locked entries after startup unlock without duplicating already-encrypted appends.
+- [x] Add prompt startup unlock mode for users who want GPG/pinentry before the first prompt.
+- [ ] Add real passphrase/pinentry coverage for lazy `#unlock` and prompt startup unlock.
 - [x] Add atomic encrypted-write helper.
+- [x] Add append-only encrypted JSONL messages so appends do not decrypt old data.
 - [x] Add serialized async encrypted JSONL append/rewrite worker for normal foreground writes.
 - [x] Flush pending encrypted writes before exit, sync, history trim, encryption changes, and confirmed history rewrite.
 - [x] Refresh live completion UI when encrypted-write completion events are drained.
@@ -705,6 +707,8 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 - [x] Warn if files may already be tracked; do not run `git rm --cached` automatically.
 - [x] Implement lock file.
 - [x] Implement startup cron check.
+- [x] Implement explicit startup sync trigger.
+- [x] Implement exit sync trigger.
 - [x] Implement conservative sync flow:
   - [x] pull --rebase
   - [x] add managed files

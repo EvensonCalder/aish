@@ -5,7 +5,7 @@ SESSION="aish-picker-cancel-render-$$"
 HOME_DIR="/tmp/aish-tmux-picker-cancel-home-$$"
 BIN_DIR="/tmp/aish-tmux-picker-cancel-bin-$$"
 : "${AISH_BIN:?AISH_BIN must point to the aish binary under test}"
-trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; rm -rf "$HOME_DIR" "$BIN_DIR"' EXIT INT TERM
+trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; rm -rf "$HOME_DIR" "$BIN_DIR" || true' EXIT INT TERM
 
 mkdir -p "$HOME_DIR" "$BIN_DIR"
 printf '#!/bin/sh\ncat >/dev/null\nexit 130\n' > "$BIN_DIR/fzf"

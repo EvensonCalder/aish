@@ -9,8 +9,8 @@ pub use file::{init_default_layout, load_config, load_or_create_config, save_con
 pub use layout::DirectoryLayout;
 pub use model::{
     AiConfig, CompletionConfig, CompletionMode, CompletionTabAccept, Config, ContextConfig,
-    DraftConfig, EditorConfig, EncryptionConfig, PasteConfig, PromptConfig, ShellConfig,
-    StorageConfig, SyncConfig,
+    DraftConfig, EditorConfig, EncryptionConfig, EncryptionStartupUnlockMode, PasteConfig,
+    PromptConfig, ShellConfig, StorageConfig, SyncConfig,
 };
 pub use normalize::normalize_config;
 pub use paths::{default_aish_dir, runtime_aish_dir};
@@ -123,12 +123,15 @@ mod tests {
             encryption: EncryptionConfig {
                 enabled: true,
                 key_fingerprint: "  ABCDEF0123456789ABCDEF0123456789ABCDEF01  ".to_string(),
+                startup_unlock: EncryptionStartupUnlockMode::Prompt,
                 recipient: "  test@example.invalid  ".to_string(),
             },
             sync: SyncConfig {
                 remote: "  git@example.invalid:aish.git  ".to_string(),
                 enabled: true,
                 schedule: "  0 * * * *  ".to_string(),
+                startup: true,
+                exit: false,
                 ai: true,
                 history: false,
                 templates: true,
@@ -154,6 +157,7 @@ mod tests {
         expected.encryption = EncryptionConfig {
             enabled: true,
             key_fingerprint: "ABCDEF0123456789ABCDEF0123456789ABCDEF01".to_string(),
+            startup_unlock: EncryptionStartupUnlockMode::Prompt,
             recipient: "test@example.invalid".to_string(),
         };
         expected.completion.match_threshold_percent = 50;
@@ -165,6 +169,8 @@ mod tests {
             remote: "git@example.invalid:aish.git".to_string(),
             enabled: true,
             schedule: "0 * * * *".to_string(),
+            startup: true,
+            exit: false,
             ai: true,
             history: false,
             templates: true,

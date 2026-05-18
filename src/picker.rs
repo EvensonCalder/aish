@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::io::{ErrorKind, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
 
@@ -172,7 +172,12 @@ pub fn run_picker_command(command: &[String], candidates: &[String]) -> Result<P
 
     if let Some(mut stdin) = child.stdin.take() {
         for candidate in candidates {
-            writeln!(stdin, "{candidate}")?;
+            if let Err(err) = writeln!(stdin, "{candidate}") {
+                if err.kind() == ErrorKind::BrokenPipe {
+                    break;
+                }
+                return Err(err.into());
+            }
         }
     }
 

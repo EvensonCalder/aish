@@ -6,7 +6,7 @@ HOME_DIR="/tmp/aish-sudo-home-$$"
 WORK_DIR="/tmp/aish-sudo-work-$$"
 BIN_DIR="/tmp/aish-sudo-bin-$$"
 : "${AISH_BIN:?AISH_BIN must point to the aish binary under test}"
-trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; rm -rf "$HOME_DIR" "$WORK_DIR" "$BIN_DIR"' EXIT INT TERM
+trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; rm -rf "$HOME_DIR" "$WORK_DIR" "$BIN_DIR" || true' EXIT INT TERM
 
 mkdir -p "$HOME_DIR" "$WORK_DIR" "$BIN_DIR"
 cat > "$BIN_DIR/sudo" <<'SCRIPT'

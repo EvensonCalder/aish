@@ -13,5 +13,6 @@ send -- "\t"
 send -- "\u001b"
 send -- "echo after-completion\r"
 assert_no "no completions" "after-completion"
+aish_wait_prompt
 
 aish_quit

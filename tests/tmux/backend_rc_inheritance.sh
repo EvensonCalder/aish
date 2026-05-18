@@ -6,7 +6,7 @@ HOME_DIR="/tmp/aish-tmux-rc-home-$$"
 : "${AISH_BIN:?AISH_BIN must point to the aish binary under test}"
 : "${AISH_BACKEND_SHELL:?AISH_BACKEND_SHELL must name the backend shell under test}"
 : "${AISH_BACKEND_KIND:?AISH_BACKEND_KIND must name the backend shell kind}"
-trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; rm -rf "$HOME_DIR"' EXIT INT TERM
+trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; rm -rf "$HOME_DIR" || true' EXIT INT TERM
 
 mkdir -p "$HOME_DIR/.aish" "$HOME_DIR/bin"
 {

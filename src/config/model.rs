@@ -194,9 +194,27 @@ pub struct ContextConfig {
 pub struct EncryptionConfig {
     pub enabled: bool,
     pub key_fingerprint: String,
+    pub startup_unlock: EncryptionStartupUnlockMode,
     /// Deprecated compatibility field. New writes should persist
     /// `key_fingerprint` after resolving any user-facing key selector.
     pub recipient: String,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EncryptionStartupUnlockMode {
+    #[default]
+    Lazy,
+    Prompt,
+}
+
+impl EncryptionStartupUnlockMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Lazy => "lazy",
+            Self::Prompt => "prompt",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -205,6 +223,8 @@ pub struct SyncConfig {
     pub remote: String,
     pub enabled: bool,
     pub schedule: String,
+    pub startup: bool,
+    pub exit: bool,
     pub ai: bool,
     pub history: bool,
     pub templates: bool,

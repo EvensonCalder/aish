@@ -139,6 +139,7 @@ fn encrypted_write_completion_event_refreshes_live_completion() {
         encryption_config: crate::config::EncryptionConfig {
             enabled: true,
             key_fingerprint: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
+            startup_unlock: crate::config::EncryptionStartupUnlockMode::Lazy,
             recipient: String::new(),
         },
         encrypted_writer: Some(EncryptedWriteQueue::start(
@@ -189,6 +190,7 @@ fn exit_persistence_boundary_flushes_pending_encrypted_draft() {
         encryption_config: crate::config::EncryptionConfig {
             enabled: true,
             key_fingerprint: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
+            startup_unlock: crate::config::EncryptionStartupUnlockMode::Lazy,
             recipient: String::new(),
         },
         encrypted_writer: Some(EncryptedWriteQueue::start(
@@ -214,7 +216,7 @@ fn exit_persistence_boundary_flushes_pending_encrypted_draft() {
     });
 
     let started = Instant::now();
-    persist_draft_and_flush_before_exit(&mut state).unwrap();
+    persist_draft_and_flush_before_exit(&mut state, &mut Vec::new()).unwrap();
     let elapsed = started.elapsed();
     releaser.join().unwrap();
 
@@ -229,6 +231,24 @@ fn exit_persistence_boundary_flushes_pending_encrypted_draft() {
     .unwrap();
     assert_eq!(loaded.items.len(), 1);
     assert_eq!(loaded.items[0].text, "echo pending-draft");
+}
+
+#[test]
+fn exit_persistence_boundary_runs_enabled_exit_sync() {
+    let mut state = AppState {
+        sync_config: crate::config::SyncConfig {
+            exit: true,
+            ..crate::config::SyncConfig::default()
+        },
+        ..AppState::default()
+    };
+    let mut output = Vec::new();
+
+    persist_draft_and_flush_before_exit(&mut state, &mut output).unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.contains("exit sync enabled; running #push"));
+    assert!(output.contains("sync remote is not configured"));
 }
 
 fn fixed_clock() -> i64 {

@@ -63,6 +63,20 @@ pub(super) fn set_sync_schedule(
         writeln!(out, "no scheduler file created")?;
         return Ok(());
     }
+    if let Some((trigger, enabled)) = parse_sync_trigger_toggle(args) {
+        update_sync_config(state, |config| match trigger {
+            "startup" => config.sync.startup = enabled,
+            "exit" => config.sync.exit = enabled,
+            _ => unreachable!("validated trigger"),
+        })?;
+        writeln!(out, "sync.{trigger}={enabled}")?;
+        writeln!(out, "no scheduler file created")?;
+        return Ok(());
+    }
+    if is_malformed_sync_trigger_toggle(args) {
+        writeln!(out, "usage: #sync startup|exit on|off")?;
+        return Ok(());
+    }
     if let Some((category, enabled)) = parse_sync_category_toggle(args) {
         update_sync_config(state, |config| match category {
             "ai" => config.sync.ai = enabled,
@@ -103,9 +117,6 @@ pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -
         writeln!(out, "config path is not configured; sync push cannot run")?;
         return Ok(());
     };
-    if state.has_pending_locked_writes() {
-        state.unlock_encrypted_storage_interactively()?;
-    }
     state.flush_encrypted_writes()?;
     let lock_path = root.join("cache/runtime/sync.lock");
     let Some(_lock) = SyncLock::acquire(&lock_path)? else {
@@ -167,6 +178,11 @@ pub(super) fn run_startup_sync_check(
 ) -> Result<()> {
     let last_attempt_path = root.join("cache/runtime/sync.last_attempt");
     let now = (state.clock)();
+    if state.sync_config.startup {
+        write_last_sync_attempt(&last_attempt_path, now)?;
+        writeln!(out, "startup sync enabled; running #push")?;
+        return run_manual_sync_push(state, out);
+    }
     match startup_sync_decision(
         &state.sync_config,
         now,
@@ -189,6 +205,14 @@ pub(super) fn run_startup_sync_check(
         | StartupSyncDecision::NotDue { .. } => {}
     }
     Ok(())
+}
+
+pub(crate) fn run_exit_sync_if_enabled(state: &mut AppState, out: &mut impl Write) -> Result<()> {
+    if !state.sync_config.exit {
+        return Ok(());
+    }
+    writeln!(out, "exit sync enabled; running #push")?;
+    run_manual_sync_push(state, out)
 }
 
 fn read_last_sync_attempt(path: &Path) -> Result<Option<i64>> {
@@ -338,16 +362,39 @@ pub(super) fn describe_git_command(command: &GitCommandPlan) -> String {
     parts.join(" ")
 }
 
-fn parse_sync_category_toggle(args: &str) -> Option<(&str, bool)> {
+fn parse_sync_trigger_toggle(args: &str) -> Option<(&str, bool)> {
+    parse_named_bool_toggle(args, is_sync_trigger)
+}
+
+fn is_malformed_sync_trigger_toggle(args: &str) -> bool {
     let mut parts = args.split_whitespace();
-    let category = parts.next()?;
+    let Some(trigger) = parts.next() else {
+        return false;
+    };
+    is_sync_trigger(trigger)
+}
+
+fn is_sync_trigger(value: &str) -> bool {
+    matches!(value, "startup" | "exit")
+}
+
+fn parse_sync_category_toggle(args: &str) -> Option<(&str, bool)> {
+    parse_named_bool_toggle(args, is_sync_category)
+}
+
+fn parse_named_bool_toggle(
+    args: &str,
+    is_allowed_name: impl Fn(&str) -> bool,
+) -> Option<(&str, bool)> {
+    let mut parts = args.split_whitespace();
+    let name = parts.next()?;
     let value = parts.next()?;
-    if parts.next().is_some() || !is_sync_category(category) {
+    if parts.next().is_some() || !is_allowed_name(name) {
         return None;
     }
     match value {
-        "on" => Some((category, true)),
-        "off" => Some((category, false)),
+        "on" => Some((name, true)),
+        "off" => Some((name, false)),
         _ => None,
     }
 }

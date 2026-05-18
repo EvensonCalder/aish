@@ -107,6 +107,11 @@ pub(super) fn write_encryption_sync_status(state: &AppState, out: &mut impl Writ
         "encryption.key_fingerprint={}",
         config_value(&state.encryption_config.key_fingerprint)
     )?;
+    writeln!(
+        out,
+        "encryption.startup_unlock={}",
+        state.encryption_config.startup_unlock.as_str()
+    )?;
     if !state.encryption_config.recipient.trim().is_empty() {
         writeln!(
             out,
@@ -147,6 +152,8 @@ pub(super) fn write_encryption_sync_status(state: &AppState, out: &mut impl Writ
         "sync.schedule={}",
         config_value(&state.sync_config.schedule)
     )?;
+    writeln!(out, "sync.startup={}", state.sync_config.startup)?;
+    writeln!(out, "sync.exit={}", state.sync_config.exit)?;
     writeln!(out, "sync.ai={}", state.sync_config.ai)?;
     writeln!(out, "sync.history={}", state.sync_config.history)?;
     writeln!(out, "sync.templates={}", state.sync_config.templates)?;

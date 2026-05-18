@@ -7,7 +7,9 @@ use std::process::Command;
 use anyhow::{Context, Result};
 
 use crate::ai::read_api_key_from_env;
-use crate::config::{self, AiConfig, EncryptionConfig, write_private_file};
+use crate::config::{
+    self, AiConfig, EncryptionConfig, EncryptionStartupUnlockMode, write_private_file,
+};
 use crate::encryption::{
     atomic_gpg_encrypt_bytes, encrypted_path, encryption_git_history_warning,
     enter_gpg_terminal_passthrough, existing_jsonl_bytes, gpg_decrypt_file, gpg_program,
@@ -131,14 +133,21 @@ pub(super) fn update_encryption_config(
     args: &str,
 ) -> Result<()> {
     let parts: Vec<_> = args.split_whitespace().collect();
-    if state.encrypted_storage_is_locked() {
-        writeln!(
+    match parts.as_slice() {
+        ["unlock-mode"] => {
+            writeln!(
+                out,
+                "encryption.startup_unlock={}",
+                state.encryption_config.startup_unlock.as_str()
+            )?;
+            Ok(())
+        }
+        ["unlock-mode", mode] => set_startup_unlock_mode(state, out, mode),
+        _ if state.encrypted_storage_is_locked() => writeln!(
             out,
             "encrypted storage is still unlocking; run #unlock before changing encryption"
-        )?;
-        return Ok(());
-    }
-    match parts.as_slice() {
+        )
+        .map_err(Into::into),
         ["on"] => enable_encryption(state, out, None),
         ["on", key_selector] => enable_encryption(state, out, Some(key_selector)),
         ["rotate", key_selector] => rotate_encryption_key(state, out, Some(key_selector)),
@@ -149,10 +158,30 @@ pub(super) fn update_encryption_config(
         ["off"] => disable_encryption(state, out),
         _ => writeln!(
             out,
-            "usage: #encrypt on [key-fingerprint|unique-email] | #encrypt rotate <key-fingerprint|unique-email> | #encrypt rewrite-history plan | #encrypt rewrite-history run <key-fingerprint|unique-email> --confirm-rewrite-history | #encrypt off"
+            "usage: #encrypt on [key-fingerprint|unique-email] | #encrypt rotate <key-fingerprint|unique-email> | #encrypt unlock-mode lazy|prompt | #encrypt rewrite-history plan | #encrypt rewrite-history run <key-fingerprint|unique-email> --confirm-rewrite-history | #encrypt off"
         )
         .map_err(Into::into),
     }
+}
+
+fn set_startup_unlock_mode(state: &mut AppState, out: &mut impl Write, mode: &str) -> Result<()> {
+    let startup_unlock = match mode {
+        "lazy" => EncryptionStartupUnlockMode::Lazy,
+        "prompt" => EncryptionStartupUnlockMode::Prompt,
+        _ => {
+            writeln!(out, "usage: #encrypt unlock-mode lazy|prompt")?;
+            return Ok(());
+        }
+    };
+    if state.config_path.is_none() {
+        writeln!(out, "config path is not configured; #encrypt not saved")?;
+        return Ok(());
+    }
+    set_encryption_config(state, |config| {
+        config.encryption.startup_unlock = startup_unlock;
+    })?;
+    writeln!(out, "encryption.startup_unlock={}", startup_unlock.as_str())?;
+    Ok(())
 }
 
 fn enable_encryption(

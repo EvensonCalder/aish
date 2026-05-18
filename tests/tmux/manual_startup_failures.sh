@@ -3,7 +3,7 @@ set -eu
 
 ROOT="/tmp/aish-tmux-manual-startup-$$"
 : "${AISH_BIN:?AISH_BIN must point to the aish binary under test}"
-trap 'tmux kill-session -t aish-manual-startup-relative-$$ >/dev/null 2>&1 || true; tmux kill-session -t aish-manual-startup-invalid-$$ >/dev/null 2>&1 || true; tmux kill-session -t aish-manual-startup-file-$$ >/dev/null 2>&1 || true; rm -rf "$ROOT"' EXIT INT TERM
+trap 'tmux kill-session -t aish-manual-startup-relative-$$ >/dev/null 2>&1 || true; tmux kill-session -t aish-manual-startup-invalid-$$ >/dev/null 2>&1 || true; tmux kill-session -t aish-manual-startup-file-$$ >/dev/null 2>&1 || true; rm -rf "$ROOT" || true' EXIT INT TERM
 
 mkdir -p "$ROOT"
 

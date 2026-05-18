@@ -1,0 +1,43 @@
+#!/usr/bin/env expect
+# Ambiguous GPG key selectors must print a recoverable error and leave the
+# interactive shell alive.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set home [aish_new_home]
+set fake_gpg "$home/ambiguous-gpg"
+set fh [open $fake_gpg w]
+puts $fh {#!/bin/sh
+for arg in "$@"; do
+  if [ "$arg" = "--list-keys" ]; then
+    printf '%s\n' 'pub:u:255:22:1111111111111111:1:::u:::scESC::::::23::0:'
+    printf '%s\n' 'fpr:::::::::100EB0696C6C86561B72BDE1F707666666666666:'
+    printf '%s\n' 'uid:u::::1::hash::Test User <test@example.invalid>::::::::::0:'
+    printf '%s\n' 'pub:u:255:22:2222222222222222:1:::u:::scESC::::::23::0:'
+    printf '%s\n' 'fpr:::::::::76A4ACC1535D1048A2F58E7F00AA33AA12345678:'
+    printf '%s\n' 'uid:u::::1::hash::Test User <test@example.invalid>::::::::::0:'
+    exit 0
+  fi
+done
+exit 9
+}
+close $fh
+file attributes $fake_gpg -permissions 0755
+set ::env(AISH_GPG) $fake_gpg
+
+aish_spawn
+
+aish_send "#encrypt on test@example.invalid"
+aish_enter
+aish_expect "Error: GPG key selector is ambiguous"
+aish_expect "100EB0696C6C86561B72BDE1F707666666666666"
+aish_expect "76A4ACC1535D1048A2F58E7F00AA33AA12345678"
+aish_wait_prompt
+
+aish_send "echo after-ambiguous-key"
+aish_enter
+aish_expect "after-ambiguous-key"
+aish_wait_prompt
+
+aish_quit

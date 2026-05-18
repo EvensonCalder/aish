@@ -27,8 +27,7 @@ Implemented and covered:
 Explicitly incomplete:
 
 - Fish support is opt-in until behavior is validated across macOS and representative Linux distributions.
-- Fully automatic startup pinentry prompting remains future work; encrypted history/templates now start with a noninteractive background unlock attempt, and `#unlock` uses the dedicated GPG/pinentry passthrough path when passphrase entry is needed.
-- Future scheduled background events are not implemented yet; current background work is limited to tick-driven refresh and serialized encrypted writes.
+- Encrypted startup has two explicit modes: `lazy` starts immediately and uses `#unlock` when old data needs a passphrase; `prompt` asks for GPG/pinentry at startup before the prompt opens.
 - Full automatic passthrough for arbitrary interactive programs remains future work; Aish currently uses an allowlist and tested stdin-command handling.
 
 ## Quickstart
@@ -297,6 +296,8 @@ Sync:
 #push
 #sync <cron-expression>
 #sync off
+#sync startup on|off
+#sync exit on|off
 #sync ai on|off
 #sync history on|off
 #sync templates on|off
@@ -311,6 +312,7 @@ Encryption:
 #unlock
 #encrypt on [key-fingerprint|unique-email]
 #encrypt rotate <key-fingerprint|unique-email>
+#encrypt unlock-mode lazy|prompt
 #encrypt rewrite-history plan
 #encrypt rewrite-history run <key-fingerprint|unique-email> --confirm-rewrite-history
 #encrypt off
@@ -466,7 +468,8 @@ Sync is deliberately conservative.
 Implemented:
 
 - Persist remote and sync category config.
-- Persist supported startup sync schedules.
+- Persist supported periodic schedules checked at startup.
+- Persist explicit startup and exit sync triggers.
 - Run `#push` against a configured Git remote.
 - Pull with rebase before pushing.
 - Add only managed enabled paths.
@@ -482,6 +485,12 @@ Aish does not:
 - Create scheduler files.
 - Remove user-managed files.
 
+Sync does not have a long-running scheduler. The supported automatic triggers are:
+
+- periodic startup check: `#sync <cron-expression>` runs `#push` at startup only when the saved interval is due.
+- every startup: `#sync startup on` runs `#push` once when Aish starts.
+- exit: `#sync exit on` runs `#push` during the exit durability boundary.
+
 ## Encryption Status
 
 Aish uses the `gpg` command-line tool for encrypted local storage.
@@ -493,11 +502,12 @@ Current behavior:
 - `#encrypt on` migrates managed history, notes, drafts, AI history, and templates to `*.jsonl.gpg` files and removes the plaintext JSONL files after successful encryption.
 - If encryption is already enabled and the target fingerprint changes, Aish decrypts the existing managed encrypted files and re-encrypts them for the new fingerprint.
 - `#encrypt rotate <key>` explicitly re-encrypts current managed storage for a new fingerprint.
-- Future writes go to encrypted JSONL files while encryption is enabled. Normal history, draft, note, AI, and template appends are queued through a serialized background encrypted writer so command output and prompt redraws do not wait for GPG.
+- `#encrypt unlock-mode lazy|prompt` selects startup behavior. `lazy` starts immediately and unlocks old encrypted history/templates in the background when possible; `prompt` requires interactive GPG/pinentry unlock before the Aish prompt opens.
+- Future writes go to encrypted JSONL files while encryption is enabled. Normal history, draft, note, AI, and template appends are queued through a serialized background encrypted writer so command output and prompt redraws do not wait for GPG. Appends are written as additional encrypted GPG messages, so adding new data does not require decrypting the old JSONL contents.
 - Aish flushes pending encrypted writes before exit, `#push`, `#history`, `#encrypt off`, key rotation, and confirmed history rewrite. A background write completion wakes the frontend tick path and refreshes live completion UI.
 - Direct decrypt operations that may need a passphrase, including stored-key fallback, `#encrypt off`, key rotation, and confirmed history rewrite, enter a dedicated unlock passthrough state. Aish clears stale completion UI, yields terminal control to GPG/pinentry, sets `GPG_TTY` when possible, and restores the previous Aish mode when the operation completes or fails.
-- On startup with encryption enabled, Aish tries to unlock history/templates in the background using noninteractive GPG so startup does not block on passphrase entry. If `gpg-agent` can decrypt without prompting, history/templates load automatically. If a passphrase is needed, history/templates stay locked, history/AI views can show `history is still unlocking...`, and `#unlock` runs the interactive GPG/pinentry passthrough.
-- Commands entered before startup unlock completes remain usable. New encrypted-storage appends are buffered in memory while locked and replayed after `#unlock`; exiting with pending locked appends triggers the unlock path before encrypted writes are flushed.
+- In lazy startup mode, Aish tries to unlock history/templates in the background using noninteractive GPG so startup does not block on passphrase entry. If `gpg-agent` can decrypt without prompting, history/templates load automatically. If a passphrase is needed, old history/templates stay locked, history/AI views can show `history is still unlocking...`, and `#unlock` runs the interactive GPG/pinentry passthrough.
+- Commands entered before lazy startup unlock completes remain usable. New encrypted-storage appends are encrypted immediately; old data-dependent views stay locked until `#unlock` succeeds.
 - `#encrypt off` decrypts managed encrypted JSONL files back to plaintext and disables encrypted writes.
 - `#key set` encrypts the API key currently available through `#env-key <ENV_NAME>` into `secrets/key.json.gpg`.
 - `#key clear` removes the encrypted key file if present.
@@ -561,6 +571,18 @@ If encrypted history/templates need a passphrase after startup:
 #unlock
 ```
 
+To require GPG/pinentry before the first prompt on future launches:
+
+```text
+#encrypt unlock-mode prompt
+```
+
+To return to nonblocking startup with explicit unlock:
+
+```text
+#encrypt unlock-mode lazy
+```
+
 To stop using the stored key:
 
 ```text
@@ -573,7 +595,7 @@ To decrypt managed storage back to plaintext and write plaintext files from then
 #encrypt off
 ```
 
-Known limits: startup unlock does not automatically pop up pinentry while you are typing; run `#unlock` when passphrase entry is needed. Direct decrypt operations already use the dedicated GPG/pinentry passthrough path. Aish warns that Git history can contain plaintext data or data encrypted for an older key; history rewrite is available only through the explicit confirmed command above.
+Known limits: lazy startup does not automatically pop up pinentry while you are typing; run `#unlock` when passphrase entry is needed, or switch to `#encrypt unlock-mode prompt` if startup must require the passphrase. Direct decrypt operations already use the dedicated GPG/pinentry passthrough path. Aish warns that Git history can contain plaintext data or data encrypted for an older key; history rewrite is available only through the explicit confirmed command above.
 
 ## Files And Storage
 
@@ -609,13 +631,13 @@ The app module root in `src/app.rs` wires together focused runtime modules:
 - `src/app/config_commands.rs`: `#model`, `#base-url`, `#env-key`, `#context`, `#paste`, and `#completion` config mutations.
 - `src/app/context_prompt.rs`: AI prompt submission, context collection confirmation, and contextual prompt building.
 - `src/app/encryption_commands.rs`: GPG key storage, `#encrypt`, current-storage rotation, and confirmed history rewrite.
-- `src/app/startup_unlock.rs`: noninteractive encrypted startup unlock, explicit `#unlock` loading, and encrypted cache preparation.
+- `src/app/startup_unlock.rs`: lazy and prompt encrypted startup unlock loading and encrypted cache preparation.
 - `src/app/execution.rs`: draft submission, command execution, foreground passthrough, PTY output forwarding, and command recording.
 - `src/app/history_ops.rs`: history trimming and encrypted/plain AI history loading helpers.
 - `src/app/template_args.rs`: template subcommand argument parsing.
 - `src/app/event_log.rs`: event log display for `#log`.
 - `src/app/reports.rs`: `#status`, `#config`, `#doctor`, `#editor`, and encryption/sync status output.
-- `src/app/sync_commands.rs`: `#set-remote`, `#sync`, `#push`, startup sync checks, and git step handling.
+- `src/app/sync_commands.rs`: `#set-remote`, `#sync`, `#push`, startup/exit sync triggers, and git step handling.
 - `src/config.rs`: public config module facade and config tests.
 - `src/config/`: config model types, directory layout, private file permissions, root path resolution, file IO, and normalization.
 - `src/completion.rs`: completion orchestration across templates, history, paths, private commands, and typo tiers.
@@ -655,11 +677,11 @@ cargo test
 
 Current active inventory:
 
-- 515 library unit tests.
+- 520 library unit tests.
 - 26 draft execution integration tests.
 - 1 first-run integration test.
 - 23 PTY integration tests, with bash/zsh active by default and fish-specific cases opt-in.
-- 116 expect-driven end-to-end interactive scenarios.
+- 117 expect-driven end-to-end interactive scenarios.
 - 45 tmux screen-capture integration tests.
 
 Expect and tmux tests launch real terminal sessions with isolated Aish homes. They should be serialized because concurrent real-terminal sessions can create false prompt and scheduler failures.

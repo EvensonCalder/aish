@@ -7,7 +7,7 @@ use std::thread::{self, JoinHandle};
 use anyhow::{Context, Result, anyhow};
 use serde::Serialize;
 
-use crate::encryption::{existing_jsonl_bytes, jsonl_bytes, rewrite_encrypted_jsonl_bytes};
+use crate::encryption::{append_encrypted_jsonl_bytes, jsonl_bytes, rewrite_encrypted_jsonl_bytes};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EncryptedWriteOperation {
@@ -169,7 +169,7 @@ fn run_worker(
                         "encrypted writer is stopped after a previous failure: {error}"
                     ))
                 } else {
-                    append_cached_jsonl(&gpg_program, &recipient, &mut cache, &path, &item_json)
+                    append_encrypted_jsonl_bytes(&gpg_program, &recipient, &path, &item_json)
                 };
                 send_event(
                     &events,
@@ -212,27 +212,6 @@ fn run_worker(
             EncryptedWriteJob::Stop => break,
         }
     }
-}
-
-fn append_cached_jsonl(
-    gpg_program: &str,
-    recipient: &str,
-    cache: &mut HashMap<PathBuf, Vec<u8>>,
-    path: &Path,
-    item_json: &[u8],
-) -> Result<()> {
-    let mut next = match cache.get(path) {
-        Some(bytes) => bytes.clone(),
-        None => existing_jsonl_bytes(gpg_program, path)?,
-    };
-    if !next.is_empty() && !next.ends_with(b"\n") {
-        next.push(b'\n');
-    }
-    next.extend_from_slice(item_json);
-    next.push(b'\n');
-    rewrite_encrypted_jsonl_bytes(gpg_program.to_string(), recipient, path, &next)?;
-    cache.insert(path.to_path_buf(), next);
-    Ok(())
 }
 
 fn send_event(

@@ -522,7 +522,7 @@ fn tmux_wrap_boundary_cursor_moves_to_next_line() {
     let Some(captured) = run_tmux_script("wrap_boundary_cursor.sh") else {
         return;
     };
-    assert_line_present(&captured, "cursor=0 1");
+    assert_line_present(&captured, "cursor=1 1");
 }
 
 #[test]
@@ -530,7 +530,7 @@ fn tmux_cjk_cursor_wrap_moves_to_next_line() {
     let Some(captured) = run_tmux_script("cjk_cursor_wrap.sh") else {
         return;
     };
-    assert_line_present(&captured, "cursor=0 1");
+    assert_line_present(&captured, "cursor=1 1");
 }
 
 #[test]

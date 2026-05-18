@@ -12,7 +12,10 @@ use crossterm::terminal::{
     Clear, ClearType, disable_raw_mode, enable_raw_mode, is_raw_mode_enabled, size,
 };
 
-use crate::app::{AppState, answer_context_confirmation, execute_draft, save_draft_if_configured};
+use crate::app::{
+    AppState, answer_context_confirmation, execute_draft, run_exit_sync_if_enabled,
+    save_draft_if_configured,
+};
 use crate::config::CompletionMode;
 use crate::display_width::{visual_line_count, visual_position};
 use crate::editor::resolve_editor_command;
@@ -174,7 +177,7 @@ pub fn run(
         match event {
             TerminalEvent::Key(key) => {
                 if handle_key(key, state, backend, out, command_timeout)? {
-                    persist_draft_and_flush_before_exit(state)?;
+                    persist_draft_and_flush_before_exit(state, out)?;
                     break;
                 }
             }
@@ -183,7 +186,7 @@ pub fn run(
                     let mut display_out = CrLfWriter::new(out);
                     execute_draft(state, backend, &mut display_out, command_timeout)?;
                     if state.exit_requested {
-                        persist_draft_and_flush_before_exit(state)?;
+                        persist_draft_and_flush_before_exit(state, out)?;
                         return Ok(());
                     }
                 }
@@ -203,11 +206,9 @@ pub fn run(
     Ok(())
 }
 
-fn persist_draft_and_flush_before_exit(state: &mut AppState) -> Result<()> {
+fn persist_draft_and_flush_before_exit(state: &mut AppState, out: &mut impl Write) -> Result<()> {
     let _ = save_draft_if_configured(state)?;
-    if state.has_pending_locked_writes() {
-        state.unlock_encrypted_storage_interactively()?;
-    }
+    run_exit_sync_if_enabled(state, out)?;
     state.flush_encrypted_writes()
 }
 

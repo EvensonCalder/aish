@@ -6,7 +6,7 @@ HOME_DIR="/tmp/aish-tmux-manual-ai-home-$$"
 MARKER="/tmp/aish-tmux-context-disabled-$$"
 DANGEROUS_MARKER="/tmp/aish-tmux-context-danger-$$"
 : "${AISH_BIN:?AISH_BIN must point to the aish binary under test}"
-trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; rm -rf "$HOME_DIR" "$MARKER" "$DANGEROUS_MARKER"' EXIT INT TERM
+trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; rm -rf "$HOME_DIR" "$MARKER" "$DANGEROUS_MARKER" || true' EXIT INT TERM
 
 mkdir -p "$HOME_DIR"
 printf 'must remain\n' > "$DANGEROUS_MARKER"

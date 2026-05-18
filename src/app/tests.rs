@@ -32,33 +32,38 @@ use std::time::{Duration, Instant};
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 #[cfg(unix)]
-fn write_fake_gpg(temp: &tempfile::TempDir) -> PathBuf {
+fn write_executable_file(path: &Path, contents: impl AsRef<[u8]>) {
     use std::os::unix::fs::PermissionsExt;
 
+    let tmp = path.with_extension("tmp");
+    fs::write(&tmp, contents).unwrap();
+    fs::set_permissions(&tmp, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::rename(&tmp, path).unwrap();
+    if let Some(parent) = path.parent() {
+        let _ = fs::File::open(parent).and_then(|dir| dir.sync_all());
+    }
+}
+
+#[cfg(unix)]
+fn write_fake_gpg(temp: &tempfile::TempDir) -> PathBuf {
     let fake_gpg = temp.path().join("fake-gpg");
-    fs::write(
-            &fake_gpg,
-            "#!/bin/sh\nmode=encrypt\nout=\"\"\ninput=\"\"\nrecipient=\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"\nlast=\"\"\nfor arg in \"$@\"; do\n  last=\"$arg\"\n  if [ \"$arg\" = \"--version\" ]; then printf 'fake gpg\\n'; exit 0; fi\ndone\nfor arg in \"$@\"; do\n  if [ \"$arg\" = \"--list-keys\" ]; then\n    fpr='AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'\n    uid='Test User <test@example.invalid>'\n    case \"$last\" in\n      *BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB*|second@example.invalid) fpr='BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB'; uid='Second User <second@example.invalid>' ;;\n    esac\n    printf '%s\\n' 'pub:u:255:22:1111111111111111:1:::u:::scESC::::::23::0:'\n    printf 'fpr:::::::::%s:\\n' \"$fpr\"\n    printf 'uid:u::::1::hash::%s:::::::::0:\\n' \"$uid\"\n    exit 0\n  fi\ndone\nwhile [ \"$#\" -gt 0 ]; do\n  case \"$1\" in\n    --decrypt) mode=decrypt ;;\n    --output) shift; out=\"$1\" ;;\n    --recipient) shift; recipient=\"$1\" ;;\n    --trust-model) shift ;;\n    --batch|--yes|--no-tty|--encrypt|--with-colons|--fingerprint) ;;\n    *) input=\"$1\" ;;\n  esac\n  shift\ndone\nif [ \"$mode\" = decrypt ]; then\n  sed '1{/^recipient:/d;}' \"$input\"\nelse\n  { printf 'recipient:%s\\n' \"$recipient\"; cat \"$input\"; } > \"$out\"\nfi\n",
-        )
-        .unwrap();
-    fs::set_permissions(&fake_gpg, fs::Permissions::from_mode(0o755)).unwrap();
+    write_executable_file(
+        &fake_gpg,
+        "#!/bin/sh\nmode=encrypt\nout=\"\"\ninput=\"\"\nrecipient=\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"\nlast=\"\"\nfor arg in \"$@\"; do\n  last=\"$arg\"\n  if [ \"$arg\" = \"--version\" ]; then printf 'fake gpg\\n'; exit 0; fi\ndone\nfor arg in \"$@\"; do\n  if [ \"$arg\" = \"--list-keys\" ]; then\n    fpr='AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'\n    uid='Test User <test@example.invalid>'\n    case \"$last\" in\n      *BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB*|second@example.invalid) fpr='BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB'; uid='Second User <second@example.invalid>' ;;\n    esac\n    printf '%s\\n' 'pub:u:255:22:1111111111111111:1:::u:::scESC::::::23::0:'\n    printf 'fpr:::::::::%s:\\n' \"$fpr\"\n    printf 'uid:u::::1::hash::%s:::::::::0:\\n' \"$uid\"\n    exit 0\n  fi\ndone\nwhile [ \"$#\" -gt 0 ]; do\n  case \"$1\" in\n    --decrypt) mode=decrypt ;;\n    --output) shift; out=\"$1\" ;;\n    --recipient) shift; recipient=\"$1\" ;;\n    --trust-model) shift ;;\n    --batch|--yes|--no-tty|--encrypt|--with-colons|--fingerprint) ;;\n    *) input=\"$1\" ;;\n  esac\n  shift\ndone\nif [ \"$mode\" = decrypt ]; then\n  sed '/^recipient:/d' \"$input\"\nelse\n  { printf 'recipient:%s\\n' \"$recipient\"; cat \"$input\"; } > \"$out\"\nfi\n",
+    );
     fake_gpg
 }
 
 #[cfg(unix)]
 fn write_blocking_fake_gpg(temp: &tempfile::TempDir, release_path: &Path) -> PathBuf {
-    use std::os::unix::fs::PermissionsExt;
-
     let fake_gpg = temp.path().join("blocking-gpg");
-    fs::write(
-            &fake_gpg,
-            format!(
-                "#!/bin/sh\nmode=encrypt\nout=\"\"\ninput=\"\"\nwhile [ \"$#\" -gt 0 ]; do\n  case \"$1\" in\n    --decrypt) mode=decrypt ;;\n    --output) shift; out=\"$1\" ;;\n    --recipient|--trust-model) shift ;;\n    --batch|--yes|--no-tty|--encrypt|always) ;;\n    *) input=\"$1\" ;;\n  esac\n  shift\ndone\nif [ \"$mode\" = decrypt ]; then\n  cat \"$input\"\nelse\n  while [ ! -f '{}' ]; do sleep 0.02; done\n  cp \"$input\" \"$out\"\nfi\n",
-                release_path.display()
-            ),
-        )
-        .unwrap();
-    fs::set_permissions(&fake_gpg, fs::Permissions::from_mode(0o755)).unwrap();
+    write_executable_file(
+        &fake_gpg,
+        format!(
+            "#!/bin/sh\nmode=encrypt\nout=\"\"\ninput=\"\"\nwhile [ \"$#\" -gt 0 ]; do\n  case \"$1\" in\n    --decrypt) mode=decrypt ;;\n    --output) shift; out=\"$1\" ;;\n    --recipient|--trust-model) shift ;;\n    --batch|--yes|--no-tty|--encrypt|always) ;;\n    *) input=\"$1\" ;;\n  esac\n  shift\ndone\nif [ \"$mode\" = decrypt ]; then\n  cat \"$input\"\nelse\n  while [ ! -f '{}' ]; do sleep 0.02; done\n  cp \"$input\" \"$out\"\nfi\n",
+            release_path.display()
+        ),
+    );
     fake_gpg
 }
 
@@ -2048,19 +2053,26 @@ fn ai_config_write_errors_are_logged() {
     let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
     let mut output = Vec::new();
 
-    let err = execute_draft(
+    execute_draft(
         &mut state,
         &mut backend,
         &mut output,
         Duration::from_secs(5),
     )
-    .unwrap_err();
+    .unwrap();
 
-    assert!(err.to_string().contains("invalid config"));
+    assert!(
+        String::from_utf8(output)
+            .unwrap()
+            .contains("Error: invalid config")
+    );
     let events = load_events(&events_path).unwrap();
-    assert_eq!(events.items.len(), 1);
+    assert_eq!(events.items.len(), 2);
     assert_eq!(events.items[0].level, EventLevel::Error);
     assert_eq!(events.items[0].msg, "config error");
+    assert_eq!(events.items[1].level, EventLevel::Error);
+    assert_eq!(events.items[1].msg, "private command failed");
+    assert!(state.draft.is_empty());
 }
 
 #[test]
@@ -2078,19 +2090,26 @@ fn context_config_write_errors_are_logged() {
     let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
     let mut output = Vec::new();
 
-    let err = execute_draft(
+    execute_draft(
         &mut state,
         &mut backend,
         &mut output,
         Duration::from_secs(5),
     )
-    .unwrap_err();
+    .unwrap();
 
-    assert!(err.to_string().contains("invalid config"));
+    assert!(
+        String::from_utf8(output)
+            .unwrap()
+            .contains("Error: invalid config")
+    );
     let events = load_events(&events_path).unwrap();
-    assert_eq!(events.items.len(), 1);
+    assert_eq!(events.items.len(), 2);
     assert_eq!(events.items[0].level, EventLevel::Error);
     assert_eq!(events.items[0].msg, "config error");
+    assert_eq!(events.items[1].level, EventLevel::Error);
+    assert_eq!(events.items[1].msg, "private command failed");
+    assert!(state.draft.is_empty());
 }
 
 #[test]
@@ -2882,6 +2901,96 @@ fn encryption_and_sync_commands_report_current_state_without_side_effects() {
 
 #[test]
 #[cfg(unix)]
+fn private_encrypt_ambiguous_key_error_keeps_prompt_recoverable() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let fake_gpg = temp.path().join("ambiguous-gpg");
+    write_executable_file(
+        &fake_gpg,
+        "#!/bin/sh\nif [ \"$1\" = \"--batch\" ]; then\n  printf '%s\\n' 'pub:u:255:22:1111111111111111:1:::u:::scESC::::::23::0:'\n  printf '%s\\n' 'fpr:::::::::100EB0696C6C86561B72BDE1F707666666666666:'\n  printf '%s\\n' 'uid:u::::1::hash::Test User <test@example.invalid>::::::::::0:'\n  printf '%s\\n' 'pub:u:255:22:2222222222222222:1:::u:::scESC::::::23::0:'\n  printf '%s\\n' 'fpr:::::::::76A4ACC1535D1048A2F58E7F00AA33AA12345678:'\n  printf '%s\\n' 'uid:u::::1::hash::Test User <test@example.invalid>::::::::::0:'\n  exit 0\nfi\nexit 9\n",
+    );
+    unsafe {
+        std::env::set_var("AISH_GPG", &fake_gpg);
+    }
+    let config_path = temp.path().join("config.toml");
+    config::save_config(&config_path, &config::Config::default()).unwrap();
+    let mut state = AppState {
+        config_path: Some(config_path),
+        ..AppState::default()
+    };
+    state.draft.insert_str("#encrypt on test@example.invalid");
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    unsafe {
+        std::env::remove_var("AISH_GPG");
+    }
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.contains("Error: GPG key selector is ambiguous"));
+    assert!(output.contains("100EB0696C6C86561B72BDE1F707666666666666"));
+    assert!(output.contains("76A4ACC1535D1048A2F58E7F00AA33AA12345678"));
+    assert!(!state.exit_requested);
+    assert_eq!(state.mode, Mode::Draft);
+    assert!(state.draft.is_empty());
+    assert!(!state.encryption_config.enabled);
+}
+
+#[test]
+fn encrypt_unlock_mode_persists_startup_unlock_policy() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.toml");
+    config::save_config(&config_path, &config::Config::default()).unwrap();
+    let mut state = AppState {
+        config_path: Some(config_path.clone()),
+        ..AppState::default()
+    };
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+
+    for (line, expected) in [
+        (
+            "#encrypt unlock-mode prompt",
+            "encryption.startup_unlock=prompt",
+        ),
+        (
+            "#encrypt unlock-mode lazy",
+            "encryption.startup_unlock=lazy",
+        ),
+    ] {
+        state.draft.insert_str(line);
+        let mut output = Vec::new();
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(
+            output.contains(expected),
+            "missing {expected:?} in {output:?}"
+        );
+    }
+
+    assert_eq!(
+        config::load_config(&config_path)
+            .unwrap()
+            .encryption
+            .startup_unlock,
+        config::EncryptionStartupUnlockMode::Lazy
+    );
+}
+
+#[test]
+#[cfg(unix)]
 fn encrypt_on_migrates_plaintext_storage_and_persists_config() {
     let _guard = ENV_LOCK.lock().unwrap();
     let temp = tempfile::tempdir().unwrap();
@@ -3067,15 +3176,10 @@ fn encrypted_completion_uses_cached_templates_without_gpg_on_keypress() {
     let _guard = ENV_LOCK.lock().unwrap();
     let temp = tempfile::tempdir().unwrap();
     let fake_gpg = temp.path().join("fail-gpg");
-    fs::write(
+    write_executable_file(
         &fake_gpg,
         "#!/bin/sh\nprintf 'unexpected gpg call\\n' >&2\nexit 9\n",
-    )
-    .unwrap();
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&fake_gpg, fs::Permissions::from_mode(0o755)).unwrap();
-    }
+    );
     unsafe {
         std::env::set_var("AISH_GPG", &fake_gpg);
     }
@@ -3083,6 +3187,7 @@ fn encrypted_completion_uses_cached_templates_without_gpg_on_keypress() {
         encryption_config: EncryptionConfig {
             enabled: true,
             key_fingerprint: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
+            startup_unlock: config::EncryptionStartupUnlockMode::Lazy,
             recipient: String::new(),
         },
         templates: vec![TemplateEntry::new("git add . && git commit")],
@@ -3112,6 +3217,7 @@ fn encrypted_history_append_does_not_block_command_completion() {
         encryption_config: EncryptionConfig {
             enabled: true,
             key_fingerprint: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
+            startup_unlock: config::EncryptionStartupUnlockMode::Lazy,
             recipient: String::new(),
         },
         encrypted_writer: Some(EncryptedWriteQueue::start(
@@ -3178,6 +3284,7 @@ fn encrypt_rewrite_history_plan_reports_manual_confirmed_flow() {
         encryption_config: EncryptionConfig {
             enabled: true,
             key_fingerprint: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
+            startup_unlock: config::EncryptionStartupUnlockMode::Lazy,
             recipient: String::new(),
         },
         ..AppState::default()
@@ -3243,6 +3350,7 @@ fn encrypt_rewrite_history_run_requires_clean_git_worktree() {
         encryption_config: EncryptionConfig {
             enabled: true,
             key_fingerprint: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
+            startup_unlock: config::EncryptionStartupUnlockMode::Lazy,
             recipient: String::new(),
         },
         ..AppState::default()
@@ -3282,6 +3390,7 @@ fn encrypted_writes_use_gpg_files_without_plaintext_jsonl() {
         encryption_config: EncryptionConfig {
             enabled: true,
             key_fingerprint: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
+            startup_unlock: config::EncryptionStartupUnlockMode::Lazy,
             recipient: String::new(),
         },
         ..AppState::default()
@@ -3408,6 +3517,7 @@ fn locked_encrypted_storage_buffers_history_until_unlock() {
         encryption_config: EncryptionConfig {
             enabled: true,
             key_fingerprint: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
+            startup_unlock: config::EncryptionStartupUnlockMode::Lazy,
             recipient: String::new(),
         },
         encrypted_storage_unlocked: false,
@@ -3444,6 +3554,7 @@ fn locked_history_mode_renders_unlock_message() {
         encryption_config: EncryptionConfig {
             enabled: true,
             key_fingerprint: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
+            startup_unlock: config::EncryptionStartupUnlockMode::Lazy,
             recipient: String::new(),
         },
         encrypted_storage_unlocked: false,
@@ -3482,6 +3593,7 @@ fn key_set_encrypts_env_api_key_without_printing_secret() {
         encryption_config: EncryptionConfig {
             enabled: false,
             key_fingerprint: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
+            startup_unlock: config::EncryptionStartupUnlockMode::Lazy,
             recipient: String::new(),
         },
         ..AppState::default()
@@ -3537,6 +3649,7 @@ fn ai_prompt_uses_gpg_stored_key_when_env_key_is_missing() {
         encryption_config: EncryptionConfig {
             enabled: false,
             key_fingerprint: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
+            startup_unlock: config::EncryptionStartupUnlockMode::Lazy,
             recipient: String::new(),
         },
         ..AppState::default()
@@ -3662,6 +3775,8 @@ fn sync_config_commands_persist_without_running_git() {
         ("#sync templates on", "sync.templates=true"),
         ("#sync drafts on", "sync.drafts=true"),
         ("#sync drafts off", "sync.drafts=false"),
+        ("#sync startup on", "sync.startup=true"),
+        ("#sync exit on", "sync.exit=true"),
         ("#sync off", "sync.enabled=false"),
     ] {
         state.draft.insert_str(line);
@@ -3691,8 +3806,10 @@ fn sync_config_commands_persist_without_running_git() {
     assert!(loaded.sync.history);
     assert!(loaded.sync.templates);
     assert!(!loaded.sync.drafts);
+    assert!(loaded.sync.startup);
+    assert!(loaded.sync.exit);
     let events = load_events(&events_path).unwrap();
-    assert_eq!(events.items.len(), 8);
+    assert_eq!(events.items.len(), 10);
     assert!(
         events
             .items
@@ -3833,6 +3950,31 @@ fn startup_sync_runs_due_schedule_against_local_git_remote() {
             .items
             .iter()
             .any(|event| event.msg == "sync push completed")
+    );
+}
+
+#[test]
+fn startup_sync_trigger_runs_without_periodic_schedule() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let mut state = AppState {
+        sync_config: SyncConfig {
+            startup: true,
+            ..SyncConfig::default()
+        },
+        clock: || 42,
+        ..AppState::default()
+    };
+    let mut output = Vec::new();
+
+    run_startup_sync_check(&mut state, root, &mut output).unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.contains("startup sync enabled; running #push"));
+    assert!(output.contains("sync remote is not configured"));
+    assert_eq!(
+        fs::read_to_string(root.join("cache/runtime/sync.last_attempt")).unwrap(),
+        "42\n"
     );
 }
 

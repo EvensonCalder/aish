@@ -164,6 +164,7 @@ fn startup_sync_decision_handles_supported_schedules_conservatively() {
         history: false,
         templates: false,
         drafts: false,
+        ..SyncConfig::default()
     };
 
     assert_eq!(
@@ -190,6 +191,7 @@ fn startup_sync_decision_rejects_unsupported_cron_without_side_effects() {
         history: false,
         templates: false,
         drafts: false,
+        ..SyncConfig::default()
     };
 
     assert_eq!(

@@ -7,7 +7,7 @@ REMOTE="$ROOT/remote.git"
 SEED="$ROOT/seed"
 HOME_DIR="$ROOT/aish-home"
 : "${AISH_BIN:?AISH_BIN must point to the aish binary under test}"
-trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; rm -rf "$ROOT"' EXIT INT TERM
+trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; rm -rf "$ROOT" || true' EXIT INT TERM
 
 if ! command -v git >/dev/null 2>&1; then
     printf 'git not installed; skipping local sync tmux workflow\n'

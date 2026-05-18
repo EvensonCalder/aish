@@ -31,6 +31,7 @@ use encryption_commands::{
 };
 pub use prompt::PromptTemplates;
 use reports::{write_config_report, write_doctor_report, write_editor_report, write_status_report};
+pub(crate) use sync_commands::run_exit_sync_if_enabled;
 use sync_commands::{run_manual_sync_push, set_sync_remote, set_sync_schedule};
 
 mod state;

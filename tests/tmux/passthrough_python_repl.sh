@@ -4,7 +4,7 @@ set -eu
 SESSION="aish-python-repl-$$"
 HOME_DIR="/tmp/aish-tmux-python-home-$$"
 : "${AISH_BIN:?AISH_BIN must point to the aish binary under test}"
-trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; rm -rf "$HOME_DIR"' EXIT INT TERM
+trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; rm -rf "$HOME_DIR" || true' EXIT INT TERM
 
 if ! command -v python3 >/dev/null 2>&1; then
     printf 'python3 not installed; skipping python passthrough tmux workflow\n'

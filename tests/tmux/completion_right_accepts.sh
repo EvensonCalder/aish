@@ -5,7 +5,7 @@ SESSION="aish-completion-right-$$"
 HOME_DIR="/tmp/aish-tmux-completion-right-home-$$"
 WORK_DIR="/tmp/aish-tmux-completion-right-work-$$"
 : "${AISH_BIN:?AISH_BIN must point to the aish binary under test}"
-trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; rm -rf "$HOME_DIR" "$WORK_DIR"' EXIT INT TERM
+trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; sleep 0.2; rm -rf "$HOME_DIR" "$WORK_DIR" || true' EXIT INT TERM
 
 mkdir -p "$HOME_DIR" "$WORK_DIR"
 printf 'accepted-right\n' > "$WORK_DIR/right-target.txt"

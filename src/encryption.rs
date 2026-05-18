@@ -415,6 +415,77 @@ pub fn atomic_gpg_encrypt_bytes(
     Ok(())
 }
 
+pub fn append_gpg_encrypt_bytes(
+    gpg_program: impl Into<String>,
+    recipient: &str,
+    final_path: impl AsRef<Path>,
+    plaintext: &[u8],
+) -> Result<()> {
+    let paths = atomic_gpg_write_paths(final_path);
+    if let Some(parent) = paths
+        .final_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        create_private_dir_all(parent).with_context(|| {
+            format!(
+                "failed to create encrypted output parent: {}",
+                parent.display()
+            )
+        })?;
+    }
+
+    write_private_plaintext_tmp(&paths.plaintext_tmp, plaintext)?;
+    let plan = gpg_encrypt_plan(
+        gpg_program,
+        recipient,
+        &paths.plaintext_tmp,
+        &paths.encrypted_tmp,
+    );
+    let encrypt_result = run_gpg_encrypt_plan(&plan);
+    let _ = fs::remove_file(&paths.plaintext_tmp);
+    if let Err(err) = encrypt_result {
+        let _ = fs::remove_file(&paths.encrypted_tmp);
+        return Err(err);
+    }
+
+    let append_result = (|| -> Result<()> {
+        let encrypted = fs::read(&paths.encrypted_tmp).with_context(|| {
+            format!(
+                "failed to read encrypted temp file {}",
+                paths.encrypted_tmp.display()
+            )
+        })?;
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&paths.final_path)
+            .with_context(|| {
+                format!(
+                    "failed to open encrypted file for append: {}",
+                    paths.final_path.display()
+                )
+            })?;
+        file.write_all(&encrypted).with_context(|| {
+            format!(
+                "failed to append encrypted data to {}",
+                paths.final_path.display()
+            )
+        })?;
+        file.sync_all().with_context(|| {
+            format!(
+                "failed to sync encrypted file after append: {}",
+                paths.final_path.display()
+            )
+        })?;
+        Ok(())
+    })();
+    let _ = fs::remove_file(&paths.encrypted_tmp);
+    append_result?;
+    set_private_file_permissions(&paths.final_path)?;
+    Ok(())
+}
+
 pub fn load_encrypted_jsonl<T: DeserializeOwned>(
     gpg_program: impl AsRef<str>,
     plaintext_path: impl AsRef<Path>,
@@ -486,16 +557,12 @@ pub fn append_encrypted_jsonl_bytes(
     plaintext_path: impl AsRef<Path>,
     item_json: &[u8],
 ) -> Result<()> {
-    let gpg_program = gpg_program.into();
     let plaintext_path = plaintext_path.as_ref();
-    let mut bytes = existing_jsonl_bytes(&gpg_program, plaintext_path)?;
-    if !bytes.is_empty() && !bytes.ends_with(b"\n") {
-        bytes.push(b'\n');
-    }
+    let mut bytes = Vec::with_capacity(item_json.len() + 1);
     bytes.extend_from_slice(item_json);
     bytes.push(b'\n');
-    atomic_gpg_encrypt_bytes(
-        &gpg_program,
+    append_gpg_encrypt_bytes(
+        gpg_program,
         recipient,
         encrypted_path(plaintext_path),
         &bytes,
@@ -715,11 +782,16 @@ mod tests {
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn write_executable(path: &Path, contents: &str) {
-        let mut file = fs::File::create(path).unwrap();
+        let tmp = path.with_extension("tmp");
+        let mut file = fs::File::create(&tmp).unwrap();
         file.write_all(contents.as_bytes()).unwrap();
         file.sync_all().unwrap();
         drop(file);
-        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::set_permissions(&tmp, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::rename(&tmp, path).unwrap();
+        if let Some(parent) = path.parent() {
+            let _ = fs::File::open(parent).and_then(|dir| dir.sync_all());
+        }
     }
     #[test]
     fn plaintext_git_history_warning_is_conservative() {
@@ -788,9 +860,36 @@ mod tests {
                 .unwrap_err()
                 .to_string();
 
-        assert!(err.contains("ambiguous"));
+        assert!(err.contains("ambiguous"), "unexpected error: {err}");
         assert!(err.contains("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
         assert!(err.contains("BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"));
+    }
+
+    #[test]
+    fn encrypted_jsonl_append_does_not_decrypt_existing_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let fake_gpg = temp.path().join("fake-gpg");
+        write_executable(
+            &fake_gpg,
+            "#!/bin/sh\nmode=encrypt\nout=\"\"\ninput=\"\"\nwhile [ \"$#\" -gt 0 ]; do\n  case \"$1\" in\n    --decrypt) printf 'decrypt should not run for append\\n' >&2; exit 17 ;;\n    --output) shift; out=\"$1\" ;;\n    --recipient|--trust-model) shift ;;\n    --batch|--yes|--no-tty|--encrypt|always) ;;\n    *) input=\"$1\" ;;\n  esac\n  shift\ndone\ncp \"$input\" \"$out\"\n",
+        );
+        let plaintext_path = temp.path().join("history/regular.jsonl");
+        let encrypted = encrypted_path(&plaintext_path);
+        fs::create_dir_all(encrypted.parent().unwrap()).unwrap();
+        fs::write(&encrypted, b"{\"old\":true}\n").unwrap();
+
+        append_encrypted_jsonl_bytes(
+            fake_gpg.display().to_string(),
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            &plaintext_path,
+            br#"{"new":true}"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            fs::read_to_string(encrypted).unwrap(),
+            "{\"old\":true}\n{\"new\":true}\n"
+        );
     }
 
     #[test]
