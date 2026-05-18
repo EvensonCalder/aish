@@ -9,6 +9,7 @@ mod parser;
 mod path;
 mod private;
 mod render;
+mod types;
 
 pub use matching::{matches_completion_prefix, matches_completion_prefix_with_threshold};
 pub use parser::{current_token_context, is_path_like_token};
@@ -17,6 +18,9 @@ pub use private::{complete_private_command_line, complete_private_commands};
 pub use render::{
     accept_completion, accept_completion_with_mode, ghost_completion_suffix,
     render_completion_candidates, render_completion_candidates_for_width, truncate_with_ellipsis,
+};
+pub use types::{
+    AcceptedCompletion, CompletionCandidate, CompletionOptions, CompletionSource, TokenContext,
 };
 
 use matching::{
@@ -35,45 +39,6 @@ use path::{
     complete_path_executables, complete_path_with_options, order_path_candidates_for_completion,
     split_path_candidates,
 };
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CompletionOptions {
-    pub max_results: usize,
-    pub ignore_spaces: bool,
-    pub fuzzy_enabled: bool,
-    pub match_threshold_percent: usize,
-    pub typo_threshold_percent: usize,
-}
-
-impl Default for CompletionOptions {
-    fn default() -> Self {
-        Self {
-            max_results: 5,
-            ignore_spaces: true,
-            fuzzy_enabled: true,
-            match_threshold_percent: 50,
-            typo_threshold_percent: 80,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TokenContext {
-    pub start: usize,
-    pub end: usize,
-    pub text: String,
-    pub is_first_token: bool,
-    pub quote: Option<char>,
-    pub path_like: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CompletionCandidate {
-    pub display: String,
-    pub replacement: String,
-    pub is_dir: bool,
-    pub source: CompletionSource,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct IndexedHistoryEntry {
@@ -95,24 +60,6 @@ pub(crate) struct IndexedTemplateEntry {
 pub(crate) struct IndexedTemplatePlaceholder {
     pub(crate) raw: String,
     pub(crate) name: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AcceptedCompletion {
-    pub line: String,
-    pub cursor: usize,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum CompletionSource {
-    Path,
-    Template,
-    TemplateTypo,
-    History,
-    HistoryTypo,
-    Executable,
-    TemplatePlaceholder,
-    PrivateCommand,
 }
 
 pub fn complete_first_token(

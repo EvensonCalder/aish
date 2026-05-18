@@ -643,7 +643,7 @@ The app module root in `src/app.rs` wires together focused runtime modules:
 - `src/config.rs`: public config module facade and config tests.
 - `src/config/`: config model types, directory layout, private file permissions, root path resolution, file IO, and normalization.
 - `src/completion.rs`: completion orchestration across templates, history, paths, private commands, and typo tiers.
-- `src/completion/`: focused completion helpers for matching rules, token parsing, path/PATH scanning, private command completion, and rendering/acceptance.
+- `src/completion/`: focused completion helpers for shared types, matching rules, token parsing, path/PATH scanning, private command completion, and rendering/acceptance.
 - `src/terminal.rs`: terminal event loop, key/paste handling, picker/editor boundaries, and prompt redraw positioning.
 - `src/terminal/completion_ui.rs`: live completion display, inline suffixes, Tab/Right acceptance, and completion panel state transitions.
 - `src/pty.rs`: PTY backend lifecycle, command execution, read loop, and streaming event callbacks.
