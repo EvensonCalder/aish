@@ -3,14 +3,9 @@ use std::panic;
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::cursor::{
-    MoveDown, MoveTo, MoveToColumn, MoveToPreviousLine, RestorePosition, SavePosition,
-};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
-use crossterm::terminal::{
-    Clear, ClearType, disable_raw_mode, enable_raw_mode, is_raw_mode_enabled, size,
-};
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode, is_raw_mode_enabled, size};
 
 use crate::app::{
     AppState, answer_context_confirmation, execute_draft, run_exit_sync_if_enabled,
@@ -29,6 +24,7 @@ use crate::shell_integration::passthrough_key_bytes;
 use crate::templates::template_placeholder_spans;
 
 mod completion_ui;
+mod render;
 
 pub use completion_ui::{
     accept_first_completion, complete_or_show_candidates, complete_or_show_candidates_for_width,
@@ -37,12 +33,21 @@ pub use completion_ui::{
 
 use completion_ui::{
     live_completion_input_key, refresh_live_completion_ui, refresh_should_defer_completion_display,
-    render_inline_completion_suffix, replace_completion_ui_from_candidates,
-    write_inline_completion_suffix,
+    replace_completion_ui_from_candidates,
+};
+pub use render::redraw;
+use render::{
+    clear_screen_for_redraw, completion_panel_content_start_col, invalidate_render_anchor,
+    move_to_rendered_end, terminal_cursor_position_for_width, terminal_display_width,
 };
 
 #[cfg(test)]
-use completion_ui::{refresh_live_completion_ui_for_width, set_completion_ui_from_candidates};
+use completion_ui::{
+    refresh_live_completion_ui_for_width, render_inline_completion_suffix,
+    set_completion_ui_from_candidates,
+};
+#[cfg(test)]
+use render::{redraw_for_size, redraw_for_width};
 
 #[cfg(test)]
 use crate::{app::InlineCompletion, completion::CompletionCandidate};
@@ -450,18 +455,6 @@ fn write_incremental_appended_char(
     state.last_rendered_lines = visual_line_count(&rendered, width);
     state.last_rendered_cursor_row = terminal_cursor_position_for_width(state, width).0;
     out.flush()?;
-    Ok(())
-}
-
-fn clear_screen_for_redraw(state: &mut AppState, out: &mut impl Write) -> Result<()> {
-    invalidate_render_anchor(state);
-    execute!(
-        out,
-        MoveTo(0, 0),
-        Clear(ClearType::All),
-        Clear(ClearType::Purge),
-        MoveTo(0, 0)
-    )?;
     Ok(())
 }
 
@@ -1091,231 +1084,6 @@ fn expand_template_draft_if_inside_placeholder(state: &mut AppState) {
     {
         state.draft_from_template = false;
     }
-}
-
-pub fn redraw(state: &mut AppState, out: &mut impl Write) -> Result<()> {
-    let (width, height) = terminal_display_size();
-    redraw_for_size(state, out, width, height)
-}
-
-#[cfg(test)]
-fn redraw_for_width(state: &mut AppState, out: &mut impl Write, width: usize) -> Result<()> {
-    redraw_for_size(state, out, width, terminal_display_height())
-}
-
-fn redraw_for_size(
-    state: &mut AppState,
-    out: &mut impl Write,
-    width: usize,
-    height: usize,
-) -> Result<()> {
-    let rendered = state.rendered_text();
-    let inline_suffix = render_inline_completion_suffix(state, width);
-    let rendered_with_inline =
-        full_rendered_text_for_width(&rendered, inline_suffix.as_deref(), &[]);
-    let prompt_lines = visual_line_count(&rendered_with_inline, width);
-    let visible_panel_len = state
-        .completion_panel
-        .len()
-        .min(height.saturating_sub(prompt_lines));
-    let visible_panel = &state.completion_panel[..visible_panel_len];
-    let full_render =
-        full_rendered_text_for_width(&rendered, inline_suffix.as_deref(), visible_panel);
-    let render_lines = visual_line_count(&full_render, width).max(1);
-
-    move_to_rendered_start(state, out)?;
-    reserve_render_area(out, render_lines, height)?;
-    execute!(
-        out,
-        MoveToColumn(0),
-        Clear(ClearType::FromCursorDown),
-        SavePosition
-    )?;
-    write!(out, "{}", rendered.replace('\n', "\r\n"))?;
-    if let Some(suffix) = &inline_suffix {
-        write_inline_completion_suffix(out, suffix)?;
-    }
-    if !visible_panel.is_empty() {
-        for line in visible_panel {
-            write!(out, "\r\n{line}")?;
-        }
-    }
-    let final_row = visual_line_count(&full_render, width).saturating_sub(1);
-    let (cursor_row, cursor_col) = terminal_cursor_position_for_width(state, width);
-    move_to_rendered_position(out, cursor_row, cursor_col)?;
-    state.last_rendered_lines = final_row + 1;
-    state.last_rendered_cursor_row = cursor_row;
-    state.render_anchor_saved = true;
-    out.flush()?;
-    Ok(())
-}
-
-fn terminal_display_width() -> usize {
-    terminal_display_size().0
-}
-
-#[cfg(test)]
-fn terminal_display_height() -> usize {
-    terminal_display_size().1
-}
-
-fn terminal_display_size() -> (usize, usize) {
-    match size() {
-        Ok((columns, rows)) => (
-            if columns > 0 { columns as usize } else { 80 },
-            if rows > 0 { rows as usize } else { 24 },
-        ),
-        _ => (80, 24),
-    }
-}
-
-fn completion_panel_content_start_col(state: &AppState, width: usize) -> usize {
-    let prefix = if state.draft.as_str()[..state.draft.cursor()].contains('\n') {
-        state
-            .continuation_prompt
-            .as_deref()
-            .unwrap_or(".. ")
-            .to_string()
-    } else {
-        state.prompt_prefix()
-    };
-    visual_position(&prefix, width).1 as usize
-}
-
-fn move_to_rendered_start(state: &AppState, out: &mut impl Write) -> Result<()> {
-    if state.last_rendered_cursor_row > 0 {
-        execute!(
-            out,
-            MoveToPreviousLine(state.last_rendered_cursor_row as u16)
-        )?;
-    }
-    execute!(out, MoveToColumn(0))?;
-    Ok(())
-}
-
-fn reserve_render_area(out: &mut impl Write, render_lines: usize, height: usize) -> Result<()> {
-    let reserve_rows = render_lines
-        .saturating_sub(1)
-        .min(height.saturating_sub(1))
-        .min(u16::MAX as usize);
-    if reserve_rows == 0 {
-        return Ok(());
-    }
-    for _ in 0..reserve_rows {
-        write!(out, "\r\n")?;
-    }
-    execute!(
-        out,
-        MoveToPreviousLine(reserve_rows as u16),
-        MoveToColumn(0)
-    )?;
-    Ok(())
-}
-
-fn move_to_rendered_position(out: &mut impl Write, row: usize, col: u16) -> Result<()> {
-    execute!(out, RestorePosition)?;
-    if row > 0 {
-        execute!(out, MoveDown(row.min(u16::MAX as usize) as u16))?;
-    }
-    execute!(out, MoveToColumn(col))?;
-    Ok(())
-}
-
-fn move_to_rendered_end(state: &AppState, out: &mut impl Write, width: usize) -> Result<()> {
-    move_to_rendered_start(state, out)?;
-    let rendered = state.rendered_text();
-    let (end_row, end_col) = visual_position(&rendered, width);
-    if end_row > 0 {
-        execute!(out, MoveDown(end_row as u16))?;
-    }
-    execute!(out, MoveToColumn(end_col))?;
-    Ok(())
-}
-
-fn invalidate_render_anchor(state: &mut AppState) {
-    state.last_rendered_lines = 0;
-    state.last_rendered_cursor_row = 0;
-    state.render_anchor_saved = false;
-}
-
-fn full_rendered_text_for_width(
-    rendered: &str,
-    inline_suffix: Option<&str>,
-    panel: &[String],
-) -> String {
-    let mut full = String::from(rendered);
-    if let Some(suffix) = inline_suffix {
-        full.push_str(suffix);
-    }
-    for line in panel {
-        full.push('\n');
-        full.push_str(line);
-    }
-    full
-}
-
-fn terminal_cursor_position_for_width(state: &AppState, width: usize) -> (usize, u16) {
-    let rendered_before_cursor = rendered_text_before_cursor(state);
-    let (row, col) = visual_position(&rendered_before_cursor, width);
-    (row, col)
-}
-
-fn rendered_text_before_cursor(state: &AppState) -> String {
-    if let Some(pending) = &state.pending_context {
-        let marker = if pending.dangerous {
-            "[dangerous context confirmation: Y/n]"
-        } else {
-            "[context confirmation: Y/n]"
-        };
-        return format!("{}{}", state.prompt_prefix(), marker);
-    }
-    match state.mode {
-        crate::modes::Mode::History => format!(
-            "{}{}",
-            state.prompt_prefix(),
-            state.selected_history_command().unwrap_or("")
-        ),
-        crate::modes::Mode::Ai => format!(
-            "{}{}",
-            state.prompt_prefix(),
-            state.selected_ai_command().unwrap_or("")
-        ),
-        crate::modes::Mode::Draft if state.draft_from_editor => {
-            format!(
-                "{}{}",
-                state.prompt_prefix(),
-                state.editor_draft_summary_for_terminal()
-            )
-        }
-        _ => {
-            let before_cursor = &state.draft.as_str()[..state.draft.cursor()];
-            if before_cursor.contains('\n') {
-                render_multiline_for_terminal(
-                    &state.prompt_prefix(),
-                    state.continuation_prompt.as_deref().unwrap_or(".. "),
-                    before_cursor,
-                )
-            } else {
-                format!("{}{}", state.prompt_prefix(), before_cursor)
-            }
-        }
-    }
-}
-
-fn render_multiline_for_terminal(
-    prompt_prefix: &str,
-    continuation_prefix: &str,
-    text: &str,
-) -> String {
-    let mut lines = text.split('\n');
-    let mut rendered = String::from(prompt_prefix);
-    rendered.push_str(lines.next().unwrap_or_default());
-    for line in lines {
-        rendered.push('\n');
-        rendered.push_str(continuation_prefix);
-        rendered.push_str(line);
-    }
-    rendered
 }
 
 #[cfg(test)]
