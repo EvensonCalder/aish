@@ -100,7 +100,7 @@ const COMMAND_HELP: &[HelpEntry] = &[
         description: "run the conservative manual sync push flow",
     },
     HelpEntry {
-        usage: "#sync [off|<cron>|ai|history|templates|drafts on|off]",
+        usage: "#sync [off|<cron>|startup|exit|ai|history|templates|drafts on|off]",
         description: "show or update sync schedule and category settings",
     },
     HelpEntry {

@@ -1177,3 +1177,16 @@ Update: completion now uses layered, non-blocking live discovery. Cheap local pa
 - `Tab` acceptance defaults to next-word behavior and is configurable between full-suggestion and next-word behavior.
 - The below-prompt panel remains readable in narrow terminals and never wraps candidate rows.
 - The feature passes pure Rust, expect, and tmux coverage before any Phase 28 checklist item is marked complete.
+
+### Soft future work: Nushell-inspired completion architecture
+
+These are research-backed design directions from comparing Aish with Nushell. They are intentionally soft TODOs, not committed implementation tasks. Each item needs a fresh design review against Aish's positioning before code changes begin: Aish is still a PTY command-input layer over Bash, Zsh, Fish, or another real shell, not a replacement shell and not a shell parser.
+
+- [ ] Evaluate a span-first completion protocol. Aish already tracks raw/value/start/end for shell-like words; a future design could extend that into candidate edits with explicit replacement ranges instead of inferring edits from the current token string.
+- [ ] Evaluate richer semantic completion candidates. A future candidate model could separate replacement text, display text, candidate kind, edit range, append-space behavior, score, and match indices. This may make rendering, accepting, deduping, and ranking less coupled.
+- [ ] Evaluate splitting completion into provider modules behind a small internal trait, such as private commands, paths, executables, templates, history, and typo correction. The goal would be easier testing and tuning without changing user-visible behavior.
+- [ ] Evaluate a dedicated matcher abstraction for structural prefix matching, typo correction, and path component matching. Keep Aish's current structural threshold and typo threshold semantics unless a replacement is proven clearer and faster.
+- [ ] Evaluate component-wise path completion inspired by Nushell's path handling: exact-directory descent, `~` and platform prefix handling, hidden-file ordering, and match indices. Shell quoting must remain Bash/Zsh/Fish-compatible and cannot copy Nushell's escaping rules directly.
+- [ ] Evaluate a more explicit conservative continuation lexer. It may track quote, escaped newline, and obvious unmatched delimiter state, but it must not become a full POSIX/Bash/Zsh/Fish parser or override backend shell semantics.
+- [ ] Evaluate keybinding diagnostics inspired by Nushell, such as listing effective keybindings or listening for a key sequence. This should stay compatible with Aish's simpler action-based keybinding config.
+- [ ] Do not absorb Nushell's typed pipeline, AST execution model, dynamic completion closures, or full shell language semantics into Aish.

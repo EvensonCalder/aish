@@ -1240,6 +1240,8 @@ Commands:
 #push
 #sync <cron-expression>
 #sync off
+#sync startup on|off
+#sync exit on|off
 #sync ai on|off
 #sync history on|off
 #sync templates on|off

@@ -887,6 +887,67 @@ fn private_command_completion_includes_nested_arguments() {
         ["draft", "history", "ai", "reset"]
     );
 
+    let sync_candidates = complete_private_command_line("#sync ", "#sync ".len(), usize::MAX);
+    assert_eq!(
+        sync_candidates
+            .iter()
+            .map(|candidate| candidate.replacement.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "off",
+            "startup",
+            "exit",
+            "ai",
+            "history",
+            "templates",
+            "drafts"
+        ]
+    );
+    let sync_trigger_candidates =
+        complete_private_command_line("#sync startup ", "#sync startup ".len(), usize::MAX);
+    assert_eq!(
+        sync_trigger_candidates
+            .iter()
+            .map(|candidate| candidate.replacement.as_str())
+            .collect::<Vec<_>>(),
+        ["on", "off"]
+    );
+
+    let template_candidates =
+        complete_private_command_line("#template ", "#template ".len(), usize::MAX);
+    assert_eq!(
+        template_candidates
+            .iter()
+            .map(|candidate| candidate.replacement.as_str())
+            .collect::<Vec<_>>(),
+        ["find", "rm", "replace", "show", "use"]
+    );
+    assert!(
+        !template_candidates
+            .iter()
+            .any(|candidate| candidate.replacement == "list")
+    );
+
+    let encrypt_candidates =
+        complete_private_command_line("#encrypt ", "#encrypt ".len(), usize::MAX);
+    assert!(
+        encrypt_candidates
+            .iter()
+            .any(|candidate| candidate.replacement == "unlock-mode")
+    );
+    let unlock_mode_candidates = complete_private_command_line(
+        "#encrypt unlock-mode ",
+        "#encrypt unlock-mode ".len(),
+        usize::MAX,
+    );
+    assert_eq!(
+        unlock_mode_candidates
+            .iter()
+            .map(|candidate| candidate.replacement.as_str())
+            .collect::<Vec<_>>(),
+        ["lazy", "prompt"]
+    );
+
     let mode_candidates =
         complete_private_command_line("#completion mode ", "#completion mode ".len(), usize::MAX);
 
