@@ -1,17 +1,16 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use crossterm::event::{self, Event};
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode, is_raw_mode_enabled};
+use crossterm::terminal::is_raw_mode_enabled;
 
 use crate::commands::{ParsedLine, parse_line};
 use crate::history::{HistoryEntry, HistorySource, NoteEntry};
 use crate::modes::Mode;
 use crate::pty::{BackendShellClosed, PtyBackend, PtyCommandEvent};
-use crate::shell_integration::{is_interactive_passthrough_command, passthrough_key_bytes};
+use crate::shell_integration::passthrough_key_bytes;
 use crate::templates::template_placeholders;
 
 use super::context_prompt::{submit_ai_prompt, submit_ai_prompt_with_context};
@@ -132,24 +131,18 @@ pub fn execute_draft(
     }
 
     state.mode = Mode::CommandRunning;
-    if is_interactive_passthrough_command(&command) {
-        let exit_code = run_foreground_interactive_command(state, backend, &command)?;
-        record_completed_command(state, command, String::new(), exit_code, executing_ai)?;
-        return Ok(());
-    }
-
-    let result =
-        match backend.run_command_with_event_callback(&command, timeout, |backend, event| {
+    let result = match backend
+        .run_command_passthrough_with_event_callback(&command, |backend, event| {
             handle_command_running_event(backend, out, event)
         }) {
-            Ok(result) => result,
-            Err(error) if error.downcast_ref::<BackendShellClosed>().is_some() => {
-                state.exit_requested = true;
-                state.clear_draft_for_new_draft();
-                return Ok(());
-            }
-            Err(error) => return Err(error),
-        };
+        Ok(result) => result,
+        Err(error) if error.downcast_ref::<BackendShellClosed>().is_some() => {
+            state.exit_requested = true;
+            state.clear_draft_for_new_draft();
+            return Ok(());
+        }
+        Err(error) => return Err(error),
+    };
     record_completed_command(
         state,
         result.command.clone(),
@@ -209,41 +202,6 @@ pub(crate) fn record_completed_command(
     Ok(())
 }
 
-fn run_foreground_interactive_command(
-    state: &AppState,
-    backend: &PtyBackend,
-    command: &str,
-) -> Result<i32> {
-    let shell = backend.shell_program();
-    let args = foreground_shell_args(shell, command);
-    let cwd = state
-        .current_cwd
-        .clone()
-        .unwrap_or(std::env::current_dir()?);
-    let raw_mode_was_enabled = is_raw_mode_enabled()?;
-    if raw_mode_was_enabled {
-        disable_raw_mode()?;
-    }
-    let child = Command::new(shell)
-        .args(&args)
-        .current_dir(cwd)
-        .spawn()
-        .with_context(|| format!("failed to run interactive command `{command}`"));
-    let status = match child {
-        Ok(mut child) => {
-            let _sigint_guard = SigintIgnoreGuard::ignore();
-            child
-                .wait()
-                .with_context(|| format!("failed to wait for interactive command `{command}`"))
-        }
-        Err(err) => Err(err),
-    };
-    if raw_mode_was_enabled {
-        enable_raw_mode()?;
-    }
-    Ok(status?.code().unwrap_or(1))
-}
-
 fn forward_terminal_input_to_backend(backend: &mut PtyBackend) -> Result<bool> {
     if !is_raw_mode_enabled().unwrap_or(false) {
         return Ok(false);
@@ -292,51 +250,6 @@ fn handle_command_running_event(
         PtyCommandEvent::PollInput | PtyCommandEvent::Idle => {
             forward_terminal_input_to_backend(backend)
         }
-    }
-}
-
-#[cfg(unix)]
-struct SigintIgnoreGuard {
-    previous: SignalHandler,
-}
-
-#[cfg(unix)]
-type SignalHandler = usize;
-
-#[cfg(unix)]
-impl SigintIgnoreGuard {
-    fn ignore() -> Self {
-        unsafe extern "C" {
-            fn signal(signum: i32, handler: SignalHandler) -> SignalHandler;
-        }
-
-        const SIGINT: i32 = 2;
-        const SIG_IGN: SignalHandler = 1;
-
-        let previous = unsafe { signal(SIGINT, SIG_IGN) };
-        Self { previous }
-    }
-}
-
-#[cfg(unix)]
-impl Drop for SigintIgnoreGuard {
-    fn drop(&mut self) {
-        unsafe extern "C" {
-            fn signal(signum: i32, handler: SignalHandler) -> SignalHandler;
-        }
-
-        const SIGINT: i32 = 2;
-        let _ = unsafe { signal(SIGINT, self.previous) };
-    }
-}
-
-#[cfg(not(unix))]
-struct SigintIgnoreGuard;
-
-#[cfg(not(unix))]
-impl SigintIgnoreGuard {
-    fn ignore() -> Self {
-        Self
     }
 }
 

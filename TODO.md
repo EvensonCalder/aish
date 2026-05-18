@@ -747,12 +747,12 @@ Status: direct AI prompts are wired to the chat-completions request path using c
   - [x] cwd reporting
   - [x] Fix Linux fish 3.7.0 opt-in PTY timeout: ready markers now emit from `fish_postexec`/explicit init output instead of `fish_prompt`, avoiding fish prompt truncation in 80-column PTYs.
   - [ ] Promote fish from opt-in experimental support only after validation across macOS and representative Linux distributions.
-- [x] Detect interactive commands for passthrough:
-  - [x] command allowlist
-  - [x] alternate screen buffer detection
-  - [x] prompt return detection
-- [x] Broaden passthrough beyond the allowlist for arbitrary interactive programs.
-  - [x] Support unknown interactive foreground programs through the backend PTY streaming path without adding fragile command-name matches.
+- [x] Use backend-driven passthrough instead of command-name matching:
+  - [x] Run user commands through the persistent backend PTY shell.
+  - [x] Forward terminal input while the backend command is running.
+  - [x] Wait for backend ready/marker completion instead of a fixed user-command deadline.
+- [x] Broaden passthrough beyond brittle command-name rules for arbitrary interactive programs.
+  - [x] Support unknown interactive terminal programs through the backend PTY streaming path without adding fragile command-name matches.
   - [x] Avoid interpreting Aish app keys while a foreground program owns the terminal.
   - [x] Preserve robust return-to-prompt detection after the program exits.
 - [x] Add `#doctor` integration checks.

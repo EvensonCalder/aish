@@ -36,7 +36,7 @@ pub(super) fn shell_launch(configured_shell: &str) -> ShellLaunch {
         "bash" => (
             vec!["-i".to_string()],
             format!(
-                " set +o history 2>/dev/null || true\n export HISTCONTROL=ignorespace${{HISTCONTROL:+:$HISTCONTROL}}; __aish_prompt_command_set=0; __aish_prompt_command_is_array=0; __aish_prompt_command_string=; __aish_prompt_command_array=(); if declare -p PROMPT_COMMAND >/dev/null 2>&1; then __aish_prompt_command_set=1; case \"$(declare -p PROMPT_COMMAND 2>/dev/null)\" in declare\\ -a*|declare\\ -A*) __aish_prompt_command_is_array=1; __aish_prompt_command_array=(\"${{PROMPT_COMMAND[@]}}\");; *) __aish_prompt_command_string=$PROMPT_COMMAND;; esac; fi; PROMPT_COMMAND=; trap - DEBUG 2>/dev/null || true; __aish_run_prompt_command() {{ if [ \"$__aish_prompt_command_set\" = 1 ]; then if [ \"$__aish_prompt_command_is_array\" = 1 ]; then local __aish_pc; for __aish_pc in \"${{__aish_prompt_command_array[@]}}\"; do eval \"$__aish_pc\"; done; else eval \"$__aish_prompt_command_string\"; fi; fi; }}; __aish_emit_ready() {{ local __aish_status=$?; __aish_run_prompt_command >/dev/null 2>&1; printf '\\n{ready_marker}\\t%s\\t%s\\n' \"$__aish_status\" \"$PWD\"; return \"$__aish_status\"; }}; PROMPT_COMMAND=__aish_emit_ready; bind 'set enable-bracketed-paste off' 2>/dev/null || true; PS1=''; PS2=''; set -o history 2>/dev/null || true; stty -echo\n"
+                " set +o history 2>/dev/null || true\n export HISTCONTROL=ignorespace${{HISTCONTROL:+:$HISTCONTROL}}; __aish_prompt_command_set=0; __aish_prompt_command_is_array=0; __aish_prompt_command_string=; __aish_prompt_command_array=(); if declare -p PROMPT_COMMAND >/dev/null 2>&1; then __aish_prompt_command_set=1; case \"$(declare -p PROMPT_COMMAND 2>/dev/null)\" in declare\\ -a*|declare\\ -A*) __aish_prompt_command_is_array=1; __aish_prompt_command_array=(\"${{PROMPT_COMMAND[@]}}\");; *) __aish_prompt_command_string=$PROMPT_COMMAND;; esac; fi; PROMPT_COMMAND=; trap - DEBUG 2>/dev/null || true; __aish_preserve_status() {{ return \"$1\"; }}; __aish_run_prompt_command() {{ if [ \"$__aish_prompt_command_set\" = 1 ]; then if [ \"$__aish_prompt_command_is_array\" = 1 ]; then local __aish_pc; for __aish_pc in \"${{__aish_prompt_command_array[@]}}\"; do eval \"$__aish_pc\"; done; else eval \"$__aish_prompt_command_string\"; fi; fi; }}; __aish_emit_ready() {{ local __aish_status=$?; stty -echo; __aish_run_prompt_command >/dev/null 2>&1; printf '\\n{ready_marker}\\t%s\\t%s\\n' \"$__aish_status\" \"$PWD\"; return \"$__aish_status\"; }}; PROMPT_COMMAND=__aish_emit_ready; bind 'set enable-bracketed-paste off' 2>/dev/null || true; PS1=''; PS2=''; set -o history 2>/dev/null || true; stty -echo\n"
             ),
             ShellIntegration::BashPromptCommand,
         ),
@@ -47,20 +47,22 @@ pub(super) fn shell_launch(configured_shell: &str) -> ShellLaunch {
                 "histignorespace".to_string(),
             ],
             format!(
-                " setopt histignorespace; stty -echo; unsetopt zle prompt_cr prompt_sp; PROMPT=''; RPROMPT=''; PROMPT2=''; function __aish_preexec() {{ printf '\\n{start_marker}\\t%s\\n' \"$1\"; }}; function __aish_precmd() {{ printf '\\n{ready_marker}\\t%s\\t%s\\n' \"$?\" \"$PWD\"; }}; autoload -Uz add-zsh-hook; add-zsh-hook -d preexec __aish_preexec 2>/dev/null || true; add-zsh-hook -d precmd __aish_precmd 2>/dev/null || true; add-zsh-hook preexec __aish_preexec; add-zsh-hook precmd __aish_precmd; preexec_functions=(__aish_preexec ${{preexec_functions:#__aish_preexec}}); precmd_functions=(__aish_precmd ${{precmd_functions:#__aish_precmd}}); fc -p 2>/dev/null || true; __aish_precmd\n"
+                " setopt histignorespace; stty -echo; unsetopt zle prompt_cr prompt_sp; PROMPT=''; RPROMPT=''; PROMPT2=''; function __aish_preserve_status() {{ return \"$1\"; }}; function __aish_preexec() {{ stty echo; printf '\\n{start_marker}\\t%s\\n' \"$1\"; }}; function __aish_precmd() {{ local __aish_status=$?; stty -echo; printf '\\n{ready_marker}\\t%s\\t%s\\n' \"$__aish_status\" \"$PWD\"; return \"$__aish_status\"; }}; autoload -Uz add-zsh-hook; add-zsh-hook -d preexec __aish_preexec 2>/dev/null || true; add-zsh-hook -d precmd __aish_precmd 2>/dev/null || true; add-zsh-hook preexec __aish_preexec; add-zsh-hook precmd __aish_precmd; preexec_functions=(__aish_preexec ${{preexec_functions:#__aish_preexec}}); precmd_functions=(__aish_precmd ${{precmd_functions:#__aish_precmd}}); fc -p 2>/dev/null || true; __aish_precmd\n"
             ),
             ShellIntegration::ZshHooks,
         ),
         "fish" => (
             fish_launch_args(&program),
             format!(
-                "stty -echo; set -g fish_greeting; function fish_title; end; function __aish_preexec --on-event fish_preexec; printf '\n{start_marker}\\t%s\n' $argv[1]; end; function __aish_emit_ready; printf '\n{ready_marker}\\t%s\\t%s\n' $status $PWD; end; function __aish_postexec --on-event fish_postexec; __aish_emit_ready; end; function fish_prompt; end; function fish_right_prompt; end; function fish_mode_prompt; end; __aish_emit_ready\n"
+                "stty -echo; set -g fish_greeting; function fish_title; end; function __aish_preserve_status; return $argv[1]; end; function __aish_preexec --on-event fish_preexec; stty echo; printf '\n{start_marker}\\t%s\n' $argv[1]; end; function __aish_emit_ready; set -l __aish_status $status; if test (count $argv) -gt 0; set __aish_status $argv[1]; end; printf '\n{ready_marker}\\t%s\\t%s\n' $__aish_status $PWD; return $__aish_status; end; function __aish_postexec --on-event fish_postexec; set -l __aish_status $status; stty -echo; __aish_emit_ready $__aish_status; end; function fish_prompt; end; function fish_right_prompt; end; function fish_mode_prompt; end; __aish_emit_ready\n"
             ),
             ShellIntegration::FishEvents,
         ),
         _ => (
             Vec::new(),
-            format!("stty -echo; printf '\\n{ready_marker}\\t%s\\n' \"$PWD\"\n"),
+            format!(
+                "__aish_preserve_status() {{ return \"$1\"; }}; stty -echo; printf '\\n{ready_marker}\\t%s\\n' \"$PWD\"\n"
+            ),
             ShellIntegration::MarkerCommand,
         ),
     };

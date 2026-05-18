@@ -1,5 +1,5 @@
 use std::sync::{Mutex, MutexGuard};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use aish::app::{AppState, execute_draft};
 use aish::commands::NoteTag;
@@ -52,6 +52,36 @@ fn execute_draft_sends_command_to_backend_and_opens_blank_draft() {
     assert_eq!(state.output_ring[0].command, "printf 'hello draft\\n'");
     assert!(state.output_ring[0].output.contains("hello draft"));
     assert_eq!(state.output_ring[0].exit_code, 0);
+}
+
+#[test]
+fn execute_draft_user_command_waits_for_backend_ready_without_command_timeout() {
+    let _guard = pty_execution_guard();
+    let mut state = AppState::default();
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    state
+        .draft
+        .insert_str("sleep 0.2; printf 'after-backend-wait\\n'");
+
+    let started = Instant::now();
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_millis(50),
+    )
+    .unwrap();
+
+    assert!(started.elapsed() >= Duration::from_millis(150));
+    assert!(
+        String::from_utf8(output)
+            .unwrap()
+            .contains("after-backend-wait")
+    );
+    assert_eq!(state.last_status, Some(0));
+    assert_eq!(state.mode, Mode::Draft);
 }
 
 #[test]
@@ -300,13 +330,13 @@ fn editor_draft_can_send_line_leading_hash_to_shell() {
 
 #[test]
 #[cfg(unix)]
-fn editor_draft_interactive_command_can_run_in_foreground() {
+fn editor_draft_interactive_command_runs_through_backend_passthrough() {
     use std::os::unix::fs::PermissionsExt;
 
     let _guard = pty_execution_guard();
     let temp = tempfile::tempdir().unwrap();
     let command_path = temp.path().join("less");
-    let marker_path = temp.path().join("editor-foreground-ran");
+    let marker_path = temp.path().join("editor-backend-ran");
     std::fs::write(
         &command_path,
         format!(
@@ -331,14 +361,14 @@ fn editor_draft_interactive_command_can_run_in_foreground() {
 
     let output = String::from_utf8(output).unwrap();
     assert!(marker_path.exists());
-    assert!(!output.contains("backend pty output"));
+    assert!(output.contains("backend pty output"));
     assert_eq!(state.last_status, Some(0));
     assert_eq!(state.output_ring.len(), 1);
     assert_eq!(
         state.output_ring[0].command,
         command_path.display().to_string()
     );
-    assert_eq!(state.output_ring[0].output, "");
+    assert!(state.output_ring[0].output.contains("backend pty output"));
     assert!(!state.draft_from_editor);
     assert!(state.draft.is_empty());
 }

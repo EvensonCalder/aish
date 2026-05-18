@@ -19,7 +19,7 @@ Implemented and covered:
 - History, notes, templates, and event log storage.
 - Safe AI request plumbing and context pseudo-pipe flow.
 - `fzf`-based history, file, template, git branch, and environment pickers.
-- Allowlisted foreground passthrough for common interactive commands, plus backend PTY passthrough coverage for unknown raw-input/alternate-screen programs.
+- Backend-driven passthrough for interactive commands through the persistent PTY shell.
 - Conservative Git sync configuration and manual push flow.
 - GPG-backed key storage and encrypted history/template storage.
 - Real-terminal regression coverage through `tmux`.
@@ -475,11 +475,9 @@ Aish uses shell markers to detect command completion and cwd, filters those mark
 
 ## Interactive And Stdin Passthrough
 
-Aish foregrounds allowlisted interactive commands so they can own the terminal until they return. This includes common shells, editors, pagers, SSH-like tools, REPLs, database CLIs, `tmux`/`screen`, `gpg`/`pinentry`, privilege/password prompt tools such as `sudo`, `doas`, `sudoedit`, `su`, and `passwd`, and similar programs. Commands outside that allowlist still run through the backend PTY streaming path, where Aish forwards terminal input while the command is running and has tmux coverage for unknown raw-input/alternate-screen programs.
+Aish runs user commands through the persistent backend PTY shell and forwards terminal input while the command is running. It waits for the backend shell's ready/marker signal instead of using command-name matching or a fixed user-command deadline, so editors, pagers, REPLs, password prompts, stdin readers, and unknown terminal programs keep shell state and return to the Aish prompt when the backend shell reports completion.
 
-Common stdin-oriented commands such as `cat`, `grep`, `sed`, `awk`, `sort`, `uniq`, `wc`, `tee`, `base64`, and `openssl` are also foregrounded when they are not wrapped in shell control syntax. This prevents commands that wait for stdin from wedging the Aish prompt.
-
-Full automatic detection for every possible alternate-screen or job-control program remains future work.
+Some full-screen programs may still expose terminal-specific edge cases because Aish translates frontend key events into PTY bytes instead of handing the controlling terminal directly to a child process. New real-world failures should get a tmux regression test.
 
 ## Sync
 
@@ -654,7 +652,7 @@ The app module root in `src/app.rs` wires together focused runtime modules:
 - `src/app/context_prompt.rs`: AI prompt submission, context collection confirmation, and contextual prompt building.
 - `src/app/encryption_commands.rs`: GPG key storage, `#encrypt`, current-storage rotation, and confirmed history rewrite.
 - `src/app/startup_unlock.rs`: lazy and prompt encrypted startup unlock loading and encrypted cache preparation.
-- `src/app/execution.rs`: draft submission, command execution, foreground passthrough, PTY output forwarding, and command recording.
+- `src/app/execution.rs`: draft submission, backend-driven command passthrough, PTY output forwarding, and command recording.
 - `src/app/history_ops.rs`: history trimming and encrypted/plain AI history loading helpers.
 - `src/app/template_args.rs`: template subcommand argument parsing.
 - `src/app/event_log.rs`: event log display for `#log`.
@@ -727,4 +725,4 @@ AISH_HOME=/tmp/aish-debug ./target/debug/aish
 NO_COLOR=1 ./target/debug/aish
 ```
 
-If a command appears to wait for stdin or take over the terminal incorrectly, test it in a normal shell and then in Aish. Aish should foreground common interactive commands and keep backend PTY commands usable when they wait for stdin or claim alternate screen; new real-world failures should get a tmux regression test.
+If a command appears to wait for stdin or take over the terminal incorrectly, test it in a normal shell and then in Aish. Aish should keep backend PTY commands usable when they wait for stdin or claim alternate screen; new real-world failures should get a tmux regression test.

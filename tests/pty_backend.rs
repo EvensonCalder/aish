@@ -274,6 +274,43 @@ fn pty_backend_streams_partial_prompt_and_accepts_stdin_reply() {
 }
 
 #[test]
+fn pty_backend_passthrough_enables_child_echo_and_restores_backend_echo_off() {
+    let _guard = pty_test_guard();
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut displayed = Vec::new();
+
+    let result = backend
+        .run_command_passthrough_with_event_callback("stty -a", |_, event| {
+            if let PtyCommandEvent::Output(chunk) = event {
+                displayed.extend_from_slice(chunk);
+            }
+            Ok(false)
+        })
+        .unwrap();
+
+    assert_eq!(result.exit_code, 0);
+    assert!(stty_has_flag(&result.output, "echo"), "{result:?}");
+    assert!(!result.output.contains("__aish_passthrough_status"));
+    assert!(!result.output.contains("stty echo"));
+
+    let restored = backend
+        .run_command("stty -a", Duration::from_secs(5))
+        .unwrap();
+    assert_eq!(restored.exit_code, 0);
+    assert!(stty_has_flag(&restored.output, "-echo"), "{restored:?}");
+
+    let displayed = String::from_utf8(displayed).unwrap();
+    assert!(stty_has_flag(&displayed, "echo"), "{displayed:?}");
+    assert!(!displayed.contains("__aish_passthrough_status"));
+}
+
+fn stty_has_flag(output: &str, flag: &str) -> bool {
+    output
+        .split(|ch: char| ch.is_whitespace() || ch == ';')
+        .any(|token| token == flag)
+}
+
+#[test]
 fn fish_pty_backend_streams_output_before_command_completion_when_available() {
     let _guard = pty_test_guard();
     if !fish_backend_tests_enabled() {

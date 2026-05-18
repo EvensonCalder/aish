@@ -250,14 +250,62 @@ impl PtyBackend {
     where
         F: FnMut(&mut Self, PtyCommandEvent<'_>) -> Result<bool>,
     {
+        self.run_command_with_event_callback_inner(command, Some(timeout), &mut on_event)
+    }
+
+    pub fn run_command_passthrough_with_event_callback<F>(
+        &mut self,
+        command: &str,
+        mut on_event: F,
+    ) -> Result<CommandResult>
+    where
+        F: FnMut(&mut Self, PtyCommandEvent<'_>) -> Result<bool>,
+    {
+        self.run_command_with_event_callback_inner(command, None, &mut on_event)
+    }
+
+    fn run_command_with_event_callback_inner<F>(
+        &mut self,
+        command: &str,
+        timeout: Option<Duration>,
+        on_event: &mut F,
+    ) -> Result<CommandResult>
+    where
+        F: FnMut(&mut Self, PtyCommandEvent<'_>) -> Result<bool>,
+    {
+        let backend_command = if timeout.is_none() {
+            self.passthrough_backend_command(command)
+        } else {
+            command.to_string()
+        };
         if self.uses_shell_events() {
             if self.shell_events_require_marker_for(command) {
-                return self.run_command_with_marker_events(command, timeout, &mut on_event);
+                return self.run_command_with_marker_events(
+                    command,
+                    &backend_command,
+                    timeout,
+                    on_event,
+                );
             }
-            return self.run_command_with_shell_events_streaming(command, timeout, &mut on_event);
+            return self.run_command_with_shell_events_streaming(
+                command,
+                &backend_command,
+                timeout,
+                on_event,
+            );
         }
 
-        self.run_command_with_marker_events(command, timeout, &mut on_event)
+        self.run_command_with_marker_events(command, &backend_command, timeout, on_event)
+    }
+
+    fn passthrough_backend_command(&self, command: &str) -> String {
+        let command = command.trim_end_matches('\n');
+        match self.integration {
+            ShellIntegration::ZshHooks | ShellIntegration::FishEvents => command.to_string(),
+            ShellIntegration::BashPromptCommand | ShellIntegration::MarkerCommand => format!(
+                " stty echo; {{\n{command}\n}}; __aish_passthrough_status=$?; stty -echo; __aish_preserve_status \"$__aish_passthrough_status\""
+            ),
+        }
     }
 
     fn uses_shell_events(&self) -> bool {
@@ -314,7 +362,8 @@ impl PtyBackend {
     fn run_command_with_marker_events<F>(
         &mut self,
         command: &str,
-        timeout: Duration,
+        backend_command: &str,
+        timeout: Option<Duration>,
         on_event: &mut F,
     ) -> Result<CommandResult>
     where
@@ -327,8 +376,8 @@ impl PtyBackend {
         if !command.contains('\n') {
             self.write_raw(&start_command)?;
         }
-        self.write_raw(command)?;
-        if !command.ends_with('\n') {
+        self.write_raw(backend_command)?;
+        if !backend_command.ends_with('\n') {
             self.write_raw("\n")?;
         }
         self.write_raw(&marker_command)?;
@@ -357,7 +406,7 @@ impl PtyBackend {
     {
         self.read_pty_until(
             PtyReadTarget::Marker { marker },
-            timeout,
+            Some(timeout),
             |backend, event| {
                 if let PtyReadEvent::Idle = event
                     && on_wait(backend)?
@@ -375,7 +424,7 @@ impl PtyBackend {
         &mut self,
         marker: &str,
         recovery_marker_command: &str,
-        timeout: Duration,
+        timeout: Option<Duration>,
         on_event: &mut F,
     ) -> Result<String>
     where
@@ -419,24 +468,27 @@ impl PtyBackend {
     fn read_pty_until<F>(
         &mut self,
         target: PtyReadTarget<'_>,
-        timeout: Duration,
+        timeout: Option<Duration>,
         mut on_event: F,
     ) -> Result<String>
     where
         F: FnMut(&mut Self, PtyReadEvent<'_>) -> Result<()>,
     {
-        let deadline = Instant::now() + timeout;
+        let deadline = timeout.map(|timeout| Instant::now() + timeout);
         let mut data = Vec::new();
         loop {
             if target.is_complete(&data) {
                 return Ok(String::from_utf8_lossy(&data).into_owned());
             }
             let now = Instant::now();
-            if now >= deadline {
+            if let Some(deadline) = deadline
+                && now >= deadline
+            {
                 bail!(target.timeout_message());
             }
             let remaining = deadline
-                .saturating_duration_since(now)
+                .map(|deadline| deadline.saturating_duration_since(now))
+                .unwrap_or_else(|| Duration::from_millis(50))
                 .min(Duration::from_millis(50));
             match self.output.recv_timeout(remaining) {
                 Ok(chunk) => {
@@ -488,15 +540,16 @@ impl PtyBackend {
     fn run_command_with_shell_events_streaming<F>(
         &mut self,
         command: &str,
-        timeout: Duration,
+        backend_command: &str,
+        timeout: Option<Duration>,
         on_event: &mut F,
     ) -> Result<CommandResult>
     where
         F: FnMut(&mut Self, PtyCommandEvent<'_>) -> Result<bool>,
     {
         let _ = self.drain_for(Duration::from_millis(25));
-        self.write_raw(command)?;
-        if !command.ends_with('\n') {
+        self.write_raw(backend_command)?;
+        if !backend_command.ends_with('\n') {
             self.write_raw("\n")?;
         }
 
@@ -508,9 +561,13 @@ impl PtyBackend {
         };
         Ok(CommandResult {
             command: command.trim_end_matches('\n').to_string(),
-            started_command: parsed
-                .started_command
-                .or_else(|| Some(command.trim_end_matches('\n').to_string())),
+            started_command: if backend_command == command {
+                parsed
+                    .started_command
+                    .or_else(|| Some(command.trim_end_matches('\n').to_string()))
+            } else {
+                Some(command.trim_end_matches('\n').to_string())
+            },
             output: parsed.output,
             exit_code: parsed.exit_code,
             cwd: Some(parsed.cwd),
@@ -521,7 +578,7 @@ impl PtyBackend {
     where
         F: FnMut(&mut Self) -> Result<bool>,
     {
-        self.read_pty_until(PtyReadTarget::Ready, timeout, |backend, event| {
+        self.read_pty_until(PtyReadTarget::Ready, Some(timeout), |backend, event| {
             if let PtyReadEvent::Idle = event {
                 let _ = on_wait(backend)?;
             }
@@ -531,7 +588,7 @@ impl PtyBackend {
 
     fn read_until_ready_streaming<F>(
         &mut self,
-        timeout: Duration,
+        timeout: Option<Duration>,
         on_event: &mut F,
     ) -> Result<String>
     where
