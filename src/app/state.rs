@@ -13,7 +13,9 @@ use crate::config::{
     SyncConfig,
 };
 use crate::encrypted_writer::EncryptedWriteQueue;
-use crate::encryption::{append_encrypted_jsonl, gpg_program, rewrite_encrypted_jsonl};
+use crate::encryption::{
+    append_encrypted_jsonl, encrypted_path, gpg_program, rewrite_encrypted_jsonl,
+};
 use crate::history::{
     AiCommandIndex, AiItem, AiSession, DraftEntry, HistoryEntry, JsonlLineError, JsonlLoad,
     NoteEntry, ai_command_indices, append_jsonl,
@@ -385,7 +387,7 @@ impl AppState {
             return Ok(());
         };
         if self.encrypted_storage_is_locked() {
-            self.append_jsonl_item(path, entry)?;
+            self.append_locked_jsonl_item(path, entry)?;
             self.pending_locked_templates.push(entry.clone());
             self.templates.push(entry.clone());
             self.invalidate_completion_template_snapshot();
@@ -526,7 +528,7 @@ impl AppState {
             return Ok(());
         };
         if self.encrypted_storage_is_locked() {
-            self.append_jsonl_item(path, &entry)?;
+            self.append_locked_jsonl_item(path, &entry)?;
             self.pending_locked_notes.push(entry);
             return Ok(());
         }
@@ -538,7 +540,7 @@ impl AppState {
             return Ok(());
         };
         if self.encrypted_storage_is_locked() {
-            self.append_jsonl_item(path, entry)?;
+            self.append_locked_jsonl_item(path, entry)?;
             self.pending_locked_draft_history.push(entry.clone());
             return Ok(());
         }
@@ -550,7 +552,7 @@ impl AppState {
             return Ok(());
         };
         if self.encrypted_storage_is_locked() {
-            self.append_jsonl_item(path, session)?;
+            self.append_locked_jsonl_item(path, session)?;
             self.pending_locked_ai_sessions.push(session.clone());
             return Ok(());
         }
@@ -562,11 +564,18 @@ impl AppState {
             return Ok(());
         };
         if self.encrypted_storage_is_locked() {
-            self.append_jsonl_item(path, entry)?;
+            self.append_locked_jsonl_item(path, entry)?;
             self.pending_locked_regular_history.push(entry.clone());
             return Ok(());
         }
         self.append_jsonl_item(path, entry)
+    }
+
+    fn append_locked_jsonl_item<T: serde::Serialize>(&self, path: &Path, item: &T) -> Result<()> {
+        if encrypted_path(path).exists() {
+            return Ok(());
+        }
+        self.append_jsonl_item(path, item)
     }
 
     fn append_jsonl_item<T: serde::Serialize>(&self, path: &Path, item: &T) -> Result<()> {
@@ -714,23 +723,71 @@ impl AppState {
         let pending_regular = std::mem::take(&mut self.pending_locked_regular_history);
         let pending_drafts = std::mem::take(&mut self.pending_locked_draft_history);
         let pending_ai_sessions = std::mem::take(&mut self.pending_locked_ai_sessions);
-        let _pending_notes = std::mem::take(&mut self.pending_locked_notes);
+        let pending_notes = std::mem::take(&mut self.pending_locked_notes);
         let pending_templates = std::mem::take(&mut self.pending_locked_templates);
 
-        self.regular_history = data.store.regular;
-        extend_missing(&mut self.regular_history, pending_regular);
-        self.draft_history = data.store.drafts;
-        extend_missing(&mut self.draft_history, pending_drafts);
-        self.ai_sessions = data.store.ai_sessions;
-        extend_missing(&mut self.ai_sessions, pending_ai_sessions);
+        let mut store = data.store;
+        let missing_regular = extend_missing_and_collect(&mut store.regular, pending_regular);
+        let missing_drafts = extend_missing_and_collect(&mut store.drafts, pending_drafts);
+        let missing_ai_sessions =
+            extend_missing_and_collect(&mut store.ai_sessions, pending_ai_sessions);
+        let missing_notes = missing_items(&store.notes, pending_notes);
+        let mut templates = data.templates.items;
+        let missing_templates = extend_missing_and_collect(&mut templates, pending_templates);
+
+        self.regular_history = store.regular;
+        self.draft_history = store.drafts;
+        self.ai_sessions = store.ai_sessions;
         self.ai_command_indices = ai_command_indices(&self.ai_sessions);
-        self.templates = data.templates.items;
-        extend_missing(&mut self.templates, pending_templates);
+        self.templates = templates;
         self.template_errors = data.templates.errors;
         self.invalidate_completion_history_snapshot();
         self.invalidate_completion_template_snapshot();
         self.encrypted_storage_unlocked = true;
         self.start_encrypted_writer_with_cache(data.encrypted_cache);
+        self.persist_missing_locked_writes(
+            &missing_regular,
+            &missing_drafts,
+            &missing_ai_sessions,
+            &missing_notes,
+            &missing_templates,
+        )?;
+        Ok(())
+    }
+
+    fn persist_missing_locked_writes(
+        &self,
+        regular: &[HistoryEntry],
+        drafts: &[DraftEntry],
+        ai_sessions: &[AiSession],
+        notes: &[NoteEntry],
+        templates: &[TemplateEntry],
+    ) -> Result<()> {
+        if let Some(path) = self.regular_history_path.clone() {
+            for entry in regular {
+                self.append_jsonl_item(&path, entry)?;
+            }
+        }
+        if let Some(path) = self.draft_history_path.clone() {
+            for entry in drafts {
+                self.append_jsonl_item(&path, entry)?;
+            }
+        }
+        if let Some(path) = self.ai_history_path.clone() {
+            for session in ai_sessions {
+                self.append_jsonl_item(&path, session)?;
+            }
+        }
+        if let Some(path) = self.notes_path.clone() {
+            for note in notes {
+                self.append_jsonl_item(&path, note)?;
+            }
+        }
+        if let Some(path) = self.template_store_path.clone() {
+            for template in templates {
+                self.append_jsonl_item(&path, template)?;
+            }
+        }
         Ok(())
     }
 
@@ -774,10 +831,20 @@ impl AppState {
     }
 }
 
-fn extend_missing<T: PartialEq>(items: &mut Vec<T>, pending: Vec<T>) {
+fn extend_missing_and_collect<T: PartialEq + Clone>(items: &mut Vec<T>, pending: Vec<T>) -> Vec<T> {
+    let mut missing = Vec::new();
     for item in pending {
         if !items.contains(&item) {
-            items.push(item);
+            items.push(item.clone());
+            missing.push(item);
         }
     }
+    missing
+}
+
+fn missing_items<T: PartialEq + Clone>(items: &[T], pending: Vec<T>) -> Vec<T> {
+    pending
+        .into_iter()
+        .filter(|item| !items.contains(item))
+        .collect()
 }

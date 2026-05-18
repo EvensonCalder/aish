@@ -49,7 +49,7 @@ fn write_fake_gpg(temp: &tempfile::TempDir) -> PathBuf {
     let fake_gpg = temp.path().join("fake-gpg");
     write_executable_file(
         &fake_gpg,
-        "#!/bin/sh\nmode=encrypt\nout=\"\"\ninput=\"\"\nrecipient=\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"\nlast=\"\"\nfor arg in \"$@\"; do\n  last=\"$arg\"\n  if [ \"$arg\" = \"--version\" ]; then printf 'fake gpg\\n'; exit 0; fi\ndone\nfor arg in \"$@\"; do\n  if [ \"$arg\" = \"--list-keys\" ]; then\n    fpr='AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'\n    uid='Test User <test@example.invalid>'\n    case \"$last\" in\n      *BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB*|second@example.invalid) fpr='BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB'; uid='Second User <second@example.invalid>' ;;\n    esac\n    printf '%s\\n' 'pub:u:255:22:1111111111111111:1:::u:::scESC::::::23::0:'\n    printf 'fpr:::::::::%s:\\n' \"$fpr\"\n    printf 'uid:u::::1::hash::%s:::::::::0:\\n' \"$uid\"\n    exit 0\n  fi\ndone\nwhile [ \"$#\" -gt 0 ]; do\n  case \"$1\" in\n    --decrypt) mode=decrypt ;;\n    --output) shift; out=\"$1\" ;;\n    --recipient) shift; recipient=\"$1\" ;;\n    --trust-model) shift ;;\n    --batch|--yes|--no-tty|--encrypt|--with-colons|--fingerprint) ;;\n    *) input=\"$1\" ;;\n  esac\n  shift\ndone\nif [ \"$mode\" = decrypt ]; then\n  sed '/^recipient:/d' \"$input\"\nelse\n  { printf 'recipient:%s\\n' \"$recipient\"; cat \"$input\"; } > \"$out\"\nfi\n",
+        "#!/bin/sh\nmode=encrypt\nout=\"\"\ninput=\"\"\nrecipient=\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"\nlast=\"\"\nfor arg in \"$@\"; do\n  last=\"$arg\"\n  if [ \"$arg\" = \"--version\" ]; then printf 'fake gpg\\n'; exit 0; fi\ndone\nfor arg in \"$@\"; do\n  if [ \"$arg\" = \"--list-keys\" ]; then\n    fpr='AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'\n    uid='Test User <test@example.invalid>'\n    case \"$last\" in\n      *BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB*|second@example.invalid) fpr='BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB'; uid='Second User <second@example.invalid>' ;;\n    esac\n    printf '%s\\n' 'pub:u:255:22:1111111111111111:1:::u:::scESC::::::23::0:'\n    printf 'fpr:::::::::%s:\\n' \"$fpr\"\n    printf 'uid:u::::1::hash::%s:::::::::0:\\n' \"$uid\"\n    exit 0\n  fi\ndone\nwhile [ \"$#\" -gt 0 ]; do\n  case \"$1\" in\n    --decrypt) mode=decrypt ;;\n    --output) shift; out=\"$1\" ;;\n    --recipient) shift; recipient=\"$1\" ;;\n    --trust-model|--pinentry-mode) shift ;;\n    --batch|--yes|--no-tty|--encrypt|--with-colons|--fingerprint|error) ;;\n    *) input=\"$1\" ;;\n  esac\n  shift\ndone\nif [ \"$mode\" = decrypt ]; then\n  count=$(grep -c '^recipient:' \"$input\" || true)\n  if [ \"$count\" -gt 1 ]; then\n    printf 'gpg: WARNING: multiple plaintexts seen\\n' >&2\n    printf 'gpg: decryption failed: Bad data\\n' >&2\n    exit 2\n  fi\n  sed '1{/^recipient:/d;}' \"$input\"\nelse\n  { printf 'recipient:%s\\n' \"$recipient\"; cat \"$input\"; } > \"$out\"\nfi\n",
     );
     fake_gpg
 }
@@ -1441,6 +1441,27 @@ fn private_exit_requests_app_exit() {
     assert!(state.exit_requested);
     assert!(state.draft.is_empty());
     assert!(output.is_empty());
+}
+
+#[test]
+fn ordinary_shell_exit_requests_clean_app_exit() {
+    let mut state = AppState::default();
+    state.draft.insert_str("exit");
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(state.exit_requested);
+    assert!(state.draft.is_empty());
+    assert!(!output.contains("backend shell PTY closed"));
 }
 
 #[test]

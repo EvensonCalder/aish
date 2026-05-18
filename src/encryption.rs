@@ -1,7 +1,8 @@
 use std::fs;
 use std::io::{BufRead, BufReader, Cursor, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, Output, Stdio};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, is_raw_mode_enabled};
@@ -78,12 +79,7 @@ pub fn run_gpg_encrypt_plan(plan: &GpgEncryptPlan) -> Result<()> {
         .with_context(|| format!("failed to run GPG command: {}", plan.program))?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let summary = stderr
-            .lines()
-            .next()
-            .unwrap_or("GPG encryption failed")
-            .trim();
+        let summary = gpg_stderr_summary(&output.stderr, "GPG encryption failed");
         bail!("GPG encryption failed: {summary}");
     }
 
@@ -93,22 +89,22 @@ pub fn run_gpg_encrypt_plan(plan: &GpgEncryptPlan) -> Result<()> {
 pub fn gpg_decrypt_file(gpg_program: impl AsRef<str>, input: impl AsRef<Path>) -> Result<Vec<u8>> {
     let input = input.as_ref();
     let program = gpg_program.as_ref();
-    let input_arg = input.display().to_string();
     let terminal = enter_gpg_terminal_passthrough()?;
-    let mut command = Command::new(program);
-    command.args(["--yes", "--decrypt", "--", &input_arg]);
-    terminal.prepare_command(&mut command);
-    let output = command
-        .output()
+    let output = run_gpg_decrypt_command(program, input, DecryptMode::Interactive, Some(&terminal))
         .with_context(|| format!("failed to run GPG command: {program}"))?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let summary = stderr
-            .lines()
-            .next()
-            .unwrap_or("GPG decryption failed")
-            .trim();
+        if gpg_stderr_mentions_multiple_plaintexts(&output.stderr)
+            && let Some(bytes) = decrypt_concatenated_openpgp_messages(
+                program,
+                input,
+                DecryptMode::Interactive,
+                Some(&terminal),
+            )?
+        {
+            return Ok(bytes);
+        }
+        let summary = gpg_stderr_summary(&output.stderr, "GPG decryption failed");
         bail!("GPG decryption failed: {summary}");
     }
 
@@ -121,31 +117,282 @@ pub fn gpg_decrypt_file_noninteractive(
 ) -> Result<Vec<u8>> {
     let input = input.as_ref();
     let program = gpg_program.as_ref();
-    let input_arg = input.display().to_string();
-    let output = Command::new(program)
-        .args([
-            "--batch",
-            "--yes",
-            "--pinentry-mode",
-            "error",
-            "--decrypt",
-            "--",
-            &input_arg,
-        ])
-        .output()
+    let output = run_gpg_decrypt_command(program, input, DecryptMode::Noninteractive, None)
         .with_context(|| format!("failed to run GPG command: {program}"))?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let summary = stderr
-            .lines()
-            .next()
-            .unwrap_or("GPG noninteractive decryption failed")
-            .trim();
+        if gpg_stderr_mentions_multiple_plaintexts(&output.stderr)
+            && let Some(bytes) = decrypt_concatenated_openpgp_messages(
+                program,
+                input,
+                DecryptMode::Noninteractive,
+                None,
+            )?
+        {
+            return Ok(bytes);
+        }
+        let summary = gpg_stderr_summary(&output.stderr, "GPG noninteractive decryption failed");
         bail!("GPG noninteractive decryption failed: {summary}");
     }
 
     Ok(output.stdout)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DecryptMode {
+    Interactive,
+    Noninteractive,
+}
+
+fn run_gpg_decrypt_command(
+    program: &str,
+    input: &Path,
+    mode: DecryptMode,
+    terminal: Option<&GpgTerminalPassthrough>,
+) -> Result<Output> {
+    let input_arg = input.display().to_string();
+    let mut command = Command::new(program);
+    match mode {
+        DecryptMode::Interactive => {
+            command.args(["--yes", "--decrypt", "--", &input_arg]);
+        }
+        DecryptMode::Noninteractive => {
+            command.args([
+                "--batch",
+                "--yes",
+                "--pinentry-mode",
+                "error",
+                "--decrypt",
+                "--",
+                &input_arg,
+            ]);
+        }
+    }
+    if let Some(terminal) = terminal {
+        terminal.prepare_command(&mut command);
+    }
+    command.output().map_err(Into::into)
+}
+
+fn gpg_stderr_mentions_multiple_plaintexts(stderr: &[u8]) -> bool {
+    String::from_utf8_lossy(stderr).contains("multiple plaintexts seen")
+}
+
+fn gpg_stderr_summary(stderr: &[u8], fallback: &str) -> String {
+    let lines: Vec<String> = String::from_utf8_lossy(stderr)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(ToOwned::to_owned)
+        .collect();
+    if lines.is_empty() {
+        return fallback.to_string();
+    }
+
+    let relevant: Vec<String> = lines
+        .iter()
+        .filter(|line| {
+            !line.starts_with("gpg: encrypted with ")
+                && !line.starts_with('"')
+                && !line.starts_with("“")
+        })
+        .cloned()
+        .collect();
+    let source = if relevant.is_empty() {
+        lines.as_slice()
+    } else {
+        relevant.as_slice()
+    };
+    let start = source.len().saturating_sub(3);
+    let mut summary = source[start..].join("; ");
+    const MAX_SUMMARY_CHARS: usize = 500;
+    if summary.chars().count() > MAX_SUMMARY_CHARS {
+        summary = summary.chars().take(MAX_SUMMARY_CHARS).collect();
+        summary.push_str("...");
+    }
+    summary
+}
+
+fn decrypt_concatenated_openpgp_messages(
+    program: &str,
+    input: &Path,
+    mode: DecryptMode,
+    terminal: Option<&GpgTerminalPassthrough>,
+) -> Result<Option<Vec<u8>>> {
+    let encrypted = fs::read(input)
+        .with_context(|| format!("failed to read encrypted file {}", input.display()))?;
+    let Some(messages) = split_concatenated_openpgp_messages(&encrypted) else {
+        return Ok(None);
+    };
+
+    let mut plaintext = Vec::new();
+    for (index, message) in messages.iter().enumerate() {
+        let part_path = decrypt_part_temp_path(input, index);
+        let decrypt_result = (|| -> Result<Output> {
+            write_private_file(&part_path, message).with_context(|| {
+                format!(
+                    "failed to write temporary GPG message {}",
+                    part_path.display()
+                )
+            })?;
+            run_gpg_decrypt_command(program, &part_path, mode, terminal)
+                .with_context(|| format!("failed to run GPG command: {program}"))
+        })();
+        let _ = fs::remove_file(&part_path);
+        let output = decrypt_result?;
+        if !output.status.success() {
+            let summary = gpg_stderr_summary(&output.stderr, "GPG decryption failed");
+            bail!(
+                "failed to decrypt OpenPGP message {} of {} in {}: {summary}",
+                index + 1,
+                messages.len(),
+                input.display()
+            );
+        }
+        plaintext.extend_from_slice(&output.stdout);
+    }
+
+    Ok(Some(plaintext))
+}
+
+fn decrypt_part_temp_path(input: &Path, index: usize) -> PathBuf {
+    let filename = input
+        .file_name()
+        .map(|name| name.to_string_lossy())
+        .unwrap_or_else(|| "message.gpg".into());
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    let part_name = format!(
+        ".{filename}.{}.{}.{}.part.gpg",
+        std::process::id(),
+        nonce,
+        index
+    );
+    input.with_file_name(part_name)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct OpenPgpPacket {
+    offset: usize,
+    tag: u8,
+    end: usize,
+}
+
+fn split_concatenated_openpgp_messages(bytes: &[u8]) -> Option<Vec<&[u8]>> {
+    let mut packets = Vec::new();
+    let mut offset = 0;
+    while offset < bytes.len() {
+        let packet = parse_openpgp_packet(bytes, offset)?;
+        offset = packet.end;
+        packets.push(packet);
+    }
+
+    let mut starts = vec![0];
+    let mut previous_was_encrypted_data = false;
+    for packet in packets.iter().skip(1) {
+        if previous_was_encrypted_data && is_session_key_packet(packet.tag) {
+            starts.push(packet.offset);
+        }
+        previous_was_encrypted_data = is_encrypted_data_packet(packet.tag);
+    }
+    if starts.len() < 2 {
+        return None;
+    }
+
+    starts.push(bytes.len());
+    Some(
+        starts
+            .windows(2)
+            .map(|window| &bytes[window[0]..window[1]])
+            .collect(),
+    )
+}
+
+fn parse_openpgp_packet(bytes: &[u8], offset: usize) -> Option<OpenPgpPacket> {
+    let ctb = *bytes.get(offset)?;
+    if ctb & 0x80 == 0 {
+        return None;
+    }
+    if ctb & 0x40 != 0 {
+        parse_new_openpgp_packet(bytes, offset, ctb)
+    } else {
+        parse_old_openpgp_packet(bytes, offset, ctb)
+    }
+}
+
+fn parse_new_openpgp_packet(bytes: &[u8], offset: usize, ctb: u8) -> Option<OpenPgpPacket> {
+    let tag = ctb & 0x3f;
+    let mut cursor = offset.checked_add(1)?;
+    loop {
+        let length_octet = *bytes.get(cursor)?;
+        cursor = cursor.checked_add(1)?;
+        let length = match length_octet {
+            0..=191 => usize::from(length_octet),
+            192..=223 => {
+                let second = usize::from(*bytes.get(cursor)?);
+                cursor = cursor.checked_add(1)?;
+                ((usize::from(length_octet) - 192) << 8) + second + 192
+            }
+            224..=254 => 1_usize.checked_shl(u32::from(length_octet & 0x1f))?,
+            255 => {
+                let raw = bytes.get(cursor..cursor.checked_add(4)?)?;
+                cursor = cursor.checked_add(4)?;
+                u32::from_be_bytes([raw[0], raw[1], raw[2], raw[3]]) as usize
+            }
+        };
+        cursor = cursor.checked_add(length)?;
+        if cursor > bytes.len() {
+            return None;
+        }
+        if !(224..=254).contains(&length_octet) {
+            return Some(OpenPgpPacket {
+                offset,
+                tag,
+                end: cursor,
+            });
+        }
+    }
+}
+
+fn parse_old_openpgp_packet(bytes: &[u8], offset: usize, ctb: u8) -> Option<OpenPgpPacket> {
+    let tag = (ctb >> 2) & 0x0f;
+    let length_type = ctb & 0x03;
+    let mut cursor = offset.checked_add(1)?;
+    let length = match length_type {
+        0 => usize::from(*bytes.get(cursor)?),
+        1 => {
+            let raw = bytes.get(cursor..cursor.checked_add(2)?)?;
+            u16::from_be_bytes([raw[0], raw[1]]) as usize
+        }
+        2 => {
+            let raw = bytes.get(cursor..cursor.checked_add(4)?)?;
+            u32::from_be_bytes([raw[0], raw[1], raw[2], raw[3]]) as usize
+        }
+        3 => bytes.len().checked_sub(cursor)?,
+        _ => unreachable!(),
+    };
+    cursor = cursor.checked_add(match length_type {
+        0 => 1,
+        1 => 2,
+        2 => 4,
+        3 => 0,
+        _ => unreachable!(),
+    })?;
+    let end = cursor.checked_add(length)?;
+    if end > bytes.len() {
+        return None;
+    }
+    Some(OpenPgpPacket { offset, tag, end })
+}
+
+fn is_session_key_packet(tag: u8) -> bool {
+    matches!(tag, 1 | 3)
+}
+
+fn is_encrypted_data_packet(tag: u8) -> bool {
+    matches!(tag, 9 | 18 | 20)
 }
 
 pub(crate) struct GpgTerminalPassthrough {
@@ -304,69 +551,16 @@ pub fn append_gpg_encrypt_bytes(
     final_path: impl AsRef<Path>,
     plaintext: &[u8],
 ) -> Result<()> {
-    let paths = atomic_gpg_write_paths(final_path);
-    if let Some(parent) = paths
-        .final_path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-    {
-        create_private_dir_all(parent).with_context(|| {
-            format!(
-                "failed to create encrypted output parent: {}",
-                parent.display()
-            )
-        })?;
-    }
-
-    write_private_plaintext_tmp(&paths.plaintext_tmp, plaintext)?;
-    let plan = gpg_encrypt_plan(
-        gpg_program,
-        recipient,
-        &paths.plaintext_tmp,
-        &paths.encrypted_tmp,
-    );
-    let encrypt_result = run_gpg_encrypt_plan(&plan);
-    let _ = fs::remove_file(&paths.plaintext_tmp);
-    if let Err(err) = encrypt_result {
-        let _ = fs::remove_file(&paths.encrypted_tmp);
-        return Err(err);
-    }
-
-    let append_result = (|| -> Result<()> {
-        let encrypted = fs::read(&paths.encrypted_tmp).with_context(|| {
-            format!(
-                "failed to read encrypted temp file {}",
-                paths.encrypted_tmp.display()
-            )
-        })?;
-        let mut file = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&paths.final_path)
-            .with_context(|| {
-                format!(
-                    "failed to open encrypted file for append: {}",
-                    paths.final_path.display()
-                )
-            })?;
-        file.write_all(&encrypted).with_context(|| {
-            format!(
-                "failed to append encrypted data to {}",
-                paths.final_path.display()
-            )
-        })?;
-        file.sync_all().with_context(|| {
-            format!(
-                "failed to sync encrypted file after append: {}",
-                paths.final_path.display()
-            )
-        })?;
-        Ok(())
-    })();
-    let _ = fs::remove_file(&paths.encrypted_tmp);
-    append_result?;
-    set_private_file_permissions(&paths.final_path)?;
-    Ok(())
+    let gpg_program = gpg_program.into();
+    let final_path = final_path.as_ref();
+    let mut bytes = if final_path.exists() {
+        gpg_decrypt_file(&gpg_program, final_path)
+            .with_context(|| format!("failed to decrypt {}", final_path.display()))?
+    } else {
+        Vec::new()
+    };
+    bytes.extend_from_slice(plaintext);
+    atomic_gpg_encrypt_bytes(gpg_program, recipient, final_path, &bytes)
 }
 
 pub fn load_encrypted_jsonl<T: DeserializeOwned>(
@@ -391,7 +585,8 @@ pub fn load_encrypted_jsonl_with_bytes<T: DeserializeOwned>(
             Vec::new(),
         ));
     }
-    let bytes = gpg_decrypt_file(gpg_program, &path)?;
+    let bytes = gpg_decrypt_file(gpg_program, &path)
+        .with_context(|| format!("failed to decrypt encrypted JSONL file {}", path.display()))?;
     let loaded = load_jsonl_bytes(&path, &bytes)?;
     Ok((loaded, bytes))
 }
@@ -411,7 +606,8 @@ pub fn load_encrypted_jsonl_with_bytes_noninteractive<T: DeserializeOwned>(
             Vec::new(),
         ));
     }
-    let bytes = gpg_decrypt_file_noninteractive(gpg_program, &path)?;
+    let bytes = gpg_decrypt_file_noninteractive(gpg_program, &path)
+        .with_context(|| format!("failed to decrypt encrypted JSONL file {}", path.display()))?;
     let loaded = load_jsonl_bytes(&path, &bytes)?;
     Ok((loaded, bytes))
 }
@@ -440,16 +636,13 @@ pub fn append_encrypted_jsonl_bytes(
     plaintext_path: impl AsRef<Path>,
     item_json: &[u8],
 ) -> Result<()> {
+    let gpg_program = gpg_program.into();
     let plaintext_path = plaintext_path.as_ref();
     let mut bytes = Vec::with_capacity(item_json.len() + 1);
+    bytes.extend_from_slice(&existing_jsonl_bytes(&gpg_program, plaintext_path)?);
     bytes.extend_from_slice(item_json);
     bytes.push(b'\n');
-    append_gpg_encrypt_bytes(
-        gpg_program,
-        recipient,
-        encrypted_path(plaintext_path),
-        &bytes,
-    )?;
+    rewrite_encrypted_jsonl_bytes(gpg_program, recipient, plaintext_path, &bytes)?;
     remove_plaintext_if_present(plaintext_path)?;
     Ok(())
 }
@@ -514,7 +707,8 @@ pub fn reencrypt_gpg_jsonl(
         return Ok(false);
     }
     let program = gpg_program.as_ref();
-    let bytes = gpg_decrypt_file(program, &path)?;
+    let bytes = gpg_decrypt_file(program, &path)
+        .with_context(|| format!("failed to decrypt encrypted JSONL file {}", path.display()))?;
     atomic_gpg_encrypt_bytes(program.to_string(), recipient, &path, &bytes)?;
     Ok(true)
 }
@@ -528,7 +722,8 @@ pub fn migrate_gpg_jsonl_to_plaintext(
     if !path.exists() {
         return Ok(false);
     }
-    let bytes = gpg_decrypt_file(gpg_program, &path)?;
+    let bytes = gpg_decrypt_file(gpg_program, &path)
+        .with_context(|| format!("failed to decrypt encrypted JSONL file {}", path.display()))?;
     atomic_plaintext_write(plaintext_path, &bytes)?;
     fs::remove_file(&path)
         .with_context(|| format!("failed to remove encrypted file {}", path.display()))?;
@@ -538,7 +733,12 @@ pub fn migrate_gpg_jsonl_to_plaintext(
 pub(crate) fn existing_jsonl_bytes(gpg_program: &str, plaintext_path: &Path) -> Result<Vec<u8>> {
     let encrypted = encrypted_path(plaintext_path);
     if encrypted.exists() {
-        return gpg_decrypt_file(gpg_program, encrypted);
+        return gpg_decrypt_file(gpg_program, &encrypted).with_context(|| {
+            format!(
+                "failed to decrypt encrypted JSONL file {}",
+                encrypted.display()
+            )
+        });
     }
     match fs::read(plaintext_path) {
         Ok(bytes) => Ok(bytes),
@@ -686,6 +886,37 @@ mod tests {
     }
 
     #[test]
+    fn gpg_stderr_summary_prefers_actionable_failure_lines() {
+        let stderr = b"gpg: encrypted with cv25519 key, ID 1234\n      \"Test User\"\ngpg: WARNING: multiple plaintexts seen\ngpg: handle plaintext failed: Unexpected error\ngpg: decryption failed: Bad data\n";
+
+        let summary = gpg_stderr_summary(stderr, "fallback");
+
+        assert!(summary.contains("multiple plaintexts seen"));
+        assert!(summary.contains("decryption failed: Bad data"));
+        assert!(!summary.contains("encrypted with cv25519 key"));
+    }
+
+    #[test]
+    fn openpgp_splitter_finds_concatenated_encrypted_messages() {
+        let first = [0x84, 0x01, 0xaa, 0xd4, 0x01, 0xbb];
+        let second = [0x84, 0x01, 0xcc, 0xd4, 0x01, 0xdd];
+        let mut concatenated = Vec::new();
+        concatenated.extend_from_slice(&first);
+        concatenated.extend_from_slice(&second);
+
+        let messages = split_concatenated_openpgp_messages(&concatenated).unwrap();
+
+        assert_eq!(messages, vec![first.as_slice(), second.as_slice()]);
+    }
+
+    #[test]
+    fn openpgp_splitter_leaves_single_message_alone() {
+        let message = [0x84, 0x01, 0xaa, 0xd4, 0x01, 0xbb];
+
+        assert!(split_concatenated_openpgp_messages(&message).is_none());
+    }
+
+    #[test]
     fn parse_gpg_public_keys_reads_primary_fingerprints_and_uids() {
         let keys = parse_gpg_public_keys(
             "tru::1:0:0:0:0:0:0:0::\n\
@@ -765,21 +996,21 @@ mod tests {
     }
 
     #[test]
-    fn encrypted_jsonl_append_does_not_decrypt_existing_file() {
+    fn encrypted_jsonl_append_rewrites_existing_file_as_single_message() {
         let temp = tempfile::tempdir().unwrap();
         let fake_gpg = temp.path().join("fake-gpg");
         write_executable(
             &fake_gpg,
-            "#!/bin/sh\nmode=encrypt\nout=\"\"\ninput=\"\"\nwhile [ \"$#\" -gt 0 ]; do\n  case \"$1\" in\n    --decrypt) printf 'decrypt should not run for append\\n' >&2; exit 17 ;;\n    --output) shift; out=\"$1\" ;;\n    --recipient|--trust-model) shift ;;\n    --batch|--yes|--no-tty|--encrypt|always) ;;\n    *) input=\"$1\" ;;\n  esac\n  shift\ndone\ncp \"$input\" \"$out\"\n",
+            "#!/bin/sh\nmode=encrypt\nout=\"\"\ninput=\"\"\nrecipient=\"recipient\"\nwhile [ \"$#\" -gt 0 ]; do\n  case \"$1\" in\n    --decrypt) mode=decrypt ;;\n    --output) shift; out=\"$1\" ;;\n    --recipient) shift; recipient=\"$1\" ;;\n    --trust-model|--pinentry-mode) shift ;;\n    --batch|--yes|--no-tty|--encrypt|always|error) ;;\n    *) input=\"$1\" ;;\n  esac\n  shift\ndone\nif [ \"$mode\" = decrypt ]; then\n  sed '1{/^recipient:/d;}' \"$input\"\nelse\n  { printf 'recipient:%s\\n' \"$recipient\"; cat \"$input\"; } > \"$out\"\nfi\n",
         );
         let plaintext_path = temp.path().join("history/regular.jsonl");
         let encrypted = encrypted_path(&plaintext_path);
         fs::create_dir_all(encrypted.parent().unwrap()).unwrap();
-        fs::write(&encrypted, b"{\"old\":true}\n").unwrap();
+        fs::write(&encrypted, b"recipient:old-key\n{\"old\":true}\n").unwrap();
 
         append_encrypted_jsonl_bytes(
             fake_gpg.display().to_string(),
-            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "new-key",
             &plaintext_path,
             br#"{"new":true}"#,
         )
@@ -787,7 +1018,7 @@ mod tests {
 
         assert_eq!(
             fs::read_to_string(encrypted).unwrap(),
-            "{\"old\":true}\n{\"new\":true}\n"
+            "recipient:new-key\n{\"old\":true}\n{\"new\":true}\n"
         );
     }
 
@@ -1016,7 +1247,7 @@ mod tests {
         let path = temp.path().join("history/regular.jsonl");
         write_executable(
             &fake_gpg,
-            "#!/bin/sh\nmode=encrypt\nout=\"\"\ninput=\"\"\nwhile [ \"$#\" -gt 0 ]; do\n  case \"$1\" in\n    --decrypt) mode=decrypt ;;\n    --output) shift; out=\"$1\" ;;\n    --batch|--yes|--no-tty|--trust-model|always|--encrypt|--recipient) ;;\n    *) input=\"$1\" ;;\n  esac\n  shift\ndone\nif [ \"$mode\" = decrypt ]; then\n  cat \"$input\"\nelse\n  cp \"$input\" \"$out\"\nfi\n",
+            "#!/bin/sh\nmode=encrypt\nout=\"\"\ninput=\"\"\nrecipient=\"recipient\"\nwhile [ \"$#\" -gt 0 ]; do\n  case \"$1\" in\n    --decrypt) mode=decrypt ;;\n    --output) shift; out=\"$1\" ;;\n    --recipient) shift; recipient=\"$1\" ;;\n    --trust-model|--pinentry-mode) shift ;;\n    --batch|--yes|--no-tty|--encrypt|always|error) ;;\n    *) input=\"$1\" ;;\n  esac\n  shift\ndone\nif [ \"$mode\" = decrypt ]; then\n  count=$(grep -c '^recipient:' \"$input\" || true)\n  if [ \"$count\" -gt 1 ]; then\n    printf 'gpg: WARNING: multiple plaintexts seen\\n' >&2\n    printf 'gpg: decryption failed: Bad data\\n' >&2\n    exit 2\n  fi\n  sed '1{/^recipient:/d;}' \"$input\"\nelse\n  { printf 'recipient:%s\\n' \"$recipient\"; cat \"$input\"; } > \"$out\"\nfi\n",
         );
 
         append_encrypted_jsonl(
@@ -1040,6 +1271,8 @@ mod tests {
 
         assert!(!path.exists());
         assert!(encrypted_path(&path).exists());
+        let encrypted = fs::read_to_string(encrypted_path(&path)).unwrap();
+        assert_eq!(encrypted.matches("recipient:recipient\n").count(), 1);
         #[cfg(unix)]
         {
             let mode = fs::metadata(encrypted_path(&path))

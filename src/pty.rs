@@ -1,3 +1,4 @@
+use std::fmt;
 use std::io::{Read, Write};
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
@@ -90,6 +91,17 @@ pub enum PtyCommandEvent<'a> {
     PollInput,
     Idle,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BackendShellClosed;
+
+impl fmt::Display for BackendShellClosed {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("backend shell PTY closed")
+    }
+}
+
+impl std::error::Error for BackendShellClosed {}
 
 enum PtyReadEvent<'a> {
     Chunk(&'a [u8]),
@@ -434,7 +446,9 @@ impl PtyBackend {
                 Err(mpsc::RecvTimeoutError::Timeout) => {
                     on_event(self, PtyReadEvent::Idle)?;
                 }
-                Err(mpsc::RecvTimeoutError::Disconnected) => bail!("backend shell PTY closed"),
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(BackendShellClosed.into());
+                }
             }
         }
     }

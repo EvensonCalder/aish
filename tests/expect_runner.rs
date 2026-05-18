@@ -249,6 +249,11 @@ fn exit_command() {
 }
 
 #[test]
+fn plain_exit_command() {
+    run_script("plain_exit_command.exp");
+}
+
+#[test]
 fn backslash_continuation() {
     run_script("backslash_continuation.exp");
 }

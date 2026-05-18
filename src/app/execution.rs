@@ -10,7 +10,7 @@ use crossterm::terminal::{disable_raw_mode, enable_raw_mode, is_raw_mode_enabled
 use crate::commands::{ParsedLine, parse_line};
 use crate::history::{HistoryEntry, HistorySource, NoteEntry};
 use crate::modes::Mode;
-use crate::pty::{PtyBackend, PtyCommandEvent};
+use crate::pty::{BackendShellClosed, PtyBackend, PtyCommandEvent};
 use crate::shell_integration::{is_interactive_passthrough_command, passthrough_key_bytes};
 use crate::templates::template_placeholders;
 
@@ -130,9 +130,18 @@ pub fn execute_draft(
         return Ok(());
     }
 
-    let result = backend.run_command_with_event_callback(&command, timeout, |backend, event| {
-        handle_command_running_event(backend, out, event)
-    })?;
+    let result =
+        match backend.run_command_with_event_callback(&command, timeout, |backend, event| {
+            handle_command_running_event(backend, out, event)
+        }) {
+            Ok(result) => result,
+            Err(error) if error.downcast_ref::<BackendShellClosed>().is_some() => {
+                state.exit_requested = true;
+                state.clear_draft_for_new_draft();
+                return Ok(());
+            }
+            Err(error) => return Err(error),
+        };
     record_completed_command(
         state,
         result.command.clone(),

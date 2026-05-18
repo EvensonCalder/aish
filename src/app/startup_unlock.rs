@@ -4,11 +4,12 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::thread;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use crate::config::DirectoryLayout;
 use crate::encryption::{
-    gpg_program, load_encrypted_jsonl_with_bytes, load_encrypted_jsonl_with_bytes_noninteractive,
+    encrypted_path, gpg_program, load_encrypted_jsonl_with_bytes,
+    load_encrypted_jsonl_with_bytes_noninteractive,
 };
 use crate::history::{
     AiSession, DraftEntry, HistoryEntry, HistoryStore, JsonlLoad, NoteEntry, ai_command_indices,
@@ -135,12 +136,19 @@ fn load_encrypted_jsonl<T: serde::de::DeserializeOwned>(
     path: &PathBuf,
     mode: UnlockMode,
 ) -> Result<(JsonlLoad<T>, Vec<u8>)> {
+    let encrypted = encrypted_path(path);
     match mode {
         UnlockMode::Interactive => load_encrypted_jsonl_with_bytes::<T>(program, path),
         UnlockMode::Noninteractive => {
             load_encrypted_jsonl_with_bytes_noninteractive::<T>(program, path)
         }
     }
+    .with_context(|| {
+        format!(
+            "failed to unlock encrypted startup file {}",
+            encrypted.display()
+        )
+    })
 }
 
 pub(crate) fn empty_history_store() -> HistoryStore {

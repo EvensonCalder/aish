@@ -1,0 +1,16 @@
+#!/usr/bin/env expect
+# Plain shell `exit` terminates Aish without surfacing backend EOF as an error.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_new_home
+aish_spawn
+aish_send "exit"
+aish_enter
+
+expect {
+    -ex "Error: backend shell PTY closed" { puts stderr "plain exit reported backend PTY closure"; exit 5 }
+    eof            {}
+    timeout        { puts stderr "aish did not exit"; exit 4 }
+}
