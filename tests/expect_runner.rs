@@ -304,6 +304,11 @@ fn completion_history_quoted_word() {
 }
 
 #[test]
+fn completion_path_shell_escaping() {
+    run_script("completion_path_shell_escaping.exp");
+}
+
+#[test]
 fn completion_no_matches_panel() {
     run_script("completion_no_matches_panel.exp");
 }

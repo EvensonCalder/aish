@@ -1,0 +1,33 @@
+#!/usr/bin/env expect
+# Path completion should insert shell-safe text, not raw path names that the
+# backend shell would split or treat as comments.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+set work "/tmp/aish-expect-path-completion-[pid]-[clock clicks]"
+file mkdir $work
+close [open [file join $work "my file.txt"] w]
+close [open [file join $work "#hash.txt"] w]
+cd $work
+
+aish_spawn
+
+aish_send "#completion display-delay-ms 0"
+aish_enter
+aish_wait_prompt
+
+aish_send "printf '<%s>\\n' my"
+aish_send "\t"
+aish_enter
+aish_expect "<my file.txt>"
+aish_wait_prompt
+
+aish_send "printf '<%s>\\n' #h"
+aish_send "\t"
+aish_enter
+aish_expect "<#hash.txt>"
+aish_wait_prompt
+
+aish_quit
+file delete -force $work
