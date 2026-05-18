@@ -19,7 +19,7 @@ Implemented and covered:
 - History, notes, templates, and event log storage.
 - Safe AI request plumbing and context pseudo-pipe flow.
 - `fzf`-based history, file, template, git branch, and environment pickers.
-- Allowlisted foreground passthrough for interactive and stdin-oriented commands.
+- Allowlisted foreground passthrough for common interactive commands, plus backend PTY passthrough coverage for unknown raw-input/alternate-screen programs.
 - Conservative Git sync configuration and manual push flow.
 - GPG-backed key storage and encrypted history/template storage.
 - Real-terminal regression coverage through `tmux`.
@@ -28,7 +28,7 @@ Explicitly incomplete:
 
 - Fish support is opt-in until behavior is validated across macOS and representative Linux distributions.
 - Encrypted startup has two explicit modes: `lazy` starts immediately and uses `#unlock` when old data needs a passphrase; `prompt` asks for GPG/pinentry at startup before the prompt opens.
-- Full automatic passthrough for arbitrary interactive programs remains future work; Aish currently uses an allowlist and tested stdin-command handling.
+- Cross-platform validation for newly reported interactive passthrough programs remains ongoing.
 
 ## Quickstart
 
@@ -458,7 +458,7 @@ Aish uses shell markers to detect command completion and cwd, filters those mark
 
 ## Interactive And Stdin Passthrough
 
-Aish foregrounds allowlisted interactive commands so they can own the terminal until they return. This includes common shells, editors, pagers, SSH-like tools, REPLs, database CLIs, `tmux`/`screen`, `gpg`/`pinentry`, privilege/password prompt tools such as `sudo`, `doas`, `sudoedit`, `su`, and `passwd`, and similar programs.
+Aish foregrounds allowlisted interactive commands so they can own the terminal until they return. This includes common shells, editors, pagers, SSH-like tools, REPLs, database CLIs, `tmux`/`screen`, `gpg`/`pinentry`, privilege/password prompt tools such as `sudo`, `doas`, `sudoedit`, `su`, and `passwd`, and similar programs. Commands outside that allowlist still run through the backend PTY streaming path, where Aish forwards terminal input while the command is running and has tmux coverage for unknown raw-input/alternate-screen programs.
 
 Common stdin-oriented commands such as `cat`, `grep`, `sed`, `awk`, `sort`, `uniq`, `wc`, `tee`, `base64`, and `openssl` are also foregrounded when they are not wrapped in shell control syntax. This prevents commands that wait for stdin from wedging the Aish prompt.
 
@@ -684,12 +684,12 @@ cargo test
 
 Current active inventory:
 
-- 520 library unit tests.
+- 547 library unit tests.
 - 26 draft execution integration tests.
 - 1 first-run integration test.
 - 23 PTY integration tests, with bash/zsh active by default and fish-specific cases opt-in.
 - 117 expect-driven end-to-end interactive scenarios.
-- 45 tmux screen-capture integration tests.
+- 46 tmux screen-capture integration tests.
 
 Expect and tmux tests launch real terminal sessions with isolated Aish homes. They should be serialized because concurrent real-terminal sessions can create false prompt and scheduler failures.
 
@@ -710,4 +710,4 @@ AISH_HOME=/tmp/aish-debug ./target/debug/aish
 NO_COLOR=1 ./target/debug/aish
 ```
 
-If a command appears to wait for stdin or take over the terminal incorrectly, test it in a normal shell and then in Aish. Aish should foreground common interactive and stdin-oriented commands; new real-world failures should get a tmux regression test.
+If a command appears to wait for stdin or take over the terminal incorrectly, test it in a normal shell and then in Aish. Aish should foreground common interactive commands and keep backend PTY commands usable when they wait for stdin or claim alternate screen; new real-world failures should get a tmux regression test.

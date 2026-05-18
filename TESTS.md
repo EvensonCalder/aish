@@ -14,10 +14,10 @@ git diff --check
 
 Current test inventory:
 
-- 520 library unit tests.
+- 547 library unit tests.
 - 26 draft execution integration tests.
 - 1 first-run integration test.
-- 45 tmux screen-capture integration tests.
+- 46 tmux screen-capture integration tests.
 - 9 of the tmux tests are manual-equivalent workflows that replaced deterministic rows from `MANUAL_TESTS.md`: real-world shell commands, prompt editing keys, completion UX mechanics, private commands/notes, templates/editor/default home, AI/context/sync config, local sync, `less` passthrough smoke, and startup failure messages.
 - 23 PTY integration tests, including default bash/zsh coverage and fish cases that skip unless fish opt-in prerequisites are available.
 - 117 expect-driven end-to-end interactive scenarios.
@@ -78,7 +78,7 @@ Expect scenarios are the acceptance layer for user-visible terminal behavior. Th
 | Templates | `template_use_executes`, `template_crud`, `template_placeholder_blocks_execution`, `home_default_template_persists`, `tmux_manual_templates_editor_and_default_home_match_visible_terminal_behavior` | Covered | Add completion/template interaction if UI changes. |
 | Editor and paste flows | `external_editor_roundtrip`, `home_default_external_editor_roundtrip`, `external_editor_failure_preserves_draft`, `home_default_external_editor_failure_preserves_draft`, `tmux_manual_templates_editor_and_default_home_match_visible_terminal_behavior`, `tmux_editor_and_paste_review_render_cleanly`, `editor_hash_content_bypasses_parser`, `multiline_paste_editor_review`, `home_default_multiline_paste_editor_review` | Covered | Real OS clipboard and full-screen editor behavior remains human-only in `MANUAL_TESTS.md`. |
 | Sync | `key_encryption_sync_safe_failures`, `home_default_sync_config_persists`, `home_default_startup_sync_runs`, `home_default_startup_sync_unsupported_schedule`, `home_default_startup_sync_failure_logs`, `home_default_startup_sync_disabled_noops`, `home_default_sync_push_local_remote`, `sync_push_local_remote`, `sync_push_failure_logs`, `sync_push_conflict_logs`, Rust startup/exit trigger tests, `tmux_manual_ai_context_and_sync_config_match_visible_terminal_behavior`, `tmux_manual_sync_local_remote_matches_visible_terminal_behavior` | Covered | Real remote auth and human conflict review remain manual-only. |
-| Passthrough/interactive programs | `passthrough_less`, `tmux_manual_passthrough_less_recovers_prompt_when_available` when `less` is available, `tmux_python_repl_passthrough_recovers_prompt_when_available` when `python3` is available, `tmux_stdin_and_gpg_like_passthrough_recovers_prompt`, backend interrupt recovery through `pty_backend_wait_callback_can_interrupt_long_running_commands`; key forwarding is Rust-covered | Partial | Broader real interactive programs remain human-only because alternate-screen and job-control behavior vary by environment. |
+| Passthrough/interactive programs | `passthrough_less`, `tmux_manual_passthrough_less_recovers_prompt_when_available` when `less` is available, `tmux_python_repl_passthrough_recovers_prompt_when_available` when `python3` is available, `tmux_stdin_and_gpg_like_passthrough_recovers_prompt`, `tmux_unknown_tui_passthrough_recovers_prompt`, backend interrupt recovery through `pty_backend_wait_callback_can_interrupt_long_running_commands`; key forwarding is Rust-covered | Covered for portable cases | Add focused regressions for newly reported real-world interactive programs. |
 | Encryption/GPG | `key_clear_removes_stored_key`, `home_default_key_clear_removes_stored_key`, `home_default_encrypt_on_migrates_storage`, `encrypted_startup_unlock`, `encrypt_ambiguous_key_recovers`, `key_encryption_sync_safe_failures`; Rust coverage for `key_set_encrypts_env_api_key_without_printing_secret`, `ai_prompt_uses_gpg_stored_key_when_env_key_is_missing`, `encrypt_on_migrates_plaintext_storage_and_persists_config`, `encrypt_rotate_reencrypts_existing_storage_and_persists_fingerprint`, `encrypt_off_decrypts_storage_and_persists_config`, `encrypt_unlock_mode_persists_startup_unlock_policy`, `encrypted_writes_use_gpg_files_without_plaintext_jsonl`, `encrypted_jsonl_append_does_not_decrypt_existing_file`, `encrypted_history_append_does_not_block_command_completion`, `encrypted_completion_uses_cached_templates_without_gpg_on_keypress`, lazy startup unlock merge behavior, noninteractive GPG decrypt boundaries, and rewrite-history planning/script safety | Mostly covered with fake GPG | Real passphrase-protected key and pinentry behavior remains human-only in `MANUAL_TESTS.md`. Lazy startup uses explicit `#unlock` when a passphrase is needed; prompt startup mode is implemented and still needs real-key coverage. |
 
 ## Feature Coverage
@@ -361,10 +361,10 @@ Implemented:
 - Zsh hook integration has PTY coverage for `preexec` command-start reporting, `precmd` finish status, and cwd reporting after command execution when `/bin/zsh` is available.
 - Fish event integration has launch/unit coverage for `fish_preexec`, `fish_postexec`, explicit ready emission, and prompt suppression setup plus opt-in PTY coverage for command-start, finish status, cwd reporting, streaming output, config inheritance, and command-token-like output preservation when `AISH_TEST_FISH=1` is set.
 - Allowlisted interactive commands can run in a foreground passthrough path with raw mode disabled; `less` has skip-safe expect coverage when available.
-- Interactive passthrough command detection covers common fullscreen tools, REPLs, shells, stdin-oriented commands such as `gpg` and `cat`, basenames, shell quoting, assignments, and wrappers such as `sudo`, `env`, `command`, and `exec`.
+- Interactive passthrough command detection covers common fullscreen tools, REPLs, shells, stdin-oriented commands such as `gpg` and `cat`, basenames, shell quoting, assignments, and wrappers such as `sudo`, `env`, `command`, and `exec`. Unknown alternate-screen/raw-input programs are covered through the backend PTY streaming path by `tmux_unknown_tui_passthrough_recovers_prompt`.
 - Alternate-screen buffer detection tracks common enter/exit CSI sequences (`?47`, `?1047`, `?1049`) and ignores unrelated terminal styling escapes.
 - Passthrough prompt-return detection requires process exit and normal-screen state before Aish redraws its prompt after an interactive command.
-- Shell integration rollup is covered across bash marker integration, zsh hooks, opt-in fish events, foreground passthrough for allowlisted interactive commands, and local temporary git sync integration tests.
+- Shell integration rollup is covered across bash marker integration, zsh hooks, opt-in fish events, foreground passthrough for allowlisted interactive commands, backend PTY passthrough for unknown TUI ownership, and local temporary git sync integration tests.
 - `#encrypt on [key]` resolves a stable GPG fingerprint, migrates managed JSONL storage to encrypted `*.jsonl.gpg` files, removes plaintext JSONL files after successful encryption, warns about Git history, and starts a serialized background encrypted writer.
 - Dangerous context pseudo-pipe commands have expect coverage proving refusal skips execution and leaves the target file intact.
 - Prompt redraw after ordinary command output has both a Rust virtual-screen regression and a real `tmux` pane-capture regression proving repeated final visible shell output remains above the next prompt in actual use; the tmux scripts run the Cargo-provided `CARGO_BIN_EXE_aish` binary via `AISH_BIN` so they cannot accidentally validate a stale `target/debug/aish`.
@@ -960,7 +960,7 @@ There are no intentionally ignored tests in the current default suite. Bash and 
 
 Important missing or partial areas:
 
-- Broader automatic passthrough detection for arbitrary alternate-screen or job-control programs.
+- Cross-platform passthrough validation for newly reported alternate-screen or job-control programs.
 - Fish backend validation across macOS and representative Linux distributions before it becomes default required coverage.
 - Search-specific indexes beyond the current in-memory history/template completion caches.
 - Live network AI provider behavior, real passphrase-protected GPG/pinentry behavior, and real remote sync authentication remain manual-only.

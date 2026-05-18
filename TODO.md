@@ -8,7 +8,7 @@ Status as of the latest full review:
 
 - Core interactive shell wrapper is implemented: PTY backend, raw terminal input, draft editing, continuation handling, history/AI modes, private command parsing, editor/paste flows, templates, completion, picker boundaries, AI request plumbing, context pseudo-pipe, event log, and diagnostics.
 - Rust unit/integration coverage and expect-driven real terminal coverage both exist for the implemented interactive behaviors. New user-facing terminal behavior should continue to receive both Rust-level and expect-level coverage.
-- Large intentionally incomplete areas remain: real passphrase/pinentry coverage across representative terminals and robust automatic passthrough for arbitrary interactive commands.
+- Large intentionally incomplete areas remain: real passphrase/pinentry coverage across representative terminals and cross-platform fish validation.
 - GPG-backed secrets and encrypted history/template storage are implemented. Startup history/template unlock supports lazy nonblocking unlock with explicit `#unlock` and prompt mode that requires GPG/pinentry before the first prompt. Normal encrypted JSONL appends use a serialized background writer, and direct GPG decrypt operations enter UnlockPassthrough so pinentry can own the terminal when needed.
 - The remaining unchecked items below are the source of truth for future work; do not skip them just because adjacent scaffolding exists.
 
@@ -751,10 +751,10 @@ Status: direct AI prompts are wired to the chat-completions request path using c
   - [x] command allowlist
   - [x] alternate screen buffer detection
   - [x] prompt return detection
-- [ ] Broaden passthrough beyond the allowlist for arbitrary interactive programs.
-  - [ ] Detect unknown interactive foreground programs without fragile command-name matching.
-  - [ ] Avoid interpreting Aish app keys while a foreground program owns the terminal.
-  - [ ] Preserve robust return-to-prompt detection after the program exits.
+- [x] Broaden passthrough beyond the allowlist for arbitrary interactive programs.
+  - [x] Support unknown interactive foreground programs through the backend PTY streaming path without adding fragile command-name matches.
+  - [x] Avoid interpreting Aish app keys while a foreground program owns the terminal.
+  - [x] Preserve robust return-to-prompt detection after the program exits.
 - [x] Add `#doctor` integration checks.
 
 ### Acceptance criteria
@@ -898,7 +898,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 - [x] Add expect coverage for representative safe failure paths for all private commands.
 - [x] Add terminal coverage for long/Unicode input workflows.
 - [x] Add expect coverage for terminal resize workflows.
-- [x] Add expect coverage for passthrough candidates where portable in CI (`less`, `fzf` fallback, simple TUI fixture).
+- [x] Add expect/tmux coverage for passthrough candidates where portable in CI (`less`, `fzf` fallback, stdin blockers, and an unknown alternate-screen TUI fixture).
 
 ### Manual tests
 
@@ -975,7 +975,7 @@ Status: direct AI prompts are wired to the chat-completions request path using c
 ### v1.0: hardening
 
 - Bash/Zsh shell integration; Fish only after cross-platform validation.
-- Robust passthrough detection.
+- Cross-platform passthrough validation for newly reported real-world programs.
 - Safety test coverage.
 - Documentation.
 - Install script/package.

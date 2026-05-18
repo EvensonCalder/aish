@@ -572,6 +572,15 @@ fn tmux_stdin_and_gpg_like_passthrough_recovers_prompt() {
 }
 
 #[test]
+fn tmux_unknown_tui_passthrough_recovers_prompt() {
+    let Some(captured) = run_tmux_script("passthrough_unknown_tui.sh") else {
+        return;
+    };
+    assert_line_present(&captured, "unknown-tui-key:x");
+    assert_line_present(&captured, "after-unknown-tui");
+}
+
+#[test]
 fn tmux_sudo_password_prompt_waits_for_user_input() {
     let Some(captured) = run_tmux_script("sudo_password_passthrough.sh") else {
         return;
