@@ -6,6 +6,8 @@ use super::TokenContext;
 pub(crate) struct ShellWord {
     pub(crate) raw: String,
     pub(crate) value: String,
+    pub(crate) start: usize,
+    pub(crate) end: usize,
 }
 
 pub fn current_token_context(line: &str, cursor: usize) -> TokenContext {
@@ -99,6 +101,8 @@ pub(crate) fn shell_like_words(command: &str) -> Vec<ShellWord> {
             ShellWord {
                 value: shell_word_value(&raw),
                 raw,
+                start,
+                end,
             }
         })
         .collect()

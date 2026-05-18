@@ -1760,6 +1760,20 @@ fn shell_like_words_remove_quotes_and_escapes_for_matching() {
 }
 
 #[test]
+fn shell_like_words_keep_source_spans_for_raw_replacement() {
+    let command = "cmd a\"b c\"d hello\\ world";
+    let words = parser::shell_like_words(command);
+
+    assert_eq!(words.len(), 3);
+    assert_eq!(words[1].raw, "a\"b c\"d");
+    assert_eq!(words[1].value, "ab cd");
+    assert_eq!(&command[words[1].start..words[1].end], words[1].raw);
+    assert_eq!(words[2].raw, "hello\\ world");
+    assert_eq!(words[2].value, "hello world");
+    assert_eq!(&command[words[2].start..words[2].end], words[2].raw);
+}
+
+#[test]
 fn complete_path_returns_empty_for_missing_directory() {
     let temp = tempfile::tempdir().unwrap();
 
