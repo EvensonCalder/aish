@@ -135,12 +135,17 @@ fn openpty(size: PtySize) -> Result<(File, File)> {
     let mut master = -1;
     let mut slave = -1;
     let winsize = winsize_from_pty_size(size);
+    let termios = terminal_termios(libc::STDIN_FILENO);
+    let termios_ptr = termios
+        .as_ref()
+        .map(|termios| termios as *const libc::termios)
+        .unwrap_or(std::ptr::null());
     let status = unsafe {
         libc::openpty(
             &mut master,
             &mut slave,
             std::ptr::null_mut(),
-            std::ptr::null(),
+            termios_ptr,
             &winsize,
         )
     };
@@ -151,6 +156,17 @@ fn openpty(size: PtySize) -> Result<(File, File)> {
     let master = unsafe { File::from_raw_fd(master) };
     let slave = unsafe { File::from_raw_fd(slave) };
     Ok((master, slave))
+}
+
+fn terminal_termios(fd: RawFd) -> Option<libc::termios> {
+    if unsafe { libc::isatty(fd) } != 1 {
+        return None;
+    }
+    let mut termios = MaybeUninit::<libc::termios>::uninit();
+    if unsafe { libc::tcgetattr(fd, termios.as_mut_ptr()) } != 0 {
+        return None;
+    }
+    Some(unsafe { termios.assume_init() })
 }
 
 fn winsize_from_pty_size(size: PtySize) -> libc::winsize {
@@ -177,8 +193,9 @@ fn reset_child_signal_state() {
         }
     }
 
-    let empty = MaybeUninit::<libc::sigset_t>::zeroed();
+    let mut empty = MaybeUninit::<libc::sigset_t>::uninit();
     unsafe {
+        libc::sigemptyset(empty.as_mut_ptr());
         libc::sigprocmask(libc::SIG_SETMASK, empty.as_ptr(), std::ptr::null_mut());
     }
 }

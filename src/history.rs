@@ -3,7 +3,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 
 use crate::commands::NoteTag;
-use crate::config::{DirectoryLayout, create_private_dir_all, set_private_file_permissions};
+use crate::config::{DirectoryLayout, create_private_dir_all, set_private_file_handle_permissions};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
@@ -302,12 +302,12 @@ pub fn append_jsonl<T: Serialize>(path: &Path, item: &T) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
+        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
     }
     let mut file = options
         .open(path)
         .with_context(|| format!("failed to open JSONL file {}", path.display()))?;
-    set_private_file_permissions(path)?;
+    set_private_file_handle_permissions(&file, path)?;
     serde_json::to_writer(&mut file, item)
         .with_context(|| format!("failed to serialize JSONL item for {}", path.display()))?;
     file.write_all(b"\n")
@@ -328,12 +328,12 @@ pub fn rewrite_jsonl<T: Serialize>(path: &Path, items: &[T]) -> Result<()> {
         #[cfg(unix)]
         {
             use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
+            options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
         }
         let mut file = options
             .open(&tmp)
             .with_context(|| format!("failed to create JSONL temp file {}", tmp.display()))?;
-        set_private_file_permissions(&tmp)?;
+        set_private_file_handle_permissions(&file, &tmp)?;
         for item in items {
             serde_json::to_writer(&mut file, item)
                 .with_context(|| format!("failed to serialize JSONL item for {}", tmp.display()))?;
@@ -348,7 +348,6 @@ pub fn rewrite_jsonl<T: Serialize>(path: &Path, items: &[T]) -> Result<()> {
             tmp.display()
         )
     })?;
-    set_private_file_permissions(path)?;
     Ok(())
 }
 

@@ -19,12 +19,17 @@ fn resolves_configured_shell_before_environment() {
 fn shell_command_builder_inherits_current_directory() {
     let cwd = env::current_dir().unwrap();
     let launch = shell_launch("/bin/bash");
-    let command = shell_command_builder(&launch, None);
+    let command = shell_command_builder(&launch);
 
     assert_eq!(
         command.get_current_dir().map(|cwd| cwd.as_os_str()),
         Some(cwd.as_os_str())
     );
+    let control_env = command
+        .get_envs()
+        .find(|(name, _)| *name == std::ffi::OsStr::new("AISH_CONTROL_FD"))
+        .map(|(_, value)| value);
+    assert_eq!(control_env, Some(None));
 }
 
 #[test]
@@ -51,6 +56,7 @@ fn bash_launch_uses_clean_startup_flags() {
     assert_eq!(launch.integration, ShellIntegration::BashPromptCommand);
     assert!(launch.init_command.contains(READY_MARKER));
     assert!(launch.init_command.contains("HISTCONTROL=ignorespace"));
+    assert!(launch.init_command.contains("unset AISH_CONTROL_FD"));
     assert!(launch.init_command.contains("enable-bracketed-paste off"));
     assert!(launch.init_command.contains("__aish_run_prompt_command"));
     assert!(launch.init_command.contains("__aish_emit_ready"));
@@ -68,6 +74,7 @@ fn non_bash_launch_does_not_receive_bash_only_flags() {
     assert_eq!(launch.program, "/bin/zsh");
     assert_eq!(launch.args, ["-i", "-o", "histignorespace"]);
     assert!(launch.init_command.contains("unsetopt zle"));
+    assert!(launch.init_command.contains("unset AISH_CONTROL_FD"));
     assert!(launch.init_command.contains("add-zsh-hook"));
     assert!(launch.init_command.contains("__aish_preexec"));
     assert!(launch.init_command.contains("__aish_precmd"));
@@ -83,6 +90,7 @@ fn fish_launch_uses_event_functions_after_user_config() {
         assert_eq!(launch.args, ["--features", "no-query-term,no-mark-prompt"]);
     }
     assert_eq!(launch.integration, ShellIntegration::FishEvents);
+    assert!(launch.init_command.contains("set -e AISH_CONTROL_FD"));
     assert!(launch.init_command.contains("--on-event fish_preexec"));
     assert!(launch.init_command.contains("--on-event fish_postexec"));
     assert!(launch.init_command.contains("__aish_emit_ready"));

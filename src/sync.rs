@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use crate::config::{SyncConfig, create_private_dir_all, set_private_file_permissions};
+use crate::config::{SyncConfig, create_private_dir_all, set_private_file_handle_permissions};
 use crate::log::{DEFAULT_MAX_EVENTS, EventLevel, append_event};
 
 const GITIGNORE_BEGIN: &str = "# BEGIN AISH MANAGED";
@@ -90,7 +90,7 @@ impl SyncLock {
         }
         match options.open(path) {
             Ok(file) => {
-                set_private_file_permissions(path)?;
+                set_private_file_handle_permissions(&file, path)?;
                 write_lock_metadata(file)?;
                 Ok(Some(Self {
                     path: path.to_path_buf(),

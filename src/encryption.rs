@@ -8,7 +8,10 @@ use anyhow::{Context, Result, bail};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, is_raw_mode_enabled};
 use serde::{Serialize, de::DeserializeOwned};
 
-use crate::config::{create_private_dir_all, set_private_file_permissions, write_private_file};
+use crate::config::{
+    create_private_dir_all, set_private_file_handle_permissions, set_private_file_permissions,
+    write_private_file,
+};
 use crate::history::{JsonlLineError, JsonlLoad};
 
 mod keys;
@@ -831,8 +834,10 @@ fn write_private_plaintext_tmp(path: &Path, plaintext: &[u8]) -> Result<()> {
         .truncate(true)
         .write(true)
         .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
         .open(path)
         .with_context(|| format!("failed to create plaintext temp file: {}", path.display()))?;
+    set_private_file_handle_permissions(&file, path)?;
     file.write_all(plaintext)
         .with_context(|| format!("failed to write plaintext temp file: {}", path.display()))?;
     file.sync_all()

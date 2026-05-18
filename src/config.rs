@@ -15,8 +15,8 @@ pub use model::{
 pub use normalize::normalize_config;
 pub use paths::{default_aish_dir, runtime_aish_dir};
 pub use private::{
-    create_private_dir_all, set_private_dir_permissions, set_private_file_permissions,
-    write_private_file,
+    create_private_dir_all, set_private_dir_permissions, set_private_file_handle_permissions,
+    set_private_file_permissions, write_private_file,
 };
 
 #[cfg(test)]

@@ -13,7 +13,7 @@ mod syntax;
 #[cfg(unix)]
 mod unix_backend;
 
-use control::{CONTROL_FD, ControlChannel, ControlChannelClosed};
+use control::{ControlChannel, ControlChannelClosed};
 use filter::{PtyOutputFilter, clean_fish_repaint_lines};
 pub use launch::resolve_shell;
 use launch::{ShellLaunch, shell_command_builder, shell_launch};
@@ -151,7 +151,7 @@ impl PtyBackend {
             (None, None)
         };
 
-        let command = shell_command_builder(&launch, control.as_ref().map(|_| CONTROL_FD));
+        let command = shell_command_builder(&launch);
         let pty = UnixPtyBackend::spawn(
             command,
             default_pty_size(),

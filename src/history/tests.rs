@@ -51,6 +51,32 @@ fn append_and_load_jsonl_items() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn append_jsonl_refuses_symlink_targets() {
+    use std::os::unix::fs::symlink;
+
+    let temp = tempfile::tempdir().unwrap();
+    let target = temp.path().join("target.jsonl");
+    let link = temp.path().join("regular.jsonl");
+    fs::write(&target, "{\"command\":\"old\",\"exit_code\":0}\n").unwrap();
+    symlink(&target, &link).unwrap();
+
+    let result = append_jsonl(
+        &link,
+        &TestEntry {
+            command: "new".to_string(),
+            exit_code: Some(0),
+        },
+    );
+
+    assert!(result.is_err());
+    assert_eq!(
+        fs::read_to_string(&target).unwrap(),
+        "{\"command\":\"old\",\"exit_code\":0}\n"
+    );
+}
+
 #[test]
 fn missing_jsonl_file_loads_as_empty() {
     let temp = tempfile::tempdir().unwrap();

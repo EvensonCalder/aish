@@ -577,7 +577,7 @@ fn pty_backend_ignores_bogus_writes_to_control_fd() {
 
     let result = backend
         .run_command(
-            "printf 'before-bogus-control\\n'; eval \"printf '__AISH_READY__\\\\t0\\\\t/tmp\\\\n' >&$AISH_CONTROL_FD\"; sleep 1; printf 'after-bogus-control\\n'",
+            "printf 'before-bogus-control\\n'; { printf '__AISH_READY__\\t0\\t/tmp\\n' >&64; } 2>/dev/null || true; sleep 1; printf 'after-bogus-control\\n'",
             Duration::from_secs(5),
         )
         .unwrap();
@@ -585,6 +585,41 @@ fn pty_backend_ignores_bogus_writes_to_control_fd() {
     assert_eq!(result.exit_code, 0);
     assert!(result.output.contains("before-bogus-control"), "{result:?}");
     assert!(result.output.contains("after-bogus-control"), "{result:?}");
+}
+
+#[test]
+fn pty_backend_does_not_export_control_fd_to_user_commands() {
+    let _guard = pty_test_guard();
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+
+    let result = backend
+        .run_command(
+            "printf 'control-fd=%s\\n' \"${AISH_CONTROL_FD-unset}\"",
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+    assert_eq!(result.exit_code, 0);
+    assert_eq!(result.output.trim(), "control-fd=unset");
+}
+
+#[test]
+fn zsh_pty_backend_does_not_export_control_fd_to_user_commands_when_available() {
+    let _guard = pty_test_guard();
+    let Some(zsh) = find_shell(&["/bin/zsh", "/usr/bin/zsh", "/usr/local/bin/zsh"]) else {
+        return;
+    };
+    let mut backend = PtyBackend::spawn(zsh).unwrap();
+
+    let result = backend
+        .run_command(
+            "printf 'control-fd=%s\\n' \"${AISH_CONTROL_FD-unset}\"",
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+    assert_eq!(result.exit_code, 0);
+    assert_eq!(result.output.trim(), "control-fd=unset");
 }
 
 #[test]
@@ -787,6 +822,34 @@ fn fish_pty_backend_runs_commands_and_reports_cwd_when_available() {
     assert_eq!(pwd.started_command.as_deref(), Some("pwd"));
     assert_eq!(pwd.cwd.as_deref(), Some("/tmp"));
     assert_eq!(pwd.output.trim(), "/tmp");
+}
+
+#[test]
+fn fish_pty_backend_does_not_export_control_fd_to_user_commands_when_available() {
+    let _guard = pty_test_guard();
+    if !fish_backend_tests_enabled() {
+        eprintln!("skipping fish PTY backend test: set AISH_TEST_FISH=1 to opt in");
+        return;
+    }
+    let Some(fish) = find_shell(&[
+        "/opt/homebrew/bin/fish",
+        "/usr/local/bin/fish",
+        "/usr/bin/fish",
+        "/bin/fish",
+    ]) else {
+        return;
+    };
+
+    let mut backend = PtyBackend::spawn(fish).unwrap();
+    let result = backend
+        .run_command(
+            "set -q AISH_CONTROL_FD; and printf 'control-fd=%s\\n' $AISH_CONTROL_FD; or printf 'control-fd=unset\\n'",
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+    assert_eq!(result.exit_code, 0);
+    assert_eq!(result.output.trim(), "control-fd=unset");
 }
 
 #[test]

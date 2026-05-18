@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow};
 
-use crate::config::set_private_file_permissions;
+use crate::config::set_private_file_handle_permissions;
 use crate::log::EventLevel;
 use crate::modes::Mode;
 
@@ -352,9 +352,9 @@ fn write_private_output_file(path: &Path, append: bool, bytes: &[u8]) -> Result<
     let mut file = options
         .open(path)
         .with_context(|| format!("failed to open private output file {}", path.display()))?;
+    set_private_file_handle_permissions(&file, path)?;
     file.write_all(bytes)
         .with_context(|| format!("failed to write private output file {}", path.display()))?;
-    set_private_file_permissions(path)?;
     Ok(())
 }
 
@@ -614,5 +614,22 @@ mod tests {
             list_output_from_commands(["printf 'one\n'", "echo two"]),
             "printf 'one\\n'\necho two\n"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_output_file_refuses_symlink_targets() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let target = temp.path().join("target");
+        let link = temp.path().join("export");
+        std::fs::write(&target, "original").unwrap();
+        symlink(&target, &link).unwrap();
+
+        let result = write_private_output_file(&link, false, b"secret");
+
+        assert!(result.is_err());
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "original");
     }
 }
