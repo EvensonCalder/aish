@@ -7,7 +7,7 @@ use crate::templates::TemplateEntry;
 use super::index::{
     IndexedHistoryEntry, IndexedTemplateEntry, index_history_entries, index_template_entries,
 };
-use super::matching::matches_completion_prefix_with_threshold;
+use super::matching::CompletionMatcher;
 use super::path::{complete_path_executables, scan_path_executables};
 use super::ranking::limit_candidates;
 use super::{CompletionCandidate, CompletionOptions, CompletionSource};
@@ -44,15 +44,14 @@ pub fn complete_first_token_with_options(
         return Vec::new();
     }
     let mut candidates = Vec::new();
+    let matcher = CompletionMatcher::new(
+        options.ignore_spaces,
+        options.match_threshold_percent,
+        options.typo_threshold_percent,
+    );
     let mut seen_templates = HashSet::new();
     for template in templates.iter().rev() {
-        if matches_completion_prefix_with_threshold(
-            &template.body,
-            prefix,
-            options.ignore_spaces,
-            options.match_threshold_percent,
-        ) && seen_templates.insert(template.id())
-        {
+        if matcher.prefix_matches(&template.body, prefix) && seen_templates.insert(template.id()) {
             candidates.push(CompletionCandidate {
                 display: template.body.clone(),
                 replacement: template.body.clone(),
@@ -64,12 +63,8 @@ pub fn complete_first_token_with_options(
 
     let mut seen_history = HashSet::new();
     for entry in history_newest_first {
-        if matches_completion_prefix_with_threshold(
-            &entry.command,
-            prefix,
-            options.ignore_spaces,
-            options.match_threshold_percent,
-        ) && seen_history.insert(entry.command.as_str())
+        if matcher.prefix_matches(&entry.command, prefix)
+            && seen_history.insert(entry.command.as_str())
         {
             candidates.push(CompletionCandidate {
                 display: entry.command.clone(),
@@ -95,13 +90,14 @@ pub(crate) fn complete_first_token_history_with_indexed_options(
     }
     let mut seen_history = HashSet::new();
     let mut candidates = Vec::new();
+    let matcher = CompletionMatcher::new(
+        options.ignore_spaces,
+        options.match_threshold_percent,
+        options.typo_threshold_percent,
+    );
     for indexed in history_newest_first {
-        if matches_completion_prefix_with_threshold(
-            &indexed.entry.command,
-            prefix,
-            options.ignore_spaces,
-            options.match_threshold_percent,
-        ) && seen_history.insert(indexed.entry.command.as_str())
+        if matcher.prefix_matches(&indexed.entry.command, prefix)
+            && seen_history.insert(indexed.entry.command.as_str())
         {
             candidates.push(CompletionCandidate {
                 display: indexed.entry.command.clone(),
@@ -124,13 +120,14 @@ pub(crate) fn complete_first_token_templates_with_indexed_options(
     }
     let mut candidates = Vec::new();
     let mut seen_templates = HashSet::new();
+    let matcher = CompletionMatcher::new(
+        options.ignore_spaces,
+        options.match_threshold_percent,
+        options.typo_threshold_percent,
+    );
     for indexed in templates.iter().rev() {
-        if matches_completion_prefix_with_threshold(
-            &indexed.entry.body,
-            prefix,
-            options.ignore_spaces,
-            options.match_threshold_percent,
-        ) && seen_templates.insert(indexed.id.as_str())
+        if matcher.prefix_matches(&indexed.entry.body, prefix)
+            && seen_templates.insert(indexed.id.as_str())
         {
             candidates.push(CompletionCandidate {
                 display: indexed.entry.body.clone(),

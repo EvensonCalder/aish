@@ -6,10 +6,7 @@ use crate::templates::TemplateEntry;
 use super::index::{
     IndexedHistoryEntry, IndexedTemplateEntry, index_history_entries, index_template_entries,
 };
-use super::matching::{
-    join_words, template_replacement_for_index, template_words_match_threshold,
-    words_match_threshold,
-};
+use super::matching::{CompletionMatcher, join_words, template_replacement_for_index};
 use super::parser::{current_token_context, split_shell_like_words};
 use super::ranking::limit_candidates;
 use super::{CompletionCandidate, CompletionOptions, CompletionSource, TokenContext};
@@ -76,6 +73,7 @@ pub(crate) fn complete_structural_templates_for_line_indexed(
     } else {
         words_before_cursor.len().saturating_sub(1)
     };
+    let matcher = CompletionMatcher::new(ignore_spaces, match_threshold_percent, 80);
     let mut seen = HashSet::new();
     let mut candidates = Vec::new();
 
@@ -83,12 +81,7 @@ pub(crate) fn complete_structural_templates_for_line_indexed(
         if indexed.words.len() <= current_word_index {
             continue;
         }
-        if !template_words_match_threshold(
-            &indexed.words,
-            &words_before_cursor,
-            ignore_spaces,
-            match_threshold_percent,
-        ) {
+        if !matcher.template_words_match_threshold(&indexed.words, &words_before_cursor) {
             continue;
         }
 
@@ -133,6 +126,7 @@ pub(crate) fn complete_structural_history_for_line_indexed(
     } else {
         words_before_cursor.len().saturating_sub(1)
     };
+    let matcher = CompletionMatcher::new(ignore_spaces, match_threshold_percent, 80);
     let mut seen = HashSet::new();
     let mut candidates = Vec::new();
 
@@ -140,12 +134,7 @@ pub(crate) fn complete_structural_history_for_line_indexed(
         if indexed.words.len() <= current_word_index {
             continue;
         }
-        if !words_match_threshold(
-            &indexed.words,
-            &words_before_cursor,
-            ignore_spaces,
-            match_threshold_percent,
-        ) {
+        if !matcher.words_match_threshold(&indexed.words, &words_before_cursor) {
             continue;
         }
 

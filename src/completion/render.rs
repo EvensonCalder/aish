@@ -3,7 +3,9 @@ use crate::display_width::{
     display_width, truncate_end_with_ellipsis, truncate_start_with_ellipsis,
 };
 
-use super::{AcceptedCompletion, CompletionCandidate, CompletionSource, TokenContext};
+use super::{
+    AcceptedCompletion, CompletionCandidate, CompletionEdit, CompletionSource, TokenContext,
+};
 
 pub fn render_completion_candidates(candidates: &[CompletionCandidate]) -> Vec<String> {
     candidates
@@ -58,22 +60,27 @@ pub fn accept_completion_with_mode(
     candidate: &CompletionCandidate,
     mode: CompletionTabAccept,
 ) -> AcceptedCompletion {
+    completion_edit_for_candidate(line, token, candidate, mode).apply_to_line(line)
+}
+
+pub fn completion_edit_for_candidate(
+    line: &str,
+    token: &TokenContext,
+    candidate: &CompletionCandidate,
+    mode: CompletionTabAccept,
+) -> CompletionEdit {
     if completion_candidate_replaces_whole_line(candidate) {
-        return AcceptedCompletion {
-            line: candidate.replacement.clone(),
-            cursor: candidate.replacement.len(),
+        return CompletionEdit {
+            start: 0,
+            end: line.len(),
+            replacement: candidate.replacement.clone(),
         };
     }
     let replacement = accepted_replacement(token, candidate, mode);
-    let mut accepted =
-        String::with_capacity(line.len() - (token.end - token.start) + replacement.len());
-    accepted.push_str(&line[..token.start]);
-    accepted.push_str(&replacement);
-    accepted.push_str(&line[token.end..]);
-    let cursor = token.start + replacement.len();
-    AcceptedCompletion {
-        line: accepted,
-        cursor,
+    CompletionEdit {
+        start: token.start,
+        end: token.end,
+        replacement,
     }
 }
 

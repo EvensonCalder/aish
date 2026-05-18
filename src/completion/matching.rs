@@ -1,5 +1,109 @@
 use super::TokenContext;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CompletionMatcher {
+    ignore_spaces: bool,
+    match_threshold_percent: usize,
+    typo_threshold_percent: usize,
+}
+
+impl CompletionMatcher {
+    pub(crate) fn new(
+        ignore_spaces: bool,
+        match_threshold_percent: usize,
+        typo_threshold_percent: usize,
+    ) -> Self {
+        Self {
+            ignore_spaces,
+            match_threshold_percent,
+            typo_threshold_percent,
+        }
+    }
+
+    pub(crate) fn prefix_matches(&self, candidate: &str, typed: &str) -> bool {
+        matches_completion_prefix_with_threshold(
+            candidate,
+            typed,
+            self.ignore_spaces,
+            self.match_threshold_percent,
+        )
+    }
+
+    pub(crate) fn word_prefix_matches(&self, candidate: &str, typed: &str) -> bool {
+        word_prefix_matches(candidate, typed, self.ignore_spaces)
+    }
+
+    pub(crate) fn typo_similarity_percent(&self, candidate: &str, typed: &str) -> usize {
+        typo_similarity_percent(candidate, typed, self.ignore_spaces)
+    }
+
+    pub(crate) fn typo_matches(&self, candidate: &str, typed: &str) -> bool {
+        self.typo_similarity_percent(candidate, typed) >= self.typo_threshold_percent
+    }
+
+    pub(crate) fn words_match_threshold(
+        &self,
+        candidate_words: &[String],
+        typed_words: &[String],
+    ) -> bool {
+        words_match_threshold_by(
+            candidate_words,
+            typed_words,
+            self.match_threshold_percent,
+            |candidate, typed| self.word_prefix_matches(candidate, typed),
+        )
+    }
+
+    pub(crate) fn template_words_match_threshold(
+        &self,
+        template_words: &[String],
+        typed_words: &[String],
+    ) -> bool {
+        words_match_threshold_by(
+            template_words,
+            typed_words,
+            self.match_threshold_percent,
+            |candidate, typed| {
+                template_word_is_placeholder(candidate)
+                    || self.word_prefix_matches(candidate, typed)
+            },
+        )
+    }
+
+    pub(crate) fn words_match_threshold_with_typos(
+        &self,
+        candidate_words: &[String],
+        typed_words: &[String],
+    ) -> bool {
+        words_match_threshold_with_typo_usage_by(
+            candidate_words,
+            typed_words,
+            self.match_threshold_percent,
+            |candidate, typed| self.word_prefix_matches(candidate, typed),
+            |candidate, typed| self.typo_matches(candidate, typed),
+        )
+    }
+
+    pub(crate) fn template_words_match_threshold_with_typos(
+        &self,
+        template_words: &[String],
+        typed_words: &[String],
+    ) -> bool {
+        words_match_threshold_with_typo_usage_by(
+            template_words,
+            typed_words,
+            self.match_threshold_percent,
+            |candidate, typed| {
+                template_word_is_placeholder(candidate)
+                    || self.word_prefix_matches(candidate, typed)
+            },
+            |candidate, typed| {
+                !template_word_is_placeholder(candidate) && self.typo_matches(candidate, typed)
+            },
+        )
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct TemplatePlaceholderWord {
     pub(super) raw: String,
@@ -14,78 +118,6 @@ pub(super) fn template_placeholder_words(body: &str) -> Vec<TemplatePlaceholderW
             Some(TemplatePlaceholderWord { raw: word, name })
         })
         .collect()
-}
-
-pub(super) fn words_match_threshold(
-    candidate_words: &[String],
-    typed_words: &[String],
-    ignore_spaces: bool,
-    match_threshold_percent: usize,
-) -> bool {
-    words_match_threshold_by(
-        candidate_words,
-        typed_words,
-        match_threshold_percent,
-        |candidate, typed| word_prefix_matches(candidate, typed, ignore_spaces),
-    )
-}
-
-pub(super) fn template_words_match_threshold(
-    template_words: &[String],
-    typed_words: &[String],
-    ignore_spaces: bool,
-    match_threshold_percent: usize,
-) -> bool {
-    words_match_threshold_by(
-        template_words,
-        typed_words,
-        match_threshold_percent,
-        |candidate, typed| {
-            template_word_is_placeholder(candidate)
-                || word_prefix_matches(candidate, typed, ignore_spaces)
-        },
-    )
-}
-
-pub(super) fn words_match_threshold_with_typos(
-    candidate_words: &[String],
-    typed_words: &[String],
-    ignore_spaces: bool,
-    match_threshold_percent: usize,
-    typo_threshold_percent: usize,
-) -> bool {
-    words_match_threshold_with_typo_usage_by(
-        candidate_words,
-        typed_words,
-        match_threshold_percent,
-        |candidate, typed| word_prefix_matches(candidate, typed, ignore_spaces),
-        |candidate, typed| {
-            typo_similarity_percent(candidate, typed, ignore_spaces) >= typo_threshold_percent
-        },
-    )
-}
-
-pub(super) fn template_words_match_threshold_with_typos(
-    template_words: &[String],
-    typed_words: &[String],
-    ignore_spaces: bool,
-    match_threshold_percent: usize,
-    typo_threshold_percent: usize,
-) -> bool {
-    words_match_threshold_with_typo_usage_by(
-        template_words,
-        typed_words,
-        match_threshold_percent,
-        |candidate, typed| {
-            template_word_is_placeholder(candidate)
-                || word_prefix_matches(candidate, typed, ignore_spaces)
-        },
-        |candidate, typed| {
-            !template_word_is_placeholder(candidate)
-                && typo_similarity_percent(candidate, typed, ignore_spaces)
-                    >= typo_threshold_percent
-        },
-    )
 }
 
 fn words_match_threshold_by(

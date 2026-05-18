@@ -38,6 +38,27 @@ pub struct CompletionCandidate {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompletionEdit {
+    pub start: usize,
+    pub end: usize,
+    pub replacement: String,
+}
+
+impl CompletionEdit {
+    pub fn apply_to_line(&self, line: &str) -> AcceptedCompletion {
+        let mut accepted =
+            String::with_capacity(line.len() - (self.end - self.start) + self.replacement.len());
+        accepted.push_str(&line[..self.start]);
+        accepted.push_str(&self.replacement);
+        accepted.push_str(&line[self.end..]);
+        AcceptedCompletion {
+            line: accepted,
+            cursor: self.start + self.replacement.len(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcceptedCompletion {
     pub line: String,
     pub cursor: usize,

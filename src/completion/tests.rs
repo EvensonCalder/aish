@@ -1,3 +1,4 @@
+use super::matching::CompletionMatcher;
 use super::*;
 use crate::config::CompletionTabAccept;
 use crate::display_width::display_width;
@@ -1562,6 +1563,22 @@ fn matches_completion_prefix_can_ignore_spaces() {
 }
 
 #[test]
+fn completion_matcher_centralizes_structural_and_typo_rules() {
+    let matcher = CompletionMatcher::new(true, 50, 80);
+
+    assert!(matcher.prefix_matches("git status", "g s"));
+    assert!(matcher.words_match_threshold(
+        &["git".to_string(), "status".to_string()],
+        &["git".to_string(), "sta".to_string()],
+    ));
+    assert!(matcher.typo_matches("status", "statuz"));
+    assert!(matcher.words_match_threshold_with_typos(
+        &["git".to_string(), "status".to_string()],
+        &["git".to_string(), "statuz".to_string()],
+    ));
+}
+
+#[test]
 fn typo_candidates_use_dedicated_typo_threshold() {
     let history = vec![HistoryEntry {
         t: 1,
@@ -1903,6 +1920,57 @@ fn accept_completion_replaces_token_and_returns_new_cursor() {
         AcceptedCompletion {
             line: "git status --short".to_string(),
             cursor: 10,
+        }
+    );
+}
+
+#[test]
+fn completion_edit_records_token_replacement_span() {
+    let line = "git sta --short";
+    let token = current_token_context(line, 7);
+    let candidate = CompletionCandidate {
+        display: "status".to_string(),
+        replacement: "status".to_string(),
+        is_dir: false,
+        source: CompletionSource::History,
+    };
+
+    let edit = completion_edit_for_candidate(line, &token, &candidate, CompletionTabAccept::Full);
+
+    assert_eq!(
+        edit,
+        CompletionEdit {
+            start: 4,
+            end: 7,
+            replacement: "status".to_string(),
+        }
+    );
+    assert_eq!(
+        edit.apply_to_line(line),
+        AcceptedCompletion {
+            line: "git status --short".to_string(),
+            cursor: 10,
+        }
+    );
+}
+
+#[test]
+fn completion_edit_records_whole_line_replacement_for_typos() {
+    let line = "git statuz";
+    let token = current_token_context(line, line.len());
+    let candidate = CompletionCandidate {
+        display: "git status --short".to_string(),
+        replacement: "git status --short".to_string(),
+        is_dir: false,
+        source: CompletionSource::HistoryTypo,
+    };
+
+    assert_eq!(
+        completion_edit_for_candidate(line, &token, &candidate, CompletionTabAccept::Word),
+        CompletionEdit {
+            start: 0,
+            end: line.len(),
+            replacement: "git status --short".to_string(),
         }
     );
 }

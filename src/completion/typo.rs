@@ -6,10 +6,7 @@ use crate::templates::TemplateEntry;
 use super::index::{
     IndexedHistoryEntry, IndexedTemplateEntry, index_history_entries, index_template_entries,
 };
-use super::matching::{
-    template_words_match_threshold_with_typos, typo_similarity_percent, word_prefix_matches,
-    words_match_threshold_with_typos,
-};
+use super::matching::CompletionMatcher;
 use super::parser::{current_token_context, split_shell_like_words};
 use super::ranking::{dedupe_completion_candidates, limit_candidates};
 use super::{CompletionCandidate, CompletionOptions, CompletionSource};
@@ -89,14 +86,18 @@ pub(crate) fn complete_first_token_typos_with_indexed_options(
         return Vec::new();
     }
     let mut candidates = Vec::new();
+    let matcher = CompletionMatcher::new(
+        options.ignore_spaces,
+        options.match_threshold_percent,
+        options.typo_threshold_percent,
+    );
     let mut seen_templates = HashSet::new();
     for indexed in templates.iter().rev() {
         let Some(first_word) = indexed.words.first() else {
             continue;
         };
-        if word_prefix_matches(first_word, prefix, options.ignore_spaces)
-            || typo_similarity_percent(first_word, prefix, options.ignore_spaces)
-                < options.typo_threshold_percent
+        if matcher.word_prefix_matches(first_word, prefix)
+            || !matcher.typo_matches(first_word, prefix)
         {
             continue;
         }
@@ -114,9 +115,8 @@ pub(crate) fn complete_first_token_typos_with_indexed_options(
         let Some(first_word) = indexed.words.first() else {
             continue;
         };
-        if word_prefix_matches(first_word, prefix, options.ignore_spaces)
-            || typo_similarity_percent(first_word, prefix, options.ignore_spaces)
-                < options.typo_threshold_percent
+        if matcher.word_prefix_matches(first_word, prefix)
+            || !matcher.typo_matches(first_word, prefix)
         {
             continue;
         }
@@ -170,6 +170,11 @@ fn complete_typo_candidates_for_line_with_indexed_options(
     } else {
         words_before_cursor.len().saturating_sub(1)
     };
+    let matcher = CompletionMatcher::new(
+        options.ignore_spaces,
+        options.match_threshold_percent,
+        options.typo_threshold_percent,
+    );
 
     let mut candidates = Vec::new();
     let mut seen_templates = HashSet::new();
@@ -177,13 +182,8 @@ fn complete_typo_candidates_for_line_with_indexed_options(
         if indexed.words.len() <= current_word_index {
             continue;
         }
-        if !template_words_match_threshold_with_typos(
-            &indexed.words,
-            &words_before_cursor,
-            options.ignore_spaces,
-            options.match_threshold_percent,
-            options.typo_threshold_percent,
-        ) {
+        if !matcher.template_words_match_threshold_with_typos(&indexed.words, &words_before_cursor)
+        {
             continue;
         }
         let replacement = indexed.entry.body.clone();
@@ -203,13 +203,7 @@ fn complete_typo_candidates_for_line_with_indexed_options(
         if indexed.words.len() <= current_word_index {
             continue;
         }
-        if !words_match_threshold_with_typos(
-            &indexed.words,
-            &words_before_cursor,
-            options.ignore_spaces,
-            options.match_threshold_percent,
-            options.typo_threshold_percent,
-        ) {
+        if !matcher.words_match_threshold_with_typos(&indexed.words, &words_before_cursor) {
             continue;
         }
         let replacement = indexed.entry.command.clone();

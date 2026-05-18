@@ -35,15 +35,17 @@ pub use path::complete_path;
 pub use private::{complete_private_command_line, complete_private_commands};
 pub use ranking::limit_candidates;
 pub use render::{
-    accept_completion, accept_completion_with_mode, ghost_completion_suffix,
-    render_completion_candidates, render_completion_candidates_for_width, truncate_with_ellipsis,
+    accept_completion, accept_completion_with_mode, completion_edit_for_candidate,
+    ghost_completion_suffix, render_completion_candidates, render_completion_candidates_for_width,
+    truncate_with_ellipsis,
 };
 pub use structural::{
     complete_structural_history_for_line_with_options,
     complete_structural_templates_for_line_with_options,
 };
 pub use types::{
-    AcceptedCompletion, CompletionCandidate, CompletionOptions, CompletionSource, TokenContext,
+    AcceptedCompletion, CompletionCandidate, CompletionEdit, CompletionOptions, CompletionSource,
+    TokenContext,
 };
 pub(crate) use typo::complete_non_first_token_typos_for_line_with_indexed_options;
 pub use typo::{

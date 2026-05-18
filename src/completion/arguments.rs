@@ -4,7 +4,7 @@ use crate::history::HistoryEntry;
 use crate::templates::TemplateEntry;
 
 use super::index::{IndexedHistoryEntry, IndexedTemplateEntry};
-use super::matching::{matches_completion_prefix_with_threshold, template_placeholder_words};
+use super::matching::{CompletionMatcher, template_placeholder_words};
 use super::parser::{command_argument_words, shell_word_value};
 use super::{CompletionCandidate, CompletionSource};
 
@@ -17,14 +17,10 @@ pub(crate) fn complete_history_arguments(
     let mut seen = HashSet::new();
     let mut candidates = Vec::new();
     let prefix = shell_word_match_text(prefix);
+    let matcher = CompletionMatcher::new(ignore_spaces, match_threshold_percent, 80);
     for entry in history_newest_first {
         for argument in command_argument_words(&entry.command) {
-            if matches_completion_prefix_with_threshold(
-                &argument.value,
-                &prefix,
-                ignore_spaces,
-                match_threshold_percent,
-            ) && seen.insert(argument.raw.clone())
+            if matcher.prefix_matches(&argument.value, &prefix) && seen.insert(argument.raw.clone())
             {
                 candidates.push(CompletionCandidate {
                     display: argument.raw.clone(),
@@ -47,14 +43,10 @@ pub(crate) fn complete_history_arguments_indexed(
     let mut seen = HashSet::new();
     let mut candidates = Vec::new();
     let prefix = shell_word_match_text(prefix);
+    let matcher = CompletionMatcher::new(ignore_spaces, match_threshold_percent, 80);
     for indexed in history_newest_first {
         for argument in &indexed.arguments {
-            if matches_completion_prefix_with_threshold(
-                &argument.value,
-                &prefix,
-                ignore_spaces,
-                match_threshold_percent,
-            ) && seen.insert(argument.raw.clone())
+            if matcher.prefix_matches(&argument.value, &prefix) && seen.insert(argument.raw.clone())
             {
                 candidates.push(CompletionCandidate {
                     display: argument.raw.clone(),
@@ -80,19 +72,12 @@ pub(crate) fn complete_template_placeholders(
 ) -> Vec<CompletionCandidate> {
     let mut seen = HashSet::new();
     let mut candidates = Vec::new();
+    let matcher = CompletionMatcher::new(ignore_spaces, match_threshold_percent, 80);
     for template in templates {
         for placeholder in template_placeholder_words(&template.body) {
-            if (matches_completion_prefix_with_threshold(
-                &placeholder.raw,
-                prefix,
-                ignore_spaces,
-                match_threshold_percent,
-            ) || matches_completion_prefix_with_threshold(
-                &placeholder.name,
-                prefix,
-                ignore_spaces,
-                match_threshold_percent,
-            )) && seen.insert(placeholder.raw.clone())
+            if (matcher.prefix_matches(&placeholder.raw, prefix)
+                || matcher.prefix_matches(&placeholder.name, prefix))
+                && seen.insert(placeholder.raw.clone())
             {
                 candidates.push(CompletionCandidate {
                     display: placeholder.raw.clone(),
@@ -114,19 +99,12 @@ pub(crate) fn complete_template_placeholders_indexed(
 ) -> Vec<CompletionCandidate> {
     let mut seen = HashSet::new();
     let mut candidates = Vec::new();
+    let matcher = CompletionMatcher::new(ignore_spaces, match_threshold_percent, 80);
     for indexed in templates {
         for placeholder in &indexed.placeholders {
-            if (matches_completion_prefix_with_threshold(
-                &placeholder.raw,
-                prefix,
-                ignore_spaces,
-                match_threshold_percent,
-            ) || matches_completion_prefix_with_threshold(
-                &placeholder.name,
-                prefix,
-                ignore_spaces,
-                match_threshold_percent,
-            )) && seen.insert(placeholder.raw.clone())
+            if (matcher.prefix_matches(&placeholder.raw, prefix)
+                || matcher.prefix_matches(&placeholder.name, prefix))
+                && seen.insert(placeholder.raw.clone())
             {
                 candidates.push(CompletionCandidate {
                     display: placeholder.raw.clone(),
