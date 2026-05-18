@@ -220,11 +220,15 @@ pub(crate) fn split_path_token(token: &str) -> (&str, &str) {
     }
 }
 
-pub(crate) fn resolve_search_dir(dir_token: &str, cwd: &Path) -> Option<PathBuf> {
+pub(crate) fn resolve_search_dir(
+    dir_token: &str,
+    cwd: &Path,
+    expand_home_tilde: bool,
+) -> Option<PathBuf> {
     if dir_token.is_empty() {
         return Some(cwd.to_path_buf());
     }
-    if dir_token == "~/" || dir_token.starts_with("~/") {
+    if expand_home_tilde && (dir_token == "~/" || dir_token.starts_with("~/")) {
         let home = std::env::var_os("HOME").map(PathBuf::from)?;
         return Some(home.join(&dir_token[2..]));
     }

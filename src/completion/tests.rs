@@ -220,6 +220,32 @@ fn complete_path_closes_quotes_and_escapes_quote_sensitive_chars() {
 }
 
 #[test]
+fn complete_path_does_not_expand_quoted_or_escaped_literal_tilde() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir(temp.path().join("~")).unwrap();
+    std::fs::write(temp.path().join("~/local.txt"), "").unwrap();
+
+    assert_eq!(
+        complete_path("'~/lo", temp.path()),
+        [CompletionCandidate {
+            display: "~/local.txt".to_string(),
+            replacement: "'~/local.txt'".to_string(),
+            is_dir: false,
+            source: CompletionSource::Path,
+        }]
+    );
+    assert_eq!(
+        complete_path("\\~/lo", temp.path()),
+        [CompletionCandidate {
+            display: "~/local.txt".to_string(),
+            replacement: "\\~/local.txt".to_string(),
+            is_dir: false,
+            source: CompletionSource::Path,
+        }]
+    );
+}
+
+#[test]
 fn complete_first_token_orders_templates_history_then_executables() {
     let temp = tempfile::tempdir().unwrap();
     let bin = temp.path().join("bin");

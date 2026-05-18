@@ -777,7 +777,7 @@ For non-first-token completion:
 - History argument candidates are shown before file path candidates after structural and placeholder candidates.
 - History argument candidates are ordered newest to oldest.
 - File/path candidates must accurately represent the underlying filesystem entry.
-- File/path matching should use the shell word value for lookup while preserving safe shell input on acceptance. Quoted and backslash-escaped typed paths must continue to match, and accepted replacements must escape unquoted shell metacharacters or close the user's current quote style.
+- File/path matching should use the shell word value for lookup while preserving safe shell input on acceptance. Quoted and backslash-escaped typed paths must continue to match, and accepted replacements must escape unquoted shell metacharacters or close the user's current quote style. Leading `~/` should expand to HOME only when the `~` is unquoted and unescaped; quoted or escaped `~/` is a literal path component.
 - Regular files must not be presented as directories.
 - Directory candidates should use a trailing `/` so users can distinguish them from files.
 - Directory scans may be cached briefly while the user types, but cache staleness must be bounded and filesystem changes must eventually be observed.

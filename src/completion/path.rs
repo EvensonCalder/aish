@@ -32,11 +32,13 @@ fn complete_path_internal(
     typo_options: Option<CompletionOptions>,
 ) -> Vec<CompletionCandidate> {
     let quote = token.chars().next().filter(|ch| matches!(ch, '\'' | '"'));
+    let home_tilde_active = home_tilde_expansion_is_active(token);
     let token_value = shell_word_value(token);
     let (dir_token, prefix) = split_path_token(&token_value);
-    let Some(search_dir) = resolve_search_dir(dir_token, cwd) else {
+    let Some(search_dir) = resolve_search_dir(dir_token, cwd, home_tilde_active) else {
         return Vec::new();
     };
+    let literal_leading_tilde = token_value.starts_with("~/") && !home_tilde_active;
     let entries = cached_path_entries(&search_dir);
 
     let mut candidates = Vec::new();
@@ -46,7 +48,7 @@ fn complete_path_internal(
         }
         let suffix = if entry.is_dir { "/" } else { "" };
         let display = format!("{dir_token}{}{suffix}", entry.name);
-        let replacement = path_replacement(quote, &display);
+        let replacement = path_replacement(quote, &display, literal_leading_tilde);
         candidates.push(CompletionCandidate {
             display,
             replacement,
@@ -69,7 +71,7 @@ fn complete_path_internal(
             }
             let display = format!("{dir_token}{}/", entry.name);
             candidates.push(CompletionCandidate {
-                replacement: path_replacement(quote, &display),
+                replacement: path_replacement(quote, &display, literal_leading_tilde),
                 display,
                 is_dir: true,
                 source: CompletionSource::Path,
@@ -81,11 +83,15 @@ fn complete_path_internal(
     candidates
 }
 
-fn path_replacement(quote: Option<char>, value: &str) -> String {
+fn home_tilde_expansion_is_active(raw_token: &str) -> bool {
+    raw_token.starts_with("~/")
+}
+
+fn path_replacement(quote: Option<char>, value: &str, literal_leading_tilde: bool) -> String {
     match quote {
         Some('\'') => single_quoted_path(value),
         Some('"') => double_quoted_path(value),
-        _ => unquoted_path(value),
+        _ => unquoted_path(value, literal_leading_tilde),
     }
 }
 
@@ -106,13 +112,18 @@ fn double_quoted_path(value: &str) -> String {
     escaped
 }
 
-fn unquoted_path(value: &str) -> String {
+fn unquoted_path(value: &str, literal_leading_tilde: bool) -> String {
     if value.contains('\n') {
         return single_quoted_path(value);
     }
 
     let mut escaped = String::with_capacity(value.len());
-    for ch in value.chars() {
+    for (index, ch) in value.chars().enumerate() {
+        if index == 0 && ch == '~' && literal_leading_tilde {
+            escaped.push('\\');
+            escaped.push(ch);
+            continue;
+        }
         if is_unquoted_path_safe_char(ch) {
             escaped.push(ch);
         } else {
