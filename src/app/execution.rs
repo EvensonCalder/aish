@@ -324,14 +324,22 @@ impl SigintIgnoreGuard {
 }
 
 pub(crate) fn foreground_shell_args(shell: &str, command: &str) -> Vec<String> {
-    let shell_name = Path::new(shell)
+    let shell_name = shell_name(shell);
+    match shell_name.as_str() {
+        "bash" | "zsh" => vec!["-lc".to_string(), command.to_string()],
+        "fish" => vec!["-c".to_string(), command.to_string()],
+        _ => vec!["-c".to_string(), command.to_string()],
+    }
+}
+
+fn shell_name(shell: &str) -> String {
+    let name = Path::new(shell.trim())
         .file_name()
         .and_then(|name| name.to_str())
-        .unwrap_or_default();
-    match shell_name {
-        "fish" => vec!["-c".to_string(), command.to_string()],
-        _ => vec!["-lc".to_string(), command.to_string()],
-    }
+        .unwrap_or_default()
+        .trim_start_matches('-')
+        .to_ascii_lowercase();
+    name.strip_suffix(".exe").unwrap_or(&name).to_string()
 }
 
 #[cfg(test)]

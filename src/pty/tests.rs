@@ -12,6 +12,7 @@ fn current_start_marker() -> &'static str {
 #[test]
 fn resolves_configured_shell_before_environment() {
     assert_eq!(resolve_shell("/bin/custom-shell"), "/bin/custom-shell");
+    assert_eq!(resolve_shell("  /bin/custom-shell  "), "/bin/custom-shell");
 }
 
 #[test]
@@ -24,6 +25,15 @@ fn shell_command_builder_inherits_current_directory() {
         command.get_cwd().map(|cwd| cwd.as_os_str()),
         Some(cwd.as_os_str())
     );
+}
+
+#[test]
+fn shell_launch_recognizes_login_shell_and_case_variants() {
+    let login_zsh = shell_launch("-zsh");
+    assert_eq!(login_zsh.integration, ShellIntegration::ZshHooks);
+
+    let upper_fish = shell_launch("/usr/local/bin/FISH");
+    assert_eq!(upper_fish.integration, ShellIntegration::FishEvents);
 }
 
 #[test]
@@ -61,6 +71,7 @@ fn non_bash_launch_does_not_receive_bash_only_flags() {
     assert!(launch.init_command.contains("add-zsh-hook"));
     assert!(launch.init_command.contains("__aish_preexec"));
     assert!(launch.init_command.contains("__aish_precmd"));
+    assert!(launch.init_command.contains("fc -p"));
 }
 
 #[test]

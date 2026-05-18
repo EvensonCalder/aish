@@ -3905,6 +3905,18 @@ fn foreground_shell_args_use_login_compatible_command_mode() {
         foreground_shell_args("/usr/bin/fish", "less file"),
         ["-c", "less file"]
     );
+    assert_eq!(
+        foreground_shell_args("  /usr/bin/FISH  ", "less file"),
+        ["-c", "less file"]
+    );
+    assert_eq!(
+        foreground_shell_args("/bin/sh", "less file"),
+        ["-c", "less file"]
+    );
+    assert_eq!(
+        foreground_shell_args("/bin/dash", "less file"),
+        ["-c", "less file"]
+    );
 }
 
 #[test]

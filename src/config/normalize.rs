@@ -1,7 +1,8 @@
 use super::{CompletionConfig, Config, ContextConfig, PasteConfig, PromptConfig, default_aish_dir};
 
 pub fn normalize_config(config: &mut Config) {
-    if config.shell.backend.trim().is_empty() {
+    config.shell.backend = config.shell.backend.trim().to_string();
+    if config.shell.backend.is_empty() {
         config.shell.backend = "auto".to_string();
     }
     if config.prompt.draft.is_empty() {

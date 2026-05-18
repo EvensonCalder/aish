@@ -15,25 +15,24 @@ pub(super) struct ShellLaunch {
 }
 
 pub fn resolve_shell(configured_shell: &str) -> String {
-    if configured_shell != "auto" && !configured_shell.trim().is_empty() {
+    let configured_shell = configured_shell.trim();
+    if configured_shell != "auto" && !configured_shell.is_empty() {
         return configured_shell.to_string();
     }
     env::var("SHELL")
         .ok()
-        .filter(|shell| !shell.trim().is_empty())
+        .map(|shell| shell.trim().to_string())
+        .filter(|shell| !shell.is_empty())
         .unwrap_or_else(|| "/bin/bash".to_string())
 }
 
 pub(super) fn shell_launch(configured_shell: &str) -> ShellLaunch {
     let program = resolve_shell(configured_shell);
-    let shell_name = Path::new(&program)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or_default();
+    let shell_name = shell_name(&program);
     let ready_marker = ready_marker();
     let start_marker = start_marker();
 
-    let (args, init_command, integration) = match shell_name {
+    let (args, init_command, integration) = match shell_name.as_str() {
         "bash" => (
             vec!["-i".to_string()],
             format!(
@@ -48,7 +47,7 @@ pub(super) fn shell_launch(configured_shell: &str) -> ShellLaunch {
                 "histignorespace".to_string(),
             ],
             format!(
-                " setopt histignorespace; stty -echo; unsetopt zle prompt_cr prompt_sp; PROMPT=''; RPROMPT=''; PROMPT2=''; function __aish_preexec() {{ printf '\\n{start_marker}\\t%s\\n' \"$1\"; }}; function __aish_precmd() {{ printf '\\n{ready_marker}\\t%s\\t%s\\n' \"$?\" \"$PWD\"; }}; autoload -Uz add-zsh-hook; add-zsh-hook -d preexec __aish_preexec 2>/dev/null || true; add-zsh-hook -d precmd __aish_precmd 2>/dev/null || true; add-zsh-hook preexec __aish_preexec; add-zsh-hook precmd __aish_precmd; preexec_functions=(__aish_preexec ${{preexec_functions:#__aish_preexec}}); precmd_functions=(__aish_precmd ${{precmd_functions:#__aish_precmd}}); __aish_precmd\n"
+                " setopt histignorespace; stty -echo; unsetopt zle prompt_cr prompt_sp; PROMPT=''; RPROMPT=''; PROMPT2=''; function __aish_preexec() {{ printf '\\n{start_marker}\\t%s\\n' \"$1\"; }}; function __aish_precmd() {{ printf '\\n{ready_marker}\\t%s\\t%s\\n' \"$?\" \"$PWD\"; }}; autoload -Uz add-zsh-hook; add-zsh-hook -d preexec __aish_preexec 2>/dev/null || true; add-zsh-hook -d precmd __aish_precmd 2>/dev/null || true; add-zsh-hook preexec __aish_preexec; add-zsh-hook precmd __aish_precmd; preexec_functions=(__aish_preexec ${{preexec_functions:#__aish_preexec}}); precmd_functions=(__aish_precmd ${{precmd_functions:#__aish_precmd}}); fc -p 2>/dev/null || true; __aish_precmd\n"
             ),
             ShellIntegration::ZshHooks,
         ),
@@ -72,6 +71,16 @@ pub(super) fn shell_launch(configured_shell: &str) -> ShellLaunch {
         init_command,
         integration,
     }
+}
+
+fn shell_name(program: &str) -> String {
+    let name = Path::new(program.trim())
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .trim_start_matches('-')
+        .to_ascii_lowercase();
+    name.strip_suffix(".exe").unwrap_or(&name).to_string()
 }
 
 fn fish_launch_args(program: &str) -> Vec<String> {

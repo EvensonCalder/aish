@@ -180,6 +180,16 @@ mod tests {
     }
 
     #[test]
+    fn normalize_trims_configured_shell_backend() {
+        let mut config = Config::default();
+        config.shell.backend = "  /usr/local/bin/fish  ".to_string();
+
+        normalize_config(&mut config);
+
+        assert_eq!(config.shell.backend, "/usr/local/bin/fish");
+    }
+
+    #[test]
     fn first_run_creates_layout_and_default_config() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("aish-home");

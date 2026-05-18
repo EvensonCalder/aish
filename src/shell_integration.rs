@@ -136,13 +136,30 @@ fn skip_assignments(words: &[String], mut index: usize) -> usize {
 
 fn skip_env_prefix(words: &[String], mut index: usize) -> usize {
     while let Some(word) = words.get(index) {
-        if word.starts_with('-') || is_assignment(word) {
+        if word == "--" {
+            index += 1;
+            index = skip_assignments(words, index);
+            break;
+        }
+        if is_env_option_with_value(word) {
+            index += 1;
+            if words.get(index).is_some() {
+                index += 1;
+            }
+        } else if word.starts_with('-') || is_assignment(word) {
             index += 1;
         } else {
             break;
         }
     }
     index
+}
+
+fn is_env_option_with_value(word: &str) -> bool {
+    matches!(
+        word,
+        "-u" | "-S" | "-C" | "--unset" | "--split-string" | "--chdir"
+    )
 }
 
 fn skip_sudo_prefix(words: &[String], mut index: usize) -> usize {
@@ -278,6 +295,22 @@ mod tests {
         assert_eq!(
             interactive_command_name("env -i TERM=xterm less README.md"),
             Some("less".to_string())
+        );
+        assert_eq!(
+            interactive_command_name("env -u FOO vim file"),
+            Some("vim".to_string())
+        );
+        assert_eq!(
+            interactive_command_name("env --unset FOO nvim file"),
+            Some("nvim".to_string())
+        );
+        assert_eq!(
+            interactive_command_name("env -C /tmp less README.md"),
+            Some("less".to_string())
+        );
+        assert_eq!(
+            interactive_command_name("env -- TERM=xterm top"),
+            Some("top".to_string())
         );
         assert_eq!(
             interactive_command_name("command -p ssh example.com"),
