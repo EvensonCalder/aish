@@ -9,6 +9,7 @@ mod bootstrap;
 mod completion_runtime;
 mod config_commands;
 mod context_prompt;
+mod editor_state;
 mod encryption_commands;
 mod event_log;
 mod execution;
