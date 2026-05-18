@@ -213,16 +213,6 @@ pub(crate) fn shell_word_value(raw: &str) -> String {
     value
 }
 
-pub(crate) fn strip_opening_quote(token: &str) -> (&str, &str) {
-    if let Some(rest) = token.strip_prefix('\'') {
-        ("'", rest)
-    } else if let Some(rest) = token.strip_prefix('"') {
-        ("\"", rest)
-    } else {
-        ("", token)
-    }
-}
-
 pub(crate) fn split_path_token(token: &str) -> (&str, &str) {
     match token.rsplit_once('/') {
         Some((dir, prefix)) => (&token[..dir.len() + 1], prefix),

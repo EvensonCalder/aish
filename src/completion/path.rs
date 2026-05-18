@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 
-use super::parser::{resolve_search_dir, split_path_token, strip_opening_quote};
+use super::parser::{resolve_search_dir, shell_word_value, split_path_token};
 use super::{
     CompletionCandidate, CompletionOptions, CompletionSource,
     complete_first_token_executables_from_names_with_options, dedupe_completion_candidates,
@@ -31,8 +31,9 @@ fn complete_path_internal(
     cwd: &Path,
     typo_options: Option<CompletionOptions>,
 ) -> Vec<CompletionCandidate> {
-    let (quote, token) = strip_opening_quote(token);
-    let (dir_token, prefix) = split_path_token(token);
+    let quote = token.chars().next().filter(|ch| matches!(ch, '\'' | '"'));
+    let token_value = shell_word_value(token);
+    let (dir_token, prefix) = split_path_token(&token_value);
     let Some(search_dir) = resolve_search_dir(dir_token, cwd) else {
         return Vec::new();
     };
@@ -44,9 +45,10 @@ fn complete_path_internal(
             continue;
         }
         let suffix = if entry.is_dir { "/" } else { "" };
-        let replacement = format!("{quote}{dir_token}{}{suffix}", entry.name);
+        let display = format!("{dir_token}{}{suffix}", entry.name);
+        let replacement = path_replacement(quote, &display);
         candidates.push(CompletionCandidate {
-            display: format!("{dir_token}{}{suffix}", entry.name),
+            display,
             replacement,
             is_dir: entry.is_dir,
             source: CompletionSource::Path,
@@ -65,9 +67,10 @@ fn complete_path_internal(
             {
                 continue;
             }
+            let display = format!("{dir_token}{}/", entry.name);
             candidates.push(CompletionCandidate {
-                display: format!("{dir_token}{}/", entry.name),
-                replacement: format!("{quote}{dir_token}{}/", entry.name),
+                replacement: path_replacement(quote, &display),
+                display,
                 is_dir: true,
                 source: CompletionSource::Path,
             });
@@ -76,6 +79,54 @@ fn complete_path_internal(
     candidates.sort_by(|left, right| left.display.cmp(&right.display));
     dedupe_completion_candidates(&mut candidates);
     candidates
+}
+
+fn path_replacement(quote: Option<char>, value: &str) -> String {
+    match quote {
+        Some('\'') => single_quoted_path(value),
+        Some('"') => double_quoted_path(value),
+        _ => unquoted_path(value),
+    }
+}
+
+fn single_quoted_path(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn double_quoted_path(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len() + 2);
+    escaped.push('"');
+    for ch in value.chars() {
+        if matches!(ch, '"' | '\\' | '$' | '`') {
+            escaped.push('\\');
+        }
+        escaped.push(ch);
+    }
+    escaped.push('"');
+    escaped
+}
+
+fn unquoted_path(value: &str) -> String {
+    if value.contains('\n') {
+        return single_quoted_path(value);
+    }
+
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if is_unquoted_path_safe_char(ch) {
+            escaped.push(ch);
+        } else {
+            escaped.push('\\');
+            escaped.push(ch);
+        }
+    }
+    escaped
+}
+
+fn is_unquoted_path_safe_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric()
+        || matches!(ch, '/' | '.' | '_' | '-' | ':' | '~')
+        || (!ch.is_ascii() && !ch.is_whitespace() && !ch.is_control())
 }
 
 #[derive(Debug, Clone)]

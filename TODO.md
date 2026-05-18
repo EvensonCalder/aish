@@ -1131,6 +1131,7 @@ Update: completion now uses layered, non-blocking live discovery. Cheap local pa
   - [x] `#completion typo-threshold <0-100>`
 - [x] Treat `completion.match_threshold_percent` as a structural word-position match rate, not typo correction.
 - [x] Preserve raw shell words for history/template completion display and insertion while using quote-removed shell-like values for matching, including quoted arguments, mixed quoted segments, and escaped spaces.
+- [x] Match path completion against shell word values and insert shell-safe path replacements for unquoted, single-quoted, double-quoted, and backslash-escaped typed paths.
 - [x] Keep typo correction separate behind `completion.typo_threshold_percent`.
 - [x] Accepting a typo-correction candidate replaces the mistyped command with the corrected template/history command.
 - [x] Keep live completion non-blocking by sending history work to a versioned worker and ignoring stale events.

@@ -143,7 +143,76 @@ fn complete_path_preserves_opening_quote_in_replacement_only() {
         complete_path("'my", temp.path()),
         [CompletionCandidate {
             display: "my file.txt".to_string(),
-            replacement: "'my file.txt".to_string(),
+            replacement: "'my file.txt'".to_string(),
+            is_dir: false,
+            source: CompletionSource::Path,
+        }]
+    );
+}
+
+#[test]
+fn complete_path_escapes_unquoted_shell_metacharacters() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::write(temp.path().join("my file.txt"), "").unwrap();
+    std::fs::write(temp.path().join("hash#file.txt"), "").unwrap();
+
+    assert_eq!(
+        complete_path("my", temp.path()),
+        [CompletionCandidate {
+            display: "my file.txt".to_string(),
+            replacement: "my\\ file.txt".to_string(),
+            is_dir: false,
+            source: CompletionSource::Path,
+        }]
+    );
+    assert_eq!(
+        complete_path("hash", temp.path()),
+        [CompletionCandidate {
+            display: "hash#file.txt".to_string(),
+            replacement: "hash\\#file.txt".to_string(),
+            is_dir: false,
+            source: CompletionSource::Path,
+        }]
+    );
+}
+
+#[test]
+fn complete_path_handles_escaped_space_in_typed_directory() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir(temp.path().join("my dir")).unwrap();
+    std::fs::write(temp.path().join("my dir/file.txt"), "").unwrap();
+
+    assert_eq!(
+        complete_path("my\\ dir/f", temp.path()),
+        [CompletionCandidate {
+            display: "my dir/file.txt".to_string(),
+            replacement: "my\\ dir/file.txt".to_string(),
+            is_dir: false,
+            source: CompletionSource::Path,
+        }]
+    );
+}
+
+#[test]
+fn complete_path_closes_quotes_and_escapes_quote_sensitive_chars() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::write(temp.path().join("it's.txt"), "").unwrap();
+    std::fs::write(temp.path().join("price$1.txt"), "").unwrap();
+
+    assert_eq!(
+        complete_path("'it", temp.path()),
+        [CompletionCandidate {
+            display: "it's.txt".to_string(),
+            replacement: "'it'\\''s.txt'".to_string(),
+            is_dir: false,
+            source: CompletionSource::Path,
+        }]
+    );
+    assert_eq!(
+        complete_path("\"price", temp.path()),
+        [CompletionCandidate {
+            display: "price$1.txt".to_string(),
+            replacement: "\"price\\$1.txt\"".to_string(),
             is_dir: false,
             source: CompletionSource::Path,
         }]
