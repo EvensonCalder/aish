@@ -28,7 +28,7 @@ It stores Aish-managed shell history, notes, AI history, drafts, templates, and
 sync metadata for one user across machines.
 
 Do not use this repository as a normal source-code checkout. Aish updates it
-with `#sync now` and `#push`.
+with `#sync now`.
 
 Local-only files such as `config.toml`, cache, logs, secrets, and temporary
 files are intentionally ignored.

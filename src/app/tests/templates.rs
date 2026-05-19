@@ -498,7 +498,7 @@ fn template_publish_writes_template_only_remote() {
 }
 
 #[test]
-fn template_fetch_pending_and_import_are_reviewable_and_deduplicated() {
+fn template_fetch_analyze_and_import_are_reviewable_and_deduplicated() {
     let temp = tempfile::tempdir().unwrap();
     let remote = temp.path().join("templates.git");
     run_test_git(temp.path(), ["init", "--bare", remote.to_str().unwrap()]);
@@ -530,9 +530,9 @@ fn template_fetch_pending_and_import_are_reviewable_and_deduplicated() {
     let output = run_template_private_command(&mut consumer, "fetch shared");
     assert!(output.contains("template fetch completed: shared (templates=2)"));
 
-    let output = run_template_private_command(&mut consumer, "pending shared rsync");
+    let output = run_template_private_command(&mut consumer, "analyze shared rsync");
     let rsync_id = template_id("rsync -avz {from} {to}");
-    assert!(output.contains(&format!("template {rsync_id}\trsync -avz")));
+    assert!(output.contains(&format!("template {rsync_id}\tnew\trsync -avz")));
     assert!(!output.contains("kubectl get pods"));
 
     let output = run_template_private_command(&mut consumer, "analyze shared");

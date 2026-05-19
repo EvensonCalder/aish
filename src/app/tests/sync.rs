@@ -1039,7 +1039,7 @@ fn startup_sync_runs_due_schedule_against_local_git_remote() {
 
     let output = String::from_utf8(output).unwrap();
     assert!(
-        output.contains("startup sync due; running #push"),
+        output.contains("startup sync due; running #sync now"),
         "{output}"
     );
     assert!(output.contains("sync push completed"), "{output}");
@@ -1074,7 +1074,7 @@ fn startup_sync_trigger_runs_without_periodic_schedule() {
     run_startup_sync_check(&mut state, root, &mut output).unwrap();
 
     let output = String::from_utf8(output).unwrap();
-    assert!(output.contains("startup sync enabled; running #push"));
+    assert!(output.contains("startup sync enabled; running #sync now"));
     assert!(output.contains("sync remote is not configured"));
     assert_eq!(
         fs::read_to_string(root.join("cache/runtime/sync.last_attempt")).unwrap(),

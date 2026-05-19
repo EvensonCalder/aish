@@ -64,7 +64,11 @@ pub(super) fn set_sync_schedule(
         "now" => return run_manual_sync_push(state, out),
         "abort" => return abort_interrupted_sync(state, out),
         "continue" => return continue_interrupted_sync(state, out),
-        "resolve-union" | "union" => return resolve_interrupted_sync_with_union(state, out),
+        "resolve-union" => return resolve_interrupted_sync_with_union(state, out),
+        "union" => {
+            writeln!(out, "usage: #sync resolve-union")?;
+            return Ok(());
+        }
         _ => {}
     }
     if state.config_path.is_none() {
@@ -1206,7 +1210,7 @@ pub(super) fn run_startup_sync_check(
     let now = (state.clock)();
     if state.sync_config.startup {
         write_last_sync_attempt(&last_attempt_path, now)?;
-        writeln!(out, "startup sync enabled; running #push")?;
+        writeln!(out, "startup sync enabled; running #sync now")?;
         return run_manual_sync_push(state, out);
     }
     match startup_sync_decision(
@@ -1216,7 +1220,7 @@ pub(super) fn run_startup_sync_check(
     ) {
         StartupSyncDecision::Due => {
             write_last_sync_attempt(&last_attempt_path, now)?;
-            writeln!(out, "startup sync due; running #push")?;
+            writeln!(out, "startup sync due; running #sync now")?;
             run_manual_sync_push(state, out)?;
         }
         StartupSyncDecision::UnsupportedSchedule(schedule) => {
@@ -1237,7 +1241,7 @@ pub(crate) fn run_exit_sync_if_enabled(state: &mut AppState, out: &mut impl Writ
     if !state.sync_config.exit {
         return Ok(());
     }
-    writeln!(out, "exit sync enabled; running #push")?;
+    writeln!(out, "exit sync enabled; running #sync now")?;
     run_manual_sync_push(state, out)
 }
 

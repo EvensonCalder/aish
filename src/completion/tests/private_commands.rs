@@ -83,7 +83,6 @@ fn private_command_completion_includes_nested_arguments() {
             "abort",
             "continue",
             "resolve-union",
-            "union",
             "off",
             "startup",
             "exit",
@@ -111,8 +110,8 @@ fn private_command_completion_includes_nested_arguments() {
             .map(|candidate| candidate.replacement.as_str())
             .collect::<Vec<_>>(),
         [
-            "analyze", "fetch", "find", "import", "list", "pending", "publish", "remote", "rm",
-            "replace", "search", "show", "use"
+            "analyze", "fetch", "find", "import", "list", "publish", "remote", "rm", "replace",
+            "search", "show", "use"
         ]
     );
     let template_remote_candidates =
@@ -131,7 +130,7 @@ fn private_command_completion_includes_nested_arguments() {
             .iter()
             .map(|candidate| candidate.replacement.as_str())
             .collect::<Vec<_>>(),
-        ["--plain", "--encrypt"]
+        ["--encrypt"]
     );
 
     let history_candidates =

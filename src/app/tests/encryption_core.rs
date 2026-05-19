@@ -11,10 +11,6 @@ fn encryption_and_sync_commands_report_current_state_without_side_effects() {
             "#set-remote git@example.invalid:aish.git",
             "config path is not configured; sync config not saved",
         ),
-        (
-            "#push",
-            "sync remote is not configured; run #set-remote <git-url> first",
-        ),
         ("#sync", "no git command run"),
     ] {
         let mut state = AppState::default();

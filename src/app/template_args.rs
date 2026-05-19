@@ -82,5 +82,5 @@ fn trim_matching_quotes(value: &str) -> &str {
 }
 
 pub(super) fn template_usage() -> &'static str {
-    "usage: #template search <query> | #template list [>|>> <path> | | <command>] | #template find <query> | #template show <id> | #template use <id> [key=value...] | #template rm <id> | #template replace <id> <body> | #template remote add|list|rm ... | #template publish <name> [--plain|--encrypt <key>] | #template fetch|analyze|pending|import ..."
+    "usage: #template search <query> | #template list [>|>> <path> | | <command>] | #template find <query> | #template show <id> | #template use <id> [key=value...] | #template rm <id> | #template replace <id> <body> | #template remote add|list|rm ... | #template publish <name> [--encrypt <key>] | #template fetch|analyze|import ..."
 }

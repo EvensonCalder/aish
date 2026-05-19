@@ -155,8 +155,8 @@ fn private_help_prints_available_commands() {
     assert!(output.contains("#template"));
     assert!(output.contains("#encrypt"));
     assert!(output.contains("#set-remote"));
-    assert!(output.contains("#push"));
     assert!(output.contains("#sync"));
+    assert!(!output.contains("#push"));
     assert!(output.contains("#exit"));
     assert!(output.contains("#quit"));
     assert!(output.contains("#history"));
@@ -171,6 +171,38 @@ fn private_help_prints_available_commands() {
     assert!(output.contains("# <prompt> - send an AI prompt"));
     assert!(output.contains("# TODO: <text> - store a note"));
     assert!(state.draft.is_empty());
+}
+
+#[test]
+fn removed_duplicate_private_commands_do_not_dispatch() {
+    for (line, expected) in [
+        ("#push", "Aish command not implemented yet: #push"),
+        ("#sync union", "usage: #sync resolve-union"),
+        ("#template pending shared", "usage: #template"),
+        (
+            "#template publish shared --plain",
+            "usage: #template publish <name> [--encrypt <key>]",
+        ),
+    ] {
+        let mut state = AppState::default();
+        state.draft.insert_str(line);
+        let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+        let mut output = Vec::new();
+
+        execute_draft(
+            &mut state,
+            &mut backend,
+            &mut output,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(
+            output.contains(expected),
+            "missing {expected:?} in {output:?}"
+        );
+    }
 }
 
 #[test]

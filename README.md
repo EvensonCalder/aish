@@ -20,7 +20,7 @@ Implemented and covered:
 - Safe AI request plumbing and context pseudo-pipe flow.
 - `fzf`-based history, file, template, git branch, and environment pickers.
 - Backend-driven passthrough for interactive commands through the persistent PTY shell.
-- Conservative Git sync configuration and manual push flow.
+- Conservative Git sync configuration and manual sync flow.
 - GPG-backed key storage and encrypted managed JSONL storage.
 - Real-terminal regression coverage through `tmux`.
 
@@ -301,10 +301,9 @@ History, notes, and templates:
 #template remote add <name> <git-url>
 #template remote list
 #template remote rm <name>
-#template publish <name> [--plain|--encrypt <key>]
+#template publish <name> [--encrypt <key>]
 #template fetch <name>
 #template analyze <name> [query]
-#template pending <name> [query]
 #template import <name> <id|all>
 ```
 
@@ -312,7 +311,6 @@ Sync:
 
 ```text
 #set-remote <git-url>
-#push
 #sync now
 #sync resolve-union
 #sync continue
@@ -506,7 +504,7 @@ Implemented:
 - Write `.aish-sync.toml` into the sync data repository as non-secret metadata. It records the private sync content categories and, when encryption is enabled, the single full GPG fingerprint that current synced data must use.
 - Persist a conservative subset of periodic schedules checked at startup.
 - Persist explicit startup and exit sync triggers.
-- Run `#sync now` or its alias `#push` against a configured Git remote.
+- Run `#sync now` against a configured Git remote.
 - Stage managed enabled paths automatically, commit only when staged content changed, merge remote updates with `git pull --no-rebase --no-edit`, then push.
 - Warn when existing Aish-managed files are present but excluded because their sync category is disabled.
 - Retry pull with `--allow-unrelated-histories` when an existing local sync repository is connected to a populated remote with separate history.
@@ -538,6 +536,16 @@ Sync does not have a long-running scheduler. The supported automatic triggers ar
 - every startup: `#sync startup on` runs the same sync flow once when Aish starts.
 - exit: `#sync exit on` runs the same sync flow during the exit durability boundary.
 
+Sync command boundaries:
+
+- `#set-remote <git-url>` only saves the private sync remote. It does not initialize Git, fetch, merge, commit, or push.
+- `#sync` prints current sync/encryption status and does not run Git.
+- `#sync now` is the only manual sync run command. It stages enabled managed files, commits when staged content changed, merges remote updates, then pushes.
+- `#sync resolve-union` is only for an interrupted merge with plaintext Aish-managed JSONL conflicts. It keeps both sides, stages the resolved files, commits, and pushes.
+- `#sync continue` is only for a merge that the user resolved and staged manually. It commits and pushes the interrupted sync.
+- `#sync abort` is only for an interrupted merge or rebase. It cancels that Git operation.
+- `#sync <schedule>`, `#sync off`, `#sync startup|exit on|off`, and `#sync ai|history|templates|drafts on|off` only update sync settings.
+
 Local bare Git repositories work as remotes:
 
 ```sh
@@ -564,7 +572,7 @@ Current behavior:
 - `#encrypt rotate <key>` explicitly re-encrypts current managed storage for a new fingerprint. If `secrets/key.json.gpg` exists, the stored API key is re-encrypted for the new fingerprint too.
 - `#encrypt unlock-mode lazy|prompt` selects startup behavior. `lazy` starts immediately and unlocks old encrypted history/templates in the background when possible; `prompt` requires interactive GPG/pinentry unlock before the Aish prompt opens.
 - Future writes go to encrypted JSONL files while encryption is enabled. Normal history, draft, note, AI, and template appends are queued through a serialized background encrypted writer so command output and prompt redraws do not wait for GPG. Appends update one complete encrypted JSONL payload from the unlocked plaintext cache rather than concatenating multiple GPG messages.
-- Aish flushes pending encrypted writes before exit, `#push`, `#history`, `#encrypt off`, key rotation, and confirmed history rewrite. A background write completion wakes the frontend tick path and refreshes live completion UI.
+- Aish flushes pending encrypted writes before exit, `#sync now`, `#history`, `#encrypt off`, key rotation, and confirmed history rewrite. A background write completion wakes the frontend tick path and refreshes live completion UI.
 - Direct decrypt operations that may need a passphrase, including stored-key fallback, `#encrypt off`, key rotation, and confirmed history rewrite, enter a dedicated unlock passthrough state. Aish clears stale completion UI, yields terminal control to GPG/pinentry, sets `GPG_TTY` when possible, and restores the previous Aish mode when the operation completes or fails. Current-storage encryption changes snapshot managed files first and restore them if a migration step fails.
 - In lazy startup mode, Aish tries to unlock history/templates in the background using noninteractive GPG so startup does not block on passphrase entry. If `gpg-agent` can decrypt without prompting, history/templates load automatically. If a passphrase is needed, old history/templates stay locked, history/AI views can show `history is still unlocking...`, and `#unlock` runs the interactive GPG/pinentry passthrough.
 - Commands entered before lazy startup unlock completes remain usable. If old encrypted storage is still locked, new appends are buffered in memory and merged into encrypted storage when `#unlock` succeeds; old data-dependent views stay locked until then.
@@ -607,7 +615,6 @@ Commands:
 #template publish shared --encrypt friend@example.com
 #template fetch shared
 #template analyze shared [query]
-#template pending shared [query]
 #template import shared <id|all>
 ```
 
@@ -633,6 +640,14 @@ deduplicated by stable template ID/body hash. Existing local templates are
 reported as already present and are not overwritten. If a template remote
 appears to be a private Aish sync repository, Aish refuses to use it and asks
 for a separate template remote.
+
+Template sharing command boundaries:
+
+- `#template remote add|list|rm` only manages named template remote config. It does not fetch, publish, or import templates.
+- `#template publish <name>` writes local templates to the named template-only remote. Plaintext is the default; `--encrypt <key>` encrypts only the payload for the chosen recipient.
+- `#template fetch <name>` updates only the local review cache for that remote.
+- `#template analyze <name> [query]` reads the fetched cache and local template store, reports `new` or `present`, and does not write local templates.
+- `#template import <name> <id|all>` is the only template sharing command that changes the local template store. It appends missing templates and does not overwrite existing ones.
 
 To rotate to a new key:
 
@@ -748,7 +763,7 @@ The app module root in `src/app.rs` wires together focused runtime modules:
 - `src/app/template_args.rs`: template subcommand argument parsing.
 - `src/app/event_log.rs`: event log display for `#log`.
 - `src/app/reports.rs`: `#status`, `#config`, `#doctor`, `#editor`, and encryption/sync status output.
-- `src/app/sync_commands.rs`: `#set-remote`, `#sync`, `#push`, startup/exit sync triggers, and git step handling.
+- `src/app/sync_commands.rs`: `#set-remote`, `#sync`, startup/exit sync triggers, and git step handling.
 - `src/config.rs`: public config module facade and config tests.
 - `src/config/`: config model types, directory layout, private file permissions, root path resolution, file IO, and normalization.
 - `src/completion.rs`: completion orchestration across templates, history, paths, private commands, and typo tiers.

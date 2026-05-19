@@ -14,11 +14,11 @@ use super::private_output::{
 use super::{
     AppState, clear_stored_key, help, load_ai_sessions_for_state, parse_key_command,
     parse_template_body, parse_template_find_query, parse_template_subcommand_args,
-    parse_template_values, prompt_command, run_manual_sync_push, set_stored_key, set_sync_remote,
-    set_sync_schedule, show_event_log, template_remote_command, template_usage,
-    trim_history_for_state, update_ai_config_field, update_completion_config,
-    update_context_config, update_encryption_config, update_paste_config, write_config_report,
-    write_doctor_report, write_editor_report, write_status_report,
+    parse_template_values, prompt_command, set_stored_key, set_sync_remote, set_sync_schedule,
+    show_event_log, template_remote_command, template_usage, trim_history_for_state,
+    update_ai_config_field, update_completion_config, update_context_config,
+    update_encryption_config, update_paste_config, write_config_report, write_doctor_report,
+    write_editor_report, write_status_report,
 };
 
 pub(super) fn execute_private_command(
@@ -64,7 +64,6 @@ pub(super) fn execute_private_command(
         }
         "encrypt" => update_encryption_config(state, out, args)?,
         "set-remote" => set_sync_remote(state, out, args)?,
-        "push" => run_manual_sync_push(state, out)?,
         "sync" => set_sync_schedule(state, out, args)?,
         _ => match suggest_private_command(name) {
             Some(suggestion) => writeln!(
@@ -342,7 +341,7 @@ fn template_command(state: &mut AppState, out: &mut impl Write, args: &str) -> R
         Some("use") => {
             keep_draft = template_use_command(state, out, args)?;
         }
-        Some("remote" | "publish" | "fetch" | "analyze" | "pending" | "import") => {
+        Some("remote" | "publish" | "fetch" | "analyze" | "import") => {
             template_remote_command(state, out, args)?;
         }
         _ => writeln!(out, "{}", template_usage())?,

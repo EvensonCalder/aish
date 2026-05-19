@@ -145,13 +145,6 @@ pub(super) fn template_remote_command(
             }
             None => write_template_usage(out),
         },
-        "pending" => match next_word(rest) {
-            Some((name, query)) => {
-                let query = query.trim();
-                pending_templates(state, out, name, (!query.is_empty()).then_some(query))
-            }
-            None => write_template_usage(out),
-        },
         "import" => match next_word(rest) {
             Some((name, selector)) => match single_word(selector) {
                 Some(selector) => import_templates(state, out, name, selector),
@@ -401,55 +394,6 @@ fn fetch_templates(state: &mut AppState, out: &mut impl Write, name: &str) -> Re
         "template fetch completed: {name} (templates={})",
         loaded.items.len()
     )?;
-    Ok(())
-}
-
-fn pending_templates(
-    state: &AppState,
-    out: &mut impl Write,
-    name: &str,
-    query: Option<&str>,
-) -> Result<()> {
-    let Some(remote) = configured_template_remote(state, name) else {
-        writeln!(out, "template remote not configured: {name}")?;
-        return Ok(());
-    };
-    let repo = template_remote_repo_path(state, remote)?;
-    if !repo.join(".git").is_dir() {
-        writeln!(
-            out,
-            "no fetched templates for remote {name}; run #template fetch {name}"
-        )?;
-        return Ok(());
-    }
-    if !validate_template_remote_worktree(out, &repo)? {
-        return Ok(());
-    }
-    let Some(loaded) = load_pending_templates_for_user(out, &repo)? else {
-        return Ok(());
-    };
-    if loaded.items.is_empty() {
-        writeln!(
-            out,
-            "no fetched templates for remote {name}; run #template fetch {name}"
-        )?;
-        return Ok(());
-    }
-    let mut matched = 0;
-    for template in loaded.items.iter().rev() {
-        let id = template.id();
-        if query
-            .map(|query| id.contains(query) || template.body.contains(query))
-            .unwrap_or(true)
-        {
-            matched += 1;
-            writeln!(out, "template {id}\t{}", template.body)?;
-        }
-    }
-    if matched == 0 {
-        writeln!(out, "no fetched templates matched: {}", query.unwrap_or(""))?;
-    }
-    write_template_load_errors(out, loaded.errors.len())?;
     Ok(())
 }
 
@@ -1040,17 +984,11 @@ fn parse_publish_args(args: &str, out: &mut impl Write) -> Result<Option<Templat
         return Ok(None);
     };
     if !valid_template_remote_name(name) {
-        writeln!(
-            out,
-            "usage: #template publish <name> [--plain|--encrypt <key>]"
-        )?;
+        writeln!(out, "usage: #template publish <name> [--encrypt <key>]")?;
         return Ok(None);
     }
     let encryption = match next_word(rest) {
         None => TemplateRemoteEncryption::Plain,
-        Some(("--plain" | "plain", rest)) if rest.trim().is_empty() => {
-            TemplateRemoteEncryption::Plain
-        }
         Some(("--encrypt" | "encrypt" | "encrypted", selector)) => {
             let Some(selector) = single_word(selector) else {
                 writeln!(
@@ -1065,10 +1003,7 @@ fn parse_publish_args(args: &str, out: &mut impl Write) -> Result<Option<Templat
             }
         }
         _ => {
-            writeln!(
-                out,
-                "usage: #template publish <name> [--plain|--encrypt <key>]"
-            )?;
+            writeln!(out, "usage: #template publish <name> [--encrypt <key>]")?;
             return Ok(None);
         }
     };

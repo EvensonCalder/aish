@@ -40,7 +40,6 @@ pub const IMPLEMENTED_PRIVATE_COMMANDS: &[&str] = &[
     "template",
     "encrypt",
     "set-remote",
-    "push",
     "sync",
     "completion",
     "log",

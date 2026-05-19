@@ -732,7 +732,7 @@ fn run_encryption_history_rewrite(
     if !root.join(".git").is_dir() {
         writeln!(
             out,
-            "git repository is not initialized; run #push before rewriting history"
+            "git repository is not initialized; run #sync now before rewriting history"
         )?;
         return Ok(());
     }

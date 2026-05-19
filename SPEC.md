@@ -717,10 +717,9 @@ Aish prints a stable `tpl-...` content-hash ID for stored templates. Users use t
 #template remote add <name> <git-url>
 #template remote list
 #template remote rm <name>
-#template publish <name> [--plain|--encrypt <key>]
+#template publish <name> [--encrypt <key>]
 #template fetch <name>
 #template analyze <name> [query]
-#template pending <name> [query]
 #template import <name> <id|all>
 ```
 
@@ -1215,7 +1214,7 @@ Behavior:
 - Normal encrypted JSONL appends should be serialized through a background writer. Foreground command execution updates in-memory state and enqueues persistence work; command output and prompt redraw must not wait for GPG encryption.
 - Encrypted JSONL appends update one complete encrypted JSONL payload for each managed file, using the writer's decrypted byte cache when available. They do not concatenate multiple independent GPG messages into one file.
 - The background encrypted writer must preserve write order per Aish process and fail closed after a write failure until the error is surfaced and pending writes are flushed or the process is restarted. Whole-file rewrites such as key rotation, decryption, and template removal should still use atomic encrypted file replacement.
-- Operations that need durable storage or rewrite storage globally must flush pending encrypted writes first. This includes exit, `#push`, `#history`, `#encrypt off`, key rotation, and confirmed history rewrite.
+- Operations that need durable storage or rewrite storage globally must flush pending encrypted writes first. This includes exit, `#sync now`, `#history`, `#encrypt off`, key rotation, and confirmed history rewrite.
 - Encrypted-write completion and failure events are frontend background events. Draining those events should refresh live completion and redraw the prompt when needed.
 - Direct GPG decrypt operations that may need pinentry should enter `UnlockPassthrough`, clear stale live completion state, yield terminal control, set `GPG_TTY` when possible, and restore raw mode and the previous Aish mode after completion or failure.
 - In `startup_unlock = "lazy"` mode, startup decrypt should first use a noninteractive background GPG attempt (`--batch --pinentry-mode error`) so startup never blocks on passphrase entry or lets pinentry fight the raw-mode UI.
@@ -1253,7 +1252,6 @@ Commands:
 
 ```text
 #set-remote <git-url>
-#push
 #sync now
 #sync resolve-union
 #sync continue
@@ -1293,6 +1291,16 @@ Policy:
 - If a category is disabled for sync, Aish updates future `.gitignore` behavior and warns if files may already be tracked.
 - Key rotation requires decrypting existing managed local and repository data with an available private key, choosing one target full fingerprint, and re-encrypting with `#encrypt rotate <key>` before syncing again. If the current machine cannot decrypt the data, it cannot resolve the key conflict safely.
 
+Command boundaries:
+
+- `#set-remote <git-url>` persists the private sync remote only and must not run Git.
+- `#sync` reports sync/encryption status only and must not run Git.
+- `#sync now` is the only manual sync run command. It must stage enabled managed paths, commit only when staged content changed, merge remote updates, and push.
+- `#sync resolve-union` is valid only during an interrupted merge with plaintext Aish-managed conflicts. It must refuse encrypted or unmanaged conflicts.
+- `#sync continue` is valid only during an interrupted merge after the user has manually resolved and staged conflicts.
+- `#sync abort` is valid only during an interrupted merge or rebase.
+- `#sync <schedule>`, `#sync off`, trigger toggles, and content-category toggles only persist sync settings.
+
 Template sharing:
 
 - Keep the private sync remote separate from public/shared template remotes.
@@ -1308,11 +1316,18 @@ Template sharing:
 - Publishing merges by stable template ID/body hash: existing remote templates are kept and local templates are added, so publishing from one machine does not prune templates published by another machine.
 - Fetching templates updates only the local review cache. Local templates change only after `#template import`.
 - `#template analyze <name> [query]` compares fetched templates with local templates and marks each fetched template as `new` or `present`.
-- `#template pending <name> [query]` lists fetched templates for review.
 - `#template import <name> <id|all>` imports selected fetched templates into the local template store.
 - Import deduplicates by stable template ID/body hash, reports already-present templates, and avoids overwriting local templates silently.
 - Template import is usable without enabling private sync.
 - If a configured template remote appears to be a private Aish sync repository, Aish refuses to use it and reports that a separate template remote is required.
+
+Template sharing command boundaries:
+
+- `#template remote add|list|rm` manages named template remote config only.
+- `#template publish <name>` is the only template sharing command that writes to a template remote. Plaintext is the default; `--encrypt <key>` encrypts only the template payload for that recipient.
+- `#template fetch <name>` updates only the local review cache.
+- `#template analyze <name> [query]` reads the review cache and local template store, reports import status, and must not modify local templates.
+- `#template import <name> <id|all>` is the only template sharing command that appends fetched templates into the local template store.
 
 Commit messages:
 
@@ -1323,7 +1338,7 @@ Commit messages:
 
 Sync triggers:
 
-1. `#sync now` runs the manual sync flow immediately. `#push` is an alias.
+1. `#sync now` runs the manual sync flow immediately.
 2. `#sync <schedule>` persists a conservative periodic interval that is checked only at startup. No scheduler files are created.
 3. `#sync startup on|off` controls whether the manual sync flow runs once every startup, independent of the periodic due check.
 4. `#sync exit on|off` controls whether the manual sync flow runs during the exit durability boundary.
@@ -1452,10 +1467,9 @@ Initial command set:
 #template remote add <name> <git-url>
 #template remote list
 #template remote rm <name>
-#template publish <name> [--plain|--encrypt <key>]
+#template publish <name> [--encrypt <key>]
 #template fetch <name>
 #template analyze <name> [query]
-#template pending <name> [query]
 #template import <name> <id|all>
 
 #editor
@@ -1468,7 +1482,6 @@ Initial command set:
 #encrypt off
 
 #set-remote <git-url>
-#push
 #sync now
 #sync resolve-union
 #sync continue

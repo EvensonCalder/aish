@@ -104,10 +104,6 @@ const COMMAND_HELP: &[HelpEntry] = &[
         description: "save the sync remote without running git",
     },
     HelpEntry {
-        usage: "#push",
-        description: "run manual sync now; alias for #sync now",
-    },
-    HelpEntry {
         usage: "#sync [now|abort|continue|resolve-union|off|<schedule>|startup|exit|ai|history|templates|drafts on|off]",
         description: "run sync, resolve sync conflicts, or update sync settings",
     },
@@ -292,8 +288,8 @@ const TEMPLATE_HELP: &[HelpEntry] = &[
         description: "list or remove template sharing remotes",
     },
     HelpEntry {
-        usage: "#template publish <name> [--plain|--encrypt <key>]",
-        description: "publish local templates to a named template-only remote, optionally encrypted",
+        usage: "#template publish <name> [--encrypt <key>]",
+        description: "publish local templates to a named template-only remote",
     },
     HelpEntry {
         usage: "#template fetch <name>",
@@ -302,10 +298,6 @@ const TEMPLATE_HELP: &[HelpEntry] = &[
     HelpEntry {
         usage: "#template analyze <name> [query]",
         description: "compare fetched templates with local templates before importing",
-    },
-    HelpEntry {
-        usage: "#template pending <name> [query]",
-        description: "inspect fetched templates before importing",
     },
     HelpEntry {
         usage: "#template import <name> <id|all>",
@@ -317,10 +309,6 @@ const SYNC_HELP: &[HelpEntry] = &[
     HelpEntry {
         usage: "#set-remote <git-url>",
         description: "save the sync remote without running git",
-    },
-    HelpEntry {
-        usage: "#push",
-        description: "run manual sync now; alias for #sync now",
     },
     HelpEntry {
         usage: "#sync",
