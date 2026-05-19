@@ -10,9 +10,10 @@ use crate::log::EventLevel;
 use crate::sync::{
     GitCommandPlan, StartupSyncDecision, SyncFailureKind, SyncLock, SyncStepOutcome,
     classify_git_sync_step, conservative_sync_plan_for_existing_paths_with_encryption,
-    init_repo_plan, log_sync_failure, maintain_managed_gitattributes, maintain_managed_gitignore,
-    maintain_sync_readme, pull_merge_allow_unrelated_plan, pull_merge_plan, push_plan,
-    startup_sync_decision, tracked_managed_files_warning,
+    disabled_existing_managed_paths_with_encryption, init_repo_plan, log_sync_failure,
+    maintain_managed_gitattributes, maintain_managed_gitignore, maintain_sync_readme,
+    pull_merge_allow_unrelated_plan, pull_merge_plan, push_plan, startup_sync_decision,
+    tracked_managed_files_warning,
 };
 
 use super::{AppState, reports::write_encryption_sync_status};
@@ -155,6 +156,12 @@ pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -
     if !ensure_sync_git_identity(state, out, &root)? {
         return Ok(());
     }
+    warn_disabled_existing_managed_paths(
+        &root,
+        &state.sync_config,
+        state.encryption_config.enabled,
+        out,
+    )?;
 
     for command in conservative_sync_plan_for_existing_paths_with_encryption(
         &root,
@@ -192,7 +199,7 @@ pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -
         }
         if is_pull_command(&command) {
             let pull = sync_pull_plan(&root, false)?.unwrap_or(command);
-            if !run_sync_git_step(state, out, &root, &pull)? {
+            if !run_sync_pull_step(state, out, &root, &pull)? {
                 return Ok(());
             }
             continue;
@@ -219,6 +226,22 @@ pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -
     }
     state.append_event(EventLevel::Info, "sync push completed")?;
     writeln!(out, "sync push completed")?;
+    Ok(())
+}
+
+fn warn_disabled_existing_managed_paths(
+    root: &Path,
+    config: &config::SyncConfig,
+    encryption_enabled: bool,
+    out: &mut impl Write,
+) -> Result<()> {
+    for path in disabled_existing_managed_paths_with_encryption(root, config, encryption_enabled) {
+        writeln!(
+            out,
+            "warning: sync.{}=false; not staging existing Aish file {}; run {} to include it",
+            path.category, path.path, path.enable_command
+        )?;
+    }
     Ok(())
 }
 
@@ -529,7 +552,7 @@ fn run_sync_push_step(
             "sync push needs remote updates; running git pull --no-rebase --no-edit"
         )?;
         let pull = sync_pull_plan(root, false)?.unwrap_or_else(pull_merge_plan);
-        if !run_sync_git_step(state, out, root, &pull)? {
+        if !run_sync_pull_step(state, out, root, &pull)? {
             return Ok(false);
         }
         let retry = run_git_command(root, command)?;
@@ -544,11 +567,46 @@ fn run_sync_push_step(
     Ok(false)
 }
 
+fn run_sync_pull_step(
+    state: &AppState,
+    out: &mut impl Write,
+    root: &Path,
+    command: &GitCommandPlan,
+) -> Result<bool> {
+    let result = run_git_command(root, command)?;
+    if result.success {
+        writeln!(out, "sync step ok: {}", describe_git_command(command))?;
+        return Ok(true);
+    }
+    let detail = result.combined_output();
+    if git_output_suggests_unrelated_histories(&detail)
+        && !command
+            .args
+            .iter()
+            .any(|arg| arg == "--allow-unrelated-histories")
+    {
+        writeln!(
+            out,
+            "sync pull needs unrelated-history merge; retrying with --allow-unrelated-histories"
+        )?;
+        let retry = sync_pull_plan(root, true)?.unwrap_or_else(pull_merge_allow_unrelated_plan);
+        return run_sync_git_step(state, out, root, &retry);
+    }
+    handle_failed_sync_step(state, out, command, result)?;
+    Ok(false)
+}
+
 fn git_output_suggests_remote_changed(output: &str) -> bool {
     let lower = output.to_ascii_lowercase();
     lower.contains("non-fast-forward")
         || lower.contains("fetch first")
         || lower.contains("stale info")
+}
+
+fn git_output_suggests_unrelated_histories(output: &str) -> bool {
+    output
+        .to_ascii_lowercase()
+        .contains("refusing to merge unrelated histories")
 }
 
 fn ensure_sync_origin_remote(

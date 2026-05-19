@@ -389,6 +389,37 @@ fn existing_managed_add_plan_does_not_stage_custom_readme() {
 }
 
 #[test]
+fn disabled_existing_managed_paths_reports_files_excluded_by_category() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::create_dir_all(temp.path().join("history")).unwrap();
+    fs::write(temp.path().join("history/ai.jsonl.gpg"), "ai").unwrap();
+    fs::write(temp.path().join("history/draft.jsonl.gpg"), "draft").unwrap();
+    let config = SyncConfig {
+        ai: false,
+        drafts: false,
+        history: true,
+        templates: true,
+        ..SyncConfig::default()
+    };
+
+    assert_eq!(
+        disabled_existing_managed_paths_with_encryption(temp.path(), &config, true),
+        vec![
+            DisabledManagedPath {
+                category: "ai".to_string(),
+                path: "history/ai.jsonl.gpg".to_string(),
+                enable_command: "#sync ai on".to_string(),
+            },
+            DisabledManagedPath {
+                category: "drafts".to_string(),
+                path: "history/draft.jsonl.gpg".to_string(),
+                enable_command: "#sync drafts on".to_string(),
+            },
+        ]
+    );
+}
+
+#[test]
 fn pull_merge_plan_uses_fixed_git_arguments() {
     assert_eq!(
         pull_merge_plan(),

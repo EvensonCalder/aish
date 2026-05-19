@@ -499,6 +499,8 @@ Implemented:
 - Persist explicit startup and exit sync triggers.
 - Run `#sync now` or its alias `#push` against a configured Git remote.
 - Stage managed enabled paths automatically, commit only when staged content changed, merge remote updates with `git pull --no-rebase --no-edit`, then push.
+- Warn when existing Aish-managed files are present but excluded because their sync category is disabled.
+- Retry pull with `--allow-unrelated-histories` when an existing local sync repository is connected to a populated remote with separate history.
 - Use Git's union merge driver for plaintext Aish JSONL files so independent appends usually merge by keeping both sides.
 - Offer `#sync resolve-union`, `#sync continue`, and `#sync abort` when a conflict still needs a user choice.
 - Log sync failures without leaking secret-like values.

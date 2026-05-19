@@ -77,6 +77,13 @@ pub struct ExistingManagedAddPlan {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DisabledManagedPath {
+    pub category: String,
+    pub path: String,
+    pub enable_command: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitCommandPlan {
     pub program: String,
     pub args: Vec<String>,
@@ -521,6 +528,59 @@ pub fn existing_managed_add_plan_with_encryption(
     ExistingManagedAddPlan {
         paths,
         missing_paths,
+    }
+}
+
+pub fn disabled_existing_managed_paths_with_encryption(
+    root: impl AsRef<Path>,
+    config: &SyncConfig,
+    encryption_enabled: bool,
+) -> Vec<DisabledManagedPath> {
+    let root = root.as_ref();
+    let mut paths = Vec::new();
+    for (category, enabled, bases) in [
+        ("ai", config.ai, &["history/ai.jsonl"][..]),
+        (
+            "history",
+            config.history,
+            &["history/notes.jsonl", "history/regular.jsonl"][..],
+        ),
+        (
+            "templates",
+            config.templates,
+            &["templates/templates.jsonl"][..],
+        ),
+        ("drafts", config.drafts, &["history/draft.jsonl"][..]),
+    ] {
+        if enabled {
+            continue;
+        }
+        for base in bases {
+            for path in storage_path_candidates(base, encryption_enabled) {
+                if root.join(&path).exists() {
+                    paths.push(DisabledManagedPath {
+                        category: category.to_string(),
+                        path,
+                        enable_command: format!("#sync {category} on"),
+                    });
+                }
+            }
+        }
+    }
+    paths.sort_by(|left, right| {
+        left.category
+            .cmp(&right.category)
+            .then_with(|| left.path.cmp(&right.path))
+    });
+    paths
+}
+
+fn storage_path_candidates(path: &str, encryption_enabled: bool) -> Vec<String> {
+    let encrypted = format!("{path}.gpg");
+    if encryption_enabled {
+        vec![encrypted, path.to_string()]
+    } else {
+        vec![path.to_string(), encrypted]
     }
 }
 

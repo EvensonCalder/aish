@@ -386,6 +386,87 @@ fn first_sync_uses_single_remote_branch_when_remote_head_is_unborn() {
 }
 
 #[test]
+fn existing_repo_retries_unrelated_remote_pull_with_merge_option() {
+    let _guard = git_env_guard();
+    let temp = tempfile::tempdir().unwrap();
+    let remote = temp.path().join("remote.git");
+    let seed = temp.path().join("seed");
+    let root = temp.path().join("aish-home");
+
+    run_test_git(temp.path(), ["init", "--bare", remote.to_str().unwrap()]);
+    fs::create_dir_all(&seed).unwrap();
+    run_test_git(&seed, ["init"]);
+    run_test_git(&seed, ["config", "user.name", "Aish Test"]);
+    run_test_git(&seed, ["config", "user.email", "aish@example.invalid"]);
+    run_test_git(&seed, ["config", "commit.gpgsign", "false"]);
+    fs::write(seed.join(".remote-seed"), "remote\n").unwrap();
+    run_test_git(&seed, ["add", ".remote-seed"]);
+    run_test_git(&seed, ["commit", "-m", "remote seed"]);
+    run_test_git(&seed, ["remote", "add", "origin", remote.to_str().unwrap()]);
+    run_test_git(&seed, ["push", "-u", "origin", "HEAD"]);
+
+    fs::create_dir_all(&root).unwrap();
+    run_test_git(&root, ["init"]);
+    run_test_git(&root, ["config", "user.name", "Aish Test"]);
+    run_test_git(&root, ["config", "user.email", "aish@example.invalid"]);
+    run_test_git(&root, ["config", "commit.gpgsign", "false"]);
+    fs::write(root.join(".local-seed"), "local\n").unwrap();
+    run_test_git(&root, ["add", ".local-seed"]);
+    run_test_git(&root, ["commit", "-m", "local seed"]);
+
+    let mut state = sync_state_for_root(&root, &remote);
+    let mut output = Vec::new();
+    run_manual_sync_push(&mut state, &mut output).unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(
+        output.contains(
+            "sync pull needs unrelated-history merge; retrying with --allow-unrelated-histories"
+        ),
+        "{output}"
+    );
+    assert!(
+        output.contains("git pull --no-rebase --no-edit --allow-unrelated-histories origin"),
+        "{output}"
+    );
+    assert!(output.contains("sync push completed"), "{output}");
+    assert_eq!(
+        run_test_git_stdout(
+            temp.path(),
+            [
+                "--git-dir",
+                remote.to_str().unwrap(),
+                "show",
+                "HEAD:.remote-seed"
+            ],
+        ),
+        "remote\n"
+    );
+    assert_eq!(
+        run_test_git_stdout(
+            temp.path(),
+            [
+                "--git-dir",
+                remote.to_str().unwrap(),
+                "show",
+                "HEAD:.local-seed"
+            ],
+        ),
+        "local\n"
+    );
+    let readme = run_test_git_stdout(
+        temp.path(),
+        [
+            "--git-dir",
+            remote.to_str().unwrap(),
+            "show",
+            "HEAD:README.md",
+        ],
+    );
+    assert!(readme.contains("Aish Sync Repository"), "{readme}");
+}
+
+#[test]
 fn sync_skips_commit_when_only_untracked_unmanaged_files_exist() {
     let _guard = git_env_guard();
     let temp = tempfile::tempdir().unwrap();
@@ -425,6 +506,57 @@ fn sync_skips_commit_when_only_untracked_unmanaged_files_exist() {
         "{output}"
     );
     assert!(output.contains("sync push completed"), "{output}");
+}
+
+#[test]
+fn sync_warns_when_existing_managed_files_are_excluded_by_category() {
+    let _guard = git_env_guard();
+    let temp = tempfile::tempdir().unwrap();
+    let remote = temp.path().join("remote.git");
+    let seed = temp.path().join("seed");
+    let root = temp.path().join("aish-home");
+    seed_local_remote(&remote, &seed, &root);
+
+    fs::create_dir_all(root.join("history")).unwrap();
+    fs::write(root.join("history/ai.jsonl.gpg"), "encrypted ai\n").unwrap();
+    fs::write(root.join("history/draft.jsonl.gpg"), "encrypted draft\n").unwrap();
+    let mut state = sync_state_for_root(&root, &remote);
+    state.sync_config.ai = false;
+    state.sync_config.drafts = false;
+    state.encryption_config = EncryptionConfig {
+        enabled: true,
+        ..EncryptionConfig::default()
+    };
+
+    let mut output = Vec::new();
+    run_manual_sync_push(&mut state, &mut output).unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(
+        output.contains(
+            "warning: sync.ai=false; not staging existing Aish file history/ai.jsonl.gpg; run #sync ai on to include it"
+        ),
+        "{output}"
+    );
+    assert!(
+        output.contains(
+            "warning: sync.drafts=false; not staging existing Aish file history/draft.jsonl.gpg; run #sync drafts on to include it"
+        ),
+        "{output}"
+    );
+    assert!(output.contains("sync push completed"), "{output}");
+    let status = run_test_git_stdout(
+        &root,
+        [
+            "status",
+            "--short",
+            "--",
+            "history/ai.jsonl.gpg",
+            "history/draft.jsonl.gpg",
+        ],
+    );
+    assert!(status.contains("?? history/ai.jsonl.gpg"), "{status}");
+    assert!(status.contains("?? history/draft.jsonl.gpg"), "{status}");
 }
 
 #[test]
