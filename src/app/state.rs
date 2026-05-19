@@ -10,7 +10,7 @@ use crate::completion::CompletionCandidate;
 use crate::completion_worker::CompletionWorker;
 use crate::config::{
     AiConfig, CompletionConfig, ContextConfig, EditorConfig, EncryptionConfig, PasteConfig,
-    SyncConfig,
+    SyncConfig, TemplateSharingConfig,
 };
 use crate::encrypted_writer::EncryptedWriteQueue;
 use crate::encryption::{
@@ -104,6 +104,7 @@ pub struct AppState {
     pub pending_locked_notes: Vec<NoteEntry>,
     pub pending_locked_templates: Vec<TemplateEntry>,
     pub sync_config: SyncConfig,
+    pub template_sharing_config: TemplateSharingConfig,
     pub pending_context: Option<PendingContextPrompt>,
     pub pending_private_output: Option<PendingPrivateOutput>,
     pub completion_panel: Vec<String>,
@@ -203,6 +204,7 @@ impl Default for AppState {
             pending_locked_notes: Vec::new(),
             pending_locked_templates: Vec::new(),
             sync_config: SyncConfig::default(),
+            template_sharing_config: TemplateSharingConfig::default(),
             pending_context: None,
             pending_private_output: None,
             completion_panel: Vec::new(),

@@ -15,10 +15,10 @@ use super::{
     AppState, clear_stored_key, help, load_ai_sessions_for_state, parse_key_command,
     parse_template_body, parse_template_find_query, parse_template_subcommand_args,
     parse_template_values, prompt_command, run_manual_sync_push, set_stored_key, set_sync_remote,
-    set_sync_schedule, show_event_log, template_usage, trim_history_for_state,
-    update_ai_config_field, update_completion_config, update_context_config,
-    update_encryption_config, update_paste_config, write_config_report, write_doctor_report,
-    write_editor_report, write_status_report,
+    set_sync_schedule, show_event_log, template_remote_command, template_usage,
+    trim_history_for_state, update_ai_config_field, update_completion_config,
+    update_context_config, update_encryption_config, update_paste_config, write_config_report,
+    write_doctor_report, write_editor_report, write_status_report,
 };
 
 pub(super) fn execute_private_command(
@@ -327,7 +327,8 @@ fn create_template_command(state: &mut AppState, out: &mut impl Write, args: &st
 fn template_command(state: &mut AppState, out: &mut impl Write, args: &str) -> Result<bool> {
     let mut keep_draft = false;
     let subcommand = args.split_whitespace().next();
-    if state.encrypted_storage_is_locked() && subcommand.is_some() {
+    if state.encrypted_storage_is_locked() && template_subcommand_needs_unlocked_storage(subcommand)
+    {
         writeln!(out, "templates are still unlocking; run #unlock")?;
         return Ok(false);
     }
@@ -341,9 +342,30 @@ fn template_command(state: &mut AppState, out: &mut impl Write, args: &str) -> R
         Some("use") => {
             keep_draft = template_use_command(state, out, args)?;
         }
+        Some("remote" | "publish" | "fetch" | "analyze" | "pending" | "import") => {
+            template_remote_command(state, out, args)?;
+        }
         _ => writeln!(out, "{}", template_usage())?,
     }
     Ok(keep_draft)
+}
+
+fn template_subcommand_needs_unlocked_storage(subcommand: Option<&str>) -> bool {
+    matches!(
+        subcommand,
+        Some(
+            "list"
+                | "search"
+                | "find"
+                | "rm"
+                | "replace"
+                | "show"
+                | "use"
+                | "publish"
+                | "analyze"
+                | "import",
+        )
+    )
 }
 
 fn template_list_command(state: &mut AppState, out: &mut impl Write, args: &str) -> Result<()> {

@@ -110,7 +110,28 @@ fn private_command_completion_includes_nested_arguments() {
             .iter()
             .map(|candidate| candidate.replacement.as_str())
             .collect::<Vec<_>>(),
-        ["find", "list", "rm", "replace", "search", "show", "use"]
+        [
+            "analyze", "fetch", "find", "import", "list", "pending", "publish", "remote", "rm",
+            "replace", "search", "show", "use"
+        ]
+    );
+    let template_remote_candidates =
+        complete_private_command_line("#template remote ", "#template remote ".len(), usize::MAX);
+    assert_eq!(
+        template_remote_candidates
+            .iter()
+            .map(|candidate| candidate.replacement.as_str())
+            .collect::<Vec<_>>(),
+        ["add", "list", "rm"]
+    );
+    let template_publish_candidates =
+        complete_private_command_line("#template publish ", "#template publish ".len(), usize::MAX);
+    assert_eq!(
+        template_publish_candidates
+            .iter()
+            .map(|candidate| candidate.replacement.as_str())
+            .collect::<Vec<_>>(),
+        ["--plain", "--encrypt"]
     );
 
     let history_candidates =

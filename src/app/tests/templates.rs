@@ -395,3 +395,325 @@ fn template_commands_report_usage_for_invalid_input() {
         assert!(state.draft.is_empty());
     }
 }
+
+#[test]
+fn template_remote_add_list_rm_persists_config() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("home");
+    let remote = temp.path().join("shared templates.git");
+    let mut state = template_sharing_state(&root);
+
+    let output = run_template_private_command(
+        &mut state,
+        &format!("remote add shared {}", remote.display()),
+    );
+
+    assert!(output.contains(&format!("template.remote.shared={}", remote.display())));
+    assert!(output.contains("no git command run"));
+    assert_eq!(state.template_sharing_config.remotes.len(), 1);
+    assert_eq!(
+        state.template_sharing_config.remotes[0].remote,
+        remote.display().to_string()
+    );
+    let loaded = config::load_config(&root.join("config.toml")).unwrap();
+    assert_eq!(loaded.template_sharing.remotes.len(), 1);
+    assert_eq!(loaded.template_sharing.remotes[0].name, "shared");
+
+    let output = run_template_private_command(&mut state, "remote list");
+    assert!(output.contains(&format!("template remote shared\t{}", remote.display())));
+
+    let output = run_template_private_command(&mut state, "remote rm shared");
+    assert!(output.contains("template remote removed: shared"));
+    let loaded = config::load_config(&root.join("config.toml")).unwrap();
+    assert!(loaded.template_sharing.remotes.is_empty());
+}
+
+#[test]
+fn template_remote_add_rejects_invalid_name_without_persisting() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("home");
+    let mut state = template_sharing_state(&root);
+
+    let output =
+        run_template_private_command(&mut state, "remote add ../bad /tmp/aish-templates.git");
+
+    assert!(output.contains("usage: #template remote add <name> <git-url>"));
+    assert!(state.template_sharing_config.remotes.is_empty());
+    let loaded = config::load_config(&root.join("config.toml")).unwrap();
+    assert!(loaded.template_sharing.remotes.is_empty());
+}
+
+#[test]
+fn template_publish_writes_template_only_remote() {
+    let temp = tempfile::tempdir().unwrap();
+    let remote = temp.path().join("templates.git");
+    run_test_git(temp.path(), ["init", "--bare", remote.to_str().unwrap()]);
+    let root = temp.path().join("home");
+    let mut state = template_sharing_state(&root);
+    run_template_private_command(
+        &mut state,
+        &format!("remote add shared {}", remote.display()),
+    );
+    state
+        .append_template(&TemplateEntry::new("kubectl get pods -n {namespace}"))
+        .unwrap();
+    state
+        .append_template(&TemplateEntry::new("rsync -avz {from} {to}"))
+        .unwrap();
+    fs::create_dir_all(root.join("history")).unwrap();
+    fs::write(root.join("history/regular.jsonl"), "private history\n").unwrap();
+
+    let output = run_template_private_command(&mut state, "publish shared");
+
+    assert!(
+        output.contains("template publish completed: shared (local=2, remote=2, encryption=none)")
+    );
+    let tree = run_test_git_stdout(
+        temp.path(),
+        [
+            "--git-dir",
+            remote.to_str().unwrap(),
+            "ls-tree",
+            "-r",
+            "--name-only",
+            "main",
+        ],
+    );
+    assert!(tree.contains(".aish-template-remote.toml"));
+    assert!(tree.contains("README.md"));
+    assert!(tree.contains("templates/templates.jsonl"));
+    assert!(!tree.contains("history/"));
+    assert!(!tree.contains("config.toml"));
+    let templates = run_test_git_stdout(
+        temp.path(),
+        [
+            "--git-dir",
+            remote.to_str().unwrap(),
+            "show",
+            "main:templates/templates.jsonl",
+        ],
+    );
+    assert!(templates.contains("kubectl get pods"));
+    assert!(templates.contains("rsync -avz"));
+}
+
+#[test]
+fn template_fetch_pending_and_import_are_reviewable_and_deduplicated() {
+    let temp = tempfile::tempdir().unwrap();
+    let remote = temp.path().join("templates.git");
+    run_test_git(temp.path(), ["init", "--bare", remote.to_str().unwrap()]);
+
+    let publisher_root = temp.path().join("publisher");
+    let mut publisher = template_sharing_state(&publisher_root);
+    run_template_private_command(
+        &mut publisher,
+        &format!("remote add shared {}", remote.display()),
+    );
+    publisher
+        .append_template(&TemplateEntry::new("kubectl get pods -n {namespace}"))
+        .unwrap();
+    publisher
+        .append_template(&TemplateEntry::new("rsync -avz {from} {to}"))
+        .unwrap();
+    run_template_private_command(&mut publisher, "publish shared");
+
+    let consumer_root = temp.path().join("consumer");
+    let mut consumer = template_sharing_state(&consumer_root);
+    run_template_private_command(
+        &mut consumer,
+        &format!("remote add shared {}", remote.display()),
+    );
+    consumer
+        .append_template(&TemplateEntry::new("kubectl get pods -n {namespace}"))
+        .unwrap();
+
+    let output = run_template_private_command(&mut consumer, "fetch shared");
+    assert!(output.contains("template fetch completed: shared (templates=2)"));
+
+    let output = run_template_private_command(&mut consumer, "pending shared rsync");
+    let rsync_id = template_id("rsync -avz {from} {to}");
+    assert!(output.contains(&format!("template {rsync_id}\trsync -avz")));
+    assert!(!output.contains("kubectl get pods"));
+
+    let output = run_template_private_command(&mut consumer, "analyze shared");
+    assert!(output.contains(&format!("template {rsync_id}\tnew\trsync -avz")));
+    assert!(output.contains("present\tkubectl get pods"));
+    assert!(output.contains("template analysis completed: fetched=2 matched=2 new=1 present=1"));
+
+    let output = run_template_private_command(&mut consumer, &format!("import shared {rsync_id}"));
+    assert!(output.contains(&format!("template imported: {rsync_id}")));
+    assert!(output.contains("template import completed: imported=1 skipped=0"));
+    let loaded = consumer.load_templates().unwrap();
+    assert_eq!(loaded.items.len(), 2);
+
+    let output = run_template_private_command(&mut consumer, "import shared all");
+    assert!(output.contains("template import completed: imported=0 skipped=2"));
+    let loaded = consumer.load_templates().unwrap();
+    assert_eq!(loaded.items.len(), 2);
+}
+
+#[test]
+fn template_fetch_refuses_private_sync_repository() {
+    let temp = tempfile::tempdir().unwrap();
+    let remote = temp.path().join("private-sync.git");
+    run_test_git(temp.path(), ["init", "--bare", remote.to_str().unwrap()]);
+    let seed = temp.path().join("seed");
+    fs::create_dir_all(&seed).unwrap();
+    run_test_git(&seed, ["init"]);
+    run_test_git(&seed, ["config", "user.name", "Aish Test"]);
+    run_test_git(&seed, ["config", "user.email", "aish@example.invalid"]);
+    fs::write(seed.join(".aish-sync.toml"), "version = 1\n").unwrap();
+    fs::create_dir_all(seed.join("templates")).unwrap();
+    fs::write(
+        seed.join("templates/templates.jsonl"),
+        "{\"body\":\"should not import\"}\n",
+    )
+    .unwrap();
+    run_test_git(
+        &seed,
+        ["add", ".aish-sync.toml", "templates/templates.jsonl"],
+    );
+    run_test_git(&seed, ["commit", "-m", "seed private sync"]);
+    run_test_git(&seed, ["branch", "-M", "main"]);
+    run_test_git(&seed, ["remote", "add", "origin", remote.to_str().unwrap()]);
+    run_test_git(&seed, ["push", "-u", "origin", "HEAD"]);
+
+    let root = temp.path().join("home");
+    let mut state = template_sharing_state(&root);
+    run_template_private_command(
+        &mut state,
+        &format!("remote add shared {}", remote.display()),
+    );
+
+    let output = run_template_private_command(&mut state, "fetch shared");
+
+    assert!(output.contains(
+        "template remote appears to be a private Aish sync repository; use a separate template remote"
+    ));
+    assert!(!output.contains("template fetch completed"));
+}
+
+#[cfg(unix)]
+#[test]
+fn encrypted_template_remote_publish_analyze_and_import_use_local_private_key() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let fake_gpg = write_fake_gpg(&temp);
+    let old_gpg = std::env::var_os("AISH_GPG");
+    unsafe {
+        std::env::set_var("AISH_GPG", &fake_gpg);
+    }
+
+    let remote = temp.path().join("templates.git");
+    run_test_git(temp.path(), ["init", "--bare", remote.to_str().unwrap()]);
+
+    let seed_root = temp.path().join("seed-publisher");
+    let mut seed = template_sharing_state(&seed_root);
+    run_template_private_command(
+        &mut seed,
+        &format!("remote add shared {}", remote.display()),
+    );
+    seed.append_template(&TemplateEntry::new("remote only template"))
+        .unwrap();
+    let output = run_template_private_command(&mut seed, "publish shared");
+    assert!(output.contains("encryption=none"), "{output}");
+
+    let encrypted_root = temp.path().join("encrypted-publisher");
+    let mut publisher = template_sharing_state(&encrypted_root);
+    run_template_private_command(
+        &mut publisher,
+        &format!("remote add shared {}", remote.display()),
+    );
+    publisher
+        .append_template(&TemplateEntry::new("secret deploy {target}"))
+        .unwrap();
+    let output = run_template_private_command(
+        &mut publisher,
+        "publish shared --encrypt test@example.invalid",
+    );
+    assert!(output.contains("encryption=gpg"), "{output}");
+
+    let tree = run_test_git_stdout(
+        temp.path(),
+        [
+            "--git-dir",
+            remote.to_str().unwrap(),
+            "ls-tree",
+            "-r",
+            "--name-only",
+            "main",
+        ],
+    );
+    assert!(tree.contains("README.md"));
+    assert!(tree.contains(".aish-template-remote.toml"));
+    assert!(tree.contains("templates/templates.jsonl.gpg"));
+    assert!(!tree.contains("templates/templates.jsonl\n"));
+    let metadata = run_test_git_stdout(
+        temp.path(),
+        [
+            "--git-dir",
+            remote.to_str().unwrap(),
+            "show",
+            "main:.aish-template-remote.toml",
+        ],
+    );
+    assert!(metadata.contains("encryption = \"gpg\""));
+    assert!(metadata.contains("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
+
+    let consumer_root = temp.path().join("consumer");
+    let mut consumer = template_sharing_state(&consumer_root);
+    run_template_private_command(
+        &mut consumer,
+        &format!("remote add shared {}", remote.display()),
+    );
+    let output = run_template_private_command(&mut consumer, "fetch shared");
+    assert!(output.contains("template fetch completed: shared (templates=2)"));
+
+    let output = run_template_private_command(&mut consumer, "analyze shared secret");
+    let secret_id = template_id("secret deploy {target}");
+    assert!(output.contains(&format!("template {secret_id}\tnew\tsecret deploy")));
+    assert!(output.contains("template analysis completed: fetched=2 matched=1 new=1 present=0"));
+
+    let output = run_template_private_command(&mut consumer, "import shared all");
+    assert!(output.contains("template import completed: imported=2 skipped=0"));
+    let loaded = consumer.load_templates().unwrap();
+    assert_eq!(loaded.items.len(), 2);
+    assert!(
+        loaded
+            .items
+            .iter()
+            .any(|template| template.body == "remote only template")
+    );
+    assert!(
+        loaded
+            .items
+            .iter()
+            .any(|template| template.body == "secret deploy {target}")
+    );
+
+    unsafe {
+        match old_gpg {
+            Some(value) => std::env::set_var("AISH_GPG", value),
+            None => std::env::remove_var("AISH_GPG"),
+        }
+    }
+}
+
+fn template_sharing_state(root: &Path) -> AppState {
+    fs::create_dir_all(root).unwrap();
+    let config_path = root.join("config.toml");
+    config::save_config(&config_path, &config::Config::default()).unwrap();
+    AppState {
+        config_path: Some(config_path),
+        template_store_path: Some(root.join("templates/templates.jsonl")),
+        events_path: Some(root.join("events.jsonl")),
+        ..AppState::default()
+    }
+}
+
+fn run_template_private_command(state: &mut AppState, args: &str) -> String {
+    let mut output = Vec::new();
+    super::super::private_commands::execute_private_command(state, &mut output, "template", args)
+        .unwrap();
+    String::from_utf8(output).unwrap()
+}

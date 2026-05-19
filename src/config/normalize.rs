@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use super::{CompletionConfig, Config, ContextConfig, PasteConfig, PromptConfig, default_aish_dir};
 
 pub fn normalize_config(config: &mut Config) {
@@ -61,4 +63,25 @@ pub fn normalize_config(config: &mut Config) {
     config.encryption.recipient = config.encryption.recipient.trim().to_string();
     config.sync.remote = config.sync.remote.trim().to_string();
     config.sync.schedule = config.sync.schedule.trim().to_string();
+    for remote in &mut config.template_sharing.remotes {
+        remote.name = remote.name.trim().to_string();
+        remote.remote = remote.remote.trim().to_string();
+    }
+    config.template_sharing.remotes.retain(|remote| {
+        !remote.name.is_empty()
+            && valid_template_remote_name(&remote.name)
+            && !remote.remote.is_empty()
+    });
+    let mut names = HashSet::new();
+    config
+        .template_sharing
+        .remotes
+        .retain(|remote| names.insert(remote.name.clone()));
+}
+
+fn valid_template_remote_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
 }

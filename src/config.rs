@@ -10,7 +10,8 @@ pub use layout::DirectoryLayout;
 pub use model::{
     AiConfig, CompletionConfig, CompletionMode, CompletionTabAccept, Config, ContextConfig,
     DraftConfig, EditorConfig, EncryptionConfig, EncryptionStartupUnlockMode, PasteConfig,
-    PromptConfig, ShellConfig, StorageConfig, SyncConfig,
+    PromptConfig, ShellConfig, StorageConfig, SyncConfig, TemplateRemoteConfig,
+    TemplateSharingConfig,
 };
 pub use normalize::normalize_config;
 pub use paths::{default_aish_dir, runtime_aish_dir};
@@ -137,6 +138,26 @@ mod tests {
                 templates: true,
                 drafts: false,
             },
+            template_sharing: TemplateSharingConfig {
+                remotes: vec![
+                    TemplateRemoteConfig {
+                        name: "  shared  ".to_string(),
+                        remote: "  git@example.invalid:templates.git  ".to_string(),
+                    },
+                    TemplateRemoteConfig {
+                        name: "   ".to_string(),
+                        remote: "git@example.invalid:empty-name.git".to_string(),
+                    },
+                    TemplateRemoteConfig {
+                        name: "../bad".to_string(),
+                        remote: "git@example.invalid:bad.git".to_string(),
+                    },
+                    TemplateRemoteConfig {
+                        name: "shared".to_string(),
+                        remote: "git@example.invalid:duplicate.git".to_string(),
+                    },
+                ],
+            },
         };
 
         normalize_config(&mut config);
@@ -175,6 +196,12 @@ mod tests {
             history: false,
             templates: true,
             drafts: false,
+        };
+        expected.template_sharing = TemplateSharingConfig {
+            remotes: vec![TemplateRemoteConfig {
+                name: "shared".to_string(),
+                remote: "git@example.invalid:templates.git".to_string(),
+            }],
         };
         assert_eq!(config, expected);
     }

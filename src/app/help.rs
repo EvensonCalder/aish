@@ -283,6 +283,34 @@ const TEMPLATE_HELP: &[HelpEntry] = &[
         usage: "#template replace <id> <template-body>",
         description: "replace matching templates with a new body",
     },
+    HelpEntry {
+        usage: "#template remote add <name> <git-url>",
+        description: "save or update a named template-only Git remote",
+    },
+    HelpEntry {
+        usage: "#template remote list | #template remote rm <name>",
+        description: "list or remove template sharing remotes",
+    },
+    HelpEntry {
+        usage: "#template publish <name> [--plain|--encrypt <key>]",
+        description: "publish local templates to a named template-only remote, optionally encrypted",
+    },
+    HelpEntry {
+        usage: "#template fetch <name>",
+        description: "fetch templates from a named remote into the review cache",
+    },
+    HelpEntry {
+        usage: "#template analyze <name> [query]",
+        description: "compare fetched templates with local templates before importing",
+    },
+    HelpEntry {
+        usage: "#template pending <name> [query]",
+        description: "inspect fetched templates before importing",
+    },
+    HelpEntry {
+        usage: "#template import <name> <id|all>",
+        description: "import fetched templates without overwriting local templates",
+    },
 ];
 
 const SYNC_HELP: &[HelpEntry] = &[

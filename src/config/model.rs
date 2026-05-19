@@ -22,6 +22,7 @@ pub struct Config {
     pub context: ContextConfig,
     pub encryption: EncryptionConfig,
     pub sync: SyncConfig,
+    pub template_sharing: TemplateSharingConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -229,6 +230,19 @@ pub struct SyncConfig {
     pub history: bool,
     pub templates: bool,
     pub drafts: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct TemplateSharingConfig {
+    pub remotes: Vec<TemplateRemoteConfig>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct TemplateRemoteConfig {
+    pub name: String,
+    pub remote: String,
 }
 
 impl Default for ContextConfig {

@@ -56,6 +56,7 @@ pub fn run() -> Result<()> {
         encrypted_startup_unlock: encrypted_startup.background_unlock,
         encrypted_startup_unlock_message: encrypted_startup.message,
         sync_config: config.sync,
+        template_sharing_config: config.template_sharing,
         editor_temp_root: Some(layout.runtime_cache.join("editor")),
         ..AppState::default()
     };

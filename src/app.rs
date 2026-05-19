@@ -24,6 +24,7 @@ mod selection_state;
 pub mod startup_unlock;
 mod sync_commands;
 mod template_args;
+mod template_remotes;
 
 use config_commands::{
     update_ai_config_field, update_completion_config, update_context_config, update_paste_config,
@@ -58,6 +59,7 @@ use template_args::{
     parse_template_body, parse_template_find_query, parse_template_subcommand_args,
     parse_template_values, template_usage,
 };
+use template_remotes::template_remote_command;
 
 fn normalize_editor_draft_content(content: &str) -> String {
     content

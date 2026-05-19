@@ -56,6 +56,17 @@ move the result into user-facing documentation if it changes behavior.
   - Treat missing GitHub credentials as a skipped optional check, not a product
     failure.
 
+## Template Sharing
+
+- [ ] Extend template sharing review workflows after the first static remote
+  flow is stable.
+  - Add richer diff/preview commands for fetched templates before import.
+  - Add trust/signature guidance for public template remotes if sharing expands
+    beyond known collaborators.
+  - Keep template sharing independent from private sync; do not mix private
+    history, drafts, AI history, notes, config, logs, cache, or secrets into
+    template remotes.
+
 ## PTY And Passthrough Hardening
 
 - [ ] Add focused regressions for any newly reported interactive, raw-mode,
@@ -80,6 +91,13 @@ move the result into user-facing documentation if it changes behavior.
     while encryption is enabled.
 
 ## Documentation And Test Hygiene
+
+- [ ] Design tmux test acceleration/parallelization as a separate effort.
+  - Preserve current single-user terminal semantics while making independent
+    scenarios safe to schedule concurrently.
+  - Do not change tmux assertions or timing as part of unrelated sync,
+    template, or terminal fixes.
+  - Document the approved execution model before changing the harness.
 
 - [ ] Keep the living docs aligned after behavior or test changes:
   - `README.md` for user-facing behavior.

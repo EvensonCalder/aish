@@ -102,7 +102,12 @@ fn private_command_argument_candidates(
         ("history", []) => &["list", "search"],
         ("ai", []) => &["list", "search"],
         ("draft", []) => &["list", "search"],
-        ("template", []) => &["find", "list", "rm", "replace", "search", "show", "use"],
+        ("template", []) => &[
+            "analyze", "fetch", "find", "import", "list", "pending", "publish", "remote", "rm",
+            "replace", "search", "show", "use",
+        ],
+        ("template", ["remote"]) => &["add", "list", "rm"],
+        ("template", ["publish"]) => &["--plain", "--encrypt"],
         ("encrypt", []) => &["on", "off", "rotate", "unlock-mode", "rewrite-history"],
         ("encrypt", ["unlock-mode"]) => &["lazy", "prompt"],
         ("encrypt", ["rewrite-history"]) => &["plan", "run"],

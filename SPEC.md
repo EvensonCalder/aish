@@ -714,6 +714,14 @@ Aish prints a stable `tpl-...` content-hash ID for stored templates. Users use t
 #template use <id> [key=value ...]
 #template rm <id>
 #template replace <id> <template-body>
+#template remote add <name> <git-url>
+#template remote list
+#template remote rm <name>
+#template publish <name> [--plain|--encrypt <key>]
+#template fetch <name>
+#template analyze <name> [query]
+#template pending <name> [query]
+#template import <name> <id|all>
 ```
 
 `#template list` prints one template body per line newest-first. `#template search <query>` prints matching bodies. The `list` form supports the same privacy-confirmed `>` / `>>` / `|` export pseudo-pipe as `#history list`, `#ai list`, and `#draft list`. `#template find <query>` is for operations that need stable `tpl-...` IDs. AI may suggest template items, but Aish never auto-saves them.
@@ -1285,14 +1293,26 @@ Policy:
 - If a category is disabled for sync, Aish updates future `.gitignore` behavior and warns if files may already be tracked.
 - Key rotation requires decrypting existing managed local and repository data with an available private key, choosing one target full fingerprint, and re-encrypting with `#encrypt rotate <key>` before syncing again. If the current machine cannot decrypt the data, it cannot resolve the key conflict safely.
 
-Template sharing TODO:
+Template sharing:
 
 - Keep the private sync remote separate from public/shared template remotes.
-- Add named template-only remotes. They must never stage or fetch private history, AI prompts, drafts, notes, config, logs, cache, or secrets.
-- Publishing templates should write only public template records plus template-repository README/metadata.
-- Fetching templates should import into a reviewable pending set first. The user can list, inspect, search, and import selected templates into the local template store.
-- Import should deduplicate by stable template ID/body hash, report already-present templates, and avoid overwriting local templates silently.
-- Template import should be usable without enabling private sync.
+- Private sync is dynamic personal state; template sharing is static published template content that is fetched, analyzed, and explicitly imported.
+- Named template remotes are configured with `#template remote add <name> <git-url>`.
+- Template remote caches live under `cache/template-remotes/<name>/repo`.
+- Template sharing commands must never stage private history, AI prompts, drafts, notes, config, logs, cache, or secrets.
+- Publishing templates writes only `README.md`, `.aish-template-remote.toml`, and either `templates/templates.jsonl` or `templates/templates.jsonl.gpg`.
+- Template remote README and metadata remain readable even when the template payload is encrypted.
+- `#template publish <name>` publishes plaintext templates. `#template publish <name> --encrypt <key>` resolves the GPG recipient and encrypts the template payload for that recipient.
+- Fetching, analyzing, and importing an encrypted template payload requires the matching local private key. This sharing encryption is independent from private sync's single repository fingerprint rule.
+- Publishing with no local templates still initializes the remote with README, metadata, and an empty template payload so the owner can edit it later.
+- Publishing merges by stable template ID/body hash: existing remote templates are kept and local templates are added, so publishing from one machine does not prune templates published by another machine.
+- Fetching templates updates only the local review cache. Local templates change only after `#template import`.
+- `#template analyze <name> [query]` compares fetched templates with local templates and marks each fetched template as `new` or `present`.
+- `#template pending <name> [query]` lists fetched templates for review.
+- `#template import <name> <id|all>` imports selected fetched templates into the local template store.
+- Import deduplicates by stable template ID/body hash, reports already-present templates, and avoids overwriting local templates silently.
+- Template import is usable without enabling private sync.
+- If a configured template remote appears to be a private Aish sync repository, Aish refuses to use it and reports that a separate template remote is required.
 
 Commit messages:
 
@@ -1429,6 +1449,14 @@ Initial command set:
 #template use <id> [key=value ...]
 #template rm <id>
 #template replace <id> <template-body>
+#template remote add <name> <git-url>
+#template remote list
+#template remote rm <name>
+#template publish <name> [--plain|--encrypt <key>]
+#template fetch <name>
+#template analyze <name> [query]
+#template pending <name> [query]
+#template import <name> <id|all>
 
 #editor
 

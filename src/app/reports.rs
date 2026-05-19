@@ -158,6 +158,19 @@ pub(super) fn write_encryption_sync_status(state: &AppState, out: &mut impl Writ
     writeln!(out, "sync.history={}", state.sync_config.history)?;
     writeln!(out, "sync.templates={}", state.sync_config.templates)?;
     writeln!(out, "sync.drafts={}", state.sync_config.drafts)?;
+    writeln!(
+        out,
+        "template_sharing.remotes={}",
+        state.template_sharing_config.remotes.len()
+    )?;
+    for remote in &state.template_sharing_config.remotes {
+        writeln!(
+            out,
+            "template_sharing.remote.{}={}",
+            remote.name,
+            config_value(&remote.remote)
+        )?;
+    }
     Ok(())
 }
 
