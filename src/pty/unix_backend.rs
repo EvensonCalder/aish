@@ -134,19 +134,19 @@ impl Drop for UnixPtyBackend {
 fn openpty(size: PtySize) -> Result<(File, File)> {
     let mut master = -1;
     let mut slave = -1;
-    let winsize = winsize_from_pty_size(size);
-    let termios = terminal_termios(libc::STDIN_FILENO);
+    let mut winsize = winsize_from_pty_size(size);
+    let mut termios = terminal_termios(libc::STDIN_FILENO);
     let termios_ptr = termios
-        .as_ref()
-        .map(|termios| termios as *const libc::termios)
-        .unwrap_or(std::ptr::null());
+        .as_mut()
+        .map(|termios| termios as *mut libc::termios)
+        .unwrap_or(std::ptr::null_mut());
     let status = unsafe {
         libc::openpty(
             &mut master,
             &mut slave,
             std::ptr::null_mut(),
             termios_ptr,
-            &winsize,
+            &mut winsize,
         )
     };
     if status != 0 {
