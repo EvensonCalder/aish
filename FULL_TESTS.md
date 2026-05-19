@@ -402,21 +402,21 @@ These checks cannot be fully replaced by automation because they depend on human
 
 | ID | Source | What Remains Human |
 | --- | --- | --- |
-| HUMAN-001 | `MANUAL_TESTS.md` H-001 | Inline completion contrast and readability across themes. |
-| HUMAN-002 | `MANUAL_TESTS.md` H-002 | Narrow-terminal visual polish across fonts and terminal emulators. |
-| HUMAN-003 | `MANUAL_TESTS.md` H-003 | Whether full vs word `Tab` acceptance feels intuitive. |
-| HUMAN-004 | `MANUAL_TESTS.md` H-004 | Real OS clipboard and bracketed paste behavior. |
-| HUMAN-005 | `MANUAL_TESTS.md` H-005/H-006 | Real editor success and failure behavior. |
-| HUMAN-006 | `MANUAL_TESTS.md` H-007 | Real `fzf` layout and key handling. |
-| HUMAN-007 | `MANUAL_TESTS.md` H-008 | Broad full-screen program passthrough across platforms. |
-| HUMAN-008 | `MANUAL_TESTS.md` H-009 | Real AI endpoint, network, auth, and rate-limit behavior. |
-| HUMAN-009 | `MANUAL_TESTS.md` H-010 | Real GPG encryption and pinentry. |
-| HUMAN-010 | `MANUAL_TESTS.md` H-011 | Fish behavior across macOS and Linux fish versions. |
-| HUMAN-011 | `MANUAL_TESTS.md` H-012 | Cross-terminal smoke tests. |
-| HUMAN-012 | `MANUAL_TESTS.md` H-013 | Production-shaped home behavior. |
-| HUMAN-013 | `MANUAL_TESTS.md` H-014/H-015 | Real private git remote auth and conflict recovery. |
-| HUMAN-014 | `MANUAL_TESTS.md` H-016 | Accessibility perception. |
-| HUMAN-015 | `MANUAL_TESTS.md` H-017 | Abnormal terminal and child-process interruption. |
+| HUMAN-001 | `MANUAL_TESTS.md` H-001/H-002 | Bash and zsh real rc compatibility, hook preservation, `clear`, and plain `exit`. |
+| HUMAN-002 | `MANUAL_TESTS.md` H-003 | Fish opt-in real rc compatibility across installed fish versions. |
+| HUMAN-003 | `MANUAL_TESTS.md` H-004 | Nested shell foreground behavior that must feel like shell-in-shell operation. |
+| HUMAN-004 | `MANUAL_TESTS.md` H-005 | Real stdin prompts, including write-protected `rm` prompt visibility. |
+| HUMAN-005 | `MANUAL_TESTS.md` H-006 | Broad full-screen, alternate-screen, REPL, SSH, and nested terminal passthrough. |
+| HUMAN-006 | `MANUAL_TESTS.md` H-007/H-008 | Real editor and OS clipboard paste behavior. |
+| HUMAN-007 | `MANUAL_TESTS.md` H-009 | Real `fzf` layout and key handling. |
+| HUMAN-008 | `MANUAL_TESTS.md` H-010 | Completion contrast, narrow-terminal visual quality, and acceptance intuition. |
+| HUMAN-009 | `MANUAL_TESTS.md` H-011 | Private history/template/AI/draft list, search, export, and pipe privacy. |
+| HUMAN-010 | `MANUAL_TESTS.md` H-012 | Real passphrase-protected GPG encryption and pinentry lifecycle. |
+| HUMAN-011 | `MANUAL_TESTS.md` H-013 | Real AI endpoint, network, auth, and context privacy behavior. |
+| HUMAN-012 | `MANUAL_TESTS.md` H-014 | Real private git remote authentication and conflict recovery. |
+| HUMAN-013 | `MANUAL_TESTS.md` H-015 | Fedora/openEuler and non-Debian Linux smoke validation. |
+| HUMAN-014 | `MANUAL_TESTS.md` H-016/H-017 | Cross-terminal rendering and production-shaped home behavior. |
+| HUMAN-015 | `MANUAL_TESTS.md` H-018 | Abnormal terminal, child-process, GPG, and recovery behavior. |
 
 ## Failure Record Template
 

@@ -1,16 +1,47 @@
-# Aish Manual-Only Test List
+# Aish Manual Test Checklist
 
-This file lists the remaining checks that should still be done by a human in a real terminal. Deterministic workflows from the old manual checklist have been moved into Rust, expect, or tmux automation.
+This file lists the checks that still need a human in a real terminal. It is not
+the full regression suite. Deterministic behavior belongs in Rust, expect, or
+tmux automation; when a manual failure can be reproduced, add an automated
+regression at the lowest practical layer.
 
-Run the automated manual-equivalent tmux workflows with:
+Use `FULL_TESTS.md` for the complete catalog and `TESTING_MANUAL.md` for the
+step-by-step distributed testing guide.
+
+## Current Baseline
+
+The default automated suite now covers ordinary shell commands, bash/zsh backend
+state, shell rc hook inheritance, `clear` redraw, `exit`, prompt editing,
+completion mechanics, private commands, templates, editor smoke, paste review,
+local bare-repo sync, fake-GPG encryption migration, stdin-oriented passthrough,
+unknown TUI passthrough, and the write-protected `rm` prompt regression.
+
+Fish runtime support is not opt-in, but fish automated tests are opt-in because
+fish may be missing and cross-platform fish behavior still needs wider version
+coverage. Native Windows is not a primary target for this PTY implementation;
+use WSL unless native Windows support is explicitly being tested.
+
+Before running human checks, run at least:
 
 ```sh
-cargo test --test tmux_capture tmux_manual -- --test-threads=1 --nocapture
+cargo fmt --check
+cargo build
+cargo test --test pty_backend -- --nocapture
+cargo test --test expect_runner -- --test-threads=1 --nocapture
+cargo test --test tmux_capture -- --test-threads=1 --nocapture
+git diff --check
 ```
 
-Those tmux workflows cover common shell commands, prompt editing keys, completion config and truncation, private commands and notes, templates, external editor smoke, default `$HOME/.aish`, AI/context/sync config, local sync, `less` passthrough smoke, and startup failure messages.
+Recommended opt-in fish automation when fish is installed:
 
-Use an isolated home for every human manual run unless the test explicitly asks for production-home behavior:
+```sh
+AISH_TEST_FISH=1 cargo test --test pty_backend -- --nocapture
+AISH_TEST_FISH=1 cargo test --test tmux_capture tmux_common_shell_workflow_matches_fish_backend_real_terminal_screen -- --nocapture
+AISH_TEST_FISH=1 cargo test --test tmux_capture tmux_backend_rc_inheritance_matches_fish_real_terminal_screen -- --nocapture
+AISH_TEST_FISH=1 cargo test --test tmux_capture tmux_rm_write_protected_prompt_waits_for_user_input_fish_backend -- --nocapture
+```
+
+Use an isolated home for normal manual runs:
 
 ```sh
 cargo build
@@ -20,39 +51,46 @@ export AISH_HOME="$AISH_MANUAL_ROOT/home"
 ./target/debug/aish
 ```
 
-## Human-Only Tests
+For shell-specific checks, set both a disposable `HOME` and an isolated
+`AISH_HOME` so user rc files cannot damage personal state.
 
-| ID | What To Do | Expected Behavior | Why It Stays Manual |
+## Human-Only Checks
+
+| ID | Area | What To Do | Expected Behavior |
 | --- | --- | --- | --- |
-| H-001 | In at least two real terminal themes, type a prefix that has an inline completion and pause before accepting it. | The inline suggestion is visibly dim, readable, aligned with the typed command, and not confused with committed text. | Tmux can assert text, but not whether the color/contrast feels correct to a user. |
-| H-002 | In a narrow real terminal, trigger long completions near the right edge. | The below-prompt panel stays single-line per candidate, truncates with `...`, and the inline hint does not overlap other UI. | Tmux covers basic elision; human review is still needed for visual polish across fonts and terminals. |
-| H-003 | Use `Tab` with both completion modes: full accept and word accept. | Full mode accepts the complete suggestion; word mode accepts only through the next shell word; the behavior feels predictable. | The mechanics are automated; the remaining check is UX intuition. |
-| H-004 | Paste one single-line command from the OS clipboard, then paste several lines from the OS clipboard. | Single-line paste inserts text without executing. Multi-line paste opens the review/editor flow and never silently executes. | Real clipboard and terminal bracketed-paste behavior varies by terminal emulator. |
-| H-005 | Use your normal editor through `Ctrl-X Ctrl-E`, for example `vim`, `nvim`, or another full-screen editor. Save a command and exit. | Aish restores the terminal, shows the editor draft summary, and executes only after `Enter`. | Fake-editor and smoke flows are automated; real editor terminal behavior is environment-specific. |
-| H-006 | Make the real editor exit with a failure or kill it from another terminal. | Aish reports the editor failure, preserves the original draft where possible, and leaves the terminal recoverable. | Failure behavior depends on the editor and terminal. |
-| H-007 | Use real `fzf` pickers for history, file paths with spaces, templates, git branches, and environment variables. Confirm and cancel each picker. | Confirmed choices insert the expected shell-safe value; canceled pickers preserve the previous draft. | Fake picker cancellation is automated; real `fzf` layout and key handling still need human verification. |
-| H-008 | Run full-screen or interactive passthrough programs such as `vim`, `nvim`, `top`, `node`, `ssh`, or nested `tmux`. Use their normal keybindings, then exit. | Aish forwards keys to the program and recovers its prompt after the program exits. | `less` and `python3` REPL smokes are automated; broad alternate-screen and job-control behavior is not portable enough for one tmux assertion. |
-| H-009 | Test a disposable real OpenAI-compatible endpoint and API key. Submit an AI prompt that returns command JSON. | Aish displays command candidates, redacts secrets in status/log output, and never auto-executes returned commands. | Real network, auth, provider errors, and rate limits should not be part of the default automated suite. |
-| H-010 | With an isolated `GNUPGHOME`, disposable passphrase-protected test key, and isolated `AISH_HOME`, run `#encrypt on <fingerprint>`, `#key set`, relaunch without the environment API key, rotate to a second key if available, and run `#encrypt off`. | GPG/pinentry gets terminal control safely, secrets are not printed, encrypted files are written as `*.jsonl.gpg`, stored API key fallback works only after successful decrypt, and plaintext/encrypted state claims are accurate. Latest manual validation reported no issues. | Fake-GPG automation covers command boundaries and storage migration; real pinentry, agent caching, and passphrase UX require a real terminal. |
-| H-011 | Validate fish backend behavior on macOS and representative Linux distributions with different fish versions. | Fish either passes the same user-visible workflows as bash/zsh or remains clearly marked experimental with known issues. | Fish startup and interactive behavior can differ by platform/version; default automation keeps fish opt-in. |
-| H-012 | Run the smoke workflow on real macOS and Linux terminals: Terminal.app, iTerm2, Alacritty, GNOME Terminal, and Konsole where available. | Prompt redraw, Unicode, completion, paste, and passthrough behavior remain stable. | Cross-terminal rendering and input behavior cannot be fully proven on one developer machine. |
-| H-013 | Intentionally use a disposable but production-shaped `$HOME` without `AISH_HOME`. Optionally inspect a real personal `~/.aish` only after backing it up. | Aish creates or reuses `$HOME/.aish` without touching unrelated files; history/templates/config persist where expected. | Automated tests use disposable homes; personal home migration is user-risky and must be deliberate. |
-| H-014 | Configure a real private git remote over SSH or HTTPS and run `#push` with disposable Aish data. | Aish uses conservative pull/add/commit/push behavior, does not create scheduler files, and does not rewrite history. | Local bare remotes are automated; real auth prompts and remote hosting behavior need human judgment. |
-| H-015 | Create a real sync conflict in a disposable remote, inspect the failure, then recover manually. | Aish reports the conflict/failure and does not auto-resolve, delete tracked files, or rewrite remote history. | Deterministic conflict failure is automated; human review verifies the message is actionable. |
-| H-016 | Use accessibility settings such as high contrast, large fonts, unusual fonts, or screen zoom while triggering completion, modes, and editor drafts. | Important text remains visible and non-overlapping; no UI relies only on subtle color. | Accessibility perception must be checked by a human. |
-| H-017 | Force an abnormal interruption, such as closing the terminal window during Aish or killing an interactive child process. | The terminal is recoverable, and `stty sane` plus relaunch returns to normal if the OS terminated the process mid-raw-mode. | OS and terminal shutdown behavior varies; automation can only cover controlled exits. |
+| H-001 | Bash rc compatibility | Launch with a disposable bash `HOME` whose `.bashrc` defines aliases, functions, `PATH`, `PROMPT_COMMAND`, and `PS0`. Run the alias, function, a command that reads the modified `PATH`, `clear`, and plain `exit`. | User shell state works, prompt-command side effects are preserved where meaningful, hook/PS0 noise is not displayed as command output, `clear` leaves the prompt at the correct position, and `exit` ends Aish cleanly without a backend PTY error. |
+| H-002 | Zsh rc compatibility | Launch with a disposable zsh `HOME` whose `.zshrc` defines aliases, functions, `PATH`, direct `preexec`/`precmd`, and `preexec_functions`/`precmd_functions`. Run the same command/state checks as bash. | User zsh hooks still run, hook output does not leak into Aish command output, command start/finish reporting remains stable, `clear` redraws correctly, and `exit` is clean. |
+| H-003 | Fish opt-in compatibility | If fish is installed, launch with a disposable fish `HOME` and `SHELL="$(command -v fish)"`. Use `config.fish` with aliases/functions, `fish_preexec`, `fish_postexec`, prompt functions, and `PATH`. Repeat command, `clear`, and `exit` checks. | Fish either matches bash/zsh user-visible behavior or the exact fish version/platform difference is recorded. A fish-only failure is a compatibility issue, not a default-suite failure unless fish was explicitly required for the platform. |
+| H-004 | Nested shell foreground behavior | From Aish, run `bash`; inside it run `bash`, `zsh`, or fish if installed; run `clear`, `sleep 10` then `Ctrl-C`, a few normal commands, then exit each layer one at a time. | The foreground program owns input while active. Aish does not interpret child-shell keys, does not rely on prompt guessing, and recovers only after the foreground shell exits. |
+| H-005 | TTY stdin prompts | Run stdin/confirmation commands such as `cat`, `grep needle`, `sed 's/a/A/'`, `awk '{print $1}'`, and a disposable write-protected `rm` prompt. Use EOF or the program's expected answer to exit. | Prompts are visible before the answer is typed, child echo/input behavior is normal, EOF works, and Aish prompt returns usable. |
+| H-006 | Full-screen and alternate-screen programs | Run real interactive tools available on the machine: `vim`/`nvim`, `less`, `top`, `fzf`, `node` or another REPL, `ssh` to a disposable or intentionally invalid target, and nested `tmux`/`screen` if available. | The program receives normal keys, alternate screen state is restored, no timeout is needed, and Aish redraws a usable prompt after the child exits. |
+| H-007 | Real editor flow | Use the normal editor through `Ctrl-X Ctrl-E`. Test save-and-return, content beginning with `#`, a large draft, and editor failure or kill from another terminal if practical. | Editor content does not execute until explicit `Enter`; editor-submitted `#` text follows the editor/raw-shell path; failures preserve the previous draft where possible and leave the terminal recoverable. |
+| H-008 | Real OS clipboard paste | Paste one single-line command and then several lines from the OS clipboard in at least one real terminal emulator. | Single-line paste inserts without executing. Multiline paste enters the review/editor flow and never silently executes. |
+| H-009 | Real `fzf` pickers | With real `fzf`, confirm and cancel history, file, template, git-branch, and environment-variable pickers, including paths with spaces. | Confirmed choices insert shell-safe text; canceled pickers preserve the previous draft and terminal layout. |
+| H-010 | Completion visual quality | In light and dark themes, type prefixes that show inline completion, below-prompt rows, long candidates near the right edge, and `Tab` full/word acceptance. Repeat in a narrow terminal and with a large font if possible. | Suggestions are readable but clearly uncommitted, text does not overlap, rows elide with `...`, and acceptance behavior feels predictable. |
+| H-011 | Private history/template/AI/draft listing privacy | Create disposable history, drafts, and templates; create AI history only if a disposable endpoint is available. Run `#history list`, `#ai list`, `#draft list`, `#template list`, each matching `search`, and the `>` / `|` export forms. Accept and reject confirmations. | List/search output is one item per line, including the empty-list case. Export or pipe of private content asks for confirmation first, refusal writes/runs nothing, and accepted output goes only to the requested file or command. |
+| H-012 | Real GPG pinentry and encryption lifecycle | With isolated `GNUPGHOME`, disposable passphrase-protected test keys, and isolated `AISH_HOME`, test `#encrypt on <fingerprint>`, `#encrypt unlock-mode prompt`, restart and unlock, `#key set`, optional key rotation, `#encrypt off`, and direct `gpg` passthrough. | Pinentry gets terminal control safely, secrets are not printed, encrypted storage uses `*.jsonl.gpg`, plaintext managed JSONL files disappear after successful encryption, unlock failures are readable, and terminal state recovers after every prompt. |
+| H-013 | Real AI endpoint and context privacy | Only with a disposable OpenAI-compatible endpoint/key, submit AI prompts that return command JSON and run safe context pseudo-pipes with confirmation on and off. | Returned commands are shown for selection and never auto-execute. Context output is redacted/truncated as configured, and dangerous context commands still require confirmation. |
+| H-014 | Sync with real auth, optional | Use a non-production SSH or HTTPS remote only when the tester intentionally has credentials. Also test the local bare-repo path if real auth is unavailable. Create a conflict and recover manually. | Lack of GitHub or remote credentials is not a failure. With real auth, prompts do not wedge Aish. Aish does not auto-resolve conflicts, delete tracked files, create scheduler files, or rewrite remote history. |
+| H-015 | Fedora/openEuler and non-Debian Linux smoke | On Fedora-family systems, including openEuler when available, run the default automated suite plus bash/zsh real-terminal smoke. Record whether the tester is root, package versions, locale, and terminal emulator. | Git output wording or missing GitHub auth is not treated as product failure. Startup errors, unwritable-home errors, `rm` prompts, shell rc hooks, `clear`, and passthrough behavior are recorded exactly if they differ. |
+| H-016 | Cross-terminal and cross-platform rendering | Repeat a short smoke workflow in representative terminals: Terminal.app, iTerm2, Ghostty, Alacritty, GNOME Terminal, Konsole, and WSL terminal hosts where available. | Prompt redraw, Unicode, completion, paste, and passthrough behavior remain stable across real terminal emulators. |
+| H-017 | Production-shaped home | After isolated tests pass, use a disposable normal-looking `HOME` with `AISH_HOME` unset. Optionally inspect a personal `~/.aish` only after backing it up and without destructive sync/encryption. | Aish creates or reuses `$HOME/.aish` only, does not touch unrelated files, and persists history/templates/config/logs as expected. |
+| H-018 | Abnormal interruption and recovery | Close the terminal while Aish is running, kill an interactive child from another terminal, kill GPG/pinentry if used, and recover with `Ctrl-C`, `Ctrl-D`, `Ctrl-L`, `stty sane`, or `reset` as needed. | The recovery path is clear. Any terminal wedge, lost input, stuck raw mode, or child process leak is recorded as high priority. |
 
-## Recording Failures
+## Failure Report Requirements
 
-When a human-only test fails, record:
+For every failure, record:
 
-- Aish commit hash.
-- Operating system and terminal emulator.
-- Backend shell and version.
-- Whether `AISH_HOME` or default `$HOME/.aish` was used.
+- Aish commit hash, or state that the source package has no `.git` metadata.
+- Operating system, kernel, architecture, terminal emulator, and locale.
+- Backend shell path and version.
+- Whether the tester is root.
+- Whether `AISH_HOME`, disposable `HOME`, or personal `$HOME/.aish` was used.
 - Exact command/key sequence.
 - Expected behavior from this file.
-- Actual visible behavior.
-- Whether the prompt remained usable afterward.
+- Actual visible behavior, including screenshots for rendering issues.
+- Whether the prompt remained usable afterward and what recovery step worked.
 
-Any reproducible failure should get an automated regression at the highest practical layer: Rust for pure logic, expect for byte-stream terminal interaction, or tmux capture for final rendered screen state.
+Any reproducible failure should become an automated regression unless it depends
+on real credentials, real pinentry UI, human visual judgment, or terminal
+emulator rendering that cannot be captured reliably.
