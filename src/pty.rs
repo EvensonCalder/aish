@@ -1,5 +1,5 @@
 use std::fmt;
-use std::io::Write;
+use std::io::{ErrorKind, Write};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
@@ -177,12 +177,13 @@ impl PtyBackend {
     }
 
     fn initialize_shell(&mut self, launch: &ShellLaunch) -> Result<()> {
-        self.write_raw(&launch.init_command)?;
         if self.uses_control_channel() {
+            self.write_shell_integration_init(&launch.init_command)?;
             let (raw, ready) =
                 self.read_until_control_ready(Some(Duration::from_secs(5)), |_, _| Ok(()))?;
             self.initial_cwd = Some(ready.cwd).or_else(|| parse_ready_cwd(&raw));
         } else {
+            self.write_raw(&launch.init_command)?;
             let mut on_wait = no_wait;
             let raw = self.read_until_ready(Duration::from_secs(5), &mut on_wait)?;
             self.initial_cwd = parse_ready_cwd(&raw);
@@ -190,6 +191,43 @@ impl PtyBackend {
         let _ = self.drain_for(Duration::from_millis(150));
         let _ = self.drain_control_events();
         Ok(())
+    }
+
+    fn write_shell_integration_init(&mut self, init_command: &str) -> Result<()> {
+        for line in init_command.split_inclusive('\n') {
+            self.write_raw_startup_line(line)?;
+            let _ = self.drain_for(Duration::from_millis(2));
+        }
+        if !init_command.ends_with('\n') {
+            self.write_raw_startup_line("\n")?;
+        }
+        Ok(())
+    }
+
+    fn write_raw_startup_line(&mut self, text: &str) -> Result<()> {
+        let bytes = text.as_bytes();
+        let mut written = 0;
+        while written < bytes.len() {
+            match self.writer.write(&bytes[written..]) {
+                Ok(0) => bail!("failed to write to PTY: wrote zero bytes"),
+                Ok(n) => written += n,
+                Err(err) if err.kind() == ErrorKind::Interrupted => {}
+                Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                    let _ = self.drain_for(Duration::from_millis(10));
+                }
+                Err(err) => return Err(err).context("failed to write to PTY"),
+            }
+        }
+        loop {
+            match self.writer.flush() {
+                Ok(()) => return Ok(()),
+                Err(err) if err.kind() == ErrorKind::Interrupted => {}
+                Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                    let _ = self.drain_for(Duration::from_millis(10));
+                }
+                Err(err) => return Err(err).context("failed to flush PTY"),
+            }
+        }
     }
 
     pub fn initial_cwd(&self) -> Option<&str> {
@@ -213,11 +251,28 @@ impl PtyBackend {
     }
 
     pub fn write_raw_bytes(&mut self, bytes: &[u8]) -> Result<()> {
-        self.writer
-            .write_all(bytes)
-            .context("failed to write to PTY")?;
-        self.writer.flush().context("failed to flush PTY")?;
-        Ok(())
+        let mut written = 0;
+        while written < bytes.len() {
+            match self.writer.write(&bytes[written..]) {
+                Ok(0) => bail!("failed to write to PTY: wrote zero bytes"),
+                Ok(n) => written += n,
+                Err(err) if err.kind() == ErrorKind::Interrupted => {}
+                Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                Err(err) => return Err(err).context("failed to write to PTY"),
+            }
+        }
+        loop {
+            match self.writer.flush() {
+                Ok(()) => return Ok(()),
+                Err(err) if err.kind() == ErrorKind::Interrupted => {}
+                Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                Err(err) => return Err(err).context("failed to flush PTY"),
+            }
+        }
     }
 
     pub fn input_needs_more_lines(&self, input: &str) -> Result<ContinuationCheck> {

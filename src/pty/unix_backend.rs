@@ -8,7 +8,7 @@ use std::process::{Child, Command, Stdio};
 use anyhow::{Context, Result, bail};
 
 use super::PtySize;
-use super::control::{CONTROL_FD, set_cloexec};
+use super::control::{CONTROL_FD, set_cloexec, set_nonblocking};
 
 pub(super) struct UnixPtyBackend {
     master: File,
@@ -23,6 +23,8 @@ impl UnixPtyBackend {
     ) -> Result<Self> {
         let (master, slave) = openpty(size)?;
         set_cloexec(master.as_raw_fd(), true).context("failed to mark PTY master close-on-exec")?;
+        set_nonblocking(master.as_raw_fd(), true)
+            .context("failed to set PTY master nonblocking")?;
 
         let stdin = slave
             .try_clone()
@@ -85,6 +87,7 @@ impl UnixPtyBackend {
         match self.master.read(&mut buf) {
             Ok(0) => Ok(None),
             Ok(n) => Ok(Some(buf[..n].to_vec())),
+            Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => Ok(Some(Vec::new())),
             Err(err) if err.kind() == std::io::ErrorKind::Interrupted => Ok(Some(Vec::new())),
             Err(err) => Err(err).context("failed to read PTY"),
         }

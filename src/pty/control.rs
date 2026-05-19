@@ -88,7 +88,7 @@ pub(super) fn set_cloexec(fd: RawFd, enabled: bool) -> Result<()> {
     Ok(())
 }
 
-fn set_nonblocking(fd: RawFd, enabled: bool) -> Result<()> {
+pub(super) fn set_nonblocking(fd: RawFd, enabled: bool) -> Result<()> {
     let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
     if flags < 0 {
         return Err(std::io::Error::last_os_error()).context("failed to read fd status flags");

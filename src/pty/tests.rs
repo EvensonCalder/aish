@@ -119,6 +119,23 @@ fn fish_launch_uses_event_functions_after_user_config() {
 }
 
 #[test]
+fn shell_integration_init_commands_keep_pty_input_lines_short() {
+    for shell in ["/bin/bash", "/bin/zsh", "/usr/bin/fish"] {
+        let launch = shell_launch(shell);
+        let longest = launch
+            .init_command
+            .lines()
+            .map(str::len)
+            .max()
+            .unwrap_or_default();
+        assert!(
+            longest <= 240,
+            "{shell} init command has a PTY input line of {longest} bytes"
+        );
+    }
+}
+
+#[test]
 fn parses_marker_and_hides_it_from_output() {
     let marker = "__AISH_STATUS__123__";
     let raw = format!("hello\r\n{marker}7\r\n");
