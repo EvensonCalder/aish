@@ -91,7 +91,7 @@ fn managed_gitattributes_preserves_user_content_and_is_idempotent() {
 #[test]
 fn sync_readme_is_created_once_and_preserves_user_edits() {
     let temp = tempfile::tempdir().unwrap();
-    let path = temp.path().join("SYNC.md");
+    let path = temp.path().join("README.md");
 
     maintain_sync_readme(&path).unwrap();
     let first = fs::read_to_string(&path).unwrap();
@@ -101,6 +101,7 @@ fn sync_readme_is_created_once_and_preserves_user_edits() {
     assert_eq!(first, second);
     assert!(first.contains("Aish Sync Repository"));
     assert!(first.contains("managed by Aish sync"));
+    assert!(first.contains("BEGIN AISH MANAGED SYNC README"));
 
     fs::write(&path, "custom sync readme\n").unwrap();
     maintain_sync_readme(&path).unwrap();
@@ -285,7 +286,7 @@ fn managed_add_plan_syncs_user_content_categories_by_default() {
             paths: vec![
                 ".gitattributes".to_string(),
                 ".gitignore".to_string(),
-                "SYNC.md".to_string(),
+                "README.md".to_string(),
                 "history/ai.jsonl".to_string(),
                 "history/draft.jsonl".to_string(),
                 "history/notes.jsonl".to_string(),
@@ -308,7 +309,7 @@ fn managed_add_plan_can_disable_all_content_categories() {
 
     assert_eq!(
         managed_add_plan(&config).paths,
-        vec![".gitattributes", ".gitignore", "SYNC.md"]
+        vec![".gitattributes", ".gitignore", "README.md"]
     );
 }
 
@@ -327,7 +328,7 @@ fn managed_add_plan_uses_gpg_paths_when_encryption_is_enabled() {
         vec![
             ".gitattributes",
             ".gitignore",
-            "SYNC.md",
+            "README.md",
             "history/ai.jsonl.gpg",
             "history/draft.jsonl.gpg",
             "history/notes.jsonl.gpg",
@@ -342,6 +343,7 @@ fn existing_managed_add_plan_skips_missing_enabled_paths() {
     let temp = tempfile::tempdir().unwrap();
     fs::create_dir_all(temp.path().join("history")).unwrap();
     fs::write(temp.path().join(".gitignore"), "").unwrap();
+    maintain_sync_readme(temp.path().join("README.md")).unwrap();
     fs::write(temp.path().join("history/regular.jsonl"), "{}").unwrap();
     let config = SyncConfig {
         ai: false,
@@ -358,7 +360,7 @@ fn existing_managed_add_plan_skips_missing_enabled_paths() {
         vec![
             ".gitattributes",
             ".gitignore",
-            "SYNC.md",
+            "README.md",
             "history/regular.jsonl"
         ]
     );
@@ -366,6 +368,24 @@ fn existing_managed_add_plan_skips_missing_enabled_paths() {
         plan.missing_paths,
         vec!["history/notes.jsonl", "templates/templates.jsonl"]
     );
+}
+
+#[test]
+fn existing_managed_add_plan_does_not_stage_custom_readme() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(temp.path().join("README.md"), "project readme\n").unwrap();
+    let config = SyncConfig {
+        ai: false,
+        drafts: false,
+        history: false,
+        templates: false,
+        ..SyncConfig::default()
+    };
+
+    let plan = existing_managed_add_plan(temp.path(), &config);
+
+    assert_eq!(plan.paths, vec![".gitattributes", ".gitignore"]);
+    assert_eq!(plan.missing_paths, vec!["README.md"]);
 }
 
 #[test]
@@ -498,7 +518,7 @@ fn conservative_sync_plan_orders_fixed_steps() {
                         "--".to_string(),
                         ".gitattributes".to_string(),
                         ".gitignore".to_string(),
-                        "SYNC.md".to_string(),
+                        "README.md".to_string(),
                         "history/ai.jsonl".to_string(),
                         "history/draft.jsonl".to_string(),
                         "history/notes.jsonl".to_string(),
@@ -555,7 +575,7 @@ fn conservative_sync_plan_adds_only_metadata_when_categories_are_disabled() {
                 "--".to_string(),
                 ".gitattributes".to_string(),
                 ".gitignore".to_string(),
-                "SYNC.md".to_string()
+                "README.md".to_string()
             ]
         }
     );

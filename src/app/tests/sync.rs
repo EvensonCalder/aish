@@ -88,8 +88,8 @@ fn sync_now_runs_against_configured_local_git_remote() {
     run_test_git(&seed, ["config", "user.name", "Aish Test"]);
     run_test_git(&seed, ["config", "user.email", "aish@example.invalid"]);
     run_test_git(&seed, ["config", "commit.gpgsign", "false"]);
-    fs::write(seed.join("README.md"), "seed\n").unwrap();
-    run_test_git(&seed, ["add", "README.md"]);
+    fs::write(seed.join(".seed"), "seed\n").unwrap();
+    run_test_git(&seed, ["add", ".seed"]);
     run_test_git(&seed, ["commit", "-m", "seed"]);
     run_test_git(&seed, ["remote", "add", "origin", remote.to_str().unwrap()]);
     run_test_git(&seed, ["push", "-u", "origin", "HEAD"]);
@@ -143,7 +143,7 @@ fn sync_now_runs_against_configured_local_git_remote() {
 
     let output = String::from_utf8(output).unwrap();
     assert!(
-        output.contains("sync step ok: git add -- .gitattributes .gitignore SYNC.md history/ai.jsonl history/draft.jsonl history/notes.jsonl history/regular.jsonl templates/templates.jsonl"),
+        output.contains("sync step ok: git add -- .gitattributes .gitignore README.md history/ai.jsonl history/draft.jsonl history/notes.jsonl history/regular.jsonl templates/templates.jsonl"),
         "{output}"
     );
     assert!(
@@ -155,7 +155,7 @@ fn sync_now_runs_against_configured_local_git_remote() {
     assert!(output.contains("sync push completed"), "{output}");
     assert!(root.join(".gitignore").exists());
     assert!(root.join(".gitattributes").exists());
-    assert!(root.join("SYNC.md").exists());
+    assert!(root.join("README.md").exists());
     let pushed_history = run_test_git_stdout(
         temp.path(),
         [
@@ -256,7 +256,7 @@ fn first_sync_merges_existing_remote_when_local_home_was_not_git_repo() {
     run_test_git(&seed, ["config", "commit.gpgsign", "false"]);
     crate::sync::maintain_managed_gitignore(seed.join(".gitignore")).unwrap();
     crate::sync::maintain_managed_gitattributes(seed.join(".gitattributes")).unwrap();
-    crate::sync::maintain_sync_readme(seed.join("SYNC.md")).unwrap();
+    crate::sync::maintain_sync_readme(seed.join("README.md")).unwrap();
     fs::write(
         seed.join("history/regular.jsonl"),
         "{\"command\":\"from-remote\"}\n",
@@ -269,7 +269,7 @@ fn first_sync_merges_existing_remote_when_local_home_was_not_git_repo() {
             "--",
             ".gitattributes",
             ".gitignore",
-            "SYNC.md",
+            "README.md",
             "history/regular.jsonl",
         ],
     );
@@ -323,7 +323,7 @@ fn first_sync_uses_single_remote_branch_when_remote_head_is_unborn() {
     run_test_git(&seed, ["config", "commit.gpgsign", "false"]);
     crate::sync::maintain_managed_gitignore(seed.join(".gitignore")).unwrap();
     crate::sync::maintain_managed_gitattributes(seed.join(".gitattributes")).unwrap();
-    crate::sync::maintain_sync_readme(seed.join("SYNC.md")).unwrap();
+    crate::sync::maintain_sync_readme(seed.join("README.md")).unwrap();
     fs::write(
         seed.join("history/regular.jsonl"),
         "{\"command\":\"remote-sync-branch\"}\n",
@@ -336,7 +336,7 @@ fn first_sync_uses_single_remote_branch_when_remote_head_is_unborn() {
             "--",
             ".gitattributes",
             ".gitignore",
-            "SYNC.md",
+            "README.md",
             "history/regular.jsonl",
         ],
     );

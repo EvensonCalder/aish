@@ -15,8 +15,10 @@ const MANAGED_GITATTRIBUTES_LINES: &[&str] = &[
     "history/*.jsonl merge=union",
     "templates/*.jsonl merge=union",
 ];
-const SYNC_README_PATH: &str = "SYNC.md";
-const SYNC_README_CONTENT: &str = r#"# Aish Sync Repository
+const SYNC_README_PATH: &str = "README.md";
+const SYNC_README_BEGIN: &str = "<!-- BEGIN AISH MANAGED SYNC README -->";
+const SYNC_README_END: &str = "<!-- END AISH MANAGED SYNC README -->";
+const SYNC_README_BODY: &str = r#"# Aish Sync Repository
 
 This Git repository is managed by Aish sync.
 
@@ -195,9 +197,25 @@ pub fn maintain_managed_gitattributes(path: impl AsRef<Path>) -> Result<()> {
 
 pub fn maintain_sync_readme(path: impl AsRef<Path>) -> Result<()> {
     let path = path.as_ref();
-    if path.exists() {
-        return Ok(());
-    }
+    let existing = match fs::read_to_string(path) {
+        Ok(raw) => Some(raw),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+        Err(err) => {
+            Err(err).with_context(|| format!("failed to read sync readme {}", path.display()))?
+        }
+    };
+    let next = match existing {
+        Some(raw) if raw.trim().is_empty() => sync_readme_section(),
+        Some(raw) if sync_readme_is_aish_managed(&raw) => replace_managed_section(
+            &raw,
+            SYNC_README_BEGIN,
+            SYNC_README_END,
+            &sync_readme_section(),
+        ),
+        Some(raw) if sync_readme_is_legacy_aish_notice(&raw) => sync_readme_section(),
+        Some(_) => return Ok(()),
+        None => sync_readme_section(),
+    };
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).with_context(|| {
             format!(
@@ -206,8 +224,21 @@ pub fn maintain_sync_readme(path: impl AsRef<Path>) -> Result<()> {
             )
         })?;
     }
-    fs::write(path, SYNC_README_CONTENT)
-        .with_context(|| format!("failed to write sync readme {}", path.display()))
+    fs::write(path, next).with_context(|| format!("failed to write sync readme {}", path.display()))
+}
+
+fn sync_readme_section() -> String {
+    format!("{SYNC_README_BEGIN}\n{SYNC_README_BODY}{SYNC_README_END}\n")
+}
+
+fn sync_readme_is_aish_managed(raw: &str) -> bool {
+    raw.lines().any(|line| line.trim() == SYNC_README_BEGIN)
+        && raw.lines().any(|line| line.trim() == SYNC_README_END)
+}
+
+fn sync_readme_is_legacy_aish_notice(raw: &str) -> bool {
+    raw.contains("# Aish Sync Repository")
+        && raw.contains("This Git repository is managed by Aish sync.")
 }
 
 fn replace_managed_gitignore_section(existing: &str) -> String {
@@ -479,11 +510,9 @@ pub fn existing_managed_add_plan_with_encryption(
     let mut paths = Vec::new();
     let mut missing_paths = Vec::new();
     for path in managed_add_plan_with_encryption(config, encryption_enabled).paths {
-        if path == ".gitignore"
-            || path == ".gitattributes"
-            || path == SYNC_README_PATH
-            || root.join(&path).exists()
-        {
+        if path == SYNC_README_PATH && !sync_readme_should_be_staged(root.join(&path)) {
+            missing_paths.push(path);
+        } else if path == ".gitignore" || path == ".gitattributes" || root.join(&path).exists() {
             paths.push(path);
         } else {
             missing_paths.push(path);
@@ -492,6 +521,18 @@ pub fn existing_managed_add_plan_with_encryption(
     ExistingManagedAddPlan {
         paths,
         missing_paths,
+    }
+}
+
+fn sync_readme_should_be_staged(path: impl AsRef<Path>) -> bool {
+    match fs::read_to_string(path) {
+        Ok(raw) => {
+            raw.trim().is_empty()
+                || sync_readme_is_aish_managed(&raw)
+                || sync_readme_is_legacy_aish_notice(&raw)
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => false,
+        Err(_) => true,
     }
 }
 

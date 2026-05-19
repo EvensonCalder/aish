@@ -167,8 +167,8 @@ fn seed_local_remote(remote: &Path, seed: &Path, root: &Path) {
     run_test_git(seed, ["config", "user.name", "Aish Test"]);
     run_test_git(seed, ["config", "user.email", "aish@example.invalid"]);
     run_test_git(seed, ["config", "commit.gpgsign", "false"]);
-    fs::write(seed.join("README.md"), "seed\n").unwrap();
-    run_test_git(seed, ["add", "README.md"]);
+    fs::write(seed.join(".seed"), "seed\n").unwrap();
+    run_test_git(seed, ["add", ".seed"]);
     run_test_git(seed, ["commit", "-m", "seed"]);
     run_test_git(seed, ["remote", "add", "origin", remote.to_str().unwrap()]);
     run_test_git(seed, ["push", "-u", "origin", "HEAD"]);

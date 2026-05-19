@@ -24,10 +24,10 @@ run_git init --bare $remote
 run_git -C $seed init
 run_git -C $seed config user.name "Aish Expect"
 run_git -C $seed config user.email "aish@example.invalid"
-set fh [open "$seed/README.md" w]
+set fh [open "$seed/.seed" w]
 puts $fh "seed"
 close $fh
-run_git -C $seed add README.md
+run_git -C $seed add .seed
 run_git -C $seed commit -m seed
 run_git -C $seed remote add origin $remote
 run_git -C $seed push -u origin HEAD
@@ -45,7 +45,7 @@ aish_wait_prompt
 
 aish_send "#push"
 aish_enter
-aish_expect "sync step ok: git add -- .gitattributes .gitignore SYNC.md"
+aish_expect "sync step ok: git add -- .gitattributes .gitignore README.md"
 aish_expect "sync step ok: git commit"
 aish_expect "sync step ok: git pull --no-rebase --no-edit"
 aish_expect "sync step ok: git push"
@@ -64,9 +64,9 @@ if {[string first "merge=union" $pushed_gitattributes] < 0} {
     puts stderr "remote .gitattributes missing Aish union merge rules"
     exit 6
 }
-set pushed_sync_readme [run_git --git-dir $remote show HEAD:SYNC.md]
+set pushed_sync_readme [run_git --git-dir $remote show HEAD:README.md]
 if {[string first "Aish Sync Repository" $pushed_sync_readme] < 0} {
-    puts stderr "remote SYNC.md missing Aish sync notice"
+    puts stderr "remote README.md missing Aish sync notice"
     exit 6
 }
 if {[file exists "$home/cache/runtime/scheduler"]} {

@@ -486,7 +486,7 @@ Some full-screen programs may still expose terminal-specific edge cases because 
 ## Sync
 
 Sync is designed for the common two-machine case where both computers use the
-same Aish Git remote. Aish writes a `SYNC.md` notice into that sync data
+same Aish Git remote. Aish writes a `README.md` notice into that sync data
 repository so the remote is clearly identifiable as Aish-managed data.
 
 Implemented:
@@ -494,7 +494,7 @@ Implemented:
 - Persist remote and sync category config.
 - Sync AI history, shell history and notes, templates, and drafts by default.
 - Keep `config.toml`, cache, logs, secrets, and temporary files local by default.
-- Write `SYNC.md` into the sync data repository as a warning/guide for anyone opening the remote.
+- Write `README.md` into the sync data repository as a warning/guide for anyone opening the remote when it is absent or already Aish-managed.
 - Persist a conservative subset of periodic schedules checked at startup.
 - Persist explicit startup and exit sync triggers.
 - Run `#sync now` or its alias `#push` against a configured Git remote.

@@ -137,7 +137,7 @@ pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -
 
     maintain_managed_gitignore(root.join(".gitignore"))?;
     maintain_managed_gitattributes(root.join(".gitattributes"))?;
-    maintain_sync_readme(root.join("SYNC.md"))?;
+    maintain_sync_readme(root.join("README.md"))?;
     let mut initialized_repo = false;
     if root.join(".git").is_dir() {
         warn_tracked_managed_paths(&root, out)?;
