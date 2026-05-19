@@ -17,6 +17,22 @@ unset -nocomplain ::env(AISH_HOME)
 set ::env(HOME) $isolated_home
 file attributes $isolated_home -permissions 0555
 
+set probe "$isolated_home/.aish-unwritable-probe"
+if {![catch {set probe_fh [open $probe w]}]} {
+    close $probe_fh
+    file attributes $isolated_home -permissions 0755
+    file delete -force $probe
+    set ::env(HOME) $old_home
+    if {$old_aish_home_exists} {
+        set ::env(AISH_HOME) $old_aish_home
+    } else {
+        unset -nocomplain ::env(AISH_HOME)
+    }
+    file delete -force $isolated_home
+    puts stderr "skipping unwritable HOME scenario: chmod 0555 directory is still writable"
+    exit 0
+}
+
 spawn -noecho $::env(AISH_BIN)
 expect {
     -ex "failed to create directory" {}

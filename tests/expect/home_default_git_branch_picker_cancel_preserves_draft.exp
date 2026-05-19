@@ -40,7 +40,7 @@ aish_wait_prompt
 
 aish_send "git -C $repo init"
 aish_enter
-aish_expect "Initialized empty Git repository"
+aish_expect_git_init_done
 aish_wait_prompt
 
 aish_send "git -C $repo config user.email aish@example.invalid && git -C $repo config user.name Aish && touch $repo/README && git -C $repo add README && git -C $repo commit -m init"

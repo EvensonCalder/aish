@@ -13,6 +13,8 @@
 log_user 0
 set ::env(NO_COLOR) "1"
 set ::env(TERM) "xterm-256color"
+set ::env(LC_ALL) "C"
+set ::env(LANG) "C"
 # Expect scenarios create temporary git repositories; keep commits independent
 # from a user's global git identity/signing configuration.
 set ::env(GIT_CONFIG_COUNT) "3"
@@ -120,6 +122,10 @@ proc aish_expect_re {pattern} {
         timeout        { puts stderr "expected re: $pattern"; exit 3 }
         eof            { puts stderr "eof while expecting re: $pattern"; exit 3 }
     }
+}
+
+proc aish_expect_git_init_done {} {
+    aish_expect_re {(Initialized|Reinitialized).*Git repository}
 }
 
 proc aish_expect_template_stored {} {

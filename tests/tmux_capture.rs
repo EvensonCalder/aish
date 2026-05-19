@@ -621,7 +621,48 @@ fn tmux_sudo_password_prompt_waits_for_user_input() {
 
 #[test]
 fn tmux_rm_write_protected_prompt_waits_for_user_input() {
-    let Some(captured) = run_tmux_script("rm_write_protected_prompt.sh") else {
+    let Some(captured) = run_tmux_script_with_env(
+        "rm_write_protected_prompt.sh",
+        &[("AISH_BACKEND_SHELL", "/bin/bash")],
+    ) else {
+        return;
+    };
+    assert!(captured.contains("remove"), "{captured:?}");
+    assert!(captured.contains("1.t"), "{captured:?}");
+    assert_line_present(&captured, "rm-declined");
+}
+
+#[test]
+fn tmux_rm_write_protected_prompt_waits_for_user_input_zsh_backend() {
+    let Some(zsh) = find_shell(&["/bin/zsh", "/usr/bin/zsh", "/usr/local/bin/zsh"]) else {
+        eprintln!("skipping zsh rm prompt tmux workflow: zsh not found");
+        return;
+    };
+    let Some(captured) = run_tmux_script_with_env(
+        "rm_write_protected_prompt.sh",
+        &[("AISH_BACKEND_SHELL", zsh)],
+    ) else {
+        return;
+    };
+    assert!(captured.contains("remove"), "{captured:?}");
+    assert!(captured.contains("1.t"), "{captured:?}");
+    assert_line_present(&captured, "rm-declined");
+}
+
+#[test]
+fn tmux_rm_write_protected_prompt_waits_for_user_input_fish_backend() {
+    if !fish_backend_tests_enabled() {
+        eprintln!("skipping fish rm prompt tmux workflow: set AISH_TEST_FISH=1 to opt in");
+        return;
+    }
+    if !command_available("fish") {
+        eprintln!("skipping fish rm prompt tmux workflow: fish not found on PATH");
+        return;
+    }
+    let Some(captured) = run_tmux_script_with_env(
+        "rm_write_protected_prompt.sh",
+        &[("AISH_BACKEND_SHELL", "fish")],
+    ) else {
         return;
     };
     assert!(captured.contains("remove"), "{captured:?}");
@@ -653,6 +694,8 @@ fn run_tmux_script_with_env(name: &str, extra_env: &[(&str, &str)]) -> Option<St
         .arg(&script)
         .current_dir(&repo)
         .env("AISH_BIN", env!("CARGO_BIN_EXE_aish"))
+        .env("LC_ALL", "C")
+        .env("LANG", "C")
         .env("TMUX_TMPDIR", &tmux_tmpdir);
     for (key, value) in extra_env {
         command.env(key, value);
@@ -754,6 +797,13 @@ fn command_available(program: &str) -> bool {
         .status()
         .map(|status| status.success())
         .unwrap_or(false)
+}
+
+fn find_shell(candidates: &[&'static str]) -> Option<&'static str> {
+    candidates
+        .iter()
+        .copied()
+        .find(|candidate| Path::new(candidate).exists())
 }
 
 fn fish_backend_tests_enabled() -> bool {
