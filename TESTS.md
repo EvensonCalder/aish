@@ -14,13 +14,13 @@ git diff --check
 
 Current test inventory:
 
-- 549 library unit tests.
-- 26 draft execution integration tests.
+- 558 library unit tests.
+- 28 draft execution integration tests.
 - 1 first-run integration test.
-- 46 tmux screen-capture integration tests.
+- 50 tmux screen-capture integration tests.
 - 9 of the tmux tests are manual-equivalent workflows that replaced deterministic rows from `MANUAL_TESTS.md`: real-world shell commands, prompt editing keys, completion UX mechanics, private commands/notes, templates/editor/default home, AI/context/sync config, local sync, `less` passthrough smoke, and startup failure messages.
-- 23 PTY integration tests, including default bash/zsh coverage and fish cases that skip unless fish opt-in prerequisites are available.
-- 117 expect-driven end-to-end interactive scenarios.
+- 32 PTY integration tests, including default bash/zsh coverage and fish cases that skip unless fish opt-in prerequisites are available.
+- 120 expect-driven end-to-end interactive scenarios.
 - Expect scenarios are serialized inside `expect_runner` because they launch real interactive terminals; parallel execution created false `no prompt` and Tcl/expect crash failures that did not match actual single-user operation.
 - Expect scenarios force `commit.gpgsign=false` through `GIT_CONFIG_COUNT` so temporary local git repositories do not depend on a developer's global GPG/pinentry setup.
 - Tmux screen-capture tests are serialized inside `tmux_capture` for the same reason: they launch real terminal panes and assert screen state.
@@ -76,9 +76,9 @@ Expect scenarios are the acceptance layer for user-visible terminal behavior. Th
 | Private command UX and diagnostics | `first_run_doctor`, `home_default_first_run_doctor`, `home_default_config_persists`, `home_default_ai_key_source_redacts_secret`, `invalid_config_startup`, `home_default_invalid_config_startup`, `home_missing_fails_cleanly`, `aish_home_empty_uses_home`, `aish_home_relative_fails_cleanly`, `home_unwritable_fails_cleanly`, `home_path_with_spaces_works`, `home_aish_path_file_fails_cleanly`, `tmux_manual_startup_failures_are_readable_in_terminal`, `help_lists_commands`, `unknown_private_command`, `private_command_safe_failures`, `status_doctor_config`, `tmux_status_command_is_visible_and_shell_recovers`, `tmux_manual_private_config_notes_workflow_matches_visible_terminal_behavior`, `key_encryption_sync_safe_failures`, `key_clear_removes_stored_key`, `ai_config_persists` | Covered | Add new safe-failure scenarios when new private commands are added. |
 | Notes, context, and logs | `notes_are_swallowed`, `home_default_notes_are_swallowed`, `tmux_manual_private_config_notes_workflow_matches_visible_terminal_behavior`, `context_config_persists`, `context_off_blocks_pseudopipe`, `context_confirm_off_runs_immediately`, `context_confirmation_skip`, `context_dangerous_refusal`, `context_dangerous_still_prompts_when_confirm_off`, `context_truncation_reports_limit`, `tmux_manual_ai_context_and_sync_config_match_visible_terminal_behavior`, `home_default_context_dangerous_refusal`, `log_shows_context_skip`, `home_default_event_log_persists` | Covered | Add new context scenarios only for observed regressions. |
 | Templates | `template_use_executes`, `template_crud`, `template_placeholder_blocks_execution`, `home_default_template_persists`, `tmux_manual_templates_editor_and_default_home_match_visible_terminal_behavior` | Covered | Add completion/template interaction if UI changes. |
-| Editor and paste flows | `external_editor_roundtrip`, `home_default_external_editor_roundtrip`, `external_editor_failure_preserves_draft`, `home_default_external_editor_failure_preserves_draft`, `tmux_manual_templates_editor_and_default_home_match_visible_terminal_behavior`, `tmux_editor_and_paste_review_render_cleanly`, `editor_hash_content_bypasses_parser`, `multiline_paste_editor_review`, `home_default_multiline_paste_editor_review` | Covered | Real OS clipboard and full-screen editor behavior remains human-only in `MANUAL_TESTS.md`. |
+| Editor and paste flows | `external_editor_roundtrip`, `home_default_external_editor_roundtrip`, `external_editor_failure_preserves_draft`, `home_default_external_editor_failure_preserves_draft`, `tmux_manual_templates_editor_and_default_home_match_visible_terminal_behavior`, `tmux_editor_and_paste_review_render_cleanly`, `editor_hash_content_uses_private_parser`, `multiline_paste_editor_review`, `home_default_multiline_paste_editor_review` | Covered | Real OS clipboard and full-screen editor behavior remains human-only in `MANUAL_TESTS.md`. |
 | Sync | `key_encryption_sync_safe_failures`, `home_default_sync_config_persists`, `home_default_startup_sync_runs`, `home_default_startup_sync_unsupported_schedule`, `home_default_startup_sync_failure_logs`, `home_default_startup_sync_disabled_noops`, `home_default_sync_push_local_remote`, `sync_push_local_remote`, `sync_push_failure_logs`, `sync_push_conflict_logs`, Rust startup/exit trigger tests, `tmux_manual_ai_context_and_sync_config_match_visible_terminal_behavior`, `tmux_manual_sync_local_remote_matches_visible_terminal_behavior` | Covered | Real remote auth and human conflict review remain manual-only. |
-| Passthrough/interactive programs | `passthrough_less`, `tmux_manual_passthrough_less_recovers_prompt_when_available` when `less` is available, `tmux_python_repl_passthrough_recovers_prompt_when_available` when `python3` is available, `tmux_stdin_and_gpg_like_passthrough_recovers_prompt`, `tmux_unknown_tui_passthrough_recovers_prompt`, backend interrupt recovery through `pty_backend_wait_callback_can_interrupt_long_running_commands`; key forwarding is Rust-covered | Covered for portable cases | Add focused regressions for newly reported real-world interactive programs. |
+| Passthrough/interactive programs | `passthrough_less`, `tmux_manual_passthrough_less_recovers_prompt_when_available` when `less` is available, `tmux_python_repl_passthrough_recovers_prompt_when_available` when `python3` is available, `tmux_stdin_and_gpg_like_passthrough_recovers_prompt`, `tmux_unknown_tui_passthrough_recovers_prompt`, backend interrupt recovery through `pty_backend_wait_callback_can_interrupt_long_running_commands`; key forwarding is Rust-covered | Covered for current backend-driven portable cases | Add focused regressions for newly reported real-world interactive programs. |
 | Encryption/GPG | `key_clear_removes_stored_key`, `home_default_key_clear_removes_stored_key`, `home_default_encrypt_on_migrates_storage`, `encrypted_startup_unlock`, `encrypt_ambiguous_key_recovers`, `key_encryption_sync_safe_failures`; Rust coverage for `key_set_encrypts_env_api_key_without_printing_secret`, `ai_prompt_uses_gpg_stored_key_when_env_key_is_missing`, `encrypt_on_migrates_plaintext_storage_and_persists_config`, `encrypt_rotate_reencrypts_existing_storage_and_persists_fingerprint`, `encrypt_off_decrypts_storage_and_persists_config`, `encrypt_unlock_mode_persists_startup_unlock_policy`, `encrypted_writes_use_gpg_files_without_plaintext_jsonl`, `encrypted_jsonl_append_does_not_decrypt_existing_file`, `encrypted_history_append_does_not_block_command_completion`, `encrypted_completion_uses_cached_templates_without_gpg_on_keypress`, lazy startup unlock merge behavior, noninteractive GPG decrypt boundaries, and rewrite-history planning/script safety | Automated with fake GPG plus human real-pinentry validation | Real passphrase-protected key and pinentry behavior remains human-only in `MANUAL_TESTS.md`; latest manual validation reported no issues for lazy `#unlock` and prompt startup unlock. |
 
 ## Feature Coverage
@@ -140,11 +140,11 @@ Status:
 
 - Passing.
 
-### PTY Backend: Bash MVP
+### PTY Backend: Unix Shell Integration
 
 Implemented:
 
-- `portable-pty` backend.
+- Unix PTY backend based on `openpty`, `setsid`, `TIOCSCTTY`, inherited PTY slave stdio, and a dedicated shell-integration control fd.
 - Shell resolution: configured shell, `$SHELL`, `/bin/bash` fallback.
 - Bash interactive startup loads user `.bashrc` before Aish injects prompt integration.
 - PTY pair creation and shell spawn.
@@ -355,16 +355,16 @@ Implemented:
 - Ctrl-L and real `clear`-style command output handling is covered with a virtual terminal screen test that interprets CR/LF and ANSI home/clear sequences, proving the final prompt renders on row 0 instead of leaving a blank first line.
 - Conservative sync flow plan helper orders pull-rebase, managed add, commit, and push steps using fixed git argument arrays without running git.
 - Manual `#push` sync is covered against a local bare git remote, including pull-rebase, managed `.gitignore` add, commit, push, and completion event logging without network access.
-- Startup `#sync <cron-expression>` behavior is covered for due and not-due schedules using a runtime timestamp file, sync lock, and local bare git remote without creating scheduler files. Explicit startup and exit sync triggers have Rust coverage.
+- Startup `#sync <schedule>` behavior is covered for due and not-due schedules using a runtime timestamp file, sync lock, and local bare git remote without creating scheduler files. Explicit startup and exit sync triggers have Rust coverage.
 - Marker-based shell integration now emits and parses command-start markers, with shell-quoting tests and PTY coverage that bash reports `started_command` without leaking internal markers into history.
 - Bash marker integration has PTY coverage for prompt-ready initial cwd, command-start reporting, command-finish exit status, and cwd reporting after command execution.
 - Zsh hook integration has PTY coverage for `preexec` command-start reporting, `precmd` finish status, and cwd reporting after command execution when `/bin/zsh` is available.
 - Fish event integration has launch/unit coverage for `fish_preexec`, `fish_postexec`, explicit ready emission, and prompt suppression setup plus opt-in PTY coverage for command-start, finish status, cwd reporting, streaming output, config inheritance, and command-token-like output preservation when `AISH_TEST_FISH=1` is set.
-- Allowlisted interactive commands can run in a foreground passthrough path with raw mode disabled; `less` has skip-safe expect coverage when available.
-- Interactive passthrough command detection covers common fullscreen tools, REPLs, shells, stdin-oriented commands such as `gpg` and `cat`, basenames, shell quoting, assignments, and wrappers such as `sudo`, `env`, `command`, and `exec`. Unknown alternate-screen/raw-input programs are covered through the backend PTY streaming path by `tmux_unknown_tui_passthrough_recovers_prompt`.
+- User commands run through backend-driven passthrough while Aish bridges frontend terminal input/output and waits for backend shell readiness over shell integration, not command-name allowlists.
+- Interactive stdin, prompt, and alternate-screen regressions are covered with representative tmux and PTY scenarios, including `less`, Python REPL, stdin readers, sudo-like password prompts, write-protected `rm`, unknown TUI behavior, and raw function-key forwarding.
 - Alternate-screen buffer detection tracks common enter/exit CSI sequences (`?47`, `?1047`, `?1049`) and ignores unrelated terminal styling escapes.
 - Passthrough prompt-return detection requires process exit and normal-screen state before Aish redraws its prompt after an interactive command.
-- Shell integration rollup is covered across bash marker integration, zsh hooks, opt-in fish events, foreground passthrough for allowlisted interactive commands, backend PTY passthrough for unknown TUI ownership, and local temporary git sync integration tests.
+- Shell integration rollup is covered across bash marker integration, zsh hooks, opt-in fish events, backend-driven passthrough, and local temporary git sync integration tests.
 - `#encrypt on [key]` resolves a stable GPG fingerprint, migrates managed JSONL storage to encrypted `*.jsonl.gpg` files, removes plaintext JSONL files after successful encryption, warns about Git history, and starts a serialized background encrypted writer.
 - Dangerous context pseudo-pipe commands have expect coverage proving refusal skips execution and leaves the target file intact.
 - Prompt redraw after ordinary command output has both a Rust virtual-screen regression and a real `tmux` pane-capture regression proving repeated final visible shell output remains above the next prompt in actual use; the tmux scripts run the Cargo-provided `CARGO_BIN_EXE_aish` binary via `AISH_BIN` so they cannot accidentally validate a stale `target/debug/aish`.
@@ -382,7 +382,7 @@ Implemented:
 - Completion has a pure path completion helper that reads matching file and directory candidates, preserves directory prefixes, sorts candidates, marks directories with trailing `/`, preserves opening quotes in replacements, and handles missing directories as no matches.
 - Completion has a pure first-token helper that returns body-first template candidates before newest-first history commands before PATH executables, with per-source deduplication.
 - Completion has a pure non-first-token helper that returns template placeholder candidates before history arguments and path candidates, with per-source deduplication.
-- Completion helpers support ignore-spaces matching and panel max-result limiting; config defaults expose `completion.max_results = 5`, `completion.ignore_spaces = true`, `completion.template_first = true`, `completion.inline = true`, and `completion.tab_accept = "full"`.
+- Completion helpers support ignore-spaces matching and panel max-result limiting; config defaults expose `completion.max_results = 5`, `completion.ignore_spaces = true`, `completion.template_first = true`, `completion.inline = true`, and `completion.tab_accept = "word"`.
 - Runtime state carries completion config and `#config`/`#status` report completion settings read-only.
 - Prompt cwd rendering abbreviates the user home directory as `~` and paths inside it as `~/...`.
 - Raw-terminal display writes normalize line feeds to CRLF through a terminal display writer, so multi-line shell output and UI messages return to column zero without corrupting stored command output.
@@ -403,7 +403,7 @@ Implemented:
 - Editor process runner appends the prepared file path to the resolved command and waits for exit status without reading or executing content.
 - Editor read-back replaces the draft buffer with saved file content without executing it.
 - Editor read-back preserves saved content as an editor draft without filtering line-leading `#` lines.
-- Editor drafts submit raw shell content without Aish private `#` parsing, while ordinary typed line-leading `#` input remains protected.
+- Editor drafts are opaque in the prompt but submit through the same parser as direct input; a leading `#` remains protected as a private command, note, or AI prompt.
 - Editor drafts render as opaque prompt summaries and direct inline editing keys leave the hidden editor content unchanged.
 - Multi-line paste content is normalized and stored as an opaque editor draft by default.
 - `paste.multiline = "discard"` ignores multi-line paste without changing draft state.
@@ -423,8 +423,8 @@ Implemented:
 - Optional shell logical splitter common-case coverage includes simple lines, blank lines, comments, backslash continuations, quotes, heredocs, and mixed command streams.
 - Editor roundtrip helper prepares a file, runs a fake editor, and reads successful edits back into draft while preserving the original draft on editor failure.
 - `Ctrl-X Ctrl-E` terminal handling resolves the editor, suspends raw mode when needed, runs the roundtrip, restores raw mode when needed, and reports success/failure.
-- `editor.execute_after_save = true` runs a successfully saved editor draft immediately with raw editor-draft semantics.
-- Template commands can create, find, remove, replace, show, and use JSONL-backed body-first templates. `#template list` is intentionally unsupported.
+- `editor.execute_after_save = true` submits a successfully saved editor draft immediately with the same parser semantics as pressing `Enter`.
+- Template commands can create, list, search, find, remove, replace, show, and use JSONL-backed body-first templates. `#template list` can print one body per line and supports the privacy-confirmed private-output export flow.
 - Template placeholders support `{name}`, `{name:description}`, and `{name...}` syntax.
 - Template use copies rendered content to a protected template draft and blocks execution while placeholders remain unresolved.
 - Template draft editing treats unresolved placeholders as spans: outside Backspace/Delete removes the whole placeholder, while editing inside expands the draft to plain editable text.
@@ -819,7 +819,9 @@ Implemented:
 - Template IDs are stable `tpl-...` content hashes derived from the template body.
 - Old `name/body` JSONL records are still readable as body-only templates.
 - `#template find <query>` prints matching template IDs and bodies.
-- `#template list` is intentionally unsupported because bulk grep/redirection should happen against the JSONL store.
+- `#template list` prints template bodies newest-first, one per line.
+- `#template search <query>` prints matching template bodies, one per line.
+- `#template list` supports the same privacy-confirmed `>` / `>>` / `|` export flow as history, AI, and draft list commands.
 - `#template show <id>` prints the matching template body without changing draft.
 - `#template rm <id>` removes valid template entries matching that ID.
 - `#template replace <id> <body>` removes existing matches and appends one replacement entry with a new body-derived ID.
@@ -846,7 +848,8 @@ Tests:
 - `templates::tests::apply_template_values_with_usage_reports_used_keys`
 - `templates::tests::apply_template_values_replaces_described_and_variadic_placeholders_by_name`
 - `app::tests::mt_command_persists_template_entry`
-- `app::tests::template_list_is_intentionally_unsupported`
+- `app::tests::template_list_prints_template_bodies_newest_first`
+- `app::tests::private_search_commands_print_matching_commands_one_per_line`
 - `app::tests::template_find_prints_matching_hash_ids`
 - `app::tests::template_show_prints_newest_matching_body`
 - `templates::tests::remove_templates_by_id_removes_all_matches_and_keeps_others`
@@ -903,7 +906,7 @@ Status:
 Implemented:
 
 - A Rust integration harness runs `expect` scenarios against the built `aish` binary with isolated `AISH_HOME` directories.
-- Interactive smoke coverage now checks real terminal input/output for basic command execution, cwd persistence, mode cycling, private command safety, help output, status/config/doctor diagnostics, notes, context confirmation skip, event log output, clear screen, exit paths, completion, readline-style editing keys, unknown `Ctrl-X` chord cancellation, history execution, persisted history trimming, AI command sequencing, AI config persistence and key-source redaction, read-only edit-copy behavior, template execution, template CRUD, unresolved template blocking, external editor roundtrip, editor hash-content parser bypass, multiline paste editor-review warning/execution, key/encryption/sync safe-failure behavior, quote continuation, backslash continuation, Ctrl-C continuation cancellation, and backend prompt leak prevention.
+- Interactive smoke coverage now checks real terminal input/output for basic command execution, cwd persistence, mode cycling, private command safety, help output, status/config/doctor diagnostics, notes, context confirmation skip, event log output, clear screen, exit paths, completion, readline-style editing keys, unknown `Ctrl-X` chord cancellation, history execution, persisted history trimming, AI command sequencing, AI config persistence and key-source redaction, read-only edit-copy behavior, template execution, template CRUD, unresolved template blocking, external editor roundtrip, editor hash-content private-parser safety, multiline paste editor-review warning/execution, key/encryption/sync safe-failure behavior, quote continuation, backslash continuation, Ctrl-C continuation cancellation, and backend prompt leak prevention.
 - Encrypted startup unlock has expect coverage for nonblocking locked startup, the visible `history is still unlocking...` state, explicit `#unlock`, and restored encrypted history after unlock.
 - Each new user-facing interactive feature should now receive both Rust-level tests and at least one expect scenario when it affects real terminal behavior.
 
@@ -946,7 +949,7 @@ Tests:
 - `expect_runner::ctrl_x_unknown_chord_cancels`
 - `expect_runner::history_trim_persists`
 - `expect_runner::template_crud`
-- `expect_runner::editor_hash_content_bypasses_parser`
+- `expect_runner::editor_hash_content_uses_private_parser`
 
 Status:
 
@@ -971,4 +974,4 @@ Next high-value tests to add:
 
 - Additional representative-terminal sweeps for real passphrase/pinentry behavior if new terminal-specific issues are reported.
 - Additional fish tmux workflows after cross-platform fish behavior is validated.
-- Focused passthrough regressions for newly allowlisted interactive programs.
+- Focused passthrough regressions for newly reported interactive programs.

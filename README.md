@@ -21,14 +21,14 @@ Implemented and covered:
 - `fzf`-based history, file, template, git branch, and environment pickers.
 - Backend-driven passthrough for interactive commands through the persistent PTY shell.
 - Conservative Git sync configuration and manual push flow.
-- GPG-backed key storage and encrypted history/template storage.
+- GPG-backed key storage and encrypted managed JSONL storage.
 - Real-terminal regression coverage through `tmux`.
 
-Explicitly incomplete:
+Validation still pending or manual-only:
 
 - Fish support is opt-in until behavior is validated across macOS and representative Linux distributions.
-- Encrypted startup has two explicit modes: `lazy` starts immediately and uses `#unlock` when old data needs a passphrase; `prompt` asks for GPG/pinentry at startup before the prompt opens.
 - Cross-platform validation for newly reported interactive passthrough programs remains ongoing.
+- Real passphrase/pinentry, live AI provider behavior, and real remote authentication remain manual validation areas.
 
 ## Quickstart
 
@@ -72,7 +72,7 @@ keyboard / terminal
  real programs and shell semantics
 ```
 
-Ordinary input is sent to the backend shell unchanged. Line-leading `#` at the Aish prompt is reserved for Aish commands and AI prompts. Editor-submitted content is raw shell input and intentionally bypasses Aish private-command parsing.
+Submitted draft text from the prompt, external editor, and paste review enters the same Aish submit parser. If the submitted text starts with line-leading `#`, it is handled as an Aish private command, note, or AI prompt. Text parsed as ordinary shell input is sent to the backend shell unchanged.
 
 ## Modes
 
@@ -305,7 +305,7 @@ Sync:
 ```text
 #set-remote <git-url>
 #push
-#sync <cron-expression>
+#sync <schedule>
 #sync off
 #sync startup on|off
 #sync exit on|off
@@ -391,11 +391,11 @@ AI requests use a chat-completions-compatible endpoint. Configure the model, bas
 5. `vim`.
 6. `vi`.
 
-Saved editor content returns as an opaque editor draft. It is not executed until you press `Enter`.
+Saved editor content returns as an opaque editor draft. It is not executed until you press `Enter`, and pressing `Enter` runs it through the same submit parser used for direct prompt input.
 
 For AI prompts, type `# ` and press `Enter` to open the editor for a multi-line AI instruction. `Ctrl-X Ctrl-E` on an existing `# ...` prompt opens the same AI prompt editor and preserves the current prompt body. The returned draft shows an AI prompt summary; pressing `Enter` sends it to the AI pipeline rather than to the backend shell.
 
-Multiline paste defaults to editor-review behavior. Aish shows a compact draft summary and a bounded escaped preview instead of rendering the full pasted content inline. This prevents accidental execution and keeps the prompt usable. `Ctrl-X Ctrl-E` opens the full pasted content in the editor, and `Enter` submits the raw editor draft as shell input even if it contains line-leading `#`.
+Multiline paste defaults to editor-review behavior. Aish shows a compact draft summary and a bounded escaped preview instead of rendering the full pasted content inline. This prevents accidental execution and keeps the prompt usable. `Ctrl-X Ctrl-E` opens the full pasted content in the editor, and `Enter` submits the editor draft through the same parser used for direct prompt input.
 
 Paste preview is controlled by:
 
@@ -475,7 +475,7 @@ Aish uses shell markers to detect command completion and cwd, filters those mark
 
 ## Interactive And Stdin Passthrough
 
-Aish runs user commands through the persistent backend PTY shell and forwards terminal input while the command is running. It waits for the backend shell's ready/marker signal instead of using command-name matching or a fixed user-command deadline, so editors, pagers, REPLs, password prompts, stdin readers, and unknown terminal programs keep shell state and return to the Aish prompt when the backend shell reports completion.
+Aish runs user commands through the persistent backend PTY shell and forwards terminal input while the command is running. On Unix, the backend shell runs in Aish's own PTY slave with a controlling terminal and a dedicated control fd for shell integration markers. Aish waits for the backend shell's ready/marker signal instead of using command-name matching or a fixed user-command deadline, so editors, pagers, REPLs, password prompts, stdin readers, and unknown terminal programs keep shell state and return to the Aish prompt when the backend shell reports completion.
 
 Some full-screen programs may still expose terminal-specific edge cases because Aish translates frontend key events into PTY bytes instead of handing the controlling terminal directly to a child process. New real-world failures should get a tmux regression test.
 
@@ -486,7 +486,7 @@ Sync is deliberately conservative.
 Implemented:
 
 - Persist remote and sync category config.
-- Persist supported periodic schedules checked at startup.
+- Persist a conservative subset of periodic schedules checked at startup.
 - Persist explicit startup and exit sync triggers.
 - Run `#push` against a configured Git remote.
 - Pull with rebase before pushing.
@@ -505,7 +505,7 @@ Aish does not:
 
 Sync does not have a long-running scheduler. The supported automatic triggers are:
 
-- periodic startup check: `#sync <cron-expression>` runs `#push` at startup only when the saved interval is due.
+- periodic startup check: `#sync <schedule>` runs `#push` at startup only when the saved interval is due. Supported forms are `@hourly`, `@daily`, `*/N * * * *`, `0 */N * * *`, `0 0 * * *`, and `0 0 */N * *`; unsupported schedules are logged and do not run git.
 - every startup: `#sync startup on` runs `#push` once when Aish starts.
 - exit: `#sync exit on` runs `#push` during the exit durability boundary.
 
@@ -631,7 +631,9 @@ templates/
 logs/
   events.jsonl
 secrets/
+  key.json.gpg
 cache/
+  runtime/
 .gitignore
 ```
 
@@ -666,8 +668,8 @@ The app module root in `src/app.rs` wires together focused runtime modules:
 - `src/terminal.rs`: terminal event loop, key/paste handling, and picker/editor boundaries.
 - `src/terminal/completion_ui.rs`: live completion display, inline suffixes, Tab/Right acceptance, and completion panel state transitions.
 - `src/terminal/render.rs`: prompt redraw positioning, render anchors, cursor placement, and screen-area reservation.
-- `src/pty.rs`: PTY backend lifecycle, command execution, read loop, and streaming event callbacks.
-- `src/pty/`: shell launch setup, randomized marker protocol, marker parsing, output filtering, and continuation syntax helpers.
+- `src/pty.rs`: PTY backend lifecycle, command execution, read loop, foreground input bridge, and streaming event callbacks.
+- `src/pty/`: Unix `openpty` backend, control fd setup, shell launch setup, randomized marker protocol, marker parsing, output filtering, and continuation syntax helpers.
 
 ## Testing
 
@@ -699,12 +701,12 @@ cargo test
 
 Current active inventory:
 
-- 549 library unit tests.
-- 26 draft execution integration tests.
+- 558 library unit tests.
+- 28 draft execution integration tests.
 - 1 first-run integration test.
-- 23 PTY integration tests, with bash/zsh active by default and fish-specific cases opt-in.
-- 117 expect-driven end-to-end interactive scenarios.
-- 46 tmux screen-capture integration tests.
+- 32 PTY integration tests, with bash/zsh active by default and fish-specific cases opt-in.
+- 120 expect-driven end-to-end interactive scenarios.
+- 50 tmux screen-capture integration tests.
 
 Expect and tmux tests launch real terminal sessions with isolated Aish homes. They should be serialized because concurrent real-terminal sessions can create false prompt and scheduler failures.
 

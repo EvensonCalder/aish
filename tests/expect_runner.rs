@@ -694,8 +694,8 @@ fn template_crud() {
 }
 
 #[test]
-fn editor_hash_content_bypasses_parser() {
-    run_script("editor_hash_content_bypasses_parser.exp");
+fn editor_hash_content_uses_private_parser() {
+    run_script("editor_hash_content_uses_private_parser.exp");
 }
 
 #[allow(dead_code)]

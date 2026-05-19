@@ -108,7 +108,7 @@ const COMMAND_HELP: &[HelpEntry] = &[
         description: "run the conservative manual sync push flow",
     },
     HelpEntry {
-        usage: "#sync [off|<cron>|startup|exit|ai|history|templates|drafts on|off]",
+        usage: "#sync [off|<schedule>|startup|exit|ai|history|templates|drafts on|off]",
         description: "show or update sync schedule and category settings",
     },
     HelpEntry {
@@ -299,7 +299,7 @@ const SYNC_HELP: &[HelpEntry] = &[
         description: "show sync and encryption status without running git",
     },
     HelpEntry {
-        usage: "#sync <cron-expression>",
+        usage: "#sync <schedule>",
         description: "save the startup sync schedule",
     },
     HelpEntry {

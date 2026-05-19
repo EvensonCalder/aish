@@ -16,7 +16,7 @@ Aish does **not** try to replace Bash, Zsh, or Fish. The backend shell remains r
 5. **History and AI results are read-only sources.** Any edit copies the selected item into draft mode.
 6. **Draft is the only editable command state.**
 7. **Multi-line pasted content does not enter draft by default.** It opens an editor-review flow or executes with warning, depending on config.
-8. **Editor-submitted content is raw shell input.** Aish does not parse line-leading `#` inside external editor content.
+8. **Editor and paste-review drafts use the same submit parser as direct prompt input.** A leading `#` at the start of submitted draft text remains reserved for Aish private commands, notes, and AI prompts; text parsed as ordinary shell input is sent to the backend shell unchanged.
 9. **Encryption prioritizes confidentiality over speed.** When encrypted, Aish does not persist plaintext search indexes.
 10. **Git sync is conservative.** Sync never auto-resolves conflicts and never rewrites history or runs `git rm --cached` automatically. Encrypted-storage Git history rewrite is a separate explicit command with destructive confirmation.
 11. **End-to-end behavior must be tested as users experience it.** Every user-visible feature needs expect-driven coverage in addition to Rust unit/integration tests, including rendering, redraw boundaries, PTY output framing, shell continuation, keybindings, mode transitions, error paths, and regression cases.
@@ -163,8 +163,8 @@ Used for interactive programs that need to own terminal input, such as `vim`, `n
 - Keyboard input is forwarded to the PTY.
 - Output is displayed as-is.
 - Aish keybindings are mostly disabled.
-- Return to normal mode occurs when the backend shell prompt is detected again.
-- Current implementation may use a conservative allowlist for known interactive and stdin-oriented programs. Robust automatic passthrough for arbitrary interactive programs is future work and must not rely only on fragile command-name matching.
+- Return to normal mode occurs when the backend shell reports command completion through the shell integration marker/control protocol.
+- Correctness must not depend on command-name allowlists, prompt guessing, or fixed user-command timeouts. Aish runs user commands through the persistent backend PTY shell, bridges terminal input/output while the command is foregrounded inside that PTY, and waits for the backend shell completion signal.
 
 #### ExternalEditor mode
 
@@ -175,7 +175,7 @@ Triggered by `Ctrl-X Ctrl-E` or configured editor actions.
 - On save and exit, editor content replaces the current draft buffer.
 - By default, content is **not executed automatically**. The user presses `Enter` to execute.
 - Optional config can enable execute-after-save for users who want that behavior.
-- Content from this mode is raw shell input; Aish does not parse line-leading `#` inside it.
+- Content from this mode is submitted through the normal Aish parser. A leading `#` at the start of the saved editor draft remains an Aish private command, note, or AI prompt; ordinary shell text is then sent to the backend shell unchanged.
 
 #### PasteReviewEditor mode
 
@@ -184,7 +184,7 @@ Legacy name for the multi-line paste review state. In the current design, this i
 - Multi-line paste with `paste.multiline = "editor"` becomes an opaque editor draft.
 - The main prompt shows only the editor draft summary.
 - `Ctrl-X Ctrl-E` can open the external editor for that content.
-- `Enter` submits the raw editor draft to the backend shell.
+- `Enter` submits the editor draft through the normal Aish parser; ordinary shell text is sent to the backend shell unchanged.
 - `paste.multiline = "execute"` with `confirm_execute = true` also uses the editor draft as the confirmation step.
 
 #### Picker modes
@@ -262,7 +262,7 @@ Types:
 # FIXME: ...             Aish note/comment
 ```
 
-This reservation applies only to direct Aish prompt input. It does **not** apply to raw content submitted from ExternalEditor mode.
+This reservation applies to submitted draft text, including direct prompt input, external editor drafts, and paste-review drafts. It is based on the first character of the submitted draft; `#` characters later inside ordinary multi-line shell text remain backend shell content.
 
 ### 5.3 Aish notes/comments
 
@@ -435,9 +435,9 @@ Editor drafts are opaque in the main prompt. Aish should show a summary such as 
 
 AI prompt editor drafts are a separate editor-draft subtype. They use the same opaque summary pattern, but `Enter` sends the editor content to the AI request path. They must not be treated as raw shell input, and `editor.execute_after_save` must not auto-send them.
 
-Editor content is raw shell input. Aish does not parse line-leading `#` inside it, does not escape it as `##`, and does not rewrite multi-line content or backslash continuations. The backend shell interprets the content exactly as submitted.
+Editor content is visually opaque in the prompt, but submission still uses the normal Aish parser. If the saved content starts with `#`, it is handled as a private command, note, or AI prompt. Otherwise the backend shell interprets the ordinary shell content exactly as submitted.
 
-`execute_after_save = false` means editor exit only writes back an editor draft. It does not execute. If `execute_after_save = true`, Aish executes only after a successful editor exit status and preserves the same raw editor-draft semantics.
+`execute_after_save = false` means editor exit only writes back an editor draft. It does not execute. If `execute_after_save = true`, Aish submits only after a successful editor exit status and preserves the same parser semantics as pressing `Enter` on that editor draft.
 
 ### 6.3 Multi-line paste
 
@@ -471,14 +471,14 @@ preview_bytes = 240
 1. Convert pasted content to an editor draft.
 2. Show only the editor draft summary in the main prompt.
 3. `Ctrl-X Ctrl-E` can reopen the content in the external editor.
-4. `Enter` submits the raw editor draft to the backend shell.
+4. `Enter` submits the editor draft through the normal parser; ordinary shell content goes to the backend shell.
 5. Do not auto-execute on paste.
 6. If `preview = true`, show an escaped preview capped by `preview_lines` and `preview_bytes`.
 
 `multiline = "execute"`:
 
 1. If `confirm_execute = true`, convert pasted content to an editor draft and wait for `Enter`.
-2. If `confirm_execute = false`, submit pasted content immediately as raw editor-draft content.
+2. If `confirm_execute = false`, submit pasted content immediately through the normal parser.
 3. Store executed content in history as the exact submitted command string.
 
 `multiline = "discard"`:
@@ -708,13 +708,15 @@ Aish prints a stable `tpl-...` content-hash ID for stored templates. Users use t
 
 ```text
 #template find <query>
+#template list [>|>> <path> | | <command>]
+#template search <query>
 #template show <id>
 #template use <id> [key=value ...]
 #template rm <id>
 #template replace <id> <template-body>
 ```
 
-`#template list` is intentionally not supported. Bulk inspection, grep, redirection, and history-oriented cleanup should happen against the template JSONL file under the Aish home directory. AI may suggest template items, but Aish never auto-saves them.
+`#template list` prints one template body per line newest-first. `#template search <query>` prints matching bodies. The `list` form supports the same privacy-confirmed `>` / `>>` / `|` export pseudo-pipe as `#history list`, `#ai list`, and `#draft list`. `#template find <query>` is for operations that need stable `tpl-...` IDs. AI may suggest template items, but Aish never auto-saves them.
 
 ### 9.2 Placeholder syntax
 
@@ -1028,7 +1030,6 @@ Recommended layout:
 ```text
 ~/.aish/
   config.toml
-  state.json
 
   history/
     regular.jsonl
@@ -1047,7 +1048,6 @@ Recommended layout:
 
   cache/
     runtime/
-    completion.sqlite
 
   .gitignore
 ```
@@ -1084,7 +1084,7 @@ history = "{user}@{host} {cwd} $ "
 ai = "{user}@{host} {cwd} % "
 
 [ai]
-chat_completions_url = "https://api.example.com/v1/chat/completions"
+base_url = "https://api.example.com/v1/chat/completions"
 model = "model-name"
 env_key = "OPENAI_API_KEY"
 
@@ -1114,6 +1114,9 @@ execute_after_save = false
 [paste]
 multiline = "editor"
 confirm_execute = true
+preview = true
+preview_lines = 3
+preview_bytes = 240
 
 [draft]
 persist = true
@@ -1145,13 +1148,14 @@ Command:
 #base-url <url>
 ```
 
-Storage should keep the actual final request URL as `chat_completions_url`.
+Storage uses `[ai].base_url`.
 
 Normalization:
 
-- If input ends with `/chat/completions`, save it as-is.
-- If input ends with `/v1` or `/v1/`, append `/chat/completions` and save the full URL.
-- Otherwise, save the input as the full request URL.
+- `#base-url <url>` requires an `http://` or `https://` URL.
+- If the value ends with `/chat/completions`, store it as-is after trimming trailing slashes.
+- Otherwise, append `/chat/completions` and store the resulting endpoint.
+- Manually edited config values are normalized at request time the same way.
 
 ### 14.2 API key handling
 
@@ -1201,14 +1205,14 @@ Behavior:
 - When encryption is enabled, do not store plaintext search indexes.
 - Live completion must not run GPG on each keypress. Encrypted template data should be loaded into an in-memory snapshot during unlock/startup and refreshed only by explicit template mutations or reload flows.
 - Normal encrypted JSONL appends should be serialized through a background writer. Foreground command execution updates in-memory state and enqueues persistence work; command output and prompt redraw must not wait for GPG encryption.
-- Encrypted JSONL appends should add a new encrypted GPG message to the encrypted file instead of decrypting existing file contents. This allows new writes in lazy locked startup mode while old encrypted data is still unavailable.
+- Encrypted JSONL appends update one complete encrypted JSONL payload for each managed file, using the writer's decrypted byte cache when available. They do not concatenate multiple independent GPG messages into one file.
 - The background encrypted writer must preserve write order per Aish process and fail closed after a write failure until the error is surfaced and pending writes are flushed or the process is restarted. Whole-file rewrites such as key rotation, decryption, and template removal should still use atomic encrypted file replacement.
 - Operations that need durable storage or rewrite storage globally must flush pending encrypted writes first. This includes exit, `#push`, `#history`, `#encrypt off`, key rotation, and confirmed history rewrite.
 - Encrypted-write completion and failure events are frontend background events. Draining those events should refresh live completion and redraw the prompt when needed.
 - Direct GPG decrypt operations that may need pinentry should enter `UnlockPassthrough`, clear stale live completion state, yield terminal control, set `GPG_TTY` when possible, and restore raw mode and the previous Aish mode after completion or failure.
 - In `startup_unlock = "lazy"` mode, startup decrypt should first use a noninteractive background GPG attempt (`--batch --pinentry-mode error`) so startup never blocks on passphrase entry or lets pinentry fight the raw-mode UI.
 - If lazy startup unlock succeeds because `gpg-agent` can decrypt without prompting, Aish loads history/templates, starts or refreshes the encrypted writer with decrypted caches, refreshes completion, and redraws.
-- If lazy startup unlock needs a passphrase, Aish keeps shell input usable, encrypts new appends immediately without decrypting old data, shows `history is still unlocking...` in history/AI modes when needed, and exposes `#unlock`.
+- If lazy startup unlock needs a passphrase, Aish keeps shell input usable, keeps same-session writes in memory when old encrypted data for that file is still locked, shows `history is still unlocking...` in history/AI modes when needed, and exposes `#unlock`.
 - In `startup_unlock = "prompt"` mode, startup should run the interactive GPG/pinentry unlock path before entering raw-mode Aish UI. If unlock fails, startup fails rather than opening a prompt with locked storage.
 - `#unlock` runs the interactive GPG/pinentry unlock path, merges loaded encrypted history/templates with any same-session in-memory locked entries, and refreshes the encrypted writer.
 - `#encrypt rewrite-history plan` prints the risk and exact confirmed command for rewriting Git history.
@@ -1242,7 +1246,7 @@ Commands:
 ```text
 #set-remote <git-url>
 #push
-#sync <cron-expression>
+#sync <schedule>
 #sync off
 #sync startup on|off
 #sync exit on|off
@@ -1271,7 +1275,7 @@ Commit messages:
 
 Sync triggers:
 
-1. `#sync <cron-expression>` persists a periodic interval that is checked only at startup. No scheduler files are created.
+1. `#sync <schedule>` persists a conservative periodic interval that is checked only at startup. No scheduler files are created.
 2. `#sync startup on|off` controls whether `#push` runs once every startup, independent of the periodic due check.
 3. `#sync exit on|off` controls whether `#push` runs during the exit durability boundary.
 4. Multiple triggers may be enabled. A single startup invocation should not run duplicate syncs for the same trigger path.
@@ -1279,7 +1283,7 @@ Sync triggers:
 6. Every automatic trigger must use the same conservative sync plan as manual `#push`.
 7. Log success/failure.
 
-Aish does not run an in-process periodic scheduler and must not create scheduler files. Periodic sync means "check whether the saved interval is due when Aish starts."
+Aish does not run an in-process periodic scheduler and must not create scheduler files. Periodic sync means "check whether the saved interval is due when Aish starts." Supported schedule forms are intentionally conservative: `@hourly`, `@daily`, `*/N * * * *`, `0 */N * * *`, `0 0 * * *`, and `0 0 */N * *`. Unsupported schedules are logged and do not run git.
 
 Recommended conservative sync:
 
@@ -1358,12 +1362,14 @@ Initial command set:
 #context <bytes>
 #context confirm on|off
 
+#paste
 #paste multiline editor|execute|discard
 #paste confirm on|off
 #paste preview on|off
 #paste preview-lines <1-20>
 #paste preview-bytes <1-4096>
 
+#completion
 #completion on|off
 #completion mode auto|tab|off
 #completion max <count>
@@ -1375,10 +1381,18 @@ Initial command set:
 #completion match-threshold <0-100>
 #completion typo-threshold <0-100>
 
+#history list [>|>> <path> | | <command>]
+#history search <query>
 #history <count>
+#ai list [>|>> <path> | | <command>]
+#ai search <query>
+#draft list [>|>> <path> | | <command>]
+#draft search <query>
 #log <count>
 
 #mt <template-body>
+#template list [>|>> <path> | | <command>]
+#template search <query>
 #template find <query>
 #template show <id>
 #template use <id> [key=value ...]
@@ -1396,7 +1410,7 @@ Initial command set:
 
 #set-remote <git-url>
 #push
-#sync <cron-expression>
+#sync <schedule>
 #sync off
 #sync startup on|off
 #sync exit on|off
@@ -1515,17 +1529,16 @@ cat *.pem
 Suggested libraries, subject to project evaluation:
 
 ```text
-PTY: portable-pty or nix/libc lower-level PTY
-Terminal input/rendering: crossterm, ratatui if needed
-Async runtime: tokio
+PTY: Unix libc openpty/setsid/TIOCSCTTY backend with a dedicated control fd
+Terminal input/rendering: crossterm
+Background work: standard threads and channels for completion, startup unlock, and encrypted writes
 Serialization: serde, serde_json, toml
-HTTP: reqwest
-JSON schema validation: serde-based validation or jsonschema crate
-Storage/search: JSONL source files, optional in-memory indexes
-Fuzzy search: nucleo, skim matcher, or external fzf integration
-GPG: spawn gpg CLI initially
-Git: spawn git CLI initially
-Cron parsing: cron parser crate or internal minimal schedule parser
+HTTP: reqwest blocking client with rustls
+Storage/search: JSONL source files and in-memory snapshots/indexes
+Fuzzy search: internal matcher plus external fzf picker integration
+GPG: spawn gpg CLI
+Git: spawn git CLI
+Sync schedule parsing: internal conservative schedule subset
 ```
 
 Aish should keep shell parsing minimal. It only needs enough lexing for current-token detection, quoting insertion, placeholder spans, and optional best-effort history splitting. The backend shell remains authoritative for execution semantics.
