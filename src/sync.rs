@@ -2,6 +2,7 @@ use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 
 use crate::config::{SyncConfig, create_private_dir_all, set_private_file_handle_permissions};
 use crate::log::{DEFAULT_MAX_EVENTS, EventLevel, append_event};
@@ -15,6 +16,7 @@ const MANAGED_GITATTRIBUTES_LINES: &[&str] = &[
     "history/*.jsonl merge=union",
     "templates/*.jsonl merge=union",
 ];
+const SYNC_METADATA_PATH: &str = ".aish-sync.toml";
 const SYNC_README_PATH: &str = "README.md";
 const SYNC_README_BEGIN: &str = "<!-- BEGIN AISH MANAGED SYNC README -->";
 const SYNC_README_END: &str = "<!-- END AISH MANAGED SYNC README -->";
@@ -30,6 +32,12 @@ with `#sync now` and `#push`.
 
 Local-only files such as `config.toml`, cache, logs, secrets, and temporary
 files are intentionally ignored.
+
+`.aish-sync.toml` is non-secret repository metadata. When encrypted storage is
+enabled, it records the single GPG fingerprint currently used for synced Aish
+data. It also records which private Aish content categories this repository
+syncs. Do not edit the fingerprint casually; all machines using this remote
+must be able to decrypt the existing data before rotating to a new key.
 
 Plaintext Aish JSONL files use Git's union merge driver so independent appends
 from multiple machines usually keep both sides. Encrypted `*.jsonl.gpg` files
@@ -81,6 +89,39 @@ pub struct DisabledManagedPath {
     pub category: String,
     pub path: String,
     pub enable_command: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncRepositoryMetadata {
+    pub version: u32,
+    pub encryption: SyncRepositoryEncryptionMetadata,
+    #[serde(default)]
+    pub content: SyncRepositoryContentMetadata,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncRepositoryEncryptionMetadata {
+    pub enabled: bool,
+    pub key_fingerprint: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncRepositoryContentMetadata {
+    pub ai: bool,
+    pub history: bool,
+    pub templates: bool,
+    pub drafts: bool,
+}
+
+impl Default for SyncRepositoryContentMetadata {
+    fn default() -> Self {
+        Self {
+            ai: true,
+            history: true,
+            templates: true,
+            drafts: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -232,6 +273,103 @@ pub fn maintain_sync_readme(path: impl AsRef<Path>) -> Result<()> {
         })?;
     }
     fs::write(path, next).with_context(|| format!("failed to write sync readme {}", path.display()))
+}
+
+pub fn sync_repository_metadata_path() -> &'static str {
+    SYNC_METADATA_PATH
+}
+
+pub fn sync_repository_metadata_for(
+    config: &SyncConfig,
+    encryption_enabled: bool,
+    key_fingerprint: &str,
+) -> SyncRepositoryMetadata {
+    let key_fingerprint = if encryption_enabled {
+        normalize_key_fingerprint(key_fingerprint)
+    } else {
+        String::new()
+    };
+    SyncRepositoryMetadata {
+        version: 1,
+        encryption: SyncRepositoryEncryptionMetadata {
+            enabled: encryption_enabled,
+            key_fingerprint,
+        },
+        content: SyncRepositoryContentMetadata {
+            ai: config.ai,
+            history: config.history,
+            templates: config.templates,
+            drafts: config.drafts,
+        },
+    }
+}
+
+pub fn read_sync_repository_metadata(
+    path: impl AsRef<Path>,
+) -> Result<Option<SyncRepositoryMetadata>> {
+    let path = path.as_ref();
+    let raw = match fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => {
+            Err(err).with_context(|| format!("failed to read sync metadata {}", path.display()))?
+        }
+    };
+    parse_sync_repository_metadata(&raw).map(Some)
+}
+
+pub fn parse_sync_repository_metadata(raw: &str) -> Result<SyncRepositoryMetadata> {
+    let mut metadata: SyncRepositoryMetadata =
+        toml::from_str(raw).context("invalid sync metadata")?;
+    metadata.encryption.key_fingerprint =
+        normalize_key_fingerprint(&metadata.encryption.key_fingerprint);
+    Ok(metadata)
+}
+
+pub fn write_sync_repository_metadata(
+    path: impl AsRef<Path>,
+    metadata: &SyncRepositoryMetadata,
+) -> Result<()> {
+    let path = path.as_ref();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "failed to create sync metadata directory {}",
+                parent.display()
+            )
+        })?;
+    }
+    let raw = sync_repository_metadata_to_string(metadata)?;
+    fs::write(path, raw)
+        .with_context(|| format!("failed to write sync metadata {}", path.display()))
+}
+
+pub fn sync_repository_metadata_file_matches(
+    path: impl AsRef<Path>,
+    metadata: &SyncRepositoryMetadata,
+) -> Result<bool> {
+    let path = path.as_ref();
+    let raw = match fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(err) => {
+            Err(err).with_context(|| format!("failed to read sync metadata {}", path.display()))?
+        }
+    };
+    Ok(raw == sync_repository_metadata_to_string(metadata)?)
+}
+
+pub fn sync_repository_metadata_to_string(metadata: &SyncRepositoryMetadata) -> Result<String> {
+    toml::to_string_pretty(metadata).context("failed to serialize sync metadata")
+}
+
+pub fn encryption_fingerprint_is_valid(fingerprint: &str) -> bool {
+    let fingerprint = fingerprint.trim();
+    fingerprint.len() == 40 && fingerprint.chars().all(|ch| ch.is_ascii_hexdigit())
+}
+
+fn normalize_key_fingerprint(fingerprint: &str) -> String {
+    fingerprint.trim().to_ascii_uppercase()
 }
 
 fn sync_readme_section() -> String {
@@ -459,6 +597,7 @@ pub fn managed_add_plan_with_encryption(
     encryption_enabled: bool,
 ) -> ManagedAddPlan {
     let mut paths = vec![
+        SYNC_METADATA_PATH.to_string(),
         ".gitattributes".to_string(),
         ".gitignore".to_string(),
         SYNC_README_PATH.to_string(),
@@ -519,7 +658,11 @@ pub fn existing_managed_add_plan_with_encryption(
     for path in managed_add_plan_with_encryption(config, encryption_enabled).paths {
         if path == SYNC_README_PATH && !sync_readme_should_be_staged(root.join(&path)) {
             missing_paths.push(path);
-        } else if path == ".gitignore" || path == ".gitattributes" || root.join(&path).exists() {
+        } else if path == SYNC_METADATA_PATH
+            || path == ".gitignore"
+            || path == ".gitattributes"
+            || root.join(&path).exists()
+        {
             paths.push(path);
         } else {
             missing_paths.push(path);

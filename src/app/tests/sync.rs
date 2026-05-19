@@ -4,6 +4,9 @@ fn git_env_guard() -> std::sync::MutexGuard<'static, ()> {
     ENV_LOCK.lock().unwrap()
 }
 
+const LOCAL_TEST_FINGERPRINT: &str = "ABCDEF0123456789ABCDEF0123456789ABCDEF01";
+const REMOTE_TEST_FINGERPRINT: &str = "FEDCBA9876543210FEDCBA9876543210FEDCBA98";
+
 #[test]
 fn sync_config_commands_persist_without_running_git() {
     let _guard = git_env_guard();
@@ -143,7 +146,7 @@ fn sync_now_runs_against_configured_local_git_remote() {
 
     let output = String::from_utf8(output).unwrap();
     assert!(
-        output.contains("sync step ok: git add -- .gitattributes .gitignore README.md history/ai.jsonl history/draft.jsonl history/notes.jsonl history/regular.jsonl templates/templates.jsonl"),
+        output.contains("sync step ok: git add -- .aish-sync.toml .gitattributes .gitignore README.md history/ai.jsonl history/draft.jsonl history/notes.jsonl history/regular.jsonl templates/templates.jsonl"),
         "{output}"
     );
     assert!(
@@ -156,6 +159,16 @@ fn sync_now_runs_against_configured_local_git_remote() {
     assert!(root.join(".gitignore").exists());
     assert!(root.join(".gitattributes").exists());
     assert!(root.join("README.md").exists());
+    let pushed_metadata = run_test_git_stdout(
+        temp.path(),
+        [
+            "--git-dir",
+            remote.to_str().unwrap(),
+            "show",
+            "HEAD:.aish-sync.toml",
+        ],
+    );
+    assert!(pushed_metadata.contains("enabled = false"));
     let pushed_history = run_test_git_stdout(
         temp.path(),
         [
@@ -525,6 +538,7 @@ fn sync_warns_when_existing_managed_files_are_excluded_by_category() {
     state.sync_config.drafts = false;
     state.encryption_config = EncryptionConfig {
         enabled: true,
+        key_fingerprint: LOCAL_TEST_FINGERPRINT.to_string(),
         ..EncryptionConfig::default()
     };
 
@@ -557,6 +571,242 @@ fn sync_warns_when_existing_managed_files_are_excluded_by_category() {
     );
     assert!(status.contains("?? history/ai.jsonl.gpg"), "{status}");
     assert!(status.contains("?? history/draft.jsonl.gpg"), "{status}");
+}
+
+#[test]
+fn encrypted_sync_writes_repository_key_metadata() {
+    let _guard = git_env_guard();
+    let temp = tempfile::tempdir().unwrap();
+    let remote = temp.path().join("remote.git");
+    let seed = temp.path().join("seed");
+    let root = temp.path().join("aish-home");
+    seed_local_remote(&remote, &seed, &root);
+
+    fs::create_dir_all(root.join("history")).unwrap();
+    fs::write(
+        root.join("history/regular.jsonl.gpg"),
+        "encrypted regular\n",
+    )
+    .unwrap();
+    let mut state = sync_state_for_root(&root, &remote);
+    state.encryption_config = EncryptionConfig {
+        enabled: true,
+        key_fingerprint: LOCAL_TEST_FINGERPRINT.to_string(),
+        ..EncryptionConfig::default()
+    };
+
+    let mut output = Vec::new();
+    run_manual_sync_push(&mut state, &mut output).unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(
+        output.contains(
+            "sync step ok: git add -- .aish-sync.toml .gitattributes .gitignore README.md history/regular.jsonl.gpg"
+        ),
+        "{output}"
+    );
+    assert!(output.contains("sync push completed"), "{output}");
+    let pushed_metadata = run_test_git_stdout(
+        temp.path(),
+        [
+            "--git-dir",
+            remote.to_str().unwrap(),
+            "show",
+            "HEAD:.aish-sync.toml",
+        ],
+    );
+    assert!(pushed_metadata.contains("enabled = true"));
+    assert!(pushed_metadata.contains(LOCAL_TEST_FINGERPRINT));
+}
+
+#[test]
+fn encrypted_sync_requires_full_local_fingerprint() {
+    let _guard = git_env_guard();
+    let temp = tempfile::tempdir().unwrap();
+    let remote = temp.path().join("remote.git");
+    let root = temp.path().join("aish-home");
+    run_test_git(temp.path(), ["init", "--bare", remote.to_str().unwrap()]);
+    fs::create_dir_all(&root).unwrap();
+    let mut state = sync_state_for_root(&root, &remote);
+    state.encryption_config = EncryptionConfig {
+        enabled: true,
+        recipient: "evenson@example.invalid".to_string(),
+        ..EncryptionConfig::default()
+    };
+
+    let mut output = Vec::new();
+    run_manual_sync_push(&mut state, &mut output).unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(
+        output.contains("sync encryption key is not configured as a full GPG fingerprint"),
+        "{output}"
+    );
+    assert!(output.contains("local key_fingerprint=evenson@example.invalid"));
+    assert!(!output.contains("sync push completed"));
+    assert!(!root.join(".git").exists());
+}
+
+#[test]
+fn sync_rejects_repository_key_mismatch_before_staging() {
+    let _guard = git_env_guard();
+    let temp = tempfile::tempdir().unwrap();
+    let remote = temp.path().join("remote.git");
+    let seed = temp.path().join("seed");
+    let root = temp.path().join("aish-home");
+    seed_local_remote(&remote, &seed, &root);
+    crate::sync::write_sync_repository_metadata(
+        root.join(crate::sync::sync_repository_metadata_path()),
+        &crate::sync::sync_repository_metadata_for(
+            &SyncConfig::default(),
+            true,
+            REMOTE_TEST_FINGERPRINT,
+        ),
+    )
+    .unwrap();
+    let mut state = sync_state_for_root(&root, &remote);
+    state.encryption_config = EncryptionConfig {
+        enabled: true,
+        key_fingerprint: LOCAL_TEST_FINGERPRINT.to_string(),
+        ..EncryptionConfig::default()
+    };
+
+    let mut output = Vec::new();
+    run_manual_sync_push(&mut state, &mut output).unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.contains("sync encryption key mismatch"), "{output}");
+    assert!(output.contains(REMOTE_TEST_FINGERPRINT), "{output}");
+    assert!(output.contains(LOCAL_TEST_FINGERPRINT), "{output}");
+    assert!(output.contains("#encrypt rotate <chosen-full-key-fingerprint>"));
+    assert!(!output.contains("sync push completed"));
+}
+
+#[test]
+fn sync_rejects_remote_key_mismatch_before_staging_local_changes() {
+    let _guard = git_env_guard();
+    let temp = tempfile::tempdir().unwrap();
+    let remote = temp.path().join("remote.git");
+    let seed = temp.path().join("seed");
+    let root = temp.path().join("aish-home");
+    let other = temp.path().join("other");
+    seed_local_remote(&remote, &seed, &root);
+
+    crate::sync::write_sync_repository_metadata(
+        root.join(crate::sync::sync_repository_metadata_path()),
+        &crate::sync::sync_repository_metadata_for(
+            &SyncConfig::default(),
+            true,
+            LOCAL_TEST_FINGERPRINT,
+        ),
+    )
+    .unwrap();
+    run_test_git(&root, ["add", ".aish-sync.toml"]);
+    run_test_git(&root, ["commit", "-m", "local metadata"]);
+    run_test_git(&root, ["push"]);
+
+    run_test_git(
+        temp.path(),
+        ["clone", remote.to_str().unwrap(), other.to_str().unwrap()],
+    );
+    run_test_git(&other, ["config", "user.name", "Aish Test"]);
+    run_test_git(&other, ["config", "user.email", "aish@example.invalid"]);
+    run_test_git(&other, ["config", "commit.gpgsign", "false"]);
+    crate::sync::write_sync_repository_metadata(
+        other.join(crate::sync::sync_repository_metadata_path()),
+        &crate::sync::sync_repository_metadata_for(
+            &SyncConfig::default(),
+            true,
+            REMOTE_TEST_FINGERPRINT,
+        ),
+    )
+    .unwrap();
+    run_test_git(&other, ["add", ".aish-sync.toml"]);
+    run_test_git(&other, ["commit", "-m", "remote metadata"]);
+    run_test_git(&other, ["push"]);
+
+    let mut state = sync_state_for_root(&root, &remote);
+    state.encryption_config = EncryptionConfig {
+        enabled: true,
+        key_fingerprint: LOCAL_TEST_FINGERPRINT.to_string(),
+        ..EncryptionConfig::default()
+    };
+    let mut output = Vec::new();
+    run_manual_sync_push(&mut state, &mut output).unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.contains("sync encryption key mismatch"), "{output}");
+    assert!(!output.contains("sync step ok: git add"), "{output}");
+    assert!(!output.contains("sync step ok: git push"), "{output}");
+    assert!(!output.contains("sync push completed"));
+}
+
+#[test]
+fn sync_adopts_remote_content_options_before_staging_local_files() {
+    let _guard = git_env_guard();
+    let temp = tempfile::tempdir().unwrap();
+    let remote = temp.path().join("remote.git");
+    let seed = temp.path().join("seed");
+    let root = temp.path().join("aish-home");
+    seed_local_remote(&remote, &seed, &root);
+
+    let remote_config = SyncConfig {
+        ai: false,
+        history: false,
+        templates: false,
+        drafts: false,
+        ..SyncConfig::default()
+    };
+    crate::sync::write_sync_repository_metadata(
+        seed.join(crate::sync::sync_repository_metadata_path()),
+        &crate::sync::sync_repository_metadata_for(&remote_config, false, ""),
+    )
+    .unwrap();
+    run_test_git(&seed, ["add", ".aish-sync.toml"]);
+    run_test_git(&seed, ["commit", "-m", "remote content options"]);
+    run_test_git(&seed, ["push"]);
+
+    fs::create_dir_all(root.join("history")).unwrap();
+    fs::write(
+        root.join("history/regular.jsonl"),
+        "{\"command\":\"local-only\"}\n",
+    )
+    .unwrap();
+    let mut state = sync_state_for_root(&root, &remote);
+    let mut output = Vec::new();
+    run_manual_sync_push(&mut state, &mut output).unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(
+        output.contains("warning: repository sync content options differ"),
+        "{output}"
+    );
+    assert!(
+        output.contains(
+            "warning: sync.history=false; not staging existing Aish file history/regular.jsonl; run #sync history on to include it"
+        ),
+        "{output}"
+    );
+    assert!(
+        output.contains(
+            "sync step ok: git add -- .aish-sync.toml .gitattributes .gitignore README.md"
+        ),
+        "{output}"
+    );
+    assert!(
+        !output.contains(
+            "sync step ok: git add -- .aish-sync.toml .gitattributes .gitignore README.md history/regular.jsonl"
+        ),
+        "{output}"
+    );
+    assert!(!state.sync_config.history);
+    assert!(!state.sync_config.templates);
+    let loaded = config::load_config(&root.join("config.toml")).unwrap();
+    assert!(!loaded.sync.history);
+    assert!(!loaded.sync.templates);
+
+    let status = run_test_git_stdout(&root, ["status", "--short", "--", "history/regular.jsonl"]);
+    assert!(status.contains("?? history/regular.jsonl"), "{status}");
 }
 
 #[test]

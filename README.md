@@ -495,12 +495,15 @@ Implemented:
 - Sync AI history, shell history and notes, templates, and drafts by default.
 - Keep `config.toml`, cache, logs, secrets, and temporary files local by default.
 - Write `README.md` into the sync data repository as a warning/guide for anyone opening the remote when it is absent or already Aish-managed.
+- Write `.aish-sync.toml` into the sync data repository as non-secret metadata. It records the private sync content categories and, when encryption is enabled, the single full GPG fingerprint that current synced data must use.
 - Persist a conservative subset of periodic schedules checked at startup.
 - Persist explicit startup and exit sync triggers.
 - Run `#sync now` or its alias `#push` against a configured Git remote.
 - Stage managed enabled paths automatically, commit only when staged content changed, merge remote updates with `git pull --no-rebase --no-edit`, then push.
 - Warn when existing Aish-managed files are present but excluded because their sync category is disabled.
 - Retry pull with `--allow-unrelated-histories` when an existing local sync repository is connected to a populated remote with separate history.
+- If `.aish-sync.toml` disagrees with local content category settings, warn and use the repository settings as the private sync authority. Existing local files excluded by those settings are left alone and only warned about.
+- Stop before pushing if `.aish-sync.toml` disagrees with the local encryption config, or if local encrypted sync is configured with an email/selector instead of a full fingerprint.
 - Use Git's union merge driver for plaintext Aish JSONL files so independent appends usually merge by keeping both sides.
 - Offer `#sync resolve-union`, `#sync continue`, and `#sync abort` when a conflict still needs a user choice.
 - Log sync failures without leaking secret-like values.
@@ -512,6 +515,14 @@ Aish does not:
 - Run `git rm --cached` automatically.
 - Create scheduler files.
 - Remove user-managed files.
+
+Encryption key conflicts are deliberate stop points. If one machine and the
+sync repository disagree on the fingerprint, choose one full fingerprint, make
+sure the machine has the private key needed to decrypt the existing local and
+repository data, run `#unlock` if needed, then run `#encrypt rotate
+<chosen-full-key-fingerprint>` and `#sync now`. If this machine cannot decrypt
+the data, import the needed private key or resolve the rotation on another
+machine that can decrypt it.
 
 Sync does not have a long-running scheduler. The supported automatic triggers are:
 
@@ -567,6 +578,25 @@ Choose a full fingerprint from the listed keys, then enable encryption inside Ai
 ```
 
 After that, history, notes, drafts, AI history, and templates are written as encrypted `*.jsonl.gpg` files. `config.toml` remains plaintext because Aish needs it to find the key fingerprint and startup settings.
+
+During sync, the non-secret `.aish-sync.toml` file is committed to the sync
+repository and records that fingerprint plus the repository's content category
+settings. `config.toml` remains local and is not committed.
+
+### Template sharing roadmap
+
+The private sync remote is for one user's Aish state. Aish should support
+separate named template remotes for sharing command templates without exposing
+private history, AI prompts, drafts, notes, config, logs, cache, or secrets.
+
+Planned shape:
+
+- Keep `#set-remote` and `#sync now` for the private sync repository.
+- Add named template remotes that are template-only by design.
+- Publish templates to a named remote by writing only public template records and a repository README/metadata notice.
+- Fetch templates from a named remote into a review/import flow so users can inspect, search, and import selected template bodies before adding them locally.
+- Deduplicate imports by stable template ID/body hash and report already-present templates instead of overwriting local templates silently.
+- Never let a template-sharing command stage private sync paths.
 
 To rotate to a new key:
 

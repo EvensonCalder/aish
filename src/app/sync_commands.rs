@@ -8,15 +8,20 @@ use anyhow::{Context, Result, bail};
 use crate::config;
 use crate::log::EventLevel;
 use crate::sync::{
-    GitCommandPlan, StartupSyncDecision, SyncFailureKind, SyncLock, SyncStepOutcome,
-    classify_git_sync_step, conservative_sync_plan_for_existing_paths_with_encryption,
-    disabled_existing_managed_paths_with_encryption, init_repo_plan, log_sync_failure,
-    maintain_managed_gitattributes, maintain_managed_gitignore, maintain_sync_readme,
-    pull_merge_allow_unrelated_plan, pull_merge_plan, push_plan, startup_sync_decision,
-    tracked_managed_files_warning,
+    GitCommandPlan, StartupSyncDecision, SyncFailureKind, SyncLock, SyncRepositoryContentMetadata,
+    SyncRepositoryMetadata, SyncStepOutcome, classify_git_sync_step,
+    conservative_sync_plan_for_existing_paths_with_encryption,
+    disabled_existing_managed_paths_with_encryption, encryption_fingerprint_is_valid,
+    init_repo_plan, log_sync_failure, maintain_managed_gitattributes, maintain_managed_gitignore,
+    maintain_sync_readme, pull_merge_allow_unrelated_plan, pull_merge_plan, push_plan,
+    read_sync_repository_metadata, startup_sync_decision, sync_repository_metadata_file_matches,
+    sync_repository_metadata_for, sync_repository_metadata_path, tracked_managed_files_warning,
+    write_sync_repository_metadata,
 };
 
-use super::{AppState, reports::write_encryption_sync_status};
+use super::{
+    AppState, encryption_commands::configured_encryption_key, reports::write_encryption_sync_status,
+};
 
 const DEFAULT_SYNC_GIT_USER_NAME: &str = "Aish Sync";
 const DEFAULT_SYNC_GIT_USER_EMAIL: &str = "aish-sync@localhost";
@@ -135,6 +140,9 @@ pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -
         writeln!(out, "sync is already running")?;
         return Ok(());
     };
+    if local_sync_repository_metadata(state, out)?.is_none() {
+        return Ok(());
+    }
 
     maintain_managed_gitignore(root.join(".gitignore"))?;
     maintain_managed_gitattributes(root.join(".gitattributes"))?;
@@ -154,6 +162,12 @@ pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -
         return Ok(());
     }
     if !ensure_sync_git_identity(state, out, &root)? {
+        return Ok(());
+    }
+    if !adopt_remote_sync_repository_metadata(state, out, &root)? {
+        return Ok(());
+    }
+    if !prepare_sync_repository_metadata(state, out, &root)? {
         return Ok(());
     }
     warn_disabled_existing_managed_paths(
@@ -186,7 +200,10 @@ pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -
                 let mut pull = pull_merge_allow_unrelated_plan();
                 pull.args.push("origin".to_string());
                 pull.args.push(remote_branch);
-                if !run_sync_git_step(state, out, &root, &pull)? {
+                if !run_sync_pull_step(state, out, &root, &pull)? {
+                    return Ok(());
+                }
+                if !prepare_sync_repository_metadata_after_pull(state, out, &root)? {
                     return Ok(());
                 }
             } else {
@@ -200,6 +217,9 @@ pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -
         if is_pull_command(&command) {
             let pull = sync_pull_plan(&root, false)?.unwrap_or(command);
             if !run_sync_pull_step(state, out, &root, &pull)? {
+                return Ok(());
+            }
+            if !prepare_sync_repository_metadata_after_pull(state, out, &root)? {
                 return Ok(());
             }
             continue;
@@ -243,6 +263,266 @@ fn warn_disabled_existing_managed_paths(
         )?;
     }
     Ok(())
+}
+
+fn adopt_remote_sync_repository_metadata(
+    state: &mut AppState,
+    out: &mut impl Write,
+    root: &Path,
+) -> Result<bool> {
+    let metadata = match remote_sync_repository_metadata(root) {
+        Ok(Some(metadata)) => metadata,
+        Ok(None) => return Ok(true),
+        Err(err) => {
+            writeln!(out, "remote sync metadata is invalid; refusing to sync")?;
+            writeln!(out, "{err:#}")?;
+            return Ok(false);
+        }
+    };
+    let Some(local) = local_sync_repository_metadata(state, out)? else {
+        return Ok(false);
+    };
+    if !sync_repository_encryption_matches(&metadata, &local) {
+        write_sync_repository_metadata_mismatch(out, &metadata, &local)?;
+        return Ok(false);
+    }
+    if metadata.content != local.content {
+        apply_repository_sync_content_options(state, out, &metadata.content)?;
+    }
+    Ok(true)
+}
+
+fn remote_sync_repository_metadata(root: &Path) -> Result<Option<SyncRepositoryMetadata>> {
+    let Some(branch) = remote_sync_branch(root)? else {
+        return Ok(None);
+    };
+    let fetch = GitCommandPlan {
+        program: "git".to_string(),
+        args: vec!["fetch".to_string(), "origin".to_string(), branch],
+    };
+    if !run_git_command(root, &fetch)?.success {
+        return Ok(None);
+    }
+    let show = GitCommandPlan {
+        program: "git".to_string(),
+        args: vec![
+            "show".to_string(),
+            format!("FETCH_HEAD:{}", sync_repository_metadata_path()),
+        ],
+    };
+    let result = run_git_command(root, &show)?;
+    if !result.success {
+        return Ok(None);
+    }
+    crate::sync::parse_sync_repository_metadata(&result.stdout)
+        .map(Some)
+        .context("remote sync metadata is invalid")
+}
+
+fn prepare_sync_repository_metadata(
+    state: &mut AppState,
+    out: &mut impl Write,
+    root: &Path,
+) -> Result<bool> {
+    let Some(expected) = local_sync_repository_metadata(state, out)? else {
+        return Ok(false);
+    };
+    let path = root.join(sync_repository_metadata_path());
+    match read_sync_repository_metadata(&path) {
+        Ok(Some(metadata)) => {
+            if !sync_repository_encryption_matches(&metadata, &expected) {
+                write_sync_repository_metadata_mismatch(out, &metadata, &expected)?;
+                return Ok(false);
+            }
+            if metadata.content != expected.content {
+                apply_repository_sync_content_options(state, out, &metadata.content)?;
+            }
+            let expected = local_sync_repository_metadata(state, out)?
+                .expect("validated encryption config remains available");
+            if metadata != expected || !sync_repository_metadata_file_matches(&path, &expected)? {
+                write_sync_repository_metadata(&path, &expected)?;
+            }
+        }
+        Ok(None) => {
+            write_sync_repository_metadata(&path, &expected)?;
+        }
+        Err(err) => {
+            writeln!(out, "sync metadata is invalid; refusing to sync")?;
+            writeln!(out, "{err:#}")?;
+            writeln!(
+                out,
+                "resolve .aish-sync.toml to one repository encryption fingerprint, then run #sync now"
+            )?;
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn prepare_sync_repository_metadata_after_pull(
+    state: &mut AppState,
+    out: &mut impl Write,
+    root: &Path,
+) -> Result<bool> {
+    if !prepare_sync_repository_metadata(state, out, root)? {
+        return Ok(false);
+    }
+    warn_disabled_existing_managed_paths(
+        root,
+        &state.sync_config,
+        state.encryption_config.enabled,
+        out,
+    )?;
+    let Some(add) = conservative_sync_plan_for_existing_paths_with_encryption(
+        root,
+        &state.sync_config,
+        state.encryption_config.enabled,
+    )
+    .commands
+    .into_iter()
+    .next() else {
+        return Ok(true);
+    };
+    if !run_sync_git_step(state, out, root, &add)? {
+        return Ok(false);
+    }
+    if git_has_staged_changes(root)? {
+        let commit = crate::sync::default_sync_commit_plan();
+        if !run_sync_git_step(state, out, root, &commit)? {
+            return Ok(false);
+        }
+    } else {
+        writeln!(out, "sync step skipped: metadata unchanged")?;
+    }
+    Ok(true)
+}
+
+fn local_sync_repository_metadata(
+    state: &AppState,
+    out: &mut impl Write,
+) -> Result<Option<SyncRepositoryMetadata>> {
+    if !state.encryption_config.enabled {
+        return Ok(Some(sync_repository_metadata_for(
+            &state.sync_config,
+            false,
+            "",
+        )));
+    }
+
+    let key = configured_encryption_key(&state.encryption_config);
+    if !encryption_fingerprint_is_valid(key) {
+        writeln!(
+            out,
+            "sync encryption key is not configured as a full GPG fingerprint; refusing to sync encrypted data"
+        )?;
+        if key.is_empty() {
+            writeln!(out, "local key_fingerprint=<empty>")?;
+        } else {
+            writeln!(out, "local key_fingerprint={key}")?;
+        }
+        writeln!(
+            out,
+            "run #encrypt rotate <full-key-fingerprint> after #unlock if encrypted storage needs a passphrase, then run #sync now"
+        )?;
+        return Ok(None);
+    }
+    Ok(Some(sync_repository_metadata_for(
+        &state.sync_config,
+        true,
+        key,
+    )))
+}
+
+fn sync_repository_encryption_matches(
+    repository: &SyncRepositoryMetadata,
+    local: &SyncRepositoryMetadata,
+) -> bool {
+    repository.version == local.version
+        && repository.encryption.enabled == local.encryption.enabled
+        && repository.encryption.key_fingerprint == local.encryption.key_fingerprint
+        && (!repository.encryption.enabled
+            || encryption_fingerprint_is_valid(&repository.encryption.key_fingerprint))
+}
+
+fn apply_repository_sync_content_options(
+    state: &mut AppState,
+    out: &mut impl Write,
+    content: &SyncRepositoryContentMetadata,
+) -> Result<()> {
+    writeln!(
+        out,
+        "warning: repository sync content options differ; using repository sync options"
+    )?;
+    writeln!(out, "sync.ai={}", content.ai)?;
+    writeln!(out, "sync.history={}", content.history)?;
+    writeln!(out, "sync.templates={}", content.templates)?;
+    writeln!(out, "sync.drafts={}", content.drafts)?;
+    update_sync_config(state, |config| {
+        config.sync.ai = content.ai;
+        config.sync.history = content.history;
+        config.sync.templates = content.templates;
+        config.sync.drafts = content.drafts;
+    })?;
+    Ok(())
+}
+
+fn write_sync_repository_metadata_mismatch(
+    out: &mut impl Write,
+    repository: &SyncRepositoryMetadata,
+    local: &SyncRepositoryMetadata,
+) -> Result<()> {
+    writeln!(
+        out,
+        "sync encryption key mismatch; refusing to sync until one repository key is chosen"
+    )?;
+    writeln!(
+        out,
+        "repository encryption={}",
+        repository.encryption.enabled
+    )?;
+    writeln!(
+        out,
+        "repository key_fingerprint={}",
+        metadata_fingerprint_display(repository)
+    )?;
+    writeln!(out, "local encryption={}", local.encryption.enabled)?;
+    writeln!(
+        out,
+        "local key_fingerprint={}",
+        metadata_fingerprint_display(local)
+    )?;
+    if repository.version != local.version {
+        writeln!(out, "repository metadata version={}", repository.version)?;
+    }
+    if repository.encryption.enabled
+        && !encryption_fingerprint_is_valid(&repository.encryption.key_fingerprint)
+    {
+        writeln!(
+            out,
+            "repository .aish-sync.toml has an invalid encryption fingerprint"
+        )?;
+    }
+    writeln!(
+        out,
+        "Aish will not merge different encryption fingerprints automatically."
+    )?;
+    writeln!(
+        out,
+        "If this machine can decrypt both local and repository data, run #unlock if needed, then run #encrypt rotate <chosen-full-key-fingerprint> and #sync now."
+    )?;
+    writeln!(
+        out,
+        "To use the repository key here, import that private key first; if this machine cannot decrypt the data, resolve the key change on a machine that can."
+    )?;
+    Ok(())
+}
+
+fn metadata_fingerprint_display(metadata: &SyncRepositoryMetadata) -> &str {
+    if metadata.encryption.key_fingerprint.is_empty() {
+        "<none>"
+    } else {
+        &metadata.encryption.key_fingerprint
+    }
 }
 
 fn abort_interrupted_sync(state: &mut AppState, out: &mut impl Write) -> Result<()> {
@@ -536,7 +816,7 @@ fn git_has_staged_changes(root: &Path) -> Result<bool> {
 }
 
 fn run_sync_push_step(
-    state: &AppState,
+    state: &mut AppState,
     out: &mut impl Write,
     root: &Path,
     command: &GitCommandPlan,
@@ -555,6 +835,9 @@ fn run_sync_push_step(
         if !run_sync_pull_step(state, out, root, &pull)? {
             return Ok(false);
         }
+        if !prepare_sync_repository_metadata_after_pull(state, out, root)? {
+            return Ok(false);
+        }
         let retry = run_git_command(root, command)?;
         if retry.success {
             writeln!(out, "sync step ok: {}", describe_git_command(command))?;
@@ -568,7 +851,7 @@ fn run_sync_push_step(
 }
 
 fn run_sync_pull_step(
-    state: &AppState,
+    state: &mut AppState,
     out: &mut impl Write,
     root: &Path,
     command: &GitCommandPlan,
@@ -590,10 +873,90 @@ fn run_sync_pull_step(
             "sync pull needs unrelated-history merge; retrying with --allow-unrelated-histories"
         )?;
         let retry = sync_pull_plan(root, true)?.unwrap_or_else(pull_merge_allow_unrelated_plan);
-        return run_sync_git_step(state, out, root, &retry);
+        return run_sync_pull_step(state, out, root, &retry);
+    }
+    if matches!(
+        classify_git_sync_step(false, &result.stdout, &result.stderr),
+        SyncStepOutcome::AbortConflict { .. }
+    ) && try_resolve_sync_metadata_pull_conflict(state, out, root)?
+    {
+        writeln!(out, "sync step ok: {}", describe_git_command(command))?;
+        return Ok(true);
     }
     handle_failed_sync_step(state, out, command, result)?;
     Ok(false)
+}
+
+fn try_resolve_sync_metadata_pull_conflict(
+    state: &mut AppState,
+    out: &mut impl Write,
+    root: &Path,
+) -> Result<bool> {
+    if !has_interrupted_merge(root) {
+        return Ok(false);
+    }
+    let metadata_path = sync_repository_metadata_path();
+    let unmerged = unmerged_paths(root)?;
+    if !unmerged.iter().any(|path| path == metadata_path) {
+        return Ok(false);
+    }
+    let Some(repository_metadata) = git_stage_sync_repository_metadata(root, 3)? else {
+        return Ok(false);
+    };
+    let Some(local_metadata) = local_sync_repository_metadata(state, out)? else {
+        return Ok(false);
+    };
+    if !sync_repository_encryption_matches(&repository_metadata, &local_metadata) {
+        write_sync_repository_metadata_mismatch(out, &repository_metadata, &local_metadata)?;
+        return Ok(false);
+    }
+    if repository_metadata.content != local_metadata.content {
+        apply_repository_sync_content_options(state, out, &repository_metadata.content)?;
+    }
+    let resolved = local_sync_repository_metadata(state, out)?
+        .expect("validated encryption config remains available");
+    write_sync_repository_metadata(root.join(metadata_path), &resolved)?;
+    let add = GitCommandPlan {
+        program: "git".to_string(),
+        args: git_add_args(&[metadata_path.to_string()]),
+    };
+    if !run_sync_git_step(state, out, root, &add)? {
+        return Ok(false);
+    }
+    let remaining = unmerged_paths(root)?;
+    if !remaining.is_empty() {
+        writeln!(
+            out,
+            "sync metadata conflict resolved using repository sync options; remaining conflicts need user resolution"
+        )?;
+        return Ok(false);
+    }
+    let commit = GitCommandPlan {
+        program: "git".to_string(),
+        args: vec!["commit".to_string(), "--no-edit".to_string()],
+    };
+    if !run_sync_git_step(state, out, root, &commit)? {
+        return Ok(false);
+    }
+    Ok(true)
+}
+
+fn git_stage_sync_repository_metadata(
+    root: &Path,
+    stage: u8,
+) -> Result<Option<SyncRepositoryMetadata>> {
+    let pathspec = format!(":{stage}:{}", sync_repository_metadata_path());
+    let command = GitCommandPlan {
+        program: "git".to_string(),
+        args: vec!["show".to_string(), pathspec],
+    };
+    let result = run_git_command(root, &command)?;
+    if !result.success {
+        return Ok(None);
+    }
+    crate::sync::parse_sync_repository_metadata(&result.stdout)
+        .map(Some)
+        .with_context(|| format!("failed to parse git stage {stage} sync metadata"))
 }
 
 fn git_output_suggests_remote_changed(output: &str) -> bool {

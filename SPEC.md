@@ -1269,6 +1269,10 @@ Policy:
 - Aish stages managed enabled files automatically before every sync commit.
 - Aish warns, without staging, when existing Aish-managed files are excluded because their sync category is disabled.
 - Aish writes `README.md` into the sync data repository so the remote is identifiable as Aish-managed data when the file is absent or already Aish-managed.
+- Aish writes `.aish-sync.toml` into the sync data repository as non-secret sync metadata. It records the private sync content categories and encryption key metadata. `config.toml` stays local and must not be committed.
+- If repository content-category metadata disagrees with local settings, Aish warns, adopts the repository settings, persists them locally, and uses those settings for the current sync. Local existing files excluded by repository settings are not staged; Aish warns about them without deleting them.
+- When encryption is enabled, `.aish-sync.toml` must contain exactly one current full 40-hex GPG key fingerprint. Local encrypted sync must use a full fingerprint, not an email/user selector.
+- If local encryption state or fingerprint disagrees with `.aish-sync.toml`, Aish must stop before pushing and tell the user how to resolve the key choice.
 - If Git identity is not configured, Aish sets local-only `user.name` and `user.email` values inside the sync repository before committing.
 - If an existing non-Git Aish home is connected to an already-populated sync remote, Aish merges the remote default branch with `--allow-unrelated-histories` during the first sync.
 - If an existing local sync repository is connected to a populated remote with separate history, Aish reports the unrelated-history case and retries the pull with `--allow-unrelated-histories`.
@@ -1279,6 +1283,16 @@ Policy:
 - Aish does not run `git rm --cached` automatically.
 - Sync does not rewrite git history. Encrypted-storage history rewrite is available only through `#encrypt rewrite-history run <key> --confirm-rewrite-history`.
 - If a category is disabled for sync, Aish updates future `.gitignore` behavior and warns if files may already be tracked.
+- Key rotation requires decrypting existing managed local and repository data with an available private key, choosing one target full fingerprint, and re-encrypting with `#encrypt rotate <key>` before syncing again. If the current machine cannot decrypt the data, it cannot resolve the key conflict safely.
+
+Template sharing TODO:
+
+- Keep the private sync remote separate from public/shared template remotes.
+- Add named template-only remotes. They must never stage or fetch private history, AI prompts, drafts, notes, config, logs, cache, or secrets.
+- Publishing templates should write only public template records plus template-repository README/metadata.
+- Fetching templates should import into a reviewable pending set first. The user can list, inspect, search, and import selected templates into the local template store.
+- Import should deduplicate by stable template ID/body hash, report already-present templates, and avoid overwriting local templates silently.
+- Template import should be usable without enabling private sync.
 
 Commit messages:
 

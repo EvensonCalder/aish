@@ -109,6 +109,71 @@ fn sync_readme_is_created_once_and_preserves_user_edits() {
 }
 
 #[test]
+fn sync_repository_metadata_roundtrips_and_normalizes_fingerprint() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join(sync_repository_metadata_path());
+    let metadata = sync_repository_metadata_for(
+        &SyncConfig::default(),
+        true,
+        "abcdef0123456789abcdef0123456789abcdef01",
+    );
+
+    write_sync_repository_metadata(&path, &metadata).unwrap();
+    let loaded = read_sync_repository_metadata(&path)
+        .unwrap()
+        .expect("metadata loaded");
+
+    assert_eq!(
+        loaded,
+        sync_repository_metadata_for(
+            &SyncConfig::default(),
+            true,
+            "ABCDEF0123456789ABCDEF0123456789ABCDEF01"
+        )
+    );
+    assert!(encryption_fingerprint_is_valid(
+        &loaded.encryption.key_fingerprint
+    ));
+}
+
+#[test]
+fn sync_repository_metadata_records_content_options() {
+    let config = SyncConfig {
+        ai: false,
+        history: true,
+        templates: false,
+        drafts: true,
+        ..SyncConfig::default()
+    };
+
+    let metadata = sync_repository_metadata_for(&config, false, "");
+    let raw = sync_repository_metadata_to_string(&metadata).unwrap();
+
+    assert!(raw.contains("[content]"));
+    assert!(raw.contains("ai = false"));
+    assert!(raw.contains("history = true"));
+    assert!(raw.contains("templates = false"));
+    assert!(raw.contains("drafts = true"));
+    assert_eq!(metadata.content.ai, config.ai);
+    assert_eq!(metadata.content.templates, config.templates);
+}
+
+#[test]
+fn sync_repository_metadata_rejects_non_fingerprint_key_values() {
+    assert!(!encryption_fingerprint_is_valid(""));
+    assert!(!encryption_fingerprint_is_valid("evenson@example.invalid"));
+    assert!(!encryption_fingerprint_is_valid(
+        "ABCDEF0123456789ABCDEF0123456789ABCDEF0"
+    ));
+    assert!(!encryption_fingerprint_is_valid(
+        "ABCDEF0123456789ABCDEF0123456789ABCDEFG"
+    ));
+    assert!(encryption_fingerprint_is_valid(
+        "ABCDEF0123456789ABCDEF0123456789ABCDEF01"
+    ));
+}
+
+#[test]
 fn tracked_managed_files_warning_lists_managed_tracked_paths() {
     let warning = tracked_managed_files_warning([
         "README.md",
@@ -284,6 +349,7 @@ fn managed_add_plan_syncs_user_content_categories_by_default() {
         managed_add_plan(&config),
         ManagedAddPlan {
             paths: vec![
+                ".aish-sync.toml".to_string(),
                 ".gitattributes".to_string(),
                 ".gitignore".to_string(),
                 "README.md".to_string(),
@@ -309,7 +375,12 @@ fn managed_add_plan_can_disable_all_content_categories() {
 
     assert_eq!(
         managed_add_plan(&config).paths,
-        vec![".gitattributes", ".gitignore", "README.md"]
+        vec![
+            ".aish-sync.toml",
+            ".gitattributes",
+            ".gitignore",
+            "README.md"
+        ]
     );
 }
 
@@ -326,6 +397,7 @@ fn managed_add_plan_uses_gpg_paths_when_encryption_is_enabled() {
     assert_eq!(
         managed_add_plan_with_encryption(&config, true).paths,
         vec![
+            ".aish-sync.toml",
             ".gitattributes",
             ".gitignore",
             "README.md",
@@ -358,6 +430,7 @@ fn existing_managed_add_plan_skips_missing_enabled_paths() {
     assert_eq!(
         plan.paths,
         vec![
+            ".aish-sync.toml",
             ".gitattributes",
             ".gitignore",
             "README.md",
@@ -384,7 +457,10 @@ fn existing_managed_add_plan_does_not_stage_custom_readme() {
 
     let plan = existing_managed_add_plan(temp.path(), &config);
 
-    assert_eq!(plan.paths, vec![".gitattributes", ".gitignore"]);
+    assert_eq!(
+        plan.paths,
+        vec![".aish-sync.toml", ".gitattributes", ".gitignore"]
+    );
     assert_eq!(plan.missing_paths, vec!["README.md"]);
 }
 
@@ -547,6 +623,7 @@ fn conservative_sync_plan_orders_fixed_steps() {
                     args: vec![
                         "add".to_string(),
                         "--".to_string(),
+                        ".aish-sync.toml".to_string(),
                         ".gitattributes".to_string(),
                         ".gitignore".to_string(),
                         "README.md".to_string(),
@@ -604,6 +681,7 @@ fn conservative_sync_plan_adds_only_metadata_when_categories_are_disabled() {
             args: vec![
                 "add".to_string(),
                 "--".to_string(),
+                ".aish-sync.toml".to_string(),
                 ".gitattributes".to_string(),
                 ".gitignore".to_string(),
                 "README.md".to_string()

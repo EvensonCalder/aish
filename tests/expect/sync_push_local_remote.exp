@@ -45,7 +45,7 @@ aish_wait_prompt
 
 aish_send "#push"
 aish_enter
-aish_expect "sync step ok: git add -- .gitattributes .gitignore README.md"
+aish_expect "sync step ok: git add -- .aish-sync.toml .gitattributes .gitignore README.md"
 aish_expect "sync step ok: git commit"
 aish_expect "sync step ok: git pull --no-rebase --no-edit"
 aish_expect "sync step ok: git push"
@@ -67,6 +67,11 @@ if {[string first "merge=union" $pushed_gitattributes] < 0} {
 set pushed_sync_readme [run_git --git-dir $remote show HEAD:README.md]
 if {[string first "Aish Sync Repository" $pushed_sync_readme] < 0} {
     puts stderr "remote README.md missing Aish sync notice"
+    exit 6
+}
+set pushed_sync_metadata [run_git --git-dir $remote show HEAD:.aish-sync.toml]
+if {[string first "enabled = false" $pushed_sync_metadata] < 0} {
+    puts stderr "remote .aish-sync.toml missing unencrypted sync metadata"
     exit 6
 }
 if {[file exists "$home/cache/runtime/scheduler"]} {
