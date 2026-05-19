@@ -79,6 +79,11 @@ fn private_command_completion_includes_nested_arguments() {
             .map(|candidate| candidate.replacement.as_str())
             .collect::<Vec<_>>(),
         [
+            "now",
+            "abort",
+            "continue",
+            "resolve-union",
+            "union",
             "off",
             "startup",
             "exit",

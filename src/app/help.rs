@@ -105,11 +105,11 @@ const COMMAND_HELP: &[HelpEntry] = &[
     },
     HelpEntry {
         usage: "#push",
-        description: "run the conservative manual sync push flow",
+        description: "run manual sync now; alias for #sync now",
     },
     HelpEntry {
-        usage: "#sync [off|<schedule>|startup|exit|ai|history|templates|drafts on|off]",
-        description: "show or update sync schedule and category settings",
+        usage: "#sync [now|abort|continue|resolve-union|off|<schedule>|startup|exit|ai|history|templates|drafts on|off]",
+        description: "run sync, resolve sync conflicts, or update sync settings",
     },
     HelpEntry {
         usage: "#exit",
@@ -292,11 +292,27 @@ const SYNC_HELP: &[HelpEntry] = &[
     },
     HelpEntry {
         usage: "#push",
-        description: "run conservative git init/add/commit/pull/push steps",
+        description: "run manual sync now; alias for #sync now",
     },
     HelpEntry {
         usage: "#sync",
         description: "show sync and encryption status without running git",
+    },
+    HelpEntry {
+        usage: "#sync now",
+        description: "stage managed files, commit local changes, merge remote updates, and push",
+    },
+    HelpEntry {
+        usage: "#sync resolve-union",
+        description: "resolve plaintext Aish file conflicts by keeping both sides, then commit and push",
+    },
+    HelpEntry {
+        usage: "#sync continue",
+        description: "continue after manually resolving and staging a sync merge conflict",
+    },
+    HelpEntry {
+        usage: "#sync abort",
+        description: "abort an interrupted sync merge or rebase",
     },
     HelpEntry {
         usage: "#sync <schedule>",

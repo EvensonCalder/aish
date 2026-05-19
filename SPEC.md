@@ -1134,10 +1134,10 @@ remote = ""
 schedule = ""
 startup = false
 exit = false
-ai = false
-history = false
-templates = false
-drafts = false
+ai = true
+history = true
+templates = true
+drafts = true
 ```
 
 ### 14.1 AI URL handling
@@ -1246,6 +1246,10 @@ Commands:
 ```text
 #set-remote <git-url>
 #push
+#sync now
+#sync resolve-union
+#sync continue
+#sync abort
 #sync <schedule>
 #sync off
 #sync startup on|off
@@ -1261,7 +1265,11 @@ Policy:
 - Aish can initialize and manage a git repository in `~/.aish`.
 - Sync is conservative.
 - Aish uses a lock file to prevent concurrent sync.
-- Aish does not auto-resolve conflicts.
+- Sync includes AI history, shell history and notes, templates, and drafts by default.
+- Aish stages managed enabled files automatically before every sync commit.
+- Plaintext Aish JSONL files use Git's union merge driver so independent appends keep both sides.
+- Aish can auto-resolve remaining plaintext Aish file conflicts with `#sync resolve-union`.
+- Aish does not auto-resolve encrypted `*.jsonl.gpg` conflicts because text union can corrupt ciphertext.
 - Aish does not run `git rm --cached` automatically.
 - Sync does not rewrite git history. Encrypted-storage history rewrite is available only through `#encrypt rewrite-history run <key> --confirm-rewrite-history`.
 - If a category is disabled for sync, Aish updates future `.gitignore` behavior and warns if files may already be tracked.
@@ -1275,31 +1283,34 @@ Commit messages:
 
 Sync triggers:
 
-1. `#sync <schedule>` persists a conservative periodic interval that is checked only at startup. No scheduler files are created.
-2. `#sync startup on|off` controls whether `#push` runs once every startup, independent of the periodic due check.
-3. `#sync exit on|off` controls whether `#push` runs during the exit durability boundary.
-4. Multiple triggers may be enabled. A single startup invocation should not run duplicate syncs for the same trigger path.
-5. Every automatic trigger must acquire the same sync lock as manual `#push`.
-6. Every automatic trigger must use the same conservative sync plan as manual `#push`.
-7. Log success/failure.
+1. `#sync now` runs the manual sync flow immediately. `#push` is an alias.
+2. `#sync <schedule>` persists a conservative periodic interval that is checked only at startup. No scheduler files are created.
+3. `#sync startup on|off` controls whether the manual sync flow runs once every startup, independent of the periodic due check.
+4. `#sync exit on|off` controls whether the manual sync flow runs during the exit durability boundary.
+5. Multiple triggers may be enabled. A single startup invocation should not run duplicate syncs for the same trigger path.
+6. Every automatic trigger must acquire the same sync lock as manual `#sync now`.
+7. Every automatic trigger must use the same conservative sync plan as manual `#sync now`.
+8. Log success/failure.
 
 Aish does not run an in-process periodic scheduler and must not create scheduler files. Periodic sync means "check whether the saved interval is due when Aish starts." Supported schedule forms are intentionally conservative: `@hourly`, `@daily`, `*/N * * * *`, `0 */N * * *`, `0 0 * * *`, and `0 0 */N * *`. Unsupported schedules are logged and do not run git.
 
 Recommended conservative sync:
 
 ```text
-git pull --rebase
 git add managed files
 git commit -m "[auto] sync <time>"
+git pull --no-rebase --no-edit
 git push
 ```
 
 If conflict occurs:
 
-- Abort automatic sync.
+- Leave the merge/rebase state intact.
 - Log error.
-- Show user a short warning.
-- Require manual resolution.
+- Show user a short warning with options.
+- `#sync resolve-union` keeps both sides for plaintext Aish files, stages them, commits, and pushes.
+- `#sync continue` continues after manual edits and `git add`.
+- `#sync abort` cancels the interrupted merge or rebase.
 
 ---
 
@@ -1410,6 +1421,10 @@ Initial command set:
 
 #set-remote <git-url>
 #push
+#sync now
+#sync resolve-union
+#sync continue
+#sync abort
 #sync <schedule>
 #sync off
 #sync startup on|off

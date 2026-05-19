@@ -8,7 +8,13 @@ use crate::log::{DEFAULT_MAX_EVENTS, EventLevel, append_event};
 
 const GITIGNORE_BEGIN: &str = "# BEGIN AISH MANAGED";
 const GITIGNORE_END: &str = "# END AISH MANAGED";
-const MANAGED_GITIGNORE_LINES: &[&str] = &["cache/", "logs/", "secrets/", "*.tmp"];
+const GITATTRIBUTES_BEGIN: &str = "# BEGIN AISH MANAGED";
+const GITATTRIBUTES_END: &str = "# END AISH MANAGED";
+const MANAGED_GITIGNORE_LINES: &[&str] = &["cache/", "logs/", "secrets/", "config.toml", "*.tmp"];
+const MANAGED_GITATTRIBUTES_LINES: &[&str] = &[
+    "history/*.jsonl merge=union",
+    "templates/*.jsonl merge=union",
+];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrackedManagedFilesWarning {
@@ -142,11 +148,51 @@ pub fn maintain_managed_gitignore(path: impl AsRef<Path>) -> Result<()> {
     fs::write(path, next).with_context(|| format!("failed to write gitignore {}", path.display()))
 }
 
+pub fn maintain_managed_gitattributes(path: impl AsRef<Path>) -> Result<()> {
+    let path = path.as_ref();
+    let existing = match fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(err) => {
+            Err(err).with_context(|| format!("failed to read gitattributes {}", path.display()))?
+        }
+    };
+    let next = replace_managed_section(
+        &existing,
+        GITATTRIBUTES_BEGIN,
+        GITATTRIBUTES_END,
+        &managed_gitattributes_section(),
+    );
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "failed to create gitattributes directory {}",
+                parent.display()
+            )
+        })?;
+    }
+    fs::write(path, next)
+        .with_context(|| format!("failed to write gitattributes {}", path.display()))
+}
+
 fn replace_managed_gitignore_section(existing: &str) -> String {
-    let managed = managed_gitignore_section();
+    replace_managed_section(
+        existing,
+        GITIGNORE_BEGIN,
+        GITIGNORE_END,
+        &managed_gitignore_section(),
+    )
+}
+
+fn replace_managed_section(
+    existing: &str,
+    begin_marker: &str,
+    end_marker: &str,
+    managed: &str,
+) -> String {
     let lines: Vec<&str> = existing.lines().collect();
-    let start = lines.iter().position(|line| line.trim() == GITIGNORE_BEGIN);
-    let end = lines.iter().position(|line| line.trim() == GITIGNORE_END);
+    let start = lines.iter().position(|line| line.trim() == begin_marker);
+    let end = lines.iter().position(|line| line.trim() == end_marker);
 
     if let (Some(start), Some(end)) = (start, end)
         && start <= end
@@ -156,7 +202,7 @@ fn replace_managed_gitignore_section(existing: &str) -> String {
             output.push_str(line);
             output.push('\n');
         }
-        output.push_str(&managed);
+        output.push_str(managed);
         for line in &lines[end + 1..] {
             output.push_str(line);
             output.push('\n');
@@ -168,7 +214,7 @@ fn replace_managed_gitignore_section(existing: &str) -> String {
     if !output.is_empty() {
         output.push_str("\n\n");
     }
-    output.push_str(&managed);
+    output.push_str(managed);
     output
 }
 
@@ -181,6 +227,19 @@ fn managed_gitignore_section() -> String {
         output.push('\n');
     }
     output.push_str(GITIGNORE_END);
+    output.push('\n');
+    output
+}
+
+fn managed_gitattributes_section() -> String {
+    let mut output = String::new();
+    output.push_str(GITATTRIBUTES_BEGIN);
+    output.push('\n');
+    for line in MANAGED_GITATTRIBUTES_LINES {
+        output.push_str(line);
+        output.push('\n');
+    }
+    output.push_str(GITATTRIBUTES_END);
     output.push('\n');
     output
 }
@@ -215,6 +274,7 @@ fn managed_tracked_path(path: &str) -> Option<String> {
     if normalized.starts_with("cache/")
         || normalized.starts_with("logs/")
         || normalized.starts_with("secrets/")
+        || normalized == "config.toml"
         || normalized.ends_with(".tmp")
     {
         Some(normalized.to_string())
@@ -325,7 +385,7 @@ pub fn managed_add_plan_with_encryption(
     config: &SyncConfig,
     encryption_enabled: bool,
 ) -> ManagedAddPlan {
-    let mut paths = vec![".gitignore".to_string()];
+    let mut paths = vec![".gitattributes".to_string(), ".gitignore".to_string()];
     if config.ai {
         paths.push(managed_storage_path("history/ai.jsonl", encryption_enabled));
     }
@@ -380,7 +440,7 @@ pub fn existing_managed_add_plan_with_encryption(
     let mut paths = Vec::new();
     let mut missing_paths = Vec::new();
     for path in managed_add_plan_with_encryption(config, encryption_enabled).paths {
-        if path == ".gitignore" || root.join(&path).exists() {
+        if path == ".gitignore" || path == ".gitattributes" || root.join(&path).exists() {
             paths.push(path);
         } else {
             missing_paths.push(path);
@@ -396,6 +456,17 @@ pub fn pull_rebase_plan() -> GitCommandPlan {
     GitCommandPlan {
         program: "git".to_string(),
         args: vec!["pull".to_string(), "--rebase".to_string()],
+    }
+}
+
+pub fn pull_merge_plan() -> GitCommandPlan {
+    GitCommandPlan {
+        program: "git".to_string(),
+        args: vec![
+            "pull".to_string(),
+            "--no-rebase".to_string(),
+            "--no-edit".to_string(),
+        ],
     }
 }
 
@@ -436,12 +507,12 @@ pub fn push_plan() -> GitCommandPlan {
 pub fn conservative_sync_plan(config: &SyncConfig) -> ConservativeSyncPlan {
     let add_plan = managed_add_plan(config);
     let commands = vec![
-        pull_rebase_plan(),
         GitCommandPlan {
             program: "git".to_string(),
             args: git_add_args(&add_plan.paths),
         },
         default_sync_commit_plan(),
+        pull_merge_plan(),
         push_plan(),
     ];
     ConservativeSyncPlan { commands }
@@ -461,12 +532,12 @@ pub fn conservative_sync_plan_for_existing_paths_with_encryption(
 ) -> ConservativeSyncPlan {
     let add_plan = existing_managed_add_plan_with_encryption(root, config, encryption_enabled);
     let commands = vec![
-        pull_rebase_plan(),
         GitCommandPlan {
             program: "git".to_string(),
             args: git_add_args(&add_plan.paths),
         },
         default_sync_commit_plan(),
+        pull_merge_plan(),
         push_plan(),
     ];
     ConservativeSyncPlan { commands }

@@ -1,7 +1,7 @@
 use super::encryption_commands::{StoredApiKey, write_history_rewrite_script};
 use super::startup_unlock::{EncryptedStartupPaths, UnlockMode, load_encrypted_startup_data};
 use super::state::OUTPUT_RING_CAPACITY;
-use super::sync_commands::{run_startup_sync_check, write_last_sync_attempt};
+use super::sync_commands::{run_manual_sync_push, run_startup_sync_check, write_last_sync_attempt};
 use super::*;
 use crate::completion::{CompletionCandidate, CompletionSource};
 use crate::config::{
@@ -137,6 +137,24 @@ fn run_test_git<const N: usize>(cwd: &Path, args: [&str; N]) {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+fn run_test_git_stdout<const N: usize>(cwd: &Path, args: [&str; N]) -> String {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .env("GIT_CONFIG_COUNT", "1")
+        .env("GIT_CONFIG_KEY_0", "commit.gpgsign")
+        .env("GIT_CONFIG_VALUE_0", "false")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).into_owned()
 }
 
 fn seed_local_remote(remote: &Path, seed: &Path, root: &Path) {

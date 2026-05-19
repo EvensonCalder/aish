@@ -881,6 +881,7 @@ fn run_git_filter_branch_reencrypt(
         success: output.status.success(),
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        exit_code: output.status.code(),
     })
 }
 

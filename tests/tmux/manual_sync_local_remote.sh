@@ -44,12 +44,13 @@ CAPTURE="$(tmux capture-pane -p -S - -t "$SESSION")"
 printf '%s\n' "$CAPTURE"
 
 printf '%s\n' "$CAPTURE" | rg -q "^sync.remote=$REMOTE$"
-printf '%s\n' "$CAPTURE" | rg -q '^sync step ok: git pull --rebase$'
-printf '%s\n' "$CAPTURE" | rg -q '^sync step ok: git add -- .gitignore$'
+printf '%s\n' "$CAPTURE" | rg -q '^sync step ok: git add -- \.gitattributes \.gitignore$'
 printf '%s\n' "$CAPTURE" | rg -q '^sync step ok: git commit$'
+printf '%s\n' "$CAPTURE" | rg -q '^sync step ok: git pull --no-rebase --no-edit$'
 printf '%s\n' "$CAPTURE" | rg -q '^sync step ok: git push'
 printf '%s\n' "$CAPTURE" | rg -q '^sync push completed$'
 printf '%s\n' "$CAPTURE" | rg -q '^after-local-sync$'
 
 git --git-dir "$REMOTE" show HEAD:.gitignore | rg -q '# BEGIN AISH MANAGED'
+git --git-dir "$REMOTE" show HEAD:.gitattributes | rg -q 'merge=union'
 test ! -e "$HOME_DIR/.aish/cache/runtime/scheduler"

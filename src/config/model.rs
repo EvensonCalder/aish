@@ -217,7 +217,7 @@ impl EncryptionStartupUnlockMode {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct SyncConfig {
     pub remote: String,
@@ -272,6 +272,22 @@ impl Default for DraftConfig {
         Self {
             persist: true,
             sync: false,
+        }
+    }
+}
+
+impl Default for SyncConfig {
+    fn default() -> Self {
+        Self {
+            remote: String::new(),
+            enabled: false,
+            schedule: String::new(),
+            startup: false,
+            exit: false,
+            ai: true,
+            history: true,
+            templates: true,
+            drafts: true,
         }
     }
 }

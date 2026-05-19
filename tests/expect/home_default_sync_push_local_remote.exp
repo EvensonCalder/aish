@@ -63,9 +63,9 @@ aish_send "#push"
 aish_enter
 aish_expect "sync step ok: git init"
 aish_expect "sync step ok: git remote add origin $remote"
-aish_expect "sync step skipped: git pull --rebase for new repository"
-aish_expect "sync step ok: git add -- .gitignore history/regular.jsonl"
+aish_expect "sync step ok: git add -- .gitattributes .gitignore history/draft.jsonl history/regular.jsonl"
 aish_expect "sync step ok: git commit"
+aish_expect "sync step skipped: git pull --no-rebase --no-edit for new repository"
 aish_expect "sync step ok: git push -u origin HEAD"
 aish_expect "sync push completed"
 aish_wait_prompt
@@ -79,6 +79,11 @@ if {[file exists "$aish_home/cache/runtime/scheduler"]} {
 set pushed_gitignore [run_git --git-dir $remote show HEAD:.gitignore]
 if {[string first "# BEGIN AISH MANAGED" $pushed_gitignore] < 0} {
     puts stderr "remote .gitignore missing managed Aish section after manual default-home sync"
+    exit 6
+}
+set pushed_gitattributes [run_git --git-dir $remote show HEAD:.gitattributes]
+if {[string first "merge=union" $pushed_gitattributes] < 0} {
+    puts stderr "remote .gitattributes missing Aish union merge rules after manual default-home sync"
     exit 6
 }
 

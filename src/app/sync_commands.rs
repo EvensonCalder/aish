@@ -3,15 +3,15 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 
 use crate::config;
 use crate::log::EventLevel;
 use crate::sync::{
     GitCommandPlan, StartupSyncDecision, SyncFailureKind, SyncLock, SyncStepOutcome,
     classify_git_sync_step, conservative_sync_plan_for_existing_paths_with_encryption,
-    init_repo_plan, log_sync_failure, maintain_managed_gitignore, startup_sync_decision,
-    tracked_managed_files_warning,
+    init_repo_plan, log_sync_failure, maintain_managed_gitattributes, maintain_managed_gitignore,
+    pull_merge_plan, push_plan, startup_sync_decision, tracked_managed_files_warning,
 };
 
 use super::{AppState, reports::write_encryption_sync_status};
@@ -49,6 +49,13 @@ pub(super) fn set_sync_schedule(
         write_encryption_sync_status(state, out)?;
         writeln!(out, "no git command run")?;
         return Ok(());
+    }
+    match args {
+        "now" => return run_manual_sync_push(state, out),
+        "abort" => return abort_interrupted_sync(state, out),
+        "continue" => return continue_interrupted_sync(state, out),
+        "resolve-union" | "union" => return resolve_interrupted_sync_with_union(state, out),
+        _ => {}
     }
     if state.config_path.is_none() {
         writeln!(out, "config path is not configured; sync config not saved")?;
@@ -125,12 +132,15 @@ pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -
     };
 
     maintain_managed_gitignore(root.join(".gitignore"))?;
+    maintain_managed_gitattributes(root.join(".gitattributes"))?;
     let mut initialized_repo = false;
     if root.join(".git").is_dir() {
         warn_tracked_managed_paths(&root, out)?;
     } else if let Some(plan) = init_repo_plan(&remote) {
         for command in &plan.commands {
-            run_sync_git_step(state, out, &root, command)?;
+            if !run_sync_git_step(state, out, &root, command)? {
+                return Ok(());
+            }
         }
         initialized_repo = true;
     }
@@ -142,25 +152,28 @@ pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -
     )
     .commands
     {
-        if initialized_repo && is_pull_rebase_command(&command) {
+        if initialized_repo && is_pull_command(&command) {
             writeln!(
                 out,
-                "sync step skipped: git pull --rebase for new repository"
+                "sync step skipped: git pull --no-rebase --no-edit for new repository"
             )?;
             continue;
         }
         if is_commit_command(&command) {
-            let result = run_git_command(&root, &command)?;
-            if result.success || git_output_is_nothing_to_commit(&result.combined_output()) {
-                if result.success {
-                    writeln!(out, "sync step ok: git commit")?;
-                } else {
-                    writeln!(out, "sync step skipped: nothing to commit")?;
+            if git_has_staged_changes(&root)? {
+                if !run_sync_git_step(state, out, &root, &command)? {
+                    return Ok(());
                 }
-                continue;
+            } else {
+                writeln!(out, "sync step skipped: nothing to commit")?;
             }
-            handle_failed_sync_step(state, out, &command, result)?;
-            return Ok(());
+            continue;
+        }
+        if is_push_command(&command) {
+            if !run_sync_push_step(state, out, &root, &command)? {
+                return Ok(());
+            }
+            continue;
         }
         if !run_sync_git_step(state, out, &root, &command)? {
             return Ok(());
@@ -169,6 +182,335 @@ pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -
     state.append_event(EventLevel::Info, "sync push completed")?;
     writeln!(out, "sync push completed")?;
     Ok(())
+}
+
+fn abort_interrupted_sync(state: &mut AppState, out: &mut impl Write) -> Result<()> {
+    let Some(root) = sync_root(state) else {
+        writeln!(out, "config path is not configured; sync abort cannot run")?;
+        return Ok(());
+    };
+    let lock_path = root.join("cache/runtime/sync.lock");
+    let Some(_lock) = SyncLock::acquire(&lock_path)? else {
+        writeln!(out, "sync is already running")?;
+        return Ok(());
+    };
+
+    if has_interrupted_merge(&root) {
+        let command = GitCommandPlan {
+            program: "git".to_string(),
+            args: vec!["merge".to_string(), "--abort".to_string()],
+        };
+        if run_sync_git_step(state, out, &root, &command)? {
+            writeln!(out, "sync abort completed")?;
+        }
+        return Ok(());
+    }
+    if has_interrupted_rebase(&root) {
+        let command = GitCommandPlan {
+            program: "git".to_string(),
+            args: vec!["rebase".to_string(), "--abort".to_string()],
+        };
+        if run_sync_git_step(state, out, &root, &command)? {
+            writeln!(out, "sync abort completed")?;
+        }
+        return Ok(());
+    }
+
+    writeln!(out, "no interrupted sync to abort")?;
+    Ok(())
+}
+
+fn continue_interrupted_sync(state: &mut AppState, out: &mut impl Write) -> Result<()> {
+    let Some(root) = sync_root(state) else {
+        writeln!(
+            out,
+            "config path is not configured; sync continue cannot run"
+        )?;
+        return Ok(());
+    };
+    let lock_path = root.join("cache/runtime/sync.lock");
+    let Some(_lock) = SyncLock::acquire(&lock_path)? else {
+        writeln!(out, "sync is already running")?;
+        return Ok(());
+    };
+
+    if has_interrupted_merge(&root) {
+        return commit_interrupted_merge_and_push(state, out, &root);
+    }
+    if has_interrupted_rebase(&root) {
+        writeln!(
+            out,
+            "interrupted rebase detected; run git rebase --continue manually after resolving conflicts, or run #sync abort"
+        )?;
+        return Ok(());
+    }
+
+    writeln!(out, "no interrupted sync to continue")?;
+    Ok(())
+}
+
+fn resolve_interrupted_sync_with_union(state: &mut AppState, out: &mut impl Write) -> Result<()> {
+    let Some(root) = sync_root(state) else {
+        writeln!(
+            out,
+            "config path is not configured; sync resolve-union cannot run"
+        )?;
+        return Ok(());
+    };
+    let lock_path = root.join("cache/runtime/sync.lock");
+    let Some(_lock) = SyncLock::acquire(&lock_path)? else {
+        writeln!(out, "sync is already running")?;
+        return Ok(());
+    };
+    if !has_interrupted_merge(&root) {
+        if has_interrupted_rebase(&root) {
+            writeln!(
+                out,
+                "interrupted rebase detected; #sync resolve-union supports merge conflicts only; run #sync abort or resolve manually"
+            )?;
+        } else {
+            writeln!(out, "no interrupted sync to resolve")?;
+        }
+        return Ok(());
+    }
+
+    let paths = unmerged_paths(&root)?;
+    if paths.is_empty() {
+        writeln!(out, "no unresolved sync conflicts found")?;
+        return Ok(());
+    }
+    let unsafe_paths: Vec<&String> = paths
+        .iter()
+        .filter(|path| !auto_union_allowed_path(path))
+        .collect();
+    if !unsafe_paths.is_empty() {
+        writeln!(
+            out,
+            "sync resolve-union refused non-plaintext or unmanaged conflict(s)"
+        )?;
+        for path in unsafe_paths {
+            writeln!(out, "manual: {path}")?;
+        }
+        writeln!(
+            out,
+            "resolve those files manually, then run #sync continue; or run #sync abort"
+        )?;
+        return Ok(());
+    }
+
+    for path in &paths {
+        resolve_conflict_file_by_union(&root.join(path))
+            .with_context(|| format!("failed to union-resolve {}", path))?;
+        writeln!(out, "sync conflict union-resolved: {path}")?;
+    }
+    let add_command = GitCommandPlan {
+        program: "git".to_string(),
+        args: git_add_args(&paths),
+    };
+    if !run_sync_git_step(state, out, &root, &add_command)? {
+        return Ok(());
+    }
+    commit_interrupted_merge_and_push(state, out, &root)
+}
+
+fn commit_interrupted_merge_and_push(
+    state: &mut AppState,
+    out: &mut impl Write,
+    root: &Path,
+) -> Result<()> {
+    let command = GitCommandPlan {
+        program: "git".to_string(),
+        args: vec!["commit".to_string(), "--no-edit".to_string()],
+    };
+    if !run_sync_git_step(state, out, root, &command)? {
+        let unresolved = unmerged_paths(root)?;
+        if !unresolved.is_empty() {
+            writeln!(
+                out,
+                "resolve conflicts manually and run git add, then #sync continue; or run #sync resolve-union for plaintext Aish files; or run #sync abort"
+            )?;
+        }
+        return Ok(());
+    }
+    let push = push_plan();
+    if !run_sync_push_step(state, out, root, &push)? {
+        return Ok(());
+    }
+    state.append_event(EventLevel::Info, "sync push completed")?;
+    writeln!(out, "sync push completed")?;
+    Ok(())
+}
+
+fn has_interrupted_merge(root: &Path) -> bool {
+    root.join(".git/MERGE_HEAD").exists()
+}
+
+fn has_interrupted_rebase(root: &Path) -> bool {
+    root.join(".git/rebase-merge").exists() || root.join(".git/rebase-apply").exists()
+}
+
+fn unmerged_paths(root: &Path) -> Result<Vec<String>> {
+    let command = GitCommandPlan {
+        program: "git".to_string(),
+        args: vec![
+            "diff".to_string(),
+            "--name-only".to_string(),
+            "--diff-filter=U".to_string(),
+            "--".to_string(),
+        ],
+    };
+    let result = run_git_command(root, &command)?;
+    if !result.success {
+        bail!(
+            "failed to list unresolved git conflicts: {}",
+            result.combined_output()
+        );
+    }
+    Ok(result
+        .stdout
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(ToOwned::to_owned)
+        .collect())
+}
+
+fn auto_union_allowed_path(path: &str) -> bool {
+    (path == ".gitignore"
+        || path == ".gitattributes"
+        || (path.starts_with("history/") && path.ends_with(".jsonl"))
+        || (path.starts_with("templates/") && path.ends_with(".jsonl")))
+        && !path.ends_with(".gpg")
+}
+
+fn resolve_conflict_file_by_union(path: &Path) -> Result<()> {
+    let raw = fs::read_to_string(path)
+        .with_context(|| format!("failed to read conflicted file {}", path.display()))?;
+    let Some(resolved) = union_conflict_markers(&raw) else {
+        bail!("file has no standard git conflict markers");
+    };
+    fs::write(path, resolved)
+        .with_context(|| format!("failed to write union-resolved file {}", path.display()))
+}
+
+fn union_conflict_markers(raw: &str) -> Option<String> {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Side {
+        Ours,
+        Base,
+        Theirs,
+    }
+
+    let mut output = String::new();
+    let mut lines = raw.split_inclusive('\n');
+    let mut changed = false;
+    while let Some(line) = lines.next() {
+        if !line.starts_with("<<<<<<<") {
+            output.push_str(line);
+            continue;
+        }
+
+        changed = true;
+        let mut ours = Vec::new();
+        let mut theirs = Vec::new();
+        let mut side = Side::Ours;
+        let mut saw_separator = false;
+        let mut saw_end = false;
+        for conflict_line in lines.by_ref() {
+            if conflict_line.starts_with("|||||||") && side == Side::Ours {
+                side = Side::Base;
+                continue;
+            }
+            if conflict_line.starts_with("=======") {
+                side = Side::Theirs;
+                saw_separator = true;
+                continue;
+            }
+            if conflict_line.starts_with(">>>>>>>") {
+                saw_end = true;
+                break;
+            }
+            match side {
+                Side::Ours => ours.push(conflict_line),
+                Side::Base => {}
+                Side::Theirs => theirs.push(conflict_line),
+            }
+        }
+        if !saw_separator || !saw_end {
+            return None;
+        }
+        for kept in ours.into_iter().chain(theirs) {
+            output.push_str(kept);
+        }
+    }
+
+    changed.then_some(output)
+}
+
+fn git_add_args(paths: &[String]) -> Vec<String> {
+    let mut args = vec!["add".to_string(), "--".to_string()];
+    args.extend(paths.iter().cloned());
+    args
+}
+
+fn git_has_staged_changes(root: &Path) -> Result<bool> {
+    let command = GitCommandPlan {
+        program: "git".to_string(),
+        args: vec![
+            "diff".to_string(),
+            "--cached".to_string(),
+            "--quiet".to_string(),
+            "--exit-code".to_string(),
+        ],
+    };
+    let result = run_git_command(root, &command)?;
+    match result.exit_code {
+        Some(0) => Ok(false),
+        Some(1) => Ok(true),
+        _ => bail!(
+            "failed to inspect staged sync changes: {}",
+            result.combined_output()
+        ),
+    }
+}
+
+fn run_sync_push_step(
+    state: &AppState,
+    out: &mut impl Write,
+    root: &Path,
+    command: &GitCommandPlan,
+) -> Result<bool> {
+    let result = run_git_command(root, command)?;
+    if result.success {
+        writeln!(out, "sync step ok: {}", describe_git_command(command))?;
+        return Ok(true);
+    }
+    if git_output_suggests_remote_changed(&result.combined_output()) {
+        writeln!(
+            out,
+            "sync push needs remote updates; running git pull --no-rebase --no-edit"
+        )?;
+        let pull = pull_merge_plan();
+        if !run_sync_git_step(state, out, root, &pull)? {
+            return Ok(false);
+        }
+        let retry = run_git_command(root, command)?;
+        if retry.success {
+            writeln!(out, "sync step ok: {}", describe_git_command(command))?;
+            return Ok(true);
+        }
+        handle_failed_sync_step(state, out, command, retry)?;
+        return Ok(false);
+    }
+    handle_failed_sync_step(state, out, command, result)?;
+    Ok(false)
+}
+
+fn git_output_suggests_remote_changed(output: &str) -> bool {
+    let lower = output.to_ascii_lowercase();
+    lower.contains("non-fast-forward")
+        || lower.contains("fetch first")
+        || lower.contains("stale info")
 }
 
 pub(super) fn run_startup_sync_check(
@@ -301,6 +643,15 @@ fn handle_failed_sync_step(
     if !detail.is_empty() {
         writeln!(out, "{detail}")?;
     }
+    if matches!(
+        classify_git_sync_step(false, &result.stdout, &result.stderr),
+        SyncStepOutcome::AbortConflict { .. }
+    ) {
+        writeln!(
+            out,
+            "options: #sync resolve-union for plaintext Aish files, #sync continue after manual resolution, or #sync abort"
+        )?;
+    }
     Ok(())
 }
 
@@ -309,6 +660,7 @@ pub(super) struct GitStepResult {
     pub(super) success: bool,
     pub(super) stdout: String,
     pub(super) stderr: String,
+    pub(super) exit_code: Option<i32>,
 }
 
 impl GitStepResult {
@@ -334,6 +686,7 @@ pub(super) fn run_git_command(root: &Path, command: &GitCommandPlan) -> Result<G
         success: output.status.success(),
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        exit_code: output.status.code(),
     })
 }
 
@@ -341,18 +694,12 @@ fn is_commit_command(command: &GitCommandPlan) -> bool {
     command.program == "git" && command.args.first().is_some_and(|arg| arg == "commit")
 }
 
-fn is_pull_rebase_command(command: &GitCommandPlan) -> bool {
-    command.program == "git"
-        && command
-            .args
-            .iter()
-            .map(String::as_str)
-            .eq(["pull", "--rebase"])
+fn is_pull_command(command: &GitCommandPlan) -> bool {
+    command.program == "git" && command.args.first().is_some_and(|arg| arg == "pull")
 }
 
-fn git_output_is_nothing_to_commit(output: &str) -> bool {
-    let lower = output.to_ascii_lowercase();
-    lower.contains("nothing to commit") || lower.contains("no changes added to commit")
+fn is_push_command(command: &GitCommandPlan) -> bool {
+    command.program == "git" && command.args.first().is_some_and(|arg| arg == "push")
 }
 
 pub(super) fn describe_git_command(command: &GitCommandPlan) -> String {

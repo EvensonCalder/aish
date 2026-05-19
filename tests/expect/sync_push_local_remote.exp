@@ -45,9 +45,9 @@ aish_wait_prompt
 
 aish_send "#push"
 aish_enter
-aish_expect "sync step ok: git pull --rebase"
-aish_expect "sync step ok: git add -- .gitignore"
+aish_expect "sync step ok: git add -- .gitattributes .gitignore"
 aish_expect "sync step ok: git commit"
+aish_expect "sync step ok: git pull --no-rebase --no-edit"
 aish_expect "sync step ok: git push"
 aish_expect "sync push completed"
 aish_wait_prompt
@@ -57,6 +57,11 @@ aish_quit
 set pushed_gitignore [run_git --git-dir $remote show HEAD:.gitignore]
 if {[string first "# BEGIN AISH MANAGED" $pushed_gitignore] < 0} {
     puts stderr "remote .gitignore missing managed Aish section"
+    exit 6
+}
+set pushed_gitattributes [run_git --git-dir $remote show HEAD:.gitattributes]
+if {[string first "merge=union" $pushed_gitattributes] < 0} {
+    puts stderr "remote .gitattributes missing Aish union merge rules"
     exit 6
 }
 if {[file exists "$home/cache/runtime/scheduler"]} {

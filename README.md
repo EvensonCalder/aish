@@ -305,6 +305,10 @@ Sync:
 ```text
 #set-remote <git-url>
 #push
+#sync now
+#sync resolve-union
+#sync continue
+#sync abort
 #sync <schedule>
 #sync off
 #sync startup on|off
@@ -481,23 +485,25 @@ Some full-screen programs may still expose terminal-specific edge cases because 
 
 ## Sync
 
-Sync is deliberately conservative.
+Sync is designed for the common two-machine case where both computers use the
+same Aish Git remote. See [SYNC.md](SYNC.md) for the short operator guide.
 
 Implemented:
 
 - Persist remote and sync category config.
+- Sync AI history, shell history and notes, templates, and drafts by default.
+- Keep `config.toml`, cache, logs, secrets, and temporary files local by default.
 - Persist a conservative subset of periodic schedules checked at startup.
 - Persist explicit startup and exit sync triggers.
-- Run `#push` against a configured Git remote.
-- Pull with rebase before pushing.
-- Add only managed enabled paths.
-- Commit only when there is something to commit.
-- Abort on conflict-like failures.
+- Run `#sync now` or its alias `#push` against a configured Git remote.
+- Stage managed enabled paths automatically, commit only when staged content changed, merge remote updates with `git pull --no-rebase --no-edit`, then push.
+- Use Git's union merge driver for plaintext Aish JSONL files so independent appends usually merge by keeping both sides.
+- Offer `#sync resolve-union`, `#sync continue`, and `#sync abort` when a conflict still needs a user choice.
 - Log sync failures without leaking secret-like values.
 
 Aish does not:
 
-- Auto-resolve conflicts.
+- Auto-resolve encrypted `*.jsonl.gpg` conflicts, because text union can corrupt ciphertext.
 - Rewrite history as part of sync. Encrypted storage history rewrite is a separate `#encrypt rewrite-history ... --confirm-rewrite-history` flow.
 - Run `git rm --cached` automatically.
 - Create scheduler files.
@@ -505,9 +511,9 @@ Aish does not:
 
 Sync does not have a long-running scheduler. The supported automatic triggers are:
 
-- periodic startup check: `#sync <schedule>` runs `#push` at startup only when the saved interval is due. Supported forms are `@hourly`, `@daily`, `*/N * * * *`, `0 */N * * *`, `0 0 * * *`, and `0 0 */N * *`; unsupported schedules are logged and do not run git.
-- every startup: `#sync startup on` runs `#push` once when Aish starts.
-- exit: `#sync exit on` runs `#push` during the exit durability boundary.
+- periodic startup check: `#sync <schedule>` runs the same sync flow as `#sync now` at startup only when the saved interval is due. Supported forms are `@hourly`, `@daily`, `*/N * * * *`, `0 */N * * *`, `0 0 * * *`, and `0 0 */N * *`; unsupported schedules are logged and do not run git.
+- every startup: `#sync startup on` runs the same sync flow once when Aish starts.
+- exit: `#sync exit on` runs the same sync flow during the exit durability boundary.
 
 ## Encryption Status
 

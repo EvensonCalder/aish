@@ -83,8 +83,9 @@ aish_wait_prompt
 
 aish_send "#push"
 aish_enter
-aish_expect "sync aborted on conflict: git pull --rebase"
+aish_expect "sync aborted on conflict: git pull --no-rebase --no-edit"
 aish_expect "CONFLICT"
+aish_expect "options: #sync resolve-union"
 aish_wait_prompt
 
 aish_send "#log 5"

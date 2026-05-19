@@ -49,10 +49,10 @@ aish_enter
 aish_expect "sync.enabled=false"
 aish_expect "sync.remote=$remote"
 aish_expect "sync.schedule=unconfigured"
-aish_expect "sync.ai=false"
+aish_expect "sync.ai=true"
 aish_expect "sync.history=true"
 aish_expect "sync.templates=true"
-aish_expect "sync.drafts=false"
+aish_expect "sync.drafts=true"
 aish_expect "no git command run"
 aish_wait_prompt
 
@@ -61,7 +61,7 @@ aish_enter
 aish_expect "sync.enabled=false"
 aish_expect "sync.remote=$remote"
 aish_expect "sync.schedule=unconfigured"
-aish_expect "sync.ai=false"
+aish_expect "sync.ai=true"
 aish_expect "sync.history=true"
 aish_expect "sync.templates=true"
 aish_wait_prompt

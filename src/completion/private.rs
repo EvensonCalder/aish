@@ -107,6 +107,11 @@ fn private_command_argument_candidates(
         ("encrypt", ["unlock-mode"]) => &["lazy", "prompt"],
         ("encrypt", ["rewrite-history"]) => &["plan", "run"],
         ("sync", []) => &[
+            "now",
+            "abort",
+            "continue",
+            "resolve-union",
+            "union",
             "off",
             "startup",
             "exit",

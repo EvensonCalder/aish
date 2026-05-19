@@ -45,6 +45,7 @@ fn managed_gitignore_preserves_user_content_and_is_idempotent() {
     assert!(first.contains("cache/\n"));
     assert!(first.contains("logs/\n"));
     assert!(first.contains("secrets/\n"));
+    assert!(first.contains("config.toml\n"));
     assert!(first.contains(GITIGNORE_END));
 }
 
@@ -69,10 +70,30 @@ fn managed_gitignore_replaces_existing_managed_section() {
 }
 
 #[test]
+fn managed_gitattributes_preserves_user_content_and_is_idempotent() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join(".gitattributes");
+    fs::write(&path, "*.md text\n").unwrap();
+
+    maintain_managed_gitattributes(&path).unwrap();
+    let first = fs::read_to_string(&path).unwrap();
+    maintain_managed_gitattributes(&path).unwrap();
+    let second = fs::read_to_string(&path).unwrap();
+
+    assert_eq!(first, second);
+    assert!(first.contains("*.md text\n"));
+    assert!(first.contains(GITATTRIBUTES_BEGIN));
+    assert!(first.contains("history/*.jsonl merge=union\n"));
+    assert!(first.contains("templates/*.jsonl merge=union\n"));
+    assert!(first.contains(GITATTRIBUTES_END));
+}
+
+#[test]
 fn tracked_managed_files_warning_lists_managed_tracked_paths() {
     let warning = tracked_managed_files_warning([
         "README.md",
         "cache/model.json",
+        "config.toml",
         "./logs/events.jsonl",
         "secrets/key.json.gpg",
         "notes.tmp",
@@ -84,12 +105,13 @@ fn tracked_managed_files_warning_lists_managed_tracked_paths() {
         warning.paths,
         vec![
             "cache/model.json",
+            "config.toml",
             "logs/events.jsonl",
             "notes.tmp",
             "secrets/key.json.gpg"
         ]
     );
-    assert!(warning.message.contains("4 Aish-managed path(s)"));
+    assert!(warning.message.contains("5 Aish-managed path(s)"));
     assert!(warning.message.contains("not running git rm --cached"));
 }
 
@@ -235,37 +257,38 @@ fn classify_git_sync_step_aborts_on_non_conflict_failure() {
 }
 
 #[test]
-fn managed_add_plan_keeps_private_categories_off_by_default() {
+fn managed_add_plan_syncs_user_content_categories_by_default() {
     let config = SyncConfig::default();
 
     assert_eq!(
         managed_add_plan(&config),
         ManagedAddPlan {
-            paths: vec![".gitignore".to_string()]
+            paths: vec![
+                ".gitattributes".to_string(),
+                ".gitignore".to_string(),
+                "history/ai.jsonl".to_string(),
+                "history/draft.jsonl".to_string(),
+                "history/notes.jsonl".to_string(),
+                "history/regular.jsonl".to_string(),
+                "templates/templates.jsonl".to_string(),
+            ]
         }
     );
 }
 
 #[test]
-fn managed_add_plan_includes_enabled_category_paths_sorted() {
+fn managed_add_plan_can_disable_all_content_categories() {
     let config = SyncConfig {
-        ai: true,
-        history: true,
-        templates: true,
-        drafts: true,
+        ai: false,
+        history: false,
+        templates: false,
+        drafts: false,
         ..SyncConfig::default()
     };
 
     assert_eq!(
         managed_add_plan(&config).paths,
-        vec![
-            ".gitignore",
-            "history/ai.jsonl",
-            "history/draft.jsonl",
-            "history/notes.jsonl",
-            "history/regular.jsonl",
-            "templates/templates.jsonl",
-        ]
+        vec![".gitattributes", ".gitignore"]
     );
 }
 
@@ -282,6 +305,7 @@ fn managed_add_plan_uses_gpg_paths_when_encryption_is_enabled() {
     assert_eq!(
         managed_add_plan_with_encryption(&config, true).paths,
         vec![
+            ".gitattributes",
             ".gitignore",
             "history/ai.jsonl.gpg",
             "history/draft.jsonl.gpg",
@@ -299,6 +323,8 @@ fn existing_managed_add_plan_skips_missing_enabled_paths() {
     fs::write(temp.path().join(".gitignore"), "").unwrap();
     fs::write(temp.path().join("history/regular.jsonl"), "{}").unwrap();
     let config = SyncConfig {
+        ai: false,
+        drafts: false,
         history: true,
         templates: true,
         ..SyncConfig::default()
@@ -306,7 +332,10 @@ fn existing_managed_add_plan_skips_missing_enabled_paths() {
 
     let plan = existing_managed_add_plan(temp.path(), &config);
 
-    assert_eq!(plan.paths, vec![".gitignore", "history/regular.jsonl"]);
+    assert_eq!(
+        plan.paths,
+        vec![".gitattributes", ".gitignore", "history/regular.jsonl"]
+    );
     assert_eq!(
         plan.missing_paths,
         vec!["history/notes.jsonl", "templates/templates.jsonl"]
@@ -314,12 +343,16 @@ fn existing_managed_add_plan_skips_missing_enabled_paths() {
 }
 
 #[test]
-fn pull_rebase_plan_uses_fixed_git_arguments() {
+fn pull_merge_plan_uses_fixed_git_arguments() {
     assert_eq!(
-        pull_rebase_plan(),
+        pull_merge_plan(),
         GitCommandPlan {
             program: "git".to_string(),
-            args: vec!["pull".to_string(), "--rebase".to_string()]
+            args: vec![
+                "pull".to_string(),
+                "--no-rebase".to_string(),
+                "--no-edit".to_string()
+            ]
         }
     );
 }
@@ -410,11 +443,7 @@ fn init_repo_plan_rejects_empty_or_control_character_remote() {
 
 #[test]
 fn conservative_sync_plan_orders_fixed_steps() {
-    let config = SyncConfig {
-        history: true,
-        templates: true,
-        ..SyncConfig::default()
-    };
+    let config = SyncConfig::default();
 
     assert_eq!(
         conservative_sync_plan(&config),
@@ -422,14 +451,13 @@ fn conservative_sync_plan_orders_fixed_steps() {
             commands: vec![
                 GitCommandPlan {
                     program: "git".to_string(),
-                    args: vec!["pull".to_string(), "--rebase".to_string()]
-                },
-                GitCommandPlan {
-                    program: "git".to_string(),
                     args: vec![
                         "add".to_string(),
                         "--".to_string(),
+                        ".gitattributes".to_string(),
                         ".gitignore".to_string(),
+                        "history/ai.jsonl".to_string(),
+                        "history/draft.jsonl".to_string(),
                         "history/notes.jsonl".to_string(),
                         "history/regular.jsonl".to_string(),
                         "templates/templates.jsonl".to_string()
@@ -441,6 +469,14 @@ fn conservative_sync_plan_orders_fixed_steps() {
                         "commit".to_string(),
                         "-m".to_string(),
                         "sync aish data".to_string()
+                    ]
+                },
+                GitCommandPlan {
+                    program: "git".to_string(),
+                    args: vec![
+                        "pull".to_string(),
+                        "--no-rebase".to_string(),
+                        "--no-edit".to_string()
                     ]
                 },
                 GitCommandPlan {
@@ -458,14 +494,23 @@ fn conservative_sync_plan_orders_fixed_steps() {
 }
 
 #[test]
-fn conservative_sync_plan_adds_only_gitignore_when_categories_are_private_by_default() {
+fn conservative_sync_plan_adds_only_metadata_when_categories_are_disabled() {
+    let config = SyncConfig {
+        ai: false,
+        history: false,
+        templates: false,
+        drafts: false,
+        ..SyncConfig::default()
+    };
+
     assert_eq!(
-        conservative_sync_plan(&SyncConfig::default()).commands[1],
+        conservative_sync_plan(&config).commands[0],
         GitCommandPlan {
             program: "git".to_string(),
             args: vec![
                 "add".to_string(),
                 "--".to_string(),
+                ".gitattributes".to_string(),
                 ".gitignore".to_string()
             ]
         }

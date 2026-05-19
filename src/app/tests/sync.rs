@@ -70,7 +70,7 @@ fn sync_config_commands_persist_without_running_git() {
 }
 
 #[test]
-fn push_sync_runs_against_configured_local_git_remote() {
+fn sync_now_runs_against_configured_local_git_remote() {
     let temp = tempfile::tempdir().unwrap();
     let remote = temp.path().join("remote.git");
     let seed = temp.path().join("seed");
@@ -94,6 +94,21 @@ fn push_sync_runs_against_configured_local_git_remote() {
     run_test_git(&root, ["config", "user.name", "Aish Test"]);
     run_test_git(&root, ["config", "user.email", "aish@example.invalid"]);
     run_test_git(&root, ["config", "commit.gpgsign", "false"]);
+    fs::create_dir_all(root.join("history")).unwrap();
+    fs::create_dir_all(root.join("templates")).unwrap();
+    fs::write(root.join("history/ai.jsonl"), "{\"text\":\"ai\"}\n").unwrap();
+    fs::write(root.join("history/draft.jsonl"), "{\"text\":\"draft\"}\n").unwrap();
+    fs::write(root.join("history/notes.jsonl"), "{\"text\":\"note\"}\n").unwrap();
+    fs::write(
+        root.join("history/regular.jsonl"),
+        "{\"command\":\"regular\"}\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("templates/templates.jsonl"),
+        "{\"body\":\"template\"}\n",
+    )
+    .unwrap();
 
     let config_path = root.join("config.toml");
     let events_path = root.join("logs/events.jsonl");
@@ -108,7 +123,7 @@ fn push_sync_runs_against_configured_local_git_remote() {
         clock: || 11,
         ..AppState::default()
     };
-    state.draft.insert_str("#push");
+    state.draft.insert_str("#sync now");
     let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
     let mut output = Vec::new();
 
@@ -122,17 +137,28 @@ fn push_sync_runs_against_configured_local_git_remote() {
 
     let output = String::from_utf8(output).unwrap();
     assert!(
-        output.contains("sync step ok: git pull --rebase"),
+        output.contains("sync step ok: git add -- .gitattributes .gitignore history/ai.jsonl history/draft.jsonl history/notes.jsonl history/regular.jsonl templates/templates.jsonl"),
         "{output}"
     );
     assert!(
-        output.contains("sync step ok: git add -- .gitignore"),
+        output.contains("sync step ok: git pull --no-rebase --no-edit"),
         "{output}"
     );
     assert!(output.contains("sync step ok: git commit"), "{output}");
     assert!(output.contains("sync step ok: git push"), "{output}");
     assert!(output.contains("sync push completed"), "{output}");
     assert!(root.join(".gitignore").exists());
+    assert!(root.join(".gitattributes").exists());
+    let pushed_history = run_test_git_stdout(
+        temp.path(),
+        [
+            "--git-dir",
+            remote.to_str().unwrap(),
+            "show",
+            "HEAD:history/regular.jsonl",
+        ],
+    );
+    assert!(pushed_history.contains("regular"));
     let events = load_events(&events_path).unwrap();
     assert!(
         events
@@ -140,6 +166,216 @@ fn push_sync_runs_against_configured_local_git_remote() {
             .iter()
             .any(|event| event.msg == "sync push completed")
     );
+}
+
+#[test]
+fn sync_skips_commit_when_only_untracked_unmanaged_files_exist() {
+    let temp = tempfile::tempdir().unwrap();
+    let remote = temp.path().join("remote.git");
+    let seed = temp.path().join("seed");
+    let root = temp.path().join("aish-home");
+    seed_local_remote(&remote, &seed, &root);
+
+    let config_path = root.join("config.toml");
+    let mut config = config::Config::default();
+    config.storage.home = root.clone();
+    config.sync.remote = remote.to_string_lossy().into_owned();
+    config::save_config(&config_path, &config).unwrap();
+    let mut state = AppState {
+        config_path: Some(config_path),
+        sync_config: config.sync,
+        clock: || 12,
+        ..AppState::default()
+    };
+
+    let mut first = Vec::new();
+    run_manual_sync_push(&mut state, &mut first).unwrap();
+    assert!(
+        String::from_utf8(first)
+            .unwrap()
+            .contains("sync push completed")
+    );
+
+    fs::create_dir_all(root.join("history")).unwrap();
+    fs::write(root.join("history/unmanaged.txt"), "local scratch\n").unwrap();
+    let mut second = Vec::new();
+    run_manual_sync_push(&mut state, &mut second).unwrap();
+
+    let output = String::from_utf8(second).unwrap();
+    assert!(
+        output.contains("sync step skipped: nothing to commit"),
+        "{output}"
+    );
+    assert!(output.contains("sync push completed"), "{output}");
+}
+
+#[test]
+fn sync_plaintext_history_uses_union_merge_across_two_clones() {
+    let temp = tempfile::tempdir().unwrap();
+    let remote = temp.path().join("remote.git");
+    let seed = temp.path().join("seed");
+    let root_a = temp.path().join("aish-a");
+    let root_b = temp.path().join("aish-b");
+    seed_local_remote(&remote, &seed, &root_a);
+    run_test_git(
+        temp.path(),
+        ["clone", remote.to_str().unwrap(), root_b.to_str().unwrap()],
+    );
+    run_test_git(&root_b, ["config", "user.name", "Aish Test"]);
+    run_test_git(&root_b, ["config", "user.email", "aish@example.invalid"]);
+    run_test_git(&root_b, ["config", "commit.gpgsign", "false"]);
+
+    let mut state_a = sync_state_for_root(&root_a, &remote);
+    fs::create_dir_all(root_a.join("history")).unwrap();
+    fs::write(
+        root_a.join("history/regular.jsonl"),
+        "{\"command\":\"from-a\"}\n",
+    )
+    .unwrap();
+    let mut out_a = Vec::new();
+    run_manual_sync_push(&mut state_a, &mut out_a).unwrap();
+    assert!(
+        String::from_utf8(out_a)
+            .unwrap()
+            .contains("sync push completed")
+    );
+
+    let mut state_b = sync_state_for_root(&root_b, &remote);
+    fs::create_dir_all(root_b.join("history")).unwrap();
+    fs::write(
+        root_b.join("history/regular.jsonl"),
+        "{\"command\":\"from-b\"}\n",
+    )
+    .unwrap();
+    let mut out_b = Vec::new();
+    run_manual_sync_push(&mut state_b, &mut out_b).unwrap();
+
+    let output_b = String::from_utf8(out_b).unwrap();
+    assert!(!output_b.contains("sync aborted on conflict"), "{output_b}");
+    assert!(output_b.contains("sync push completed"), "{output_b}");
+    let pushed_history = run_test_git_stdout(
+        temp.path(),
+        [
+            "--git-dir",
+            remote.to_str().unwrap(),
+            "show",
+            "HEAD:history/regular.jsonl",
+        ],
+    );
+    assert!(pushed_history.contains("from-a"), "{pushed_history}");
+    assert!(pushed_history.contains("from-b"), "{pushed_history}");
+}
+
+#[test]
+fn sync_resolve_union_command_keeps_both_sides_after_conflict() {
+    let temp = tempfile::tempdir().unwrap();
+    let remote = temp.path().join("remote.git");
+    let seed = temp.path().join("seed");
+    let other = temp.path().join("other");
+    let root = temp.path().join("aish-home");
+
+    run_test_git(temp.path(), ["init", "--bare", remote.to_str().unwrap()]);
+    fs::create_dir_all(&seed).unwrap();
+    run_test_git(&seed, ["init"]);
+    run_test_git(&seed, ["config", "user.name", "Aish Test"]);
+    run_test_git(&seed, ["config", "user.email", "aish@example.invalid"]);
+    fs::write(
+        seed.join(".gitignore"),
+        "seed-line\n# BEGIN AISH MANAGED\ncache/\nlogs/\nsecrets/\n*.tmp\n# END AISH MANAGED\n",
+    )
+    .unwrap();
+    run_test_git(&seed, ["add", ".gitignore"]);
+    run_test_git(&seed, ["commit", "-m", "seed"]);
+    run_test_git(&seed, ["remote", "add", "origin", remote.to_str().unwrap()]);
+    run_test_git(&seed, ["push", "-u", "origin", "HEAD"]);
+    run_test_git(
+        temp.path(),
+        ["clone", remote.to_str().unwrap(), root.to_str().unwrap()],
+    );
+    run_test_git(
+        temp.path(),
+        ["clone", remote.to_str().unwrap(), other.to_str().unwrap()],
+    );
+    for repo in [&root, &other] {
+        run_test_git(repo, ["config", "user.name", "Aish Test"]);
+        run_test_git(repo, ["config", "user.email", "aish@example.invalid"]);
+        run_test_git(repo, ["config", "commit.gpgsign", "false"]);
+    }
+
+    fs::write(
+        root.join(".gitignore"),
+        "aish-local-line\n# BEGIN AISH MANAGED\ncache/\nlogs/\nsecrets/\n*.tmp\n# END AISH MANAGED\n",
+    )
+    .unwrap();
+    run_test_git(&root, ["add", ".gitignore"]);
+    run_test_git(&root, ["commit", "-m", "local-change"]);
+
+    fs::write(
+        other.join(".gitignore"),
+        "remote-line\n# BEGIN AISH MANAGED\ncache/\nlogs/\nsecrets/\n*.tmp\n# END AISH MANAGED\n",
+    )
+    .unwrap();
+    run_test_git(&other, ["add", ".gitignore"]);
+    run_test_git(&other, ["commit", "-m", "remote-change"]);
+    run_test_git(&other, ["push"]);
+
+    let mut state = sync_state_for_root(&root, &remote);
+    let mut conflict_output = Vec::new();
+    run_manual_sync_push(&mut state, &mut conflict_output).unwrap();
+    let conflict_output = String::from_utf8(conflict_output).unwrap();
+    assert!(
+        conflict_output.contains("sync aborted on conflict"),
+        "{conflict_output}"
+    );
+    assert!(conflict_output.contains("#sync resolve-union"));
+
+    state.draft.insert_str("#sync resolve-union");
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut resolve_output = Vec::new();
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut resolve_output,
+        Duration::from_secs(10),
+    )
+    .unwrap();
+
+    let resolve_output = String::from_utf8(resolve_output).unwrap();
+    assert!(
+        resolve_output.contains("sync conflict union-resolved: .gitignore"),
+        "{resolve_output}"
+    );
+    assert!(
+        resolve_output.contains("sync push completed"),
+        "{resolve_output}"
+    );
+    let pushed_gitignore = run_test_git_stdout(
+        temp.path(),
+        [
+            "--git-dir",
+            remote.to_str().unwrap(),
+            "show",
+            "HEAD:.gitignore",
+        ],
+    );
+    assert!(pushed_gitignore.contains("aish-local-line"));
+    assert!(pushed_gitignore.contains("remote-line"));
+}
+
+fn sync_state_for_root(root: &Path, remote: &Path) -> AppState {
+    let config_path = root.join("config.toml");
+    let events_path = root.join("logs/events.jsonl");
+    let mut config = config::Config::default();
+    config.storage.home = root.to_path_buf();
+    config.sync.remote = remote.to_string_lossy().into_owned();
+    config::save_config(&config_path, &config).unwrap();
+    AppState {
+        config_path: Some(config_path),
+        events_path: Some(events_path),
+        sync_config: config.sync,
+        clock: fixed_clock,
+        ..AppState::default()
+    }
 }
 
 #[test]
