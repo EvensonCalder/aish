@@ -486,13 +486,15 @@ Some full-screen programs may still expose terminal-specific edge cases because 
 ## Sync
 
 Sync is designed for the common two-machine case where both computers use the
-same Aish Git remote. See [SYNC.md](SYNC.md) for the short operator guide.
+same Aish Git remote. Aish writes a `SYNC.md` notice into that sync data
+repository so the remote is clearly identifiable as Aish-managed data.
 
 Implemented:
 
 - Persist remote and sync category config.
 - Sync AI history, shell history and notes, templates, and drafts by default.
 - Keep `config.toml`, cache, logs, secrets, and temporary files local by default.
+- Write `SYNC.md` into the sync data repository as a warning/guide for anyone opening the remote.
 - Persist a conservative subset of periodic schedules checked at startup.
 - Persist explicit startup and exit sync triggers.
 - Run `#sync now` or its alias `#push` against a configured Git remote.
@@ -514,6 +516,19 @@ Sync does not have a long-running scheduler. The supported automatic triggers ar
 - periodic startup check: `#sync <schedule>` runs the same sync flow as `#sync now` at startup only when the saved interval is due. Supported forms are `@hourly`, `@daily`, `*/N * * * *`, `0 */N * * *`, `0 0 * * *`, and `0 0 */N * *`; unsupported schedules are logged and do not run git.
 - every startup: `#sync startup on` runs the same sync flow once when Aish starts.
 - exit: `#sync exit on` runs the same sync flow during the exit durability boundary.
+
+Local bare Git repositories work as remotes:
+
+```sh
+git init --bare ~/aish-sync.git
+```
+
+Then run this inside Aish:
+
+```text
+#set-remote /Users/you/aish-sync.git
+#sync now
+```
 
 ## Encryption Status
 

@@ -1267,6 +1267,10 @@ Policy:
 - Aish uses a lock file to prevent concurrent sync.
 - Sync includes AI history, shell history and notes, templates, and drafts by default.
 - Aish stages managed enabled files automatically before every sync commit.
+- Aish writes `SYNC.md` into the sync data repository so the remote is identifiable as Aish-managed data.
+- If Git identity is not configured, Aish sets local-only `user.name` and `user.email` values inside the sync repository before committing.
+- If an existing non-Git Aish home is connected to an already-populated sync remote, Aish merges the remote default branch with `--allow-unrelated-histories` during the first sync.
+- Local bare Git repositories are valid sync remotes.
 - Plaintext Aish JSONL files use Git's union merge driver so independent appends keep both sides.
 - Aish can auto-resolve remaining plaintext Aish file conflicts with `#sync resolve-union`.
 - Aish does not auto-resolve encrypted `*.jsonl.gpg` conflicts because text union can corrupt ciphertext.

@@ -1,7 +1,12 @@
 use super::*;
 
+fn git_env_guard() -> std::sync::MutexGuard<'static, ()> {
+    ENV_LOCK.lock().unwrap()
+}
+
 #[test]
 fn sync_config_commands_persist_without_running_git() {
+    let _guard = git_env_guard();
     let temp = tempfile::tempdir().unwrap();
     let config_path = temp.path().join("config.toml");
     let events_path = temp.path().join("logs/events.jsonl");
@@ -71,6 +76,7 @@ fn sync_config_commands_persist_without_running_git() {
 
 #[test]
 fn sync_now_runs_against_configured_local_git_remote() {
+    let _guard = git_env_guard();
     let temp = tempfile::tempdir().unwrap();
     let remote = temp.path().join("remote.git");
     let seed = temp.path().join("seed");
@@ -137,7 +143,7 @@ fn sync_now_runs_against_configured_local_git_remote() {
 
     let output = String::from_utf8(output).unwrap();
     assert!(
-        output.contains("sync step ok: git add -- .gitattributes .gitignore history/ai.jsonl history/draft.jsonl history/notes.jsonl history/regular.jsonl templates/templates.jsonl"),
+        output.contains("sync step ok: git add -- .gitattributes .gitignore SYNC.md history/ai.jsonl history/draft.jsonl history/notes.jsonl history/regular.jsonl templates/templates.jsonl"),
         "{output}"
     );
     assert!(
@@ -149,6 +155,7 @@ fn sync_now_runs_against_configured_local_git_remote() {
     assert!(output.contains("sync push completed"), "{output}");
     assert!(root.join(".gitignore").exists());
     assert!(root.join(".gitattributes").exists());
+    assert!(root.join("SYNC.md").exists());
     let pushed_history = run_test_git_stdout(
         temp.path(),
         [
@@ -169,7 +176,218 @@ fn sync_now_runs_against_configured_local_git_remote() {
 }
 
 #[test]
+fn sync_bootstraps_local_git_identity_when_missing() {
+    let _guard = git_env_guard();
+    let temp = tempfile::tempdir().unwrap();
+    let empty_global = temp.path().join("empty-gitconfig");
+    fs::write(&empty_global, "").unwrap();
+    let old_global = std::env::var_os("GIT_CONFIG_GLOBAL");
+    let old_nosystem = std::env::var_os("GIT_CONFIG_NOSYSTEM");
+    unsafe {
+        std::env::set_var("GIT_CONFIG_GLOBAL", &empty_global);
+        std::env::set_var("GIT_CONFIG_NOSYSTEM", "1");
+    }
+
+    let remote = temp.path().join("remote.git");
+    let root = temp.path().join("aish-home");
+    run_test_git(temp.path(), ["init", "--bare", remote.to_str().unwrap()]);
+    fs::create_dir_all(root.join("history")).unwrap();
+    fs::write(
+        root.join("history/regular.jsonl"),
+        "{\"command\":\"identity\"}\n",
+    )
+    .unwrap();
+
+    let mut state = sync_state_for_root(&root, &remote);
+    let mut output = Vec::new();
+    run_manual_sync_push(&mut state, &mut output).unwrap();
+
+    unsafe {
+        match old_global {
+            Some(value) => std::env::set_var("GIT_CONFIG_GLOBAL", value),
+            None => std::env::remove_var("GIT_CONFIG_GLOBAL"),
+        }
+        match old_nosystem {
+            Some(value) => std::env::set_var("GIT_CONFIG_NOSYSTEM", value),
+            None => std::env::remove_var("GIT_CONFIG_NOSYSTEM"),
+        }
+    }
+    let output = String::from_utf8(output).unwrap();
+    assert!(
+        output.contains("sync step ok: git config --local user.name Aish Sync"),
+        "{output}"
+    );
+    assert!(
+        output.contains("sync step ok: git config --local user.email aish-sync@localhost"),
+        "{output}"
+    );
+    assert!(
+        output.contains("sync step ok: git config --local commit.gpgsign false"),
+        "{output}"
+    );
+    assert!(output.contains("sync push completed"), "{output}");
+    assert_eq!(
+        run_test_git_stdout(&root, ["config", "--local", "user.name"]).trim(),
+        "Aish Sync"
+    );
+    assert_eq!(
+        run_test_git_stdout(&root, ["config", "--local", "user.email"]).trim(),
+        "aish-sync@localhost"
+    );
+    assert_eq!(
+        run_test_git_stdout(&root, ["config", "--local", "commit.gpgsign"]).trim(),
+        "false"
+    );
+}
+
+#[test]
+fn first_sync_merges_existing_remote_when_local_home_was_not_git_repo() {
+    let _guard = git_env_guard();
+    let temp = tempfile::tempdir().unwrap();
+    let remote = temp.path().join("remote.git");
+    let seed = temp.path().join("seed");
+    let root = temp.path().join("aish-home");
+
+    run_test_git(temp.path(), ["init", "--bare", remote.to_str().unwrap()]);
+    fs::create_dir_all(seed.join("history")).unwrap();
+    run_test_git(&seed, ["init"]);
+    run_test_git(&seed, ["config", "user.name", "Aish Test"]);
+    run_test_git(&seed, ["config", "user.email", "aish@example.invalid"]);
+    run_test_git(&seed, ["config", "commit.gpgsign", "false"]);
+    crate::sync::maintain_managed_gitignore(seed.join(".gitignore")).unwrap();
+    crate::sync::maintain_managed_gitattributes(seed.join(".gitattributes")).unwrap();
+    crate::sync::maintain_sync_readme(seed.join("SYNC.md")).unwrap();
+    fs::write(
+        seed.join("history/regular.jsonl"),
+        "{\"command\":\"from-remote\"}\n",
+    )
+    .unwrap();
+    run_test_git(
+        &seed,
+        [
+            "add",
+            "--",
+            ".gitattributes",
+            ".gitignore",
+            "SYNC.md",
+            "history/regular.jsonl",
+        ],
+    );
+    run_test_git(&seed, ["commit", "-m", "seed sync"]);
+    run_test_git(&seed, ["remote", "add", "origin", remote.to_str().unwrap()]);
+    run_test_git(&seed, ["push", "-u", "origin", "HEAD"]);
+
+    fs::create_dir_all(root.join("history")).unwrap();
+    fs::write(
+        root.join("history/regular.jsonl"),
+        "{\"command\":\"from-local\"}\n",
+    )
+    .unwrap();
+    let mut state = sync_state_for_root(&root, &remote);
+    let mut output = Vec::new();
+    run_manual_sync_push(&mut state, &mut output).unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(
+        output.contains("git pull --no-rebase --no-edit --allow-unrelated-histories origin"),
+        "{output}"
+    );
+    assert!(output.contains("sync push completed"), "{output}");
+    let pushed_history = run_test_git_stdout(
+        temp.path(),
+        [
+            "--git-dir",
+            remote.to_str().unwrap(),
+            "show",
+            "HEAD:history/regular.jsonl",
+        ],
+    );
+    assert!(pushed_history.contains("from-remote"), "{pushed_history}");
+    assert!(pushed_history.contains("from-local"), "{pushed_history}");
+}
+
+#[test]
+fn first_sync_uses_single_remote_branch_when_remote_head_is_unborn() {
+    let _guard = git_env_guard();
+    let temp = tempfile::tempdir().unwrap();
+    let remote = temp.path().join("remote.git");
+    let seed = temp.path().join("seed");
+    let root = temp.path().join("aish-home");
+
+    run_test_git(temp.path(), ["init", "--bare", remote.to_str().unwrap()]);
+    fs::create_dir_all(seed.join("history")).unwrap();
+    run_test_git(&seed, ["init"]);
+    run_test_git(&seed, ["branch", "-M", "sync-data"]);
+    run_test_git(&seed, ["config", "user.name", "Aish Test"]);
+    run_test_git(&seed, ["config", "user.email", "aish@example.invalid"]);
+    run_test_git(&seed, ["config", "commit.gpgsign", "false"]);
+    crate::sync::maintain_managed_gitignore(seed.join(".gitignore")).unwrap();
+    crate::sync::maintain_managed_gitattributes(seed.join(".gitattributes")).unwrap();
+    crate::sync::maintain_sync_readme(seed.join("SYNC.md")).unwrap();
+    fs::write(
+        seed.join("history/regular.jsonl"),
+        "{\"command\":\"remote-sync-branch\"}\n",
+    )
+    .unwrap();
+    run_test_git(
+        &seed,
+        [
+            "add",
+            "--",
+            ".gitattributes",
+            ".gitignore",
+            "SYNC.md",
+            "history/regular.jsonl",
+        ],
+    );
+    run_test_git(&seed, ["commit", "-m", "seed sync"]);
+    run_test_git(&seed, ["remote", "add", "origin", remote.to_str().unwrap()]);
+    run_test_git(&seed, ["push", "-u", "origin", "HEAD"]);
+
+    fs::create_dir_all(root.join("history")).unwrap();
+    fs::write(
+        root.join("history/regular.jsonl"),
+        "{\"command\":\"local-sync-branch\"}\n",
+    )
+    .unwrap();
+    let mut state = sync_state_for_root(&root, &remote);
+    let mut output = Vec::new();
+    run_manual_sync_push(&mut state, &mut output).unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(
+        output.contains("sync step ok: git branch -M sync-data"),
+        "{output}"
+    );
+    assert!(
+        output.contains(
+            "git pull --no-rebase --no-edit --allow-unrelated-histories origin sync-data"
+        ),
+        "{output}"
+    );
+    assert!(output.contains("sync push completed"), "{output}");
+    let pushed_history = run_test_git_stdout(
+        temp.path(),
+        [
+            "--git-dir",
+            remote.to_str().unwrap(),
+            "show",
+            "sync-data:history/regular.jsonl",
+        ],
+    );
+    assert!(
+        pushed_history.contains("remote-sync-branch"),
+        "{pushed_history}"
+    );
+    assert!(
+        pushed_history.contains("local-sync-branch"),
+        "{pushed_history}"
+    );
+}
+
+#[test]
 fn sync_skips_commit_when_only_untracked_unmanaged_files_exist() {
+    let _guard = git_env_guard();
     let temp = tempfile::tempdir().unwrap();
     let remote = temp.path().join("remote.git");
     let seed = temp.path().join("seed");
@@ -211,6 +429,7 @@ fn sync_skips_commit_when_only_untracked_unmanaged_files_exist() {
 
 #[test]
 fn sync_plaintext_history_uses_union_merge_across_two_clones() {
+    let _guard = git_env_guard();
     let temp = tempfile::tempdir().unwrap();
     let remote = temp.path().join("remote.git");
     let seed = temp.path().join("seed");
@@ -268,6 +487,7 @@ fn sync_plaintext_history_uses_union_merge_across_two_clones() {
 
 #[test]
 fn sync_resolve_union_command_keeps_both_sides_after_conflict() {
+    let _guard = git_env_guard();
     let temp = tempfile::tempdir().unwrap();
     let remote = temp.path().join("remote.git");
     let seed = temp.path().join("seed");
@@ -380,6 +600,7 @@ fn sync_state_for_root(root: &Path, remote: &Path) -> AppState {
 
 #[test]
 fn foreground_shell_args_use_login_compatible_command_mode() {
+    let _guard = git_env_guard();
     assert_eq!(
         foreground_shell_args("/bin/bash", "less file"),
         ["-lc", "less file"]
@@ -408,6 +629,7 @@ fn foreground_shell_args_use_login_compatible_command_mode() {
 
 #[test]
 fn startup_sync_runs_due_schedule_against_local_git_remote() {
+    let _guard = git_env_guard();
     let temp = tempfile::tempdir().unwrap();
     let remote = temp.path().join("remote.git");
     let seed = temp.path().join("seed");
@@ -454,6 +676,7 @@ fn startup_sync_runs_due_schedule_against_local_git_remote() {
 
 #[test]
 fn startup_sync_trigger_runs_without_periodic_schedule() {
+    let _guard = git_env_guard();
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
     let mut state = AppState {
@@ -479,6 +702,7 @@ fn startup_sync_trigger_runs_without_periodic_schedule() {
 
 #[test]
 fn startup_sync_skips_not_due_schedule_without_running_git() {
+    let _guard = git_env_guard();
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
     let last_attempt = root.join("cache/runtime/sync.last_attempt");
@@ -503,6 +727,7 @@ fn startup_sync_skips_not_due_schedule_without_running_git() {
 
 #[test]
 fn sync_category_toggle_rejects_invalid_usage_without_persisting() {
+    let _guard = git_env_guard();
     let temp = tempfile::tempdir().unwrap();
     let config_path = temp.path().join("config.toml");
     config::save_config(&config_path, &config::Config::default()).unwrap();

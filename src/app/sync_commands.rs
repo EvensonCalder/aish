@@ -11,10 +11,14 @@ use crate::sync::{
     GitCommandPlan, StartupSyncDecision, SyncFailureKind, SyncLock, SyncStepOutcome,
     classify_git_sync_step, conservative_sync_plan_for_existing_paths_with_encryption,
     init_repo_plan, log_sync_failure, maintain_managed_gitattributes, maintain_managed_gitignore,
-    pull_merge_plan, push_plan, startup_sync_decision, tracked_managed_files_warning,
+    maintain_sync_readme, pull_merge_allow_unrelated_plan, pull_merge_plan, push_plan,
+    startup_sync_decision, tracked_managed_files_warning,
 };
 
 use super::{AppState, reports::write_encryption_sync_status};
+
+const DEFAULT_SYNC_GIT_USER_NAME: &str = "Aish Sync";
+const DEFAULT_SYNC_GIT_USER_EMAIL: &str = "aish-sync@localhost";
 
 pub(super) fn set_sync_remote(
     state: &mut AppState,
@@ -133,6 +137,7 @@ pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -
 
     maintain_managed_gitignore(root.join(".gitignore"))?;
     maintain_managed_gitattributes(root.join(".gitattributes"))?;
+    maintain_sync_readme(root.join("SYNC.md"))?;
     let mut initialized_repo = false;
     if root.join(".git").is_dir() {
         warn_tracked_managed_paths(&root, out)?;
@@ -144,6 +149,12 @@ pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -
         }
         initialized_repo = true;
     }
+    if !ensure_sync_origin_remote(state, out, &root, &remote)? {
+        return Ok(());
+    }
+    if !ensure_sync_git_identity(state, out, &root)? {
+        return Ok(());
+    }
 
     for command in conservative_sync_plan_for_existing_paths_with_encryption(
         &root,
@@ -153,10 +164,37 @@ pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -
     .commands
     {
         if initialized_repo && is_pull_command(&command) {
-            writeln!(
-                out,
-                "sync step skipped: git pull --no-rebase --no-edit for new repository"
-            )?;
+            if let Some(remote_branch) = remote_sync_branch(&root)? {
+                let rename = GitCommandPlan {
+                    program: "git".to_string(),
+                    args: vec![
+                        "branch".to_string(),
+                        "-M".to_string(),
+                        remote_branch.clone(),
+                    ],
+                };
+                if !run_sync_git_step(state, out, &root, &rename)? {
+                    return Ok(());
+                }
+                let mut pull = pull_merge_allow_unrelated_plan();
+                pull.args.push("origin".to_string());
+                pull.args.push(remote_branch);
+                if !run_sync_git_step(state, out, &root, &pull)? {
+                    return Ok(());
+                }
+            } else {
+                writeln!(
+                    out,
+                    "sync step skipped: git pull --no-rebase --no-edit for new repository"
+                )?;
+            }
+            continue;
+        }
+        if is_pull_command(&command) {
+            let pull = sync_pull_plan(&root, false)?.unwrap_or(command);
+            if !run_sync_git_step(state, out, &root, &pull)? {
+                return Ok(());
+            }
             continue;
         }
         if is_commit_command(&command) {
@@ -490,7 +528,7 @@ fn run_sync_push_step(
             out,
             "sync push needs remote updates; running git pull --no-rebase --no-edit"
         )?;
-        let pull = pull_merge_plan();
+        let pull = sync_pull_plan(root, false)?.unwrap_or_else(pull_merge_plan);
         if !run_sync_git_step(state, out, root, &pull)? {
             return Ok(false);
         }
@@ -511,6 +549,231 @@ fn git_output_suggests_remote_changed(output: &str) -> bool {
     lower.contains("non-fast-forward")
         || lower.contains("fetch first")
         || lower.contains("stale info")
+}
+
+fn ensure_sync_origin_remote(
+    state: &AppState,
+    out: &mut impl Write,
+    root: &Path,
+    remote: &str,
+) -> Result<bool> {
+    match remote_origin_url(root)? {
+        Some(current) if current == remote => Ok(true),
+        Some(_) => {
+            let command = GitCommandPlan {
+                program: "git".to_string(),
+                args: vec![
+                    "remote".to_string(),
+                    "set-url".to_string(),
+                    "origin".to_string(),
+                    remote.to_string(),
+                ],
+            };
+            run_sync_git_step(state, out, root, &command)
+        }
+        None => {
+            let command = GitCommandPlan {
+                program: "git".to_string(),
+                args: vec![
+                    "remote".to_string(),
+                    "add".to_string(),
+                    "origin".to_string(),
+                    remote.to_string(),
+                ],
+            };
+            run_sync_git_step(state, out, root, &command)
+        }
+    }
+}
+
+fn remote_origin_url(root: &Path) -> Result<Option<String>> {
+    let command = GitCommandPlan {
+        program: "git".to_string(),
+        args: vec![
+            "remote".to_string(),
+            "get-url".to_string(),
+            "origin".to_string(),
+        ],
+    };
+    let result = run_git_command(root, &command)?;
+    if result.success {
+        let value = result.stdout.trim();
+        return Ok((!value.is_empty()).then(|| value.to_string()));
+    }
+    Ok(None)
+}
+
+fn ensure_sync_git_identity(state: &AppState, out: &mut impl Write, root: &Path) -> Result<bool> {
+    for (key, value) in [
+        ("user.name", DEFAULT_SYNC_GIT_USER_NAME),
+        ("user.email", DEFAULT_SYNC_GIT_USER_EMAIL),
+    ] {
+        if git_config_value(root, key)?.is_none() {
+            let command = GitCommandPlan {
+                program: "git".to_string(),
+                args: vec![
+                    "config".to_string(),
+                    "--local".to_string(),
+                    key.to_string(),
+                    value.to_string(),
+                ],
+            };
+            if !run_sync_git_step(state, out, root, &command)? {
+                return Ok(false);
+            }
+        }
+    }
+    if git_config_value(root, "commit.gpgsign")?.as_deref() != Some("false") {
+        let command = GitCommandPlan {
+            program: "git".to_string(),
+            args: vec![
+                "config".to_string(),
+                "--local".to_string(),
+                "commit.gpgsign".to_string(),
+                "false".to_string(),
+            ],
+        };
+        if !run_sync_git_step(state, out, root, &command)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn git_config_value(root: &Path, key: &str) -> Result<Option<String>> {
+    let command = GitCommandPlan {
+        program: "git".to_string(),
+        args: vec!["config".to_string(), "--get".to_string(), key.to_string()],
+    };
+    let result = run_git_command(root, &command)?;
+    if result.success {
+        let value = result.stdout.trim();
+        return Ok((!value.is_empty()).then(|| value.to_string()));
+    }
+    if result.exit_code == Some(1) {
+        return Ok(None);
+    }
+    bail!(
+        "failed to inspect git config {key}: {}",
+        result.combined_output()
+    )
+}
+
+fn remote_head_branch(root: &Path) -> Result<Option<String>> {
+    let command = GitCommandPlan {
+        program: "git".to_string(),
+        args: vec![
+            "ls-remote".to_string(),
+            "--symref".to_string(),
+            "origin".to_string(),
+            "HEAD".to_string(),
+        ],
+    };
+    let result = run_git_command(root, &command)?;
+    if !result.success {
+        return Ok(None);
+    }
+    for line in result.stdout.lines() {
+        let Some(rest) = line.strip_prefix("ref: refs/heads/") else {
+            continue;
+        };
+        let Some((branch, target)) = rest.split_once('\t') else {
+            continue;
+        };
+        if target == "HEAD" && !branch.is_empty() && !branch.chars().any(char::is_control) {
+            return Ok(Some(branch.to_string()));
+        }
+    }
+    Ok(None)
+}
+
+fn sync_pull_plan(root: &Path, allow_unrelated: bool) -> Result<Option<GitCommandPlan>> {
+    let Some(branch) = remote_sync_branch(root)? else {
+        return Ok(None);
+    };
+    let mut plan = if allow_unrelated {
+        pull_merge_allow_unrelated_plan()
+    } else {
+        pull_merge_plan()
+    };
+    plan.args.push("origin".to_string());
+    plan.args.push(branch);
+    Ok(Some(plan))
+}
+
+fn remote_sync_branch(root: &Path) -> Result<Option<String>> {
+    if let Some(branch) = current_branch(root)?
+        && remote_branch_exists(root, &branch)?
+    {
+        return Ok(Some(branch));
+    }
+    if let Some(branch) = remote_head_branch(root)?
+        && remote_branch_exists(root, &branch)?
+    {
+        return Ok(Some(branch));
+    }
+    let branches = remote_branch_candidates(root)?;
+    if branches.len() == 1 {
+        return Ok(branches.into_iter().next());
+    }
+    Ok(None)
+}
+
+fn current_branch(root: &Path) -> Result<Option<String>> {
+    let command = GitCommandPlan {
+        program: "git".to_string(),
+        args: vec!["branch".to_string(), "--show-current".to_string()],
+    };
+    let result = run_git_command(root, &command)?;
+    if !result.success {
+        return Ok(None);
+    }
+    let branch = result.stdout.trim();
+    Ok((!branch.is_empty() && !branch.chars().any(char::is_control)).then(|| branch.to_string()))
+}
+
+fn remote_branch_exists(root: &Path, branch: &str) -> Result<bool> {
+    let command = GitCommandPlan {
+        program: "git".to_string(),
+        args: vec![
+            "ls-remote".to_string(),
+            "--heads".to_string(),
+            "origin".to_string(),
+            branch.to_string(),
+        ],
+    };
+    let result = run_git_command(root, &command)?;
+    Ok(result.success && !result.stdout.trim().is_empty())
+}
+
+fn remote_branch_candidates(root: &Path) -> Result<Vec<String>> {
+    let command = GitCommandPlan {
+        program: "git".to_string(),
+        args: vec![
+            "ls-remote".to_string(),
+            "--heads".to_string(),
+            "origin".to_string(),
+        ],
+    };
+    let result = run_git_command(root, &command)?;
+    if !result.success {
+        return Ok(Vec::new());
+    }
+    let mut branches = Vec::new();
+    for line in result.stdout.lines() {
+        let Some((_, refname)) = line.split_once('\t') else {
+            continue;
+        };
+        let Some(branch) = refname.strip_prefix("refs/heads/") else {
+            continue;
+        };
+        if !branch.is_empty() && !branch.chars().any(char::is_control) {
+            branches.push(branch.to_string());
+        }
+    }
+    branches.sort();
+    branches.dedup();
+    Ok(branches)
 }
 
 pub(super) fn run_startup_sync_check(

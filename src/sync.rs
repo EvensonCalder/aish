@@ -15,6 +15,24 @@ const MANAGED_GITATTRIBUTES_LINES: &[&str] = &[
     "history/*.jsonl merge=union",
     "templates/*.jsonl merge=union",
 ];
+const SYNC_README_PATH: &str = "SYNC.md";
+const SYNC_README_CONTENT: &str = r#"# Aish Sync Repository
+
+This Git repository is managed by Aish sync.
+
+It stores Aish-managed shell history, notes, AI history, drafts, templates, and
+sync metadata for one user across machines.
+
+Do not use this repository as a normal source-code checkout. Aish updates it
+with `#sync now` and `#push`.
+
+Local-only files such as `config.toml`, cache, logs, secrets, and temporary
+files are intentionally ignored.
+
+Plaintext Aish JSONL files use Git's union merge driver so independent appends
+from multiple machines usually keep both sides. Encrypted `*.jsonl.gpg` files
+must not be text-union merged because that can corrupt ciphertext.
+"#;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrackedManagedFilesWarning {
@@ -173,6 +191,23 @@ pub fn maintain_managed_gitattributes(path: impl AsRef<Path>) -> Result<()> {
     }
     fs::write(path, next)
         .with_context(|| format!("failed to write gitattributes {}", path.display()))
+}
+
+pub fn maintain_sync_readme(path: impl AsRef<Path>) -> Result<()> {
+    let path = path.as_ref();
+    if path.exists() {
+        return Ok(());
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "failed to create sync readme directory {}",
+                parent.display()
+            )
+        })?;
+    }
+    fs::write(path, SYNC_README_CONTENT)
+        .with_context(|| format!("failed to write sync readme {}", path.display()))
 }
 
 fn replace_managed_gitignore_section(existing: &str) -> String {
@@ -385,7 +420,11 @@ pub fn managed_add_plan_with_encryption(
     config: &SyncConfig,
     encryption_enabled: bool,
 ) -> ManagedAddPlan {
-    let mut paths = vec![".gitattributes".to_string(), ".gitignore".to_string()];
+    let mut paths = vec![
+        ".gitattributes".to_string(),
+        ".gitignore".to_string(),
+        SYNC_README_PATH.to_string(),
+    ];
     if config.ai {
         paths.push(managed_storage_path("history/ai.jsonl", encryption_enabled));
     }
@@ -440,7 +479,11 @@ pub fn existing_managed_add_plan_with_encryption(
     let mut paths = Vec::new();
     let mut missing_paths = Vec::new();
     for path in managed_add_plan_with_encryption(config, encryption_enabled).paths {
-        if path == ".gitignore" || path == ".gitattributes" || root.join(&path).exists() {
+        if path == ".gitignore"
+            || path == ".gitattributes"
+            || path == SYNC_README_PATH
+            || root.join(&path).exists()
+        {
             paths.push(path);
         } else {
             missing_paths.push(path);
@@ -466,6 +509,18 @@ pub fn pull_merge_plan() -> GitCommandPlan {
             "pull".to_string(),
             "--no-rebase".to_string(),
             "--no-edit".to_string(),
+        ],
+    }
+}
+
+pub fn pull_merge_allow_unrelated_plan() -> GitCommandPlan {
+    GitCommandPlan {
+        program: "git".to_string(),
+        args: vec![
+            "pull".to_string(),
+            "--no-rebase".to_string(),
+            "--no-edit".to_string(),
+            "--allow-unrelated-histories".to_string(),
         ],
     }
 }

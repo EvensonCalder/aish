@@ -89,6 +89,25 @@ fn managed_gitattributes_preserves_user_content_and_is_idempotent() {
 }
 
 #[test]
+fn sync_readme_is_created_once_and_preserves_user_edits() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("SYNC.md");
+
+    maintain_sync_readme(&path).unwrap();
+    let first = fs::read_to_string(&path).unwrap();
+    maintain_sync_readme(&path).unwrap();
+    let second = fs::read_to_string(&path).unwrap();
+
+    assert_eq!(first, second);
+    assert!(first.contains("Aish Sync Repository"));
+    assert!(first.contains("managed by Aish sync"));
+
+    fs::write(&path, "custom sync readme\n").unwrap();
+    maintain_sync_readme(&path).unwrap();
+    assert_eq!(fs::read_to_string(&path).unwrap(), "custom sync readme\n");
+}
+
+#[test]
 fn tracked_managed_files_warning_lists_managed_tracked_paths() {
     let warning = tracked_managed_files_warning([
         "README.md",
@@ -266,6 +285,7 @@ fn managed_add_plan_syncs_user_content_categories_by_default() {
             paths: vec![
                 ".gitattributes".to_string(),
                 ".gitignore".to_string(),
+                "SYNC.md".to_string(),
                 "history/ai.jsonl".to_string(),
                 "history/draft.jsonl".to_string(),
                 "history/notes.jsonl".to_string(),
@@ -288,7 +308,7 @@ fn managed_add_plan_can_disable_all_content_categories() {
 
     assert_eq!(
         managed_add_plan(&config).paths,
-        vec![".gitattributes", ".gitignore"]
+        vec![".gitattributes", ".gitignore", "SYNC.md"]
     );
 }
 
@@ -307,6 +327,7 @@ fn managed_add_plan_uses_gpg_paths_when_encryption_is_enabled() {
         vec![
             ".gitattributes",
             ".gitignore",
+            "SYNC.md",
             "history/ai.jsonl.gpg",
             "history/draft.jsonl.gpg",
             "history/notes.jsonl.gpg",
@@ -334,7 +355,12 @@ fn existing_managed_add_plan_skips_missing_enabled_paths() {
 
     assert_eq!(
         plan.paths,
-        vec![".gitattributes", ".gitignore", "history/regular.jsonl"]
+        vec![
+            ".gitattributes",
+            ".gitignore",
+            "SYNC.md",
+            "history/regular.jsonl"
+        ]
     );
     assert_eq!(
         plan.missing_paths,
@@ -352,6 +378,22 @@ fn pull_merge_plan_uses_fixed_git_arguments() {
                 "pull".to_string(),
                 "--no-rebase".to_string(),
                 "--no-edit".to_string()
+            ]
+        }
+    );
+}
+
+#[test]
+fn pull_merge_allow_unrelated_plan_uses_fixed_git_arguments() {
+    assert_eq!(
+        pull_merge_allow_unrelated_plan(),
+        GitCommandPlan {
+            program: "git".to_string(),
+            args: vec![
+                "pull".to_string(),
+                "--no-rebase".to_string(),
+                "--no-edit".to_string(),
+                "--allow-unrelated-histories".to_string()
             ]
         }
     );
@@ -456,6 +498,7 @@ fn conservative_sync_plan_orders_fixed_steps() {
                         "--".to_string(),
                         ".gitattributes".to_string(),
                         ".gitignore".to_string(),
+                        "SYNC.md".to_string(),
                         "history/ai.jsonl".to_string(),
                         "history/draft.jsonl".to_string(),
                         "history/notes.jsonl".to_string(),
@@ -511,7 +554,8 @@ fn conservative_sync_plan_adds_only_metadata_when_categories_are_disabled() {
                 "add".to_string(),
                 "--".to_string(),
                 ".gitattributes".to_string(),
-                ".gitignore".to_string()
+                ".gitignore".to_string(),
+                "SYNC.md".to_string()
             ]
         }
     );
