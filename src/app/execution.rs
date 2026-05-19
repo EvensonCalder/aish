@@ -163,6 +163,11 @@ pub fn execute_draft(
             return Ok(());
         }
     }
+    if is_plain_exit_command(&command) {
+        state.exit_requested = true;
+        state.clear_draft_for_new_draft();
+        return Ok(());
+    }
 
     let continuation = backend.input_needs_more_lines(&command)?;
     if continuation.needs_more {
@@ -198,6 +203,10 @@ pub fn execute_draft(
         state.current_cwd = Some(PathBuf::from(cwd));
     }
     Ok(())
+}
+
+fn is_plain_exit_command(command: &str) -> bool {
+    command.trim() == "exit"
 }
 
 pub(crate) fn record_completed_command(

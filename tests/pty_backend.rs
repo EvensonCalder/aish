@@ -154,6 +154,23 @@ fn bash_pty_backend_loads_user_bashrc_without_prompt_noise() {
 }
 
 #[test]
+fn bash_pty_backend_suppresses_ps0_noise_from_bashrc() {
+    let _guard = pty_test_guard();
+    let home = tempfile::tempdir().unwrap();
+    fs::write(home.path().join(".bashrc"), "PS0='bash-ps0-noise\n'\n").unwrap();
+    let _home_guard = EnvVarGuard::set("HOME", home.path().as_os_str());
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+
+    let result = backend
+        .run_command("printf 'bash-after-ps0\\n'", Duration::from_secs(5))
+        .unwrap();
+
+    assert_eq!(result.exit_code, 0);
+    assert_eq!(result.output.trim(), "bash-after-ps0");
+    assert!(!result.output.contains("bash-ps0-noise"), "{result:?}");
+}
+
+#[test]
 fn pty_backend_streams_output_before_command_completion() {
     let _guard = pty_test_guard();
     let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
@@ -784,6 +801,51 @@ fn zsh_pty_backend_loads_user_zshrc_when_available() {
 }
 
 #[test]
+fn zsh_pty_backend_preserves_direct_hook_functions_when_available() {
+    let _guard = pty_test_guard();
+    let Some(zsh) = find_shell(&["/bin/zsh", "/usr/bin/zsh", "/usr/local/bin/zsh"]) else {
+        return;
+    };
+
+    let home = tempfile::tempdir().unwrap();
+    fs::write(
+        home.path().join(".zshrc"),
+        "function preexec() { export AISH_ZSH_DIRECT_PREEXEC=\"$1\"; printf zsh-direct-preexec-noise\\\\n; }\n\
+         function precmd() { export AISH_ZSH_DIRECT_PRECMD=ran; printf zsh-direct-precmd-noise\\\\n; }\n\
+         PROMPT='zsh-direct-prompt> '\n",
+    )
+    .unwrap();
+    let _home_guard = EnvVarGuard::set("HOME", home.path().as_os_str());
+    let mut backend = PtyBackend::spawn(zsh).unwrap();
+
+    let command = backend
+        .run_command("printf 'zsh-direct-body\\n'", Duration::from_secs(5))
+        .unwrap();
+    let hooks = backend
+        .run_command(
+            "printf '%s|%s\\n' \"$AISH_ZSH_DIRECT_PRECMD\" \"$AISH_ZSH_DIRECT_PREEXEC\"",
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+    assert_eq!(command.exit_code, 0);
+    assert_eq!(command.output.trim(), "zsh-direct-body");
+    assert_eq!(hooks.exit_code, 0);
+    assert!(hooks.output.trim().starts_with("ran|printf "), "{hooks:?}");
+    for result in [&command, &hooks] {
+        assert!(
+            !result.output.contains("zsh-direct-preexec-noise"),
+            "{result:?}"
+        );
+        assert!(
+            !result.output.contains("zsh-direct-precmd-noise"),
+            "{result:?}"
+        );
+        assert!(!result.output.contains("zsh-direct-prompt"), "{result:?}");
+    }
+}
+
+#[test]
 fn fish_pty_backend_runs_commands_and_reports_cwd_when_available() {
     let _guard = pty_test_guard();
     if !fish_backend_tests_enabled() {
@@ -993,6 +1055,79 @@ fn fish_pty_backend_loads_user_config_when_available() {
     for result in [&function, &env, &path, &events] {
         assert!(!result.output.contains("fish-config-prompt"), "{result:?}");
         assert!(!result.output.contains("__AISH_READY__"), "{result:?}");
+    }
+}
+
+#[test]
+fn fish_pty_backend_wraps_user_event_handlers_when_available() {
+    let _guard = pty_test_guard();
+    if !fish_backend_tests_enabled() {
+        eprintln!("skipping fish PTY backend event test: set AISH_TEST_FISH=1 to opt in");
+        return;
+    }
+    let Some(fish) = find_shell(&[
+        "/opt/homebrew/bin/fish",
+        "/usr/local/bin/fish",
+        "/usr/bin/fish",
+        "/bin/fish",
+    ]) else {
+        return;
+    };
+
+    let home = tempfile::tempdir().unwrap();
+    let fish_config_dir = home.path().join(".config/fish");
+    fs::create_dir_all(&fish_config_dir).unwrap();
+    fs::write(
+        fish_config_dir.join("config.fish"),
+        "function aish_user_fish_preexec --on-event fish_preexec\n\
+             set -gx AISH_FISH_DIRECT_PREEXEC $argv[1]\n\
+             printf 'fish-direct-preexec-noise\\n'\n\
+         end\n\
+         function aish_user_fish_postexec --on-event fish_postexec\n\
+             set -gx AISH_FISH_DIRECT_POSTEXEC ran\n\
+             set -gx AISH_FISH_DIRECT_POSTEXEC_STATUS $status\n\
+             printf 'fish-direct-postexec-noise\\n'\n\
+         end\n\
+         function fish_prompt\n\
+             printf 'fish-direct-prompt> '\n\
+         end\n",
+    )
+    .unwrap();
+    let _home_guard = EnvVarGuard::set("HOME", home.path().as_os_str());
+    let mut backend = PtyBackend::spawn(fish).unwrap();
+
+    let command = backend
+        .run_command("printf 'fish-direct-body\\n'", Duration::from_secs(5))
+        .unwrap();
+    let failure = backend
+        .run_command("false", Duration::from_secs(5))
+        .unwrap();
+    let events = backend
+        .run_command(
+            "printf '%s|%s|%s\\n' $AISH_FISH_DIRECT_POSTEXEC $AISH_FISH_DIRECT_POSTEXEC_STATUS $AISH_FISH_DIRECT_PREEXEC",
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+    assert_eq!(command.exit_code, 0);
+    assert_eq!(command.output.trim(), "fish-direct-body");
+    assert_eq!(failure.exit_code, 1);
+    assert!(failure.output.trim().is_empty(), "{failure:?}");
+    assert_eq!(events.exit_code, 0);
+    assert!(
+        events.output.trim().starts_with("ran|1|printf "),
+        "{events:?}"
+    );
+    for result in [&command, &failure, &events] {
+        assert!(
+            !result.output.contains("fish-direct-preexec-noise"),
+            "{result:?}"
+        );
+        assert!(
+            !result.output.contains("fish-direct-postexec-noise"),
+            "{result:?}"
+        );
+        assert!(!result.output.contains("fish-direct-prompt"), "{result:?}");
     }
 }
 

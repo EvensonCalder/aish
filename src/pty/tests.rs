@@ -65,6 +65,7 @@ fn bash_launch_uses_clean_startup_flags() {
             .init_command
             .contains("PROMPT_COMMAND=__aish_emit_ready")
     );
+    assert!(launch.init_command.contains("PS0=''"));
     assert!(launch.init_command.contains("trap - DEBUG"));
 }
 
@@ -76,6 +77,8 @@ fn non_bash_launch_does_not_receive_bash_only_flags() {
     assert!(launch.init_command.contains("unsetopt zle"));
     assert!(launch.init_command.contains("unset AISH_CONTROL_FD"));
     assert!(launch.init_command.contains("add-zsh-hook"));
+    assert!(launch.init_command.contains("__aish_user_preexec_function"));
+    assert!(launch.init_command.contains("__aish_user_precmd_function"));
     assert!(launch.init_command.contains("__aish_preexec"));
     assert!(launch.init_command.contains("__aish_precmd"));
     assert!(launch.init_command.contains("fc -p"));
@@ -91,8 +94,24 @@ fn fish_launch_uses_event_functions_after_user_config() {
     }
     assert_eq!(launch.integration, ShellIntegration::FishEvents);
     assert!(launch.init_command.contains("set -e AISH_CONTROL_FD"));
+    assert!(
+        launch
+            .init_command
+            .contains("__aish_user_fish_preexec_functions")
+    );
+    assert!(
+        launch
+            .init_command
+            .contains("__aish_user_fish_postexec_functions")
+    );
     assert!(launch.init_command.contains("--on-event fish_preexec"));
     assert!(launch.init_command.contains("--on-event fish_postexec"));
+    assert!(launch.init_command.contains("__aish_run_user_fish_preexec"));
+    assert!(
+        launch
+            .init_command
+            .contains("__aish_run_user_fish_postexec")
+    );
     assert!(launch.init_command.contains("__aish_emit_ready"));
     assert!(launch.init_command.contains("function fish_prompt"));
     assert!(!launch.args.contains(&"--noprofile".to_string()));
