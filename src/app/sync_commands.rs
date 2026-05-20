@@ -222,12 +222,18 @@ pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -
             continue;
         }
         if is_pull_command(&command) {
-            let pull = sync_pull_plan(&root, false)?.unwrap_or(command);
-            if !run_sync_pull_step(state, out, &root, &pull)? {
-                return Ok(());
-            }
-            if !prepare_sync_repository_metadata_after_pull(state, out, &root)? {
-                return Ok(());
+            if let Some(pull) = sync_pull_plan(&root, false)? {
+                if !run_sync_pull_step(state, out, &root, &pull)? {
+                    return Ok(());
+                }
+                if !prepare_sync_repository_metadata_after_pull(state, out, &root)? {
+                    return Ok(());
+                }
+            } else {
+                writeln!(
+                    out,
+                    "sync step skipped: git pull --no-rebase --no-edit because remote has no branch"
+                )?;
             }
             continue;
         }
@@ -838,7 +844,10 @@ fn run_sync_push_step(
             out,
             "sync push needs remote updates; running git pull --no-rebase --no-edit"
         )?;
-        let pull = sync_pull_plan(root, false)?.unwrap_or_else(pull_merge_plan);
+        let Some(pull) = sync_pull_plan(root, false)? else {
+            handle_failed_sync_step(state, out, command, result)?;
+            return Ok(false);
+        };
         if !run_sync_pull_step(state, out, root, &pull)? {
             return Ok(false);
         }
@@ -879,7 +888,10 @@ fn run_sync_pull_step(
             out,
             "sync pull needs unrelated-history merge; retrying with --allow-unrelated-histories"
         )?;
-        let retry = sync_pull_plan(root, true)?.unwrap_or_else(pull_merge_allow_unrelated_plan);
+        let Some(retry) = sync_pull_plan(root, true)? else {
+            handle_failed_sync_step(state, out, command, result)?;
+            return Ok(false);
+        };
         return run_sync_pull_step(state, out, root, &retry);
     }
     if matches!(

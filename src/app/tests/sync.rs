@@ -189,6 +189,65 @@ fn sync_now_runs_against_configured_local_git_remote() {
 }
 
 #[test]
+fn existing_repo_with_empty_bare_remote_skips_pull_without_tracking_error() {
+    let _guard = git_env_guard();
+    let temp = tempfile::tempdir().unwrap();
+    let remote = temp.path().join("remote.git");
+    let root = temp.path().join("aish-home");
+
+    run_test_git(temp.path(), ["init", "--bare", remote.to_str().unwrap()]);
+    fs::create_dir_all(&root).unwrap();
+    run_test_git(&root, ["init"]);
+    run_test_git(&root, ["remote", "add", "origin", remote.to_str().unwrap()]);
+    fs::create_dir_all(root.join("history")).unwrap();
+    fs::write(
+        root.join("history/regular.jsonl"),
+        "{\"command\":\"local\"}\n",
+    )
+    .unwrap();
+
+    let config_path = root.join("config.toml");
+    let events_path = root.join("logs/events.jsonl");
+    let mut config = config::Config::default();
+    config.storage.home = root.clone();
+    config.sync.remote = remote.to_string_lossy().into_owned();
+    config::save_config(&config_path, &config).unwrap();
+    let mut state = AppState {
+        config_path: Some(config_path),
+        events_path: Some(events_path),
+        sync_config: config.sync,
+        clock: || 12,
+        ..AppState::default()
+    };
+    let mut output = Vec::new();
+
+    run_manual_sync_push(&mut state, &mut output).unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(
+        output.contains(
+            "sync step skipped: git pull --no-rebase --no-edit because remote has no branch"
+        ),
+        "{output}"
+    );
+    assert!(
+        !output.contains("There is no tracking information"),
+        "{output}"
+    );
+    assert!(output.contains("sync push completed"), "{output}");
+    let pushed_history = run_test_git_stdout(
+        temp.path(),
+        [
+            "--git-dir",
+            remote.to_str().unwrap(),
+            "show",
+            "HEAD:history/regular.jsonl",
+        ],
+    );
+    assert!(pushed_history.contains("local"), "{pushed_history}");
+}
+
+#[test]
 fn sync_bootstraps_local_git_identity_when_missing() {
     let _guard = git_env_guard();
     let temp = tempfile::tempdir().unwrap();

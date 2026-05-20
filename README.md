@@ -506,6 +506,8 @@ Implemented:
 - Persist explicit startup and exit sync triggers.
 - Run `#sync now` against a configured Git remote.
 - Stage managed enabled paths automatically, commit only when staged content changed, merge remote updates with `git pull --no-rebase --no-edit`, then push.
+- Treat an empty bare/GitHub remote as a normal first-sync target: skip pull when the remote has no branch, then push with upstream setup.
+- Use explicit remote branches for pulls instead of relying on local Git branch tracking.
 - Clear stale sync locks left by dead Aish processes before refusing a new sync.
 - Stop an individual Git sync step after 60 seconds, report the timeout, release the sync lock, and return to the Aish prompt.
 - Warn when existing Aish-managed files are present but excluded because their sync category is disabled.

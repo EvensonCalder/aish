@@ -1282,6 +1282,8 @@ Policy:
 - When encryption is enabled, `.aish-sync.toml` must contain exactly one current full 40-hex GPG key fingerprint. Local encrypted sync must use a full fingerprint, not an email/user selector.
 - If local encryption state or fingerprint disagrees with `.aish-sync.toml`, Aish must stop before pushing and tell the user how to resolve the key choice.
 - If Git identity is not configured, Aish sets local-only `user.name` and `user.email` values inside the sync repository before committing.
+- Empty bare or hosted Git remotes are valid first-sync targets. If the remote has no branch, Aish must skip pull and let push create the branch/upstream.
+- Aish must not rely on local branch tracking for pull. When a remote branch exists, pull must specify the remote and branch explicitly.
 - If an existing non-Git Aish home is connected to an already-populated sync remote, Aish merges the remote default branch with `--allow-unrelated-histories` during the first sync.
 - If an existing local sync repository is connected to a populated remote with separate history, Aish reports the unrelated-history case and retries the pull with `--allow-unrelated-histories`.
 - Local bare Git repositories are valid sync remotes.
