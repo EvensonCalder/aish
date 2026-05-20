@@ -2,7 +2,7 @@
 set -eu
 
 SESSION="aish-cr-progress-$$"
-HOME_DIR="/tmp/aish-tmux-cr-progress-home-$$"
+HOME_DIR="${AISH_TMUX_ARTIFACT_DIR:-/tmp}/aish-tmux-cr-progress-home-$$"
 BIN_DIR="$HOME_DIR/bin"
 : "${AISH_BIN:?AISH_BIN must point to the aish binary under test}"
 trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; rm -rf "$HOME_DIR" || true' EXIT INT TERM

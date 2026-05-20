@@ -13,6 +13,8 @@
 
 #[path = "support/expect.rs"]
 mod expect_support;
+#[path = "support/process.rs"]
+mod process_support;
 
 use expect_support::{list_scripts, run_script};
 

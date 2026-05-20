@@ -5,7 +5,7 @@
 set timeout 10
 source [file dirname [info script]]/_lib.exp
 
-set work "/tmp/aish-expect-path-completion-[pid]-[clock clicks]"
+set work "$::env(AISH_EXPECT_ARTIFACT_DIR)/aish-expect-path-completion-[pid]-[clock clicks]"
 file mkdir $work
 close [open [file join $work "my file.txt"] w]
 close [open [file join $work "#hash.txt"] w]

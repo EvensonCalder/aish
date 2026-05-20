@@ -5,7 +5,7 @@
 set timeout 10
 source [file dirname [info script]]/_lib.exp
 
-set bindir "/tmp/aish-fake-fzf-[pid]-[clock clicks]"
+set bindir "$::env(AISH_EXPECT_ARTIFACT_DIR)/aish-fake-fzf-[pid]-[clock clicks]"
 file mkdir $bindir
 set fzf "$bindir/fzf"
 set fh [open $fzf w]

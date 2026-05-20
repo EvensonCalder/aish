@@ -2,8 +2,8 @@
 set -eu
 
 SESSION="aish-completion-enter-clears-$$"
-HOME_DIR="/tmp/aish-tmux-completion-enter-home-$$"
-WORK_DIR="/tmp/aish-tmux-completion-enter-work-$$"
+HOME_DIR="${AISH_TMUX_ARTIFACT_DIR:-/tmp}/aish-tmux-completion-enter-home-$$"
+WORK_DIR="${AISH_TMUX_ARTIFACT_DIR:-/tmp}/aish-tmux-completion-enter-work-$$"
 : "${AISH_BIN:?AISH_BIN must point to the aish binary under test}"
 
 cleanup() {

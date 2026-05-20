@@ -5,7 +5,7 @@
 set timeout 10
 source [file dirname [info script]]/_lib.exp
 
-set editor "/tmp/aish-fake-editor-[pid]-[clock clicks].sh"
+set editor "$::env(AISH_EXPECT_ARTIFACT_DIR)/aish-fake-editor-[pid]-[clock clicks].sh"
 set fh [open $editor w]
 puts $fh {#!/bin/sh}
 puts $fh {printf 'echo editor-expect-ok\n' > "$1"}

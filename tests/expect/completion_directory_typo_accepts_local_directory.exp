@@ -5,7 +5,7 @@
 set timeout 10
 source [file dirname [info script]]/_lib.exp
 
-set workdir "/tmp/aish-dir-typo-[pid]-[clock clicks]"
+set workdir "$::env(AISH_EXPECT_ARTIFACT_DIR)/aish-dir-typo-[pid]-[clock clicks]"
 file delete -force $workdir
 file mkdir $workdir
 file mkdir "$workdir/src"

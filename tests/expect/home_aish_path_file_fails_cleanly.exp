@@ -5,7 +5,7 @@
 set timeout 10
 source [file dirname [info script]]/_lib.exp
 
-set isolated_home "/tmp/aish-home-file-conflict-[pid]-[clock clicks]"
+set isolated_home "$::env(AISH_EXPECT_ARTIFACT_DIR)/aish-home-file-conflict-[pid]-[clock clicks]"
 file delete -force $isolated_home
 file mkdir $isolated_home
 set old_home $::env(HOME)

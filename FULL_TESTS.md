@@ -78,8 +78,8 @@ Run these from the repository root.
 | AUTO-005 | `cargo test --test first_run -- --nocapture` | First-run integration tests pass. |
 | AUTO-006 | `cargo test --test pty_backend -- --nocapture` | Bash and zsh PTY tests pass; unavailable optional shells skip cleanly. |
 | AUTO-007 | `AISH_TEST_FISH=1 cargo test --test pty_backend -- --nocapture` | Fish PTY tests pass when fish is installed, or the failure is recorded as a fish compatibility bug. |
-| AUTO-008 | `cargo test --test expect_runner -- --test-threads=1 --nocapture` | Expect-driven terminal scenarios pass serially. |
-| AUTO-009 | `cargo test --test tmux_capture -- --test-threads=1 --nocapture` | Tmux screen-capture tests pass serially. |
+| AUTO-008 | `cargo test --test expect_runner -- --nocapture` | Expect-driven terminal scenarios pass with bounded harness parallelism and isolated artifact directories. |
+| AUTO-009 | `cargo test --test tmux_capture -- --nocapture` | Tmux screen-capture tests pass with isolated tmux servers and bounded harness parallelism. |
 | AUTO-010 | `AISH_TEST_FISH=1 cargo test --test tmux_capture tmux_common_shell_workflow_matches_fish_backend_real_terminal_screen -- --nocapture` | Fish tmux smoke passes when fish is installed, or the failure is recorded as a fish compatibility issue. |
 | AUTO-011 | `cargo clippy --all-targets -- -D warnings` | Clippy passes without warnings. |
 | AUTO-012 | `git diff --check` | No whitespace errors. |
@@ -94,8 +94,8 @@ cargo test --lib
 cargo test --test draft_execution -- --nocapture
 cargo test --test first_run -- --nocapture
 cargo test --test pty_backend -- --nocapture
-cargo test --test expect_runner -- --test-threads=1 --nocapture
-cargo test --test tmux_capture -- --test-threads=1 --nocapture
+cargo test --test expect_runner -- --nocapture
+cargo test --test tmux_capture -- --nocapture
 cargo clippy --all-targets -- -D warnings
 git diff --check
 ```
@@ -351,9 +351,9 @@ Use only disposable repositories.
 | --- | --- | --- | --- |
 | SYNC-001 | Configure a local bare git remote in `/tmp`. | Remote setup does not use network or personal credentials. | Paste commands. |
 | SYNC-002 | Run `#set-remote <local-bare-repo-url>`. | Config persists the remote. | Paste `#config` output. |
-| SYNC-003 | Create history/templates/notes, then run `#push`. | Aish commits only managed enabled paths and pushes successfully. | Paste output. |
-| SYNC-004 | Run `#push` again with no changes. | Aish reports no changes or succeeds without creating unnecessary commits. | Paste output. |
-| SYNC-005 | Create a deterministic conflict in the disposable remote, then run `#push`. | Aish reports the conflict/failure and does not auto-resolve, delete, or rewrite history. | Paste output. |
+| SYNC-003 | Create history/templates/notes, then run `#sync now`. | Aish commits only managed enabled paths and pushes successfully. | Paste output. |
+| SYNC-004 | Run `#sync now` again with no changes. | Aish reports no changes or succeeds without creating unnecessary commits. | Paste output. |
+| SYNC-005 | Create a deterministic conflict in the disposable remote, then run `#sync now`. | Aish reports the conflict/failure and does not auto-resolve, delete, or rewrite history. | Paste output. |
 | SYNC-006 | Run `#sync off`, `#sync ai on`, `#sync history on`, `#sync templates on`, and `#sync drafts on`. | Category config persists; no scheduler files are created. | Paste output. |
 | SYNC-007 | Configure a real private remote only if explicitly safe and disposable. | Auth prompts do not wedge terminal; Aish remains conservative. | Describe result. |
 

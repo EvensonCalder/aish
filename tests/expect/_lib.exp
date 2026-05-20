@@ -24,12 +24,15 @@ set ::env(GIT_CONFIG_KEY_1) "user.name"
 set ::env(GIT_CONFIG_VALUE_1) "Aish Expect"
 set ::env(GIT_CONFIG_KEY_2) "user.email"
 set ::env(GIT_CONFIG_VALUE_2) "aish@example.invalid"
+if {![info exists ::env(AISH_EXPECT_ARTIFACT_DIR)] || $::env(AISH_EXPECT_ARTIFACT_DIR) eq ""} {
+    set ::env(AISH_EXPECT_ARTIFACT_DIR) "/tmp"
+}
 set ::aish_last_draft ""
 
 # Pick an isolated HOME/AISH_HOME per spawn so tests do not inherit the user's
 # shell rc files and concurrent runs do not collide.
 proc aish_new_home {} {
-    set tmp "/tmp/aish-expect-[pid]-[clock clicks]"
+    set tmp "$::env(AISH_EXPECT_ARTIFACT_DIR)/aish-expect-[pid]-[clock clicks]"
     file mkdir $tmp
     set ::env(AISH_HOME) $tmp
     set ::env(HOME) $tmp

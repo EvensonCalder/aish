@@ -5,7 +5,7 @@
 set timeout 10
 source [file dirname [info script]]/_lib.exp
 
-set isolated_home "/tmp/aish-home-file-picker-[pid]-[clock clicks]"
+set isolated_home "$::env(AISH_EXPECT_ARTIFACT_DIR)/aish-home-file-picker-[pid]-[clock clicks]"
 file delete -force $isolated_home
 file mkdir $isolated_home
 set old_home $::env(HOME)
@@ -16,7 +16,7 @@ if {$old_aish_home_exists} {
 unset -nocomplain ::env(AISH_HOME)
 set ::env(HOME) $isolated_home
 
-set bindir "/tmp/aish-home-file-fake-fzf-[pid]-[clock clicks]"
+set bindir "$::env(AISH_EXPECT_ARTIFACT_DIR)/aish-home-file-fake-fzf-[pid]-[clock clicks]"
 file mkdir $bindir
 set fzf "$bindir/fzf"
 set fh [open $fzf w]
@@ -28,7 +28,7 @@ file attributes $fzf -permissions 0755
 set old_path $::env(PATH)
 set ::env(PATH) "$bindir:$old_path"
 
-set workdir "/tmp/aish-home-file-picker-work-[pid]-[clock clicks]"
+set workdir "$::env(AISH_EXPECT_ARTIFACT_DIR)/aish-home-file-picker-work-[pid]-[clock clicks]"
 file mkdir $workdir
 set fh [open "$workdir/candidate.txt" w]
 puts $fh "candidate"

@@ -5,7 +5,7 @@
 set timeout 10
 source [file dirname [info script]]/_lib.exp
 
-set isolated_home "/tmp/aish-home-env-picker-[pid]-[clock clicks]"
+set isolated_home "$::env(AISH_EXPECT_ARTIFACT_DIR)/aish-home-env-picker-[pid]-[clock clicks]"
 file delete -force $isolated_home
 file mkdir $isolated_home
 set old_home $::env(HOME)
@@ -21,7 +21,7 @@ unset -nocomplain ::env(AISH_HOME)
 set ::env(HOME) $isolated_home
 set ::env(AISH_EXPECT_PICKER_VAR) "available"
 
-set bindir "/tmp/aish-home-env-fake-fzf-[pid]-[clock clicks]"
+set bindir "$::env(AISH_EXPECT_ARTIFACT_DIR)/aish-home-env-fake-fzf-[pid]-[clock clicks]"
 file mkdir $bindir
 set fzf "$bindir/fzf"
 set fh [open $fzf w]

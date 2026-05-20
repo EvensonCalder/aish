@@ -2,8 +2,8 @@
 set -eu
 
 SESSION="aish-manual-real-world-$$"
-HOME_DIR="/tmp/aish-tmux-manual-real-home-$$"
-WORK_DIR="/tmp/aish-tmux-manual-real-work-$$"
+HOME_DIR="${AISH_TMUX_ARTIFACT_DIR:-/tmp}/aish-tmux-manual-real-home-$$"
+WORK_DIR="${AISH_TMUX_ARTIFACT_DIR:-/tmp}/aish-tmux-manual-real-work-$$"
 : "${AISH_BIN:?AISH_BIN must point to the aish binary under test}"
 trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; rm -rf "$HOME_DIR" "$WORK_DIR" || true' EXIT INT TERM
 

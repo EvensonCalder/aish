@@ -5,7 +5,7 @@
 set timeout 10
 source [file dirname [info script]]/_lib.exp
 
-set marker "/tmp/aish-context-confirm-off-[pid]-[clock clicks]"
+set marker "$::env(AISH_EXPECT_ARTIFACT_DIR)/aish-context-confirm-off-[pid]-[clock clicks]"
 set ::env(AISH_EXPECT_CONTEXT_KEY) "test-key"
 
 aish_spawn

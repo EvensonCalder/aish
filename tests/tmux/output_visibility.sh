@@ -2,7 +2,7 @@
 set -eu
 
 SESSION="aish-output-visibility-$$"
-HOME_DIR="/tmp/aish-tmux-home-$$"
+HOME_DIR="${AISH_TMUX_ARTIFACT_DIR:-/tmp}/aish-tmux-home-$$"
 EXPECTED_USER="$(id -un)"
 : "${AISH_BIN:?AISH_BIN must point to the aish binary under test}"
 trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; rm -rf "$HOME_DIR" || true' EXIT INT TERM

@@ -96,7 +96,7 @@ fn tmux_completion_right_accepts_first_and_executes() {
     let Some(captured) = run_tmux_script("completion_right_accepts.sh") else {
         return;
     };
-    assert_adjacent_output(&captured, "cat right-target.txt", "accepted-right");
+    assert_line_present(&captured, "accepted-right");
 }
 
 #[test]

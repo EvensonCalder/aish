@@ -1,11 +1,11 @@
 #!/usr/bin/env expect
-# Production-style manual sync: without AISH_HOME, #push should sync managed
+# Production-style manual sync: without AISH_HOME, #sync now should sync managed
 # files from $HOME/.aish to a local bare remote without scheduler files.
 
 set timeout 25
 source [file dirname [info script]]/_lib.exp
 
-set root "/tmp/aish-home-sync-push-[pid]-[clock clicks]"
+set root "$::env(AISH_EXPECT_ARTIFACT_DIR)/aish-home-sync-push-[pid]-[clock clicks]"
 set isolated_home "$root/user-home"
 set aish_home "$isolated_home/.aish"
 set remote "$root/remote.git"
@@ -59,13 +59,13 @@ aish_enter
 aish_expect "home-push-history"
 aish_wait_prompt
 
-aish_send "#push"
+aish_send "#sync now"
 aish_enter
 aish_expect "sync step ok: git init"
 aish_expect "sync step ok: git remote add origin $remote"
 aish_expect "sync step ok: git add -- .aish-sync.toml .gitattributes .gitignore README.md history/draft.jsonl history/regular.jsonl"
 aish_expect "sync step ok: git commit"
-aish_expect "sync step skipped: git pull --no-rebase --no-edit for new repository"
+aish_expect "sync step skipped: remote cache has no branch to merge for new repository"
 aish_expect "sync step ok: git push -u origin HEAD"
 aish_expect "sync push completed"
 aish_wait_prompt

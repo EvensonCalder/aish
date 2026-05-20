@@ -1,8 +1,14 @@
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::Mutex;
+use std::sync::OnceLock;
 
-static EXPECT_RUN_LOCK: Mutex<()> = Mutex::new(());
+use crate::process_support::{RunLimiter, default_test_jobs, run_with_timeout, script_timeout};
+
+static EXPECT_RUN_LIMITER: OnceLock<RunLimiter> = OnceLock::new();
+
+fn expect_run_limiter() -> &'static RunLimiter {
+    EXPECT_RUN_LIMITER.get_or_init(|| RunLimiter::new(default_test_jobs("AISH_EXPECT_TEST_JOBS")))
+}
 
 fn expect_bin() -> Option<PathBuf> {
     for candidate in [
@@ -27,9 +33,7 @@ fn aish_binary() -> PathBuf {
 }
 
 pub(crate) fn run_script(name: &str) {
-    let _guard = EXPECT_RUN_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _permit = expect_run_limiter().acquire();
     let Some(expect) = expect_bin() else {
         eprintln!("skipping {name}: `expect` not installed");
         return;
@@ -41,17 +45,30 @@ pub(crate) fn run_script(name: &str) {
         script.display()
     );
 
-    let output = Command::new(&expect)
+    let artifact_dir = tempfile::Builder::new()
+        .prefix("aish-expect-")
+        .tempdir_in("/tmp")
+        .expect("failed to create expect test artifact dir");
+
+    let mut command = Command::new(&expect);
+    command
         .arg(&script)
         .env("AISH_BIN", aish_binary())
-        .output()
-        .expect("failed to launch expect");
+        .env("AISH_EXPECT_ARTIFACT_DIR", artifact_dir.path());
+    let result = run_with_timeout(
+        command,
+        script_timeout("AISH_EXPECT_TEST_TIMEOUT_SECS", 90),
+        || {},
+    )
+    .expect("failed to launch expect");
+    let output = result.output;
 
-    if !output.status.success() {
+    if result.timed_out || !output.status.success() {
         panic!(
-            "expect script failed: {}\nstatus: {}\nstdout:\n{}\nstderr:\n{}",
+            "expect script failed: {}\nstatus: {}\ntimed out: {}\nstdout:\n{}\nstderr:\n{}",
             script.display(),
             output.status,
+            result.timed_out,
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );

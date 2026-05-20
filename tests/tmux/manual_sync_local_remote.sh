@@ -2,7 +2,7 @@
 set -eu
 
 SESSION="aish-manual-sync-local-$$"
-ROOT="/tmp/aish-tmux-manual-sync-$$"
+ROOT="${AISH_TMUX_ARTIFACT_DIR:-/tmp}/aish-tmux-manual-sync-$$"
 REMOTE="$ROOT/remote.git"
 SEED="$ROOT/seed"
 HOME_DIR="$ROOT/aish-home"
@@ -35,7 +35,7 @@ sleep 5
 
 tmux send-keys -t "$SESSION" "#set-remote $REMOTE" Enter
 sleep 1
-tmux send-keys -t "$SESSION" '#push' Enter
+tmux send-keys -t "$SESSION" '#sync now' Enter
 sleep 5
 tmux send-keys -t "$SESSION" 'echo after-local-sync' Enter
 sleep 2
@@ -44,9 +44,10 @@ CAPTURE="$(tmux capture-pane -p -S - -t "$SESSION")"
 printf '%s\n' "$CAPTURE"
 
 printf '%s\n' "$CAPTURE" | rg -q "^sync.remote=$REMOTE$"
-printf '%s\n' "$CAPTURE" | rg -q '^sync step ok: git add -- \.gitattributes \.gitignore README\.md$'
+printf '%s\n' "$CAPTURE" | rg -q '^sync step ok: git add -- \.aish-sync\.toml \.gitattributes \.gitignore README\.md$'
 printf '%s\n' "$CAPTURE" | rg -q '^sync step ok: git commit'
-printf '%s\n' "$CAPTURE" | rg -q '^sync step ok: git pull --no-rebase --no-edit( origin [^[:space:]]+)?$'
+printf '%s\n' "$CAPTURE" | rg -q '^sync step ok: git (pull --no-rebase --no-edit|fetch )'
+printf '%s\n' "$CAPTURE" | rg -q '^sync step ok: git (merge --no-edit|pull --no-rebase --no-edit)'
 printf '%s\n' "$CAPTURE" | rg -q '^sync step ok: git push'
 printf '%s\n' "$CAPTURE" | rg -q '^sync push completed$'
 printf '%s\n' "$CAPTURE" | rg -q '^after-local-sync$'

@@ -21,12 +21,12 @@ Current test inventory:
 - 9 of the tmux tests are manual-equivalent workflows that replaced deterministic rows from `MANUAL_TESTS.md`: real-world shell commands, prompt editing keys, completion UX mechanics, private commands/notes, templates/editor/default home, AI/context/sync config, local sync, `less` passthrough smoke, and startup failure messages.
 - 32 PTY integration tests, including default bash/zsh coverage and fish cases that skip unless fish opt-in prerequisites are available.
 - 120 expect-driven end-to-end interactive scenarios.
-- Expect scenarios are serialized inside `expect_runner` because they launch real interactive terminals; parallel execution created false `no prompt` and Tcl/expect crash failures that did not match actual single-user operation.
+- Expect scenarios run with bounded parallelism inside `expect_runner`. Each scenario gets its own artifact directory and timeout; use `AISH_EXPECT_TEST_JOBS=1` to debug timing-sensitive expect failures, and `AISH_EXPECT_TEST_TIMEOUT_SECS` only when diagnosing a long-running scenario.
 - Expect scenarios force `commit.gpgsign=false` through `GIT_CONFIG_COUNT` so temporary local git repositories do not depend on a developer's global GPG/pinentry setup.
-- Tmux screen-capture tests are serialized inside `tmux_capture` for the same reason: they launch real terminal panes and assert screen state.
+- Tmux screen-capture tests run with bounded parallelism inside `tmux_capture`. Each script gets its own tmux socket directory, artifact directory, and timeout; use `AISH_TMUX_TEST_JOBS=1` to debug timing-sensitive screen assertions, and `AISH_TMUX_TEST_TIMEOUT_SECS` only when diagnosing a long-running script.
 - `MANUAL_TESTS.md` now contains only human-only checks; deterministic manual workflows should be added to tmux/expect/Rust instead of expanding the human checklist.
 - Most tmux tests assert final visible rows; longer backend-specific workflows capture pane scrollback so normal scrolling does not make earlier command output disappear from the assertion window.
-- Tmux screen-capture tests use an isolated short `TMUX_TMPDIR` under `/tmp` so they do not attach to a user's tmux server or exceed Unix socket path limits on macOS.
+- Tmux screen-capture tests use an isolated short tmux socket path under `/tmp` so they do not attach to a user's tmux server or exceed Unix socket path limits on macOS.
 - Tmux screen-capture tests skip cleanly when `tmux` is unavailable or cannot create a local session.
 - Backend-specific tmux workflows write an isolated `shell.backend` config and run against bash and zsh by default; fish is available as opt-in coverage with `AISH_TEST_FISH=1`.
 - Tmux pane capture trims trailing spaces, so tmux tests must not be used as the only assertion for prompt suffix spaces; expect byte-stream and Rust rendering tests cover those details.
@@ -56,7 +56,7 @@ cargo test --test draft_execution -- --nocapture
 cargo test --test first_run -- --nocapture
 cargo test --test pty_backend -- --nocapture
 cargo test --test expect_runner -- --nocapture
-cargo test --test tmux_capture -- --test-threads=1 --nocapture
+cargo test --test tmux_capture -- --nocapture
 cargo test -- --list
 ```
 
@@ -326,7 +326,7 @@ Implemented:
 - Context pseudo-pipe commands execute only through the controlled context collector after config, confirmation, and danger checks.
 - Unknown private commands are not sent to shell.
 - Unknown private commands suggest the nearest implemented command when there is a close match.
-- Minimal private commands: `#help`, `#status`, `#config`, `#doctor`, `#model`, `#base-url`, `#env-key`, `#key set`, `#key clear`, `#context`, `#completion`, `#log`, `#editor`, `#mt`, `#template find`, `#template show`, `#template use`, `#template rm`, `#template replace`, `#encrypt`, `#set-remote`, `#push`, `#sync`, `#exit`, `#quit`, `#history <count>`.
+- Minimal private commands: `#help`, `#status`, `#config`, `#doctor`, `#model`, `#base-url`, `#env-key`, `#key set`, `#key clear`, `#context`, `#completion`, `#log`, `#editor`, `#mt`, `#template find`, `#template show`, `#template use`, `#template rm`, `#template replace`, `#encrypt`, `#set-remote`, `#sync now`, `#sync`, `#exit`, `#quit`, `#history <count>`.
 - `#help` prints private commands and the configured keybinding map.
 - `Esc` clears the draft and returns to draft mode.
 - `Ctrl-R` resolves to history search without editing draft state before the picker returns a selection.
@@ -353,8 +353,8 @@ Implemented:
 - Sync push command plan helper emits fixed `git push` arguments without shell interpolation or running git.
 - Git repository initialization plan helper emits fixed `git init` and `git remote add origin <remote>` arguments while rejecting empty/control-character remotes without running git.
 - Ctrl-L and real `clear`-style command output handling is covered with a virtual terminal screen test that interprets CR/LF and ANSI home/clear sequences, proving the final prompt renders on row 0 instead of leaving a blank first line.
-- Conservative sync flow plan helper orders pull-rebase, managed add, commit, and push steps using fixed git argument arrays without running git.
-- Manual `#push` sync is covered against a local bare git remote, including pull-rebase, managed `.gitignore` add, commit, push, and completion event logging without network access.
+- Conservative sync flow plan helper orders remote-cache fetch/merge, managed add, commit, and push steps using fixed git argument arrays without running git.
+- Manual `#sync now` sync is covered against a local bare git remote, including remote-cache fetch/merge, managed `.gitignore` add, commit, push, and completion event logging without network access.
 - Startup `#sync <schedule>` behavior is covered for due and not-due schedules using a runtime timestamp file, sync lock, and local bare git remote without creating scheduler files. Explicit startup and exit sync triggers have Rust coverage.
 - Marker-based shell integration now emits and parses command-start markers, with shell-quoting tests and PTY coverage that bash reports `started_command` without leaking internal markers into history.
 - Bash marker integration has PTY coverage for prompt-ready initial cwd, command-start reporting, command-finish exit status, and cwd reporting after command execution.
@@ -370,8 +370,8 @@ Implemented:
 - Prompt redraw after ordinary command output has both a Rust virtual-screen regression and a real `tmux` pane-capture regression proving repeated final visible shell output remains above the next prompt in actual use; the tmux scripts run the Cargo-provided `CARGO_BIN_EXE_aish` binary via `AISH_BIN` so they cannot accidentally validate a stale `target/debug/aish`.
 - Common real-world shell workflows have expect and backend-specific tmux coverage proving Aish passes through persistent `cd`, `mkdir`, file redirection, `cat | grep`, quoted arguments, exported environment variables, file tests, failing commands, and recovery after failure across bash and zsh by default; fish coverage is opt-in with `AISH_TEST_FISH=1`.
 - Command output followed by mode-switch redraw and unique completion acceptance has expect coverage through the real binary.
-- Manual `#push` sync has expect coverage against a local temporary bare git remote, including managed `.gitignore` push and no scheduler file creation.
-- Manual `#push` sync failure has expect coverage with a missing local remote, including visible failure output, event-log recording, and no scheduler file creation.
+- Manual `#sync now` sync has expect coverage against a local temporary bare git remote, including managed `.gitignore` push and no scheduler file creation.
+- Manual `#sync now` sync failure has expect coverage with a missing local remote, including visible failure output, event-log recording, and no scheduler file creation.
 - Representative private-command safe failures have expect coverage for invalid history/log/template/context/sync usage, followed by a backend command proving the session remains usable.
 - Unicode command output has real `tmux` pane-capture coverage so UTF-8 behavior is checked against final visible terminal state without relying on Tcl/expect Unicode handling.
 - Terminal size has expect coverage proving startup outer terminal rows/columns propagate to backend child commands via `stty size`; runtime backend resize is covered by PTY integration.
@@ -428,7 +428,7 @@ Implemented:
 - Template placeholders support `{name}`, `{name:description}`, and `{name...}` syntax.
 - Template use copies rendered content to a protected template draft and blocks execution while placeholders remain unresolved.
 - Template draft editing treats unresolved placeholders as spans: outside Backspace/Delete removes the whole placeholder, while editing inside expands the draft to plain editable text.
-- Encryption commands can change managed storage encryption state through GPG-backed migration/rotation/decryption; sync commands persist remote/schedule/category state and `#push` runs the conservative git flow.
+- Encryption commands can change managed storage encryption state through GPG-backed migration/rotation/decryption; sync commands persist remote/schedule/category state and `#sync now` runs the conservative git flow.
 - `#context` reports and persists current context configuration.
 - `#config` prints read-only runtime configuration and does not create missing storage files.
 - `#doctor` prints read-only diagnostics and does not create missing storage files.

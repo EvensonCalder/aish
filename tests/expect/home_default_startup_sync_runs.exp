@@ -6,7 +6,7 @@
 set timeout 25
 source [file dirname [info script]]/_lib.exp
 
-set root "/tmp/aish-home-startup-sync-[pid]-[clock clicks]"
+set root "$::env(AISH_EXPECT_ARTIFACT_DIR)/aish-home-startup-sync-[pid]-[clock clicks]"
 set isolated_home "$root/user-home"
 set aish_home "$isolated_home/.aish"
 set remote "$root/remote.git"

@@ -2,9 +2,9 @@
 set -eu
 
 SESSION="aish-manual-ai-context-sync-$$"
-HOME_DIR="/tmp/aish-tmux-manual-ai-home-$$"
-MARKER="/tmp/aish-tmux-context-disabled-$$"
-DANGEROUS_MARKER="/tmp/aish-tmux-context-danger-$$"
+HOME_DIR="${AISH_TMUX_ARTIFACT_DIR:-/tmp}/aish-tmux-manual-ai-home-$$"
+MARKER="${AISH_TMUX_ARTIFACT_DIR:-/tmp}/aish-tmux-context-disabled-$$"
+DANGEROUS_MARKER="${AISH_TMUX_ARTIFACT_DIR:-/tmp}/aish-tmux-context-danger-$$"
 : "${AISH_BIN:?AISH_BIN must point to the aish binary under test}"
 trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; rm -rf "$HOME_DIR" "$MARKER" "$DANGEROUS_MARKER" || true' EXIT INT TERM
 
@@ -64,7 +64,7 @@ tmux send-keys -t "$SESSION" '#sync drafts on' Enter
 sleep 1
 tmux send-keys -t "$SESSION" '#sync ai maybe' Enter
 sleep 1
-tmux send-keys -t "$SESSION" '#push' Enter
+tmux send-keys -t "$SESSION" '#sync now' Enter
 sleep 2
 tmux send-keys -t "$SESSION" 'echo after-ai-context-sync' Enter
 sleep 2

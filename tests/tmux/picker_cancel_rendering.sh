@@ -2,8 +2,8 @@
 set -eu
 
 SESSION="aish-picker-cancel-render-$$"
-HOME_DIR="/tmp/aish-tmux-picker-cancel-home-$$"
-BIN_DIR="/tmp/aish-tmux-picker-cancel-bin-$$"
+HOME_DIR="${AISH_TMUX_ARTIFACT_DIR:-/tmp}/aish-tmux-picker-cancel-home-$$"
+BIN_DIR="${AISH_TMUX_ARTIFACT_DIR:-/tmp}/aish-tmux-picker-cancel-bin-$$"
 : "${AISH_BIN:?AISH_BIN must point to the aish binary under test}"
 trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; rm -rf "$HOME_DIR" "$BIN_DIR" || true' EXIT INT TERM
 

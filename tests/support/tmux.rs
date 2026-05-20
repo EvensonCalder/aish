@@ -1,19 +1,27 @@
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::Mutex;
+use std::sync::OnceLock;
 
+use crate::process_support::{RunLimiter, default_test_jobs, run_with_timeout, script_timeout};
 pub(crate) use crate::shell_support::{command_available, find_shell, fish_backend_tests_enabled};
 
-static TMUX_RUN_LOCK: Mutex<()> = Mutex::new(());
+static TMUX_RUN_LIMITER: OnceLock<RunLimiter> = OnceLock::new();
 
-fn tmux_available(tmux_tmpdir: &Path) -> bool {
-    if std::fs::create_dir_all(tmux_tmpdir).is_err() {
+fn tmux_run_limiter() -> &'static RunLimiter {
+    TMUX_RUN_LIMITER.get_or_init(|| RunLimiter::new(default_test_jobs("AISH_TMUX_TEST_JOBS")))
+}
+
+fn tmux_available(tmux_socket: &Path) -> bool {
+    if let Some(parent) = tmux_socket.parent()
+        && std::fs::create_dir_all(parent).is_err()
+    {
         return false;
     }
 
-    if !Command::new("tmux")
+    if !Command::new(tmux_binary())
         .arg("-V")
-        .env("TMUX_TMPDIR", tmux_tmpdir)
         .output()
         .map(|output| output.status.success())
         .unwrap_or(false)
@@ -21,18 +29,28 @@ fn tmux_available(tmux_tmpdir: &Path) -> bool {
         return false;
     }
 
+    let tmux = tmux_binary();
     let probe = format!("aish-tmux-probe-{}", std::process::id());
-    let available = Command::new("tmux")
-        .args(["new-session", "-d", "-s", &probe, "true"])
-        .env("TMUX_TMPDIR", tmux_tmpdir)
+    let _ = Command::new(&tmux)
+        .arg("-S")
+        .arg(tmux_socket)
+        .args(["new-session", "-d", "-s", &probe, "sleep 30"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    let available = Command::new(&tmux)
+        .arg("-S")
+        .arg(tmux_socket)
+        .args(["has-session", "-t", &probe])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
         .map(|status| status.success())
         .unwrap_or(false);
-    let _ = Command::new("tmux")
-        .args(["kill-session", "-t", &probe])
-        .env("TMUX_TMPDIR", tmux_tmpdir)
+    let _ = Command::new(&tmux)
+        .arg("-S")
+        .arg(tmux_socket)
+        .arg("kill-server")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
@@ -44,13 +62,15 @@ pub(crate) fn run_tmux_script(name: &str) -> Option<String> {
 }
 
 pub(crate) fn run_tmux_script_with_env(name: &str, extra_env: &[(&str, &str)]) -> Option<String> {
-    let _guard = TMUX_RUN_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let tmux_tmpdir = tmux_tmpdir(name);
-    if !tmux_available(&tmux_tmpdir) {
+    let _permit = tmux_run_limiter().acquire();
+    let tmux_tmpdir = tmux_tempdir();
+    let tmux_socket = tmux_tmpdir.path().join("tmux.sock");
+    let tmux_wrapper = create_tmux_wrapper(tmux_tmpdir.path(), &tmux_socket, &tmux_binary());
+    let artifact_dir = tmux_tmpdir.path().join("a");
+    std::fs::create_dir_all(&artifact_dir).expect("failed to create tmux test artifact dir");
+
+    if !tmux_available(&tmux_socket) {
         eprintln!("skipping {name}: tmux is not installed or cannot create sessions");
-        let _ = std::fs::remove_dir_all(&tmux_tmpdir);
         return None;
     }
 
@@ -65,18 +85,26 @@ pub(crate) fn run_tmux_script_with_env(name: &str, extra_env: &[(&str, &str)]) -
         .env("AISH_BIN", env!("CARGO_BIN_EXE_aish"))
         .env("LC_ALL", "C")
         .env("LANG", "C")
-        .env("TMUX_TMPDIR", &tmux_tmpdir);
+        .env("PATH", prepend_to_path(&tmux_wrapper))
+        .env("AISH_TMUX_ARTIFACT_DIR", &artifact_dir);
     for (key, value) in extra_env {
         command.env(key, value);
     }
-    let output = command.output().expect("failed to launch tmux script");
-    let _ = std::fs::remove_dir_all(&tmux_tmpdir);
+    let result = run_with_timeout(
+        command,
+        script_timeout("AISH_TMUX_TEST_TIMEOUT_SECS", 120),
+        || terminate_tmux_server(&tmux_socket),
+    )
+    .expect("failed to launch tmux script");
+    terminate_tmux_server(&tmux_socket);
+    let output = result.output;
 
-    if !output.status.success() {
+    if result.timed_out || !output.status.success() {
         panic!(
-            "tmux script failed: {}\nstatus: {}\nstdout:\n{}\nstderr:\n{}",
+            "tmux script failed: {}\nstatus: {}\ntimed out: {}\nstdout:\n{}\nstderr:\n{}",
             script.display(),
             output.status,
+            result.timed_out,
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
@@ -85,12 +113,68 @@ pub(crate) fn run_tmux_script_with_env(name: &str, extra_env: &[(&str, &str)]) -
     Some(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-fn tmux_tmpdir(name: &str) -> PathBuf {
-    let safe_name: String = name
-        .chars()
-        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
-        .collect();
-    PathBuf::from("/tmp").join(format!("aish-tmux-{}-{safe_name}", std::process::id()))
+fn tmux_tempdir() -> tempfile::TempDir {
+    tempfile::Builder::new()
+        .prefix("at-")
+        .tempdir_in("/tmp")
+        .expect("failed to create tmux test tempdir")
+}
+
+fn create_tmux_wrapper(root: &Path, tmux_socket: &Path, tmux_bin: &Path) -> PathBuf {
+    let bin_dir = root.join("bin");
+    std::fs::create_dir_all(&bin_dir).expect("failed to create tmux wrapper dir");
+    let wrapper = bin_dir.join("tmux");
+    let script = format!(
+        "#!/bin/sh\nexec {} -S {} \"$@\"\n",
+        shell_quote(&tmux_bin.to_string_lossy()),
+        shell_quote(&tmux_socket.to_string_lossy())
+    );
+    std::fs::write(&wrapper, script).expect("failed to write tmux wrapper");
+    #[cfg(unix)]
+    {
+        let mut permissions = std::fs::metadata(&wrapper)
+            .expect("failed to stat tmux wrapper")
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&wrapper, permissions)
+            .expect("failed to make tmux wrapper executable");
+    }
+    bin_dir
+}
+
+fn prepend_to_path(prefix: &Path) -> std::ffi::OsString {
+    let mut value = std::ffi::OsString::from(prefix);
+    if let Some(path) = std::env::var_os("PATH") {
+        value.push(":");
+        value.push(path);
+    }
+    value
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn tmux_binary() -> PathBuf {
+    if let Some(path) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path) {
+            let candidate = dir.join("tmux");
+            if candidate.is_file() {
+                return candidate;
+            }
+        }
+    }
+    PathBuf::from("tmux")
+}
+
+fn terminate_tmux_server(tmux_socket: &Path) {
+    let _ = Command::new(tmux_binary())
+        .arg("-S")
+        .arg(tmux_socket)
+        .arg("kill-server")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
 }
 
 pub(crate) fn assert_adjacent_output(captured: &str, command: &str, expected_output: &str) {

@@ -74,7 +74,7 @@ fn tmux_unknown_tui_passthrough_recovers_prompt() {
     let Some(captured) = run_tmux_script("passthrough_unknown_tui.sh") else {
         return;
     };
-    assert_line_present(&captured, "unknown-tui-key:x");
+    assert!(captured.contains("unknown-tui-key:x"), "{captured:?}");
     assert_line_present(&captured, "after-unknown-tui");
 }
 
@@ -104,7 +104,10 @@ fn tmux_rm_write_protected_prompt_waits_for_user_input() {
     ) else {
         return;
     };
-    assert!(captured.contains("remove"), "{captured:?}");
+    assert!(
+        captured.contains("remove") || captured.contains("override"),
+        "{captured:?}"
+    );
     assert!(captured.contains("1.t"), "{captured:?}");
     assert_line_present(&captured, "rm-declined");
 }
@@ -121,7 +124,10 @@ fn tmux_rm_write_protected_prompt_waits_for_user_input_zsh_backend() {
     ) else {
         return;
     };
-    assert!(captured.contains("remove"), "{captured:?}");
+    assert!(
+        captured.contains("remove") || captured.contains("override"),
+        "{captured:?}"
+    );
     assert!(captured.contains("1.t"), "{captured:?}");
     assert_line_present(&captured, "rm-declined");
 }

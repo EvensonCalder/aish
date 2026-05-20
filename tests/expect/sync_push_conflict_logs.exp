@@ -5,7 +5,7 @@
 set timeout 25
 source [file dirname [info script]]/_lib.exp
 
-set root "/tmp/aish-sync-conflict-[pid]-[clock clicks]"
+set root "$::env(AISH_EXPECT_ARTIFACT_DIR)/aish-sync-conflict-[pid]-[clock clicks]"
 set remote "$root/remote.git"
 set seed "$root/seed"
 set other "$root/other"
@@ -81,9 +81,9 @@ aish_enter
 aish_expect "sync.remote=$remote"
 aish_wait_prompt
 
-aish_send "#push"
+aish_send "#sync now"
 aish_enter
-aish_expect "sync aborted on conflict: git pull --no-rebase --no-edit"
+aish_expect "sync aborted on conflict: git merge --no-edit FETCH_HEAD"
 aish_expect "CONFLICT"
 aish_expect "options: #sync resolve-union"
 aish_wait_prompt

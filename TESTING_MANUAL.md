@@ -275,14 +275,16 @@ cargo test --test pty_backend -- --nocapture
 If `expect` is installed:
 
 ```sh
-cargo test --test expect_runner -- --test-threads=1 --nocapture
+cargo test --test expect_runner -- --nocapture
 ```
 
 If `tmux` is installed:
 
 ```sh
-cargo test --test tmux_capture -- --test-threads=1 --nocapture
+cargo test --test tmux_capture -- --nocapture
 ```
+
+Expect and tmux use bounded parallelism, isolated artifact roots, and per-scenario timeouts by default. For timing-sensitive debugging, set `AISH_EXPECT_TEST_JOBS=1` or `AISH_TMUX_TEST_JOBS=1`; for timeout diagnosis, override `AISH_EXPECT_TEST_TIMEOUT_SECS` or `AISH_TMUX_TEST_TIMEOUT_SECS`.
 
 If fish is installed and the tester agrees to opt-in fish validation:
 
@@ -650,7 +652,7 @@ Inside Aish:
 ```text
 #set-remote <path-to-bare-repo>
 #status
-#push
+#sync now
 ```
 
 Create disposable history/templates/notes before pushing.

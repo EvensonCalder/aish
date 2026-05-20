@@ -5,8 +5,8 @@
 set timeout 10
 source [file dirname [info script]]/_lib.exp
 
-set isolated_home "/tmp/aish-home-completion-[pid]-[clock clicks]"
-set workdir "/tmp/aish-home-completion-work-[pid]-[clock clicks]"
+set isolated_home "$::env(AISH_EXPECT_ARTIFACT_DIR)/aish-home-completion-[pid]-[clock clicks]"
+set workdir "$::env(AISH_EXPECT_ARTIFACT_DIR)/aish-home-completion-work-[pid]-[clock clicks]"
 file delete -force $isolated_home
 file delete -force $workdir
 file mkdir $isolated_home

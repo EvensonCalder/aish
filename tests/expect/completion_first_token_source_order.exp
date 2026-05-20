@@ -7,7 +7,7 @@
 set timeout 10
 source [file dirname [info script]]/_lib.exp
 
-set bindir "/tmp/aish-completion-path-[pid]-[clock clicks]"
+set bindir "$::env(AISH_EXPECT_ARTIFACT_DIR)/aish-completion-path-[pid]-[clock clicks]"
 file delete -force $bindir
 file mkdir $bindir
 set fh [open "$bindir/aishexpectuniq-exec" w]

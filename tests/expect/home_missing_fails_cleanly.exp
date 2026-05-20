@@ -5,7 +5,7 @@
 set timeout 10
 source [file dirname [info script]]/_lib.exp
 
-set isolated_cwd "/tmp/aish-missing-home-[pid]-[clock clicks]"
+set isolated_cwd "$::env(AISH_EXPECT_ARTIFACT_DIR)/aish-missing-home-[pid]-[clock clicks]"
 file delete -force $isolated_cwd
 file mkdir $isolated_cwd
 set old_home $::env(HOME)

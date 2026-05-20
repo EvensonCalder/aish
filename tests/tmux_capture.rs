@@ -1,5 +1,7 @@
 use std::path::Path;
 
+#[path = "support/process.rs"]
+mod process_support;
 #[path = "support/shell.rs"]
 mod shell_support;
 #[path = "support/tmux.rs"]

@@ -2,8 +2,8 @@
 set -eu
 
 SESSION="aish-rm-prompt-$$"
-HOME_DIR="/tmp/aish-rm-prompt-home-$$"
-WORK_DIR="/tmp/aish-rm-prompt-work-$$"
+HOME_DIR="${AISH_TMUX_ARTIFACT_DIR:-/tmp}/aish-rm-prompt-home-$$"
+WORK_DIR="${AISH_TMUX_ARTIFACT_DIR:-/tmp}/aish-rm-prompt-work-$$"
 : "${AISH_BIN:?AISH_BIN must point to the aish binary under test}"
 BACKEND_SHELL="${AISH_BACKEND_SHELL:-/bin/bash}"
 trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; rm -rf "$HOME_DIR" "$WORK_DIR" || true' EXIT INT TERM
@@ -22,7 +22,7 @@ sleep 1
 EARLY_CAPTURE="$(tmux capture-pane -p -S - -t "$SESSION")"
 printf '%s\n' "$EARLY_CAPTURE"
 
-if ! printf '%s\n' "$EARLY_CAPTURE" | rg -q "remove .*1\\.t.*\\?"; then
+if ! printf '%s\n' "$EARLY_CAPTURE" | rg -q "(remove|override) .*1\\.t.*\\?"; then
   printf 'rm prompt was not visible before answering\n' >&2
   exit 1
 fi

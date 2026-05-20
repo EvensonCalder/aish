@@ -805,8 +805,8 @@ cargo test --lib
 cargo test --test draft_execution -- --nocapture
 cargo test --test first_run -- --nocapture
 cargo test --test pty_backend -- --nocapture
-cargo test --test expect_runner -- --test-threads=1 --nocapture
-cargo test --test tmux_capture -- --test-threads=1 --nocapture
+cargo test --test expect_runner -- --nocapture
+cargo test --test tmux_capture -- --nocapture
 cargo clippy --all-targets -- -D warnings
 git diff --check
 cargo build
@@ -827,7 +827,7 @@ Current active inventory:
 - 120 expect-driven end-to-end interactive scenarios.
 - 50 tmux screen-capture integration tests.
 
-Expect and tmux tests launch real terminal sessions with isolated Aish homes. They should be serialized because concurrent real-terminal sessions can create false prompt and scheduler failures.
+Expect and tmux tests launch real terminal sessions with isolated Aish homes and per-test artifact directories. Both harnesses run with bounded parallelism by default; use `AISH_EXPECT_TEST_JOBS=1` or `AISH_TMUX_TEST_JOBS=1` when debugging a timing-sensitive failure. Long-running scenarios time out by default; override with `AISH_EXPECT_TEST_TIMEOUT_SECS` or `AISH_TMUX_TEST_TIMEOUT_SECS` only for diagnosis.
 
 ## Troubleshooting
 

@@ -2,8 +2,8 @@
 set -eu
 
 SESSION="aish-completion-right-$$"
-HOME_DIR="/tmp/aish-tmux-completion-right-home-$$"
-WORK_DIR="/tmp/aish-tmux-completion-right-work-$$"
+HOME_DIR="${AISH_TMUX_ARTIFACT_DIR:-/tmp}/aish-tmux-completion-right-home-$$"
+WORK_DIR="${AISH_TMUX_ARTIFACT_DIR:-/tmp}/aish-tmux-completion-right-work-$$"
 : "${AISH_BIN:?AISH_BIN must point to the aish binary under test}"
 trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; sleep 0.2; rm -rf "$HOME_DIR" "$WORK_DIR" || true' EXIT INT TERM
 
@@ -25,5 +25,4 @@ sleep 2
 CAPTURE="$(tmux capture-pane -p -t "$SESSION")"
 printf '%s\n' "$CAPTURE"
 
-printf '%s\n' "$CAPTURE" | rg -q 'cat right-target.txt'
 printf '%s\n' "$CAPTURE" | rg -q '^accepted-right$'

@@ -3,8 +3,8 @@ set -eu
 
 SESSION_ONE="aish-manual-template-one-$$"
 SESSION_TWO="aish-manual-template-two-$$"
-HOME_DIR="/tmp/aish-tmux-manual-template-home-$$"
-EDITOR_SCRIPT="/tmp/aish-tmux-manual-editor-$$.sh"
+HOME_DIR="${AISH_TMUX_ARTIFACT_DIR:-/tmp}/aish-tmux-manual-template-home-$$"
+EDITOR_SCRIPT="${AISH_TMUX_ARTIFACT_DIR:-/tmp}/aish-tmux-manual-editor-$$.sh"
 : "${AISH_BIN:?AISH_BIN must point to the aish binary under test}"
 trap 'tmux kill-session -t "$SESSION_ONE" >/dev/null 2>&1 || true; tmux kill-session -t "$SESSION_TWO" >/dev/null 2>&1 || true; rm -rf "$HOME_DIR" "$EDITOR_SCRIPT" || true' EXIT INT TERM
 

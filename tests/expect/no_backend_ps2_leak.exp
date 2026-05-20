@@ -11,7 +11,7 @@
 set timeout 10
 source [file dirname [info script]]/_lib.exp
 
-set logpath "/tmp/aish-expect-ps2-[pid]-[clock clicks].log"
+set logpath "$::env(AISH_EXPECT_ARTIFACT_DIR)/aish-expect-ps2-[pid]-[clock clicks].log"
 log_file -a $logpath
 
 aish_spawn

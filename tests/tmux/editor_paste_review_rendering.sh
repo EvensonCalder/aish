@@ -2,8 +2,8 @@
 set -eu
 
 SESSION="aish-editor-paste-render-$$"
-HOME_DIR="/tmp/aish-tmux-editor-paste-home-$$"
-EDITOR_SCRIPT="/tmp/aish-tmux-editor-paste-$$.sh"
+HOME_DIR="${AISH_TMUX_ARTIFACT_DIR:-/tmp}/aish-tmux-editor-paste-home-$$"
+EDITOR_SCRIPT="${AISH_TMUX_ARTIFACT_DIR:-/tmp}/aish-tmux-editor-paste-$$.sh"
 : "${AISH_BIN:?AISH_BIN must point to the aish binary under test}"
 trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; rm -rf "$HOME_DIR" "$EDITOR_SCRIPT" || true' EXIT INT TERM
 

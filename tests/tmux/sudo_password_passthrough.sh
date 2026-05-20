@@ -2,9 +2,9 @@
 set -eu
 
 SESSION="aish-sudo-password-$$"
-HOME_DIR="/tmp/aish-sudo-home-$$"
-WORK_DIR="/tmp/aish-sudo-work-$$"
-BIN_DIR="/tmp/aish-sudo-bin-$$"
+HOME_DIR="${AISH_TMUX_ARTIFACT_DIR:-/tmp}/aish-sudo-home-$$"
+WORK_DIR="${AISH_TMUX_ARTIFACT_DIR:-/tmp}/aish-sudo-work-$$"
+BIN_DIR="${AISH_TMUX_ARTIFACT_DIR:-/tmp}/aish-sudo-bin-$$"
 : "${AISH_BIN:?AISH_BIN must point to the aish binary under test}"
 trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; rm -rf "$HOME_DIR" "$WORK_DIR" "$BIN_DIR" || true' EXIT INT TERM
 

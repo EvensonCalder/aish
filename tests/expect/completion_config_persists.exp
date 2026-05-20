@@ -4,7 +4,7 @@
 set timeout 10
 source [file dirname [info script]]/_lib.exp
 
-set work "/tmp/aishcc-[pid]"
+set work "$::env(AISH_EXPECT_ARTIFACT_DIR)/aishcc-[pid]"
 file mkdir $work
 close [open "$work/aish-complete-three.txt" w]
 close [open "$work/aish-complete-two.txt" w]

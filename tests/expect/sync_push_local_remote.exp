@@ -1,11 +1,11 @@
 #!/usr/bin/env expect
-# End-to-end manual sync: #push should work against a local bare git remote
+# End-to-end manual sync: #sync now should work against a local bare git remote
 # without network access or scheduler files.
 
 set timeout 20
 source [file dirname [info script]]/_lib.exp
 
-set root "/tmp/aish-sync-expect-[pid]-[clock clicks]"
+set root "$::env(AISH_EXPECT_ARTIFACT_DIR)/aish-sync-expect-[pid]-[clock clicks]"
 set remote "$root/remote.git"
 set seed "$root/seed"
 set home "$root/aish-home"
@@ -43,11 +43,12 @@ aish_enter
 aish_expect "sync.remote=$remote"
 aish_wait_prompt
 
-aish_send "#push"
+aish_send "#sync now"
 aish_enter
 aish_expect "sync step ok: git add -- .aish-sync.toml .gitattributes .gitignore README.md"
 aish_expect "sync step ok: git commit"
-aish_expect "sync step ok: git pull --no-rebase --no-edit"
+aish_expect "sync step ok: git fetch"
+aish_expect "sync step ok: git merge --no-edit FETCH_HEAD"
 aish_expect "sync step ok: git push"
 aish_expect "sync push completed"
 aish_wait_prompt

@@ -2,8 +2,8 @@
 set -eu
 
 SESSION="aish-manual-completion-$$"
-HOME_DIR="/tmp/aish-tmux-manual-completion-home-$$"
-WORK_DIR="/tmp/aish-tmux-manual-completion-work-$$"
+HOME_DIR="${AISH_TMUX_ARTIFACT_DIR:-/tmp}/aish-tmux-manual-completion-home-$$"
+WORK_DIR="${AISH_TMUX_ARTIFACT_DIR:-/tmp}/aish-tmux-manual-completion-work-$$"
 : "${AISH_BIN:?AISH_BIN must point to the aish binary under test}"
 cleanup() {
     tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true

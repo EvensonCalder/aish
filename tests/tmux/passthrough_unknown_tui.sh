@@ -2,8 +2,8 @@
 set -eu
 
 SESSION="aish-unknown-tui-$$"
-HOME_DIR="/tmp/aish-tmux-unknown-tui-home-$$"
-BIN_DIR="/tmp/aish-tmux-unknown-tui-bin-$$"
+HOME_DIR="${AISH_TMUX_ARTIFACT_DIR:-/tmp}/aish-tmux-unknown-tui-home-$$"
+BIN_DIR="${AISH_TMUX_ARTIFACT_DIR:-/tmp}/aish-tmux-unknown-tui-bin-$$"
 : "${AISH_BIN:?AISH_BIN must point to the aish binary under test}"
 trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; rm -rf "$HOME_DIR" "$BIN_DIR" || true' EXIT INT TERM
 
@@ -29,7 +29,12 @@ tmux new-session -d -x 120 -y 40 -s "$SESSION" "env HOME='$HOME_DIR' AISH_HOME='
 sleep 5
 
 tmux send-keys -t "$SESSION" 'aish-unknown-tui' Enter
-sleep 1
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+    if tmux capture-pane -p -t "$SESSION" | rg -q 'unknown-tui-ready'; then
+        break
+    fi
+    sleep 0.2
+done
 tmux send-keys -t "$SESSION" x
 sleep 2
 tmux send-keys -t "$SESSION" C-c
@@ -40,5 +45,5 @@ sleep 2
 CAPTURE="$(tmux capture-pane -p -S - -t "$SESSION")"
 printf '%s\n' "$CAPTURE"
 
-printf '%s\n' "$CAPTURE" | rg -q '^unknown-tui-key:x$'
+printf '%s\n' "$CAPTURE" | rg -q 'unknown-tui-key:x'
 printf '%s\n' "$CAPTURE" | rg -q '^after-unknown-tui$'

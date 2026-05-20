@@ -5,7 +5,7 @@
 set timeout 10
 source [file dirname [info script]]/_lib.exp
 
-set marker "/tmp/aish-context-disabled-marker-[pid]-[clock clicks]"
+set marker "$::env(AISH_EXPECT_ARTIFACT_DIR)/aish-context-disabled-marker-[pid]-[clock clicks]"
 
 aish_spawn
 

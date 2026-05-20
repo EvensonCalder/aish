@@ -36,7 +36,7 @@ proc expect_clean_output {command expected forbidden} {
     aish_wait_prompt_without $forbidden
 }
 
-set home "/tmp/aish-expect-fish-rc-[pid]-[clock clicks]"
+set home "$::env(AISH_EXPECT_ARTIFACT_DIR)/aish-expect-fish-rc-[pid]-[clock clicks]"
 set bindir "$home/bin"
 set fish_config_dir "$home/.config/fish"
 file mkdir "$home/.aish"
