@@ -281,6 +281,7 @@ pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -
             return Ok(());
         }
     }
+    state.reload_synced_private_data()?;
     state.append_event(EventLevel::Info, "sync push completed")?;
     writeln!(out, "sync push completed")?;
     Ok(())
@@ -930,6 +931,7 @@ fn commit_interrupted_merge_and_push(
     )? {
         return Ok(());
     }
+    state.reload_synced_private_data()?;
     state.append_event(EventLevel::Info, "sync push completed")?;
     writeln!(out, "sync push completed")?;
     Ok(())

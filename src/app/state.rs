@@ -14,11 +14,12 @@ use crate::config::{
 };
 use crate::encrypted_writer::EncryptedWriteQueue;
 use crate::encryption::{
-    append_encrypted_jsonl, encrypted_path, gpg_program, rewrite_encrypted_jsonl,
+    append_encrypted_jsonl, encrypted_path, gpg_program, load_encrypted_jsonl_with_bytes,
+    rewrite_encrypted_jsonl,
 };
 use crate::history::{
     AiCommandIndex, AiItem, AiSession, DraftEntry, HistoryEntry, JsonlLineError, JsonlLoad,
-    NoteEntry, ai_command_indices, append_jsonl,
+    NoteEntry, ai_command_indices, append_jsonl, load_jsonl,
 };
 use crate::input::InputBuffer;
 use crate::keybindings::{KeyPress, KeybindingConfig};
@@ -660,6 +661,127 @@ impl AppState {
             initial_cache,
         ));
         self.last_encrypted_write_error = None;
+    }
+
+    pub(crate) fn reload_synced_private_data(&mut self) -> Result<()> {
+        self.flush_encrypted_writes()?;
+        if self.encryption_config.enabled {
+            if self.encrypted_storage_is_locked() {
+                if let Some(paths) = self.encrypted_startup_paths() {
+                    self.encrypted_startup_unlock = Some(EncryptedStartupUnlock::start(paths));
+                    self.encrypted_startup_unlock_message =
+                        Some("encrypted storage unlocking in background".into());
+                }
+                return Ok(());
+            }
+            self.reload_encrypted_synced_private_data()
+        } else {
+            self.reload_plaintext_synced_private_data()
+        }
+    }
+
+    fn reload_plaintext_synced_private_data(&mut self) -> Result<()> {
+        if self.sync_config.history
+            && let Some(path) = &self.regular_history_path
+        {
+            self.regular_history = load_jsonl::<HistoryEntry>(path)?.items;
+        }
+        if self.sync_config.drafts
+            && let Some(path) = &self.draft_history_path
+        {
+            self.draft_history = load_jsonl::<DraftEntry>(path)?.items;
+        }
+        if self.sync_config.ai
+            && let Some(path) = &self.ai_history_path
+        {
+            self.ai_sessions = load_jsonl::<AiSession>(path)?.items;
+            self.ai_command_indices = ai_command_indices(&self.ai_sessions);
+        }
+        if self.sync_config.templates
+            && let Some(path) = &self.template_store_path
+        {
+            let loaded = load_templates(path)?;
+            self.templates = loaded.items;
+            self.template_errors = loaded.errors;
+        }
+        self.finish_synced_private_data_reload();
+        Ok(())
+    }
+
+    fn reload_encrypted_synced_private_data(&mut self) -> Result<()> {
+        let program = gpg_program();
+        let mut encrypted_cache = HashMap::new();
+        if self.sync_config.history {
+            if let Some(path) = &self.regular_history_path {
+                let (loaded, bytes) =
+                    load_encrypted_jsonl_with_bytes::<HistoryEntry>(&program, path)
+                        .with_context(|| format!("failed to reload synced {}", path.display()))?;
+                self.regular_history = loaded.items;
+                encrypted_cache.insert(path.clone(), bytes);
+            }
+            if let Some(path) = &self.notes_path {
+                let (_, bytes) = load_encrypted_jsonl_with_bytes::<NoteEntry>(&program, path)
+                    .with_context(|| format!("failed to reload synced {}", path.display()))?;
+                encrypted_cache.insert(path.clone(), bytes);
+            }
+        }
+        if self.sync_config.drafts
+            && let Some(path) = &self.draft_history_path
+        {
+            let (loaded, bytes) = load_encrypted_jsonl_with_bytes::<DraftEntry>(&program, path)
+                .with_context(|| format!("failed to reload synced {}", path.display()))?;
+            self.draft_history = loaded.items;
+            encrypted_cache.insert(path.clone(), bytes);
+        }
+        if self.sync_config.ai
+            && let Some(path) = &self.ai_history_path
+        {
+            let (loaded, bytes) = load_encrypted_jsonl_with_bytes::<AiSession>(&program, path)
+                .with_context(|| format!("failed to reload synced {}", path.display()))?;
+            self.ai_sessions = loaded.items;
+            self.ai_command_indices = ai_command_indices(&self.ai_sessions);
+            encrypted_cache.insert(path.clone(), bytes);
+        }
+        if self.sync_config.templates
+            && let Some(path) = &self.template_store_path
+        {
+            let (loaded, bytes) = load_encrypted_jsonl_with_bytes::<TemplateEntry>(&program, path)
+                .with_context(|| format!("failed to reload synced {}", path.display()))?;
+            self.templates = loaded.items;
+            self.template_errors = loaded.errors;
+            encrypted_cache.insert(path.clone(), bytes);
+        }
+        self.finish_synced_private_data_reload();
+        if let Some(writer) = &self.encrypted_writer {
+            writer.replace_cache(encrypted_cache)?;
+        } else {
+            self.start_encrypted_writer_with_cache(encrypted_cache);
+        }
+        self.encrypted_storage_unlocked = true;
+        Ok(())
+    }
+
+    fn finish_synced_private_data_reload(&mut self) {
+        if self
+            .selected_history_index
+            .is_some_and(|index| index >= self.regular_history.len())
+        {
+            self.selected_history_index = None;
+        }
+        if self
+            .selected_draft_index
+            .is_some_and(|index| index >= self.draft_history.len())
+        {
+            self.selected_draft_index = None;
+        }
+        if self
+            .selected_ai_index
+            .is_some_and(|index| index >= self.ai_command_indices.len())
+        {
+            self.selected_ai_index = None;
+        }
+        self.invalidate_completion_history_snapshot();
+        self.invalidate_completion_template_snapshot();
     }
 
     pub fn encrypted_storage_is_locked(&self) -> bool {
