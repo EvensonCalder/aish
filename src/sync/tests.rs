@@ -103,7 +103,9 @@ fn managed_gitattributes_preserves_user_content_and_is_idempotent() {
     assert!(first.contains("*.md text\n"));
     assert!(first.contains(GITATTRIBUTES_BEGIN));
     assert!(first.contains("history/*.jsonl merge=union\n"));
+    assert!(first.contains("history/*.jsonl.gpg binary\n"));
     assert!(first.contains("templates/*.jsonl merge=union\n"));
+    assert!(first.contains("templates/*.jsonl.gpg binary\n"));
     assert!(first.contains(GITATTRIBUTES_END));
 }
 

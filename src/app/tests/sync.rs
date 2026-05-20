@@ -1480,6 +1480,310 @@ fn sync_plaintext_history_uses_union_merge_across_two_clones() {
 }
 
 #[test]
+fn sync_encrypted_history_auto_unions_binary_conflict_across_two_clones() {
+    let _guard = git_env_guard();
+    let temp = tempfile::tempdir().unwrap();
+    let remote = temp.path().join("remote.git");
+    let seed = temp.path().join("seed");
+    let root_a = temp.path().join("aish-a");
+    let root_b = temp.path().join("aish-b");
+    let fake_gpg = write_fake_gpg(&temp);
+    let old_gpg = std::env::var_os("AISH_GPG");
+    unsafe {
+        std::env::set_var("AISH_GPG", &fake_gpg);
+    }
+
+    run_test_git(temp.path(), ["init", "--bare", remote.to_str().unwrap()]);
+    fs::create_dir_all(seed.join("history")).unwrap();
+    run_test_git(&seed, ["init"]);
+    run_test_git(&seed, ["config", "user.name", "Aish Test"]);
+    run_test_git(&seed, ["config", "user.email", "aish@example.invalid"]);
+    run_test_git(&seed, ["config", "commit.gpgsign", "false"]);
+    crate::sync::write_sync_repository_metadata(
+        seed.join(crate::sync::sync_repository_metadata_path()),
+        &crate::sync::sync_repository_metadata_for(
+            &SyncConfig::default(),
+            true,
+            LOCAL_TEST_FINGERPRINT,
+        ),
+    )
+    .unwrap();
+    crate::sync::maintain_managed_gitattributes(seed.join(".gitattributes")).unwrap();
+    atomic_gpg_encrypt_bytes(
+        fake_gpg.to_string_lossy().into_owned(),
+        LOCAL_TEST_FINGERPRINT,
+        seed.join("history/regular.jsonl.gpg"),
+        b"{\"t\":1,\"command\":\"base\",\"exit_code\":0,\"source\":\"user\"}\n",
+    )
+    .unwrap();
+    run_test_git(
+        &seed,
+        [
+            "add",
+            "--",
+            ".aish-sync.toml",
+            ".gitattributes",
+            "history/regular.jsonl.gpg",
+        ],
+    );
+    run_test_git(&seed, ["commit", "-m", "encrypted seed"]);
+    run_test_git(&seed, ["remote", "add", "origin", remote.to_str().unwrap()]);
+    run_test_git(&seed, ["push", "-u", "origin", "HEAD"]);
+    run_test_git(
+        temp.path(),
+        ["clone", remote.to_str().unwrap(), root_a.to_str().unwrap()],
+    );
+    run_test_git(
+        temp.path(),
+        ["clone", remote.to_str().unwrap(), root_b.to_str().unwrap()],
+    );
+    for root in [&root_a, &root_b] {
+        run_test_git(root, ["config", "user.name", "Aish Test"]);
+        run_test_git(root, ["config", "user.email", "aish@example.invalid"]);
+        run_test_git(root, ["config", "commit.gpgsign", "false"]);
+    }
+
+    let mut state_a = sync_state_for_root(&root_a, &remote);
+    configure_private_data_paths(&mut state_a, &root_a);
+    state_a.encryption_config = EncryptionConfig {
+        enabled: true,
+        key_fingerprint: LOCAL_TEST_FINGERPRINT.to_string(),
+        ..EncryptionConfig::default()
+    };
+    atomic_gpg_encrypt_bytes(
+        fake_gpg.to_string_lossy().into_owned(),
+        LOCAL_TEST_FINGERPRINT,
+        root_a.join("history/regular.jsonl.gpg"),
+        b"{\"t\":1,\"command\":\"base\",\"exit_code\":0,\"source\":\"user\"}\n{\"t\":2,\"command\":\"from-a\",\"exit_code\":0,\"source\":\"user\"}\n",
+    )
+    .unwrap();
+    let mut out_a = Vec::new();
+    run_manual_sync_push(&mut state_a, &mut out_a).unwrap();
+    assert!(
+        String::from_utf8(out_a)
+            .unwrap()
+            .contains("sync push completed")
+    );
+
+    let mut state_b = sync_state_for_root(&root_b, &remote);
+    configure_private_data_paths(&mut state_b, &root_b);
+    state_b.encryption_config = EncryptionConfig {
+        enabled: true,
+        key_fingerprint: LOCAL_TEST_FINGERPRINT.to_string(),
+        ..EncryptionConfig::default()
+    };
+    atomic_gpg_encrypt_bytes(
+        fake_gpg.to_string_lossy().into_owned(),
+        LOCAL_TEST_FINGERPRINT,
+        root_b.join("history/regular.jsonl.gpg"),
+        b"{\"t\":1,\"command\":\"base\",\"exit_code\":0,\"source\":\"user\"}\n{\"t\":3,\"command\":\"from-b\",\"exit_code\":0,\"source\":\"user\"}\n",
+    )
+    .unwrap();
+    let mut out_b = Vec::new();
+    run_manual_sync_push(&mut state_b, &mut out_b).unwrap();
+
+    let output_b = String::from_utf8(out_b).unwrap();
+    assert!(!output_b.contains("sync aborted on conflict"), "{output_b}");
+    assert!(
+        output_b.contains(
+            "sync encrypted conflict union-resolved: history/regular.jsonl.gpg records ours=2 theirs=2 merged=3"
+        ),
+        "{output_b}"
+    );
+    assert!(output_b.contains("sync push completed"), "{output_b}");
+    let decrypted = String::from_utf8(
+        gpg_decrypt_file(
+            fake_gpg.to_string_lossy(),
+            root_b.join("history/regular.jsonl.gpg"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(decrypted.contains("base"), "{decrypted}");
+    assert!(decrypted.contains("from-a"), "{decrypted}");
+    assert!(decrypted.contains("from-b"), "{decrypted}");
+    let pushed_encrypted_history = run_test_git_stdout(
+        temp.path(),
+        [
+            "--git-dir",
+            remote.to_str().unwrap(),
+            "show",
+            "HEAD:history/regular.jsonl.gpg",
+        ],
+    );
+    assert!(
+        pushed_encrypted_history.contains("from-a"),
+        "{pushed_encrypted_history}"
+    );
+    assert!(
+        pushed_encrypted_history.contains("from-b"),
+        "{pushed_encrypted_history}"
+    );
+
+    unsafe {
+        match old_gpg {
+            Some(value) => std::env::set_var("AISH_GPG", value),
+            None => std::env::remove_var("AISH_GPG"),
+        }
+    }
+}
+
+#[test]
+fn sync_continue_auto_unions_existing_encrypted_conflict() {
+    let _guard = git_env_guard();
+    let temp = tempfile::tempdir().unwrap();
+    let remote = temp.path().join("remote.git");
+    let seed = temp.path().join("seed");
+    let root_a = temp.path().join("aish-a");
+    let root_b = temp.path().join("aish-b");
+    let fake_gpg = write_fake_gpg(&temp);
+    let old_gpg = std::env::var_os("AISH_GPG");
+    unsafe {
+        std::env::set_var("AISH_GPG", &fake_gpg);
+    }
+
+    run_test_git(temp.path(), ["init", "--bare", remote.to_str().unwrap()]);
+    fs::create_dir_all(seed.join("history")).unwrap();
+    run_test_git(&seed, ["init"]);
+    run_test_git(&seed, ["config", "user.name", "Aish Test"]);
+    run_test_git(&seed, ["config", "user.email", "aish@example.invalid"]);
+    run_test_git(&seed, ["config", "commit.gpgsign", "false"]);
+    crate::sync::write_sync_repository_metadata(
+        seed.join(crate::sync::sync_repository_metadata_path()),
+        &crate::sync::sync_repository_metadata_for(
+            &SyncConfig::default(),
+            true,
+            LOCAL_TEST_FINGERPRINT,
+        ),
+    )
+    .unwrap();
+    crate::sync::maintain_managed_gitattributes(seed.join(".gitattributes")).unwrap();
+    atomic_gpg_encrypt_bytes(
+        fake_gpg.to_string_lossy().into_owned(),
+        LOCAL_TEST_FINGERPRINT,
+        seed.join("history/regular.jsonl.gpg"),
+        b"{\"t\":1,\"command\":\"base\",\"exit_code\":0,\"source\":\"user\"}\n",
+    )
+    .unwrap();
+    run_test_git(
+        &seed,
+        [
+            "add",
+            "--",
+            ".aish-sync.toml",
+            ".gitattributes",
+            "history/regular.jsonl.gpg",
+        ],
+    );
+    run_test_git(&seed, ["commit", "-m", "encrypted seed"]);
+    run_test_git(&seed, ["remote", "add", "origin", remote.to_str().unwrap()]);
+    run_test_git(&seed, ["push", "-u", "origin", "HEAD"]);
+    run_test_git(
+        temp.path(),
+        ["clone", remote.to_str().unwrap(), root_a.to_str().unwrap()],
+    );
+    run_test_git(
+        temp.path(),
+        ["clone", remote.to_str().unwrap(), root_b.to_str().unwrap()],
+    );
+    for root in [&root_a, &root_b] {
+        run_test_git(root, ["config", "user.name", "Aish Test"]);
+        run_test_git(root, ["config", "user.email", "aish@example.invalid"]);
+        run_test_git(root, ["config", "commit.gpgsign", "false"]);
+    }
+
+    atomic_gpg_encrypt_bytes(
+        fake_gpg.to_string_lossy().into_owned(),
+        LOCAL_TEST_FINGERPRINT,
+        root_a.join("history/regular.jsonl.gpg"),
+        b"{\"t\":1,\"command\":\"base\",\"exit_code\":0,\"source\":\"user\"}\n{\"t\":2,\"command\":\"from-a\",\"exit_code\":0,\"source\":\"user\"}\n",
+    )
+    .unwrap();
+    run_test_git(&root_a, ["add", "--", "history/regular.jsonl.gpg"]);
+    run_test_git(&root_a, ["commit", "-m", "from a"]);
+    run_test_git(&root_a, ["push"]);
+
+    atomic_gpg_encrypt_bytes(
+        fake_gpg.to_string_lossy().into_owned(),
+        LOCAL_TEST_FINGERPRINT,
+        root_b.join("history/regular.jsonl.gpg"),
+        b"{\"t\":1,\"command\":\"base\",\"exit_code\":0,\"source\":\"user\"}\n{\"t\":3,\"command\":\"from-b\",\"exit_code\":0,\"source\":\"user\"}\n",
+    )
+    .unwrap();
+    run_test_git(&root_b, ["add", "--", "history/regular.jsonl.gpg"]);
+    run_test_git(&root_b, ["commit", "-m", "from b"]);
+    run_test_git(&root_b, ["fetch", "origin"]);
+    let merge = Command::new("git")
+        .args(["merge", "--no-edit", "FETCH_HEAD"])
+        .current_dir(&root_b)
+        .env("GIT_CONFIG_COUNT", "1")
+        .env("GIT_CONFIG_KEY_0", "commit.gpgsign")
+        .env("GIT_CONFIG_VALUE_0", "false")
+        .output()
+        .unwrap();
+    assert!(
+        !merge.status.success(),
+        "merge unexpectedly succeeded: stdout={} stderr={}",
+        String::from_utf8_lossy(&merge.stdout),
+        String::from_utf8_lossy(&merge.stderr)
+    );
+
+    let mut state_b = sync_state_for_root(&root_b, &remote);
+    configure_private_data_paths(&mut state_b, &root_b);
+    state_b.encryption_config = EncryptionConfig {
+        enabled: true,
+        key_fingerprint: LOCAL_TEST_FINGERPRINT.to_string(),
+        ..EncryptionConfig::default()
+    };
+    let mut output = Vec::new();
+    set_sync_schedule(&mut state_b, &mut output, "continue").unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(
+        output.contains(
+            "sync encrypted conflict union-resolved: history/regular.jsonl.gpg records ours=2 theirs=2 merged=3"
+        ),
+        "{output}"
+    );
+    assert!(output.contains("sync push completed"), "{output}");
+    let decrypted = String::from_utf8(
+        gpg_decrypt_file(
+            fake_gpg.to_string_lossy(),
+            root_b.join("history/regular.jsonl.gpg"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(decrypted.contains("base"), "{decrypted}");
+    assert!(decrypted.contains("from-a"), "{decrypted}");
+    assert!(decrypted.contains("from-b"), "{decrypted}");
+    let pushed_encrypted_history = run_test_git_stdout(
+        temp.path(),
+        [
+            "--git-dir",
+            remote.to_str().unwrap(),
+            "show",
+            "HEAD:history/regular.jsonl.gpg",
+        ],
+    );
+    assert!(
+        pushed_encrypted_history.contains("from-a"),
+        "{pushed_encrypted_history}"
+    );
+    assert!(
+        pushed_encrypted_history.contains("from-b"),
+        "{pushed_encrypted_history}"
+    );
+
+    unsafe {
+        match old_gpg {
+            Some(value) => std::env::set_var("AISH_GPG", value),
+            None => std::env::remove_var("AISH_GPG"),
+        }
+    }
+}
+
+#[test]
 fn sync_reports_local_remote_managed_record_count_differences() {
     let _guard = git_env_guard();
     let temp = tempfile::tempdir().unwrap();

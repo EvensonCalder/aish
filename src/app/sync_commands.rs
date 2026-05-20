@@ -855,16 +855,21 @@ fn resolve_interrupted_sync_with_union(state: &mut AppState, out: &mut impl Writ
         writeln!(out, "no unresolved sync conflicts found")?;
         return Ok(());
     }
-    let unsafe_paths: Vec<&String> = paths
-        .iter()
-        .filter(|path| !auto_union_allowed_path(path))
-        .collect();
+    let mut plaintext_paths = Vec::new();
+    let mut encrypted_paths = Vec::new();
+    let mut unsafe_paths = Vec::new();
+    for path in &paths {
+        if auto_union_allowed_path(path) {
+            plaintext_paths.push(path.clone());
+        } else if encrypted_auto_union_allowed_path(state, path) {
+            encrypted_paths.push(path.clone());
+        } else {
+            unsafe_paths.push(path.clone());
+        }
+    }
     if !unsafe_paths.is_empty() {
-        writeln!(
-            out,
-            "sync resolve-union refused non-plaintext or unmanaged conflict(s)"
-        )?;
-        for path in unsafe_paths {
+        writeln!(out, "sync resolve-union refused unmanaged conflict(s)")?;
+        for path in &unsafe_paths {
             writeln!(out, "manual: {path}")?;
         }
         writeln!(
@@ -874,10 +879,14 @@ fn resolve_interrupted_sync_with_union(state: &mut AppState, out: &mut impl Writ
         return Ok(());
     }
 
-    for path in &paths {
+    for path in &plaintext_paths {
         resolve_conflict_file_by_union(&root.join(path))
             .with_context(|| format!("failed to union-resolve {}", path))?;
         writeln!(out, "sync conflict union-resolved: {path}")?;
+    }
+    for path in &encrypted_paths {
+        resolve_encrypted_conflict_file_by_union(state, out, &root, path)
+            .with_context(|| format!("failed to union-resolve encrypted {}", path))?;
     }
     let add_command = GitCommandPlan {
         program: "git".to_string(),
@@ -901,6 +910,7 @@ fn commit_interrupted_merge_and_push(
         )?;
         return Ok(());
     };
+    let _ = try_resolve_encrypted_sync_data_conflicts(state, out, root)?;
     let Some(mut sync_data_snapshot) = verify_sync_data_for_git_write(state, out, root)? else {
         return Ok(());
     };
@@ -913,7 +923,7 @@ fn commit_interrupted_merge_and_push(
         if !unresolved.is_empty() {
             writeln!(
                 out,
-                "resolve conflicts manually and run git add, then #sync continue; or run #sync resolve-union for plaintext Aish files; or run #sync abort"
+                "resolve conflicts manually and run git add, then #sync continue; or run #sync resolve-union for Aish-managed conflicts; or run #sync abort"
             )?;
         }
         return Ok(());
@@ -979,6 +989,13 @@ fn auto_union_allowed_path(path: &str) -> bool {
         && !path.ends_with(".gpg")
 }
 
+fn encrypted_auto_union_allowed_path(state: &AppState, path: &str) -> bool {
+    state.encryption_config.enabled
+        && managed_sync_data_files(&state.sync_config)
+            .iter()
+            .any(|file| path == format!("{}.gpg", file.logical_path))
+}
+
 fn resolve_conflict_file_by_union(path: &Path) -> Result<()> {
     let raw = fs::read_to_string(path)
         .with_context(|| format!("failed to read conflicted file {}", path.display()))?;
@@ -1041,6 +1058,102 @@ fn union_conflict_markers(raw: &str) -> Option<String> {
     }
 
     changed.then_some(output)
+}
+
+fn try_resolve_encrypted_sync_data_conflicts(
+    state: &AppState,
+    out: &mut impl Write,
+    root: &Path,
+) -> Result<bool> {
+    if !state.encryption_config.enabled {
+        return Ok(false);
+    }
+    let encrypted_paths: Vec<String> = unmerged_paths(root)?
+        .into_iter()
+        .filter(|path| encrypted_auto_union_allowed_path(state, path))
+        .collect();
+    if encrypted_paths.is_empty() {
+        return Ok(false);
+    }
+
+    for path in &encrypted_paths {
+        resolve_encrypted_conflict_file_by_union(state, out, root, path)
+            .with_context(|| format!("failed to union-resolve encrypted {}", path))?;
+    }
+    let add_command = GitCommandPlan {
+        program: "git".to_string(),
+        args: git_add_args(&encrypted_paths),
+    };
+    if !run_sync_git_step(state, out, root, &add_command)? {
+        return Ok(false);
+    }
+    Ok(unmerged_paths(root)?.is_empty())
+}
+
+fn resolve_encrypted_conflict_file_by_union(
+    state: &AppState,
+    out: &mut impl Write,
+    root: &Path,
+    path: &str,
+) -> Result<()> {
+    let program = gpg_program();
+    let ours = git_stage_blob_bytes(root, 2, path)?;
+    let theirs = git_stage_blob_bytes(root, 3, path)?;
+    if ours.is_none() && theirs.is_none() {
+        bail!("git conflict has neither ours nor theirs stage for {path}");
+    }
+    let ours_plaintext = decrypt_conflict_stage_blob(&program, root, path, ours.as_deref())?;
+    let theirs_plaintext = decrypt_conflict_stage_blob(&program, root, path, theirs.as_deref())?;
+    let merged = union_jsonl_bytes(path, &ours_plaintext, &theirs_plaintext)?;
+    let ours_count = count_jsonl_records(path, &ours_plaintext)?;
+    let theirs_count = count_jsonl_records(path, &theirs_plaintext)?;
+    let merged_count = count_jsonl_records(path, &merged)?;
+    atomic_gpg_encrypt_bytes(
+        gpg_program(),
+        configured_encryption_key(&state.encryption_config),
+        root.join(path),
+        &merged,
+    )
+    .with_context(|| format!("failed to write encrypted union-resolved sync file {path}"))?;
+    writeln!(
+        out,
+        "sync encrypted conflict union-resolved: {path} records ours={ours_count} theirs={theirs_count} merged={merged_count}"
+    )?;
+    Ok(())
+}
+
+fn decrypt_conflict_stage_blob(
+    gpg_program: &str,
+    root: &Path,
+    path: &str,
+    ciphertext: Option<&[u8]>,
+) -> Result<Vec<u8>> {
+    let Some(ciphertext) = ciphertext else {
+        return Ok(Vec::new());
+    };
+    if ciphertext.is_empty() {
+        return Ok(Vec::new());
+    }
+    decrypt_remote_managed_sync_blob(gpg_program, root, path, ciphertext)
+}
+
+fn git_stage_blob_bytes(root: &Path, stage: u8, path: &str) -> Result<Option<Vec<u8>>> {
+    let pathspec = format!(":{stage}:{path}");
+    let command = GitCommandPlan {
+        program: "git".to_string(),
+        args: vec!["show".to_string(), pathspec],
+    };
+    let result = run_git_command_bytes(root, &command)?;
+    if result.success {
+        return Ok(Some(result.stdout));
+    }
+    if result.exit_code == Some(128) {
+        return Ok(None);
+    }
+    bail!(
+        "failed to read git stage {stage}:{path}: {}",
+        result.combined_output()
+    )
 }
 
 fn git_add_args(paths: &[String]) -> Vec<String> {
@@ -1642,10 +1755,13 @@ fn run_sync_merge_step(
     if matches!(
         classify_git_sync_step(false, &result.stdout, &result.stderr),
         SyncStepOutcome::AbortConflict { .. }
-    ) && try_resolve_sync_metadata_pull_conflict(state, out, root)?
-    {
-        writeln!(out, "sync step ok: {}", describe_git_command(&command))?;
-        return Ok(true);
+    ) {
+        let metadata_resolved = try_resolve_sync_metadata_pull_conflict(state, out, root)?;
+        let encrypted_resolved = try_resolve_encrypted_sync_data_conflicts(state, out, root)?;
+        if (metadata_resolved || encrypted_resolved) && unmerged_paths(root)?.is_empty() {
+            writeln!(out, "sync step ok: {}", describe_git_command(&command))?;
+            return Ok(true);
+        }
     }
     handle_failed_sync_step(state, out, root, &command, result)?;
     Ok(false)
@@ -2019,7 +2135,7 @@ fn handle_failed_sync_step(
         }
         writeln!(
             out,
-            "options: #sync resolve-union for plaintext Aish files, #sync continue after manual resolution, or #sync abort"
+            "options: #sync resolve-union for Aish-managed conflicts, #sync continue after manual resolution, or #sync abort"
         )?;
     }
     Ok(())

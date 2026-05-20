@@ -16,7 +16,9 @@ const GITATTRIBUTES_END: &str = "# END AISH MANAGED";
 const MANAGED_GITIGNORE_LINES: &[&str] = &["cache/", "logs/", "secrets/", "config.toml", "*.tmp"];
 const MANAGED_GITATTRIBUTES_LINES: &[&str] = &[
     "history/*.jsonl merge=union",
+    "history/*.jsonl.gpg binary",
     "templates/*.jsonl merge=union",
+    "templates/*.jsonl.gpg binary",
 ];
 const SYNC_METADATA_PATH: &str = ".aish-sync.toml";
 const SYNC_README_PATH: &str = "README.md";
@@ -44,7 +46,9 @@ must be able to decrypt the existing data before rotating to a new key.
 
 Plaintext Aish JSONL files use Git's union merge driver so independent appends
 from multiple machines usually keep both sides. Encrypted `*.jsonl.gpg` files
-must not be text-union merged because that can corrupt ciphertext.
+must not be text-union merged because that can corrupt ciphertext; Aish resolves
+managed encrypted JSONL conflicts by decrypting both sides, unioning plaintext
+records, and re-encrypting the merged file.
 "#;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

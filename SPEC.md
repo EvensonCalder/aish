@@ -18,7 +18,7 @@ Aish does **not** try to replace Bash, Zsh, or Fish. The backend shell remains r
 7. **Multi-line pasted content does not enter draft by default.** It opens an editor-review flow or executes with warning, depending on config.
 8. **Editor and paste-review drafts use the same submit parser as direct prompt input.** A leading `#` at the start of submitted draft text remains reserved for Aish private commands, notes, and AI prompts; text parsed as ordinary shell input is sent to the backend shell unchanged.
 9. **Encryption prioritizes confidentiality over speed.** When encrypted, Aish does not persist plaintext search indexes.
-10. **Git sync is conservative.** Sync never auto-resolves conflicts and never rewrites history or runs `git rm --cached` automatically. Encrypted-storage Git history rewrite is a separate explicit command with destructive confirmation.
+10. **Git sync is conservative.** Sync only auto-resolves Aish-managed append-only JSONL conflicts where both sides can be preserved; it never auto-resolves unmanaged conflicts, never rewrites history, and never runs `git rm --cached` automatically. Encrypted-storage Git history rewrite is a separate explicit command with destructive confirmation.
 11. **End-to-end behavior must be tested as users experience it.** Every user-visible feature needs expect-driven coverage in addition to Rust unit/integration tests, including rendering, redraw boundaries, PTY output framing, shell continuation, keybindings, mode transitions, error paths, and regression cases.
 
 ---
@@ -1293,8 +1293,9 @@ Policy:
 - Local bare Git repositories are valid sync remotes.
 - Plaintext Aish JSONL files use Git's union merge driver so independent appends keep both sides.
 - After a successful remote merge, Aish reports managed JSONL record-count changes. If an enabled managed record count decreases during the merge, sync must restore the JSONL union before pushing so neither side's records are deleted. If union restoration fails, sync must stop before pushing.
-- Aish can auto-resolve remaining plaintext Aish file conflicts with `#sync resolve-union`.
-- Aish does not auto-resolve encrypted `*.jsonl.gpg` conflicts because text union can corrupt ciphertext.
+- Aish can auto-resolve remaining Aish-managed text and JSONL conflicts with `#sync resolve-union`.
+- Aish must mark encrypted `*.jsonl.gpg` files as binary so Git does not text-union merge ciphertext.
+- Aish can auto-resolve enabled encrypted Aish JSONL conflicts by reading Git's ours/theirs stages, decrypting both complete payloads, unioning plaintext JSONL records, re-encrypting the merged file, and staging it. If either side cannot decrypt, sync must stop before pushing.
 - Aish does not run `git rm --cached` automatically.
 - Sync does not rewrite git history. Encrypted-storage history rewrite is available only through `#encrypt rewrite-history run <key> --confirm-rewrite-history`.
 - If a category is disabled for sync, Aish updates future `.gitignore` behavior and warns if files may already be tracked.
@@ -1305,8 +1306,8 @@ Command boundaries:
 - `#set-remote <git-url>` persists the private sync remote only and must not run Git.
 - `#sync` reports sync/encryption status only and must not run Git.
 - `#sync now` is the only manual sync run command. It must verify enabled managed data, stage enabled managed paths, commit only when staged content changed, merge remote updates, verify/count merged data, and push.
-- `#sync resolve-union` is valid only during an interrupted merge with plaintext Aish-managed conflicts. It must refuse encrypted or unmanaged conflicts.
-- `#sync continue` is valid only during an interrupted merge after the user has manually resolved and staged conflicts.
+- `#sync resolve-union` is valid only during an interrupted merge with Aish-managed conflicts. It must union managed plaintext files directly, union encrypted `*.jsonl.gpg` by decrypting ours/theirs and re-encrypting the merged plaintext, and refuse unmanaged conflicts.
+- `#sync continue` is valid only during an interrupted merge. It may auto-resolve remaining enabled encrypted Aish JSONL conflicts before committing; unmanaged conflicts still require manual resolution and staging.
 - `#sync abort` is valid only during an interrupted merge or rebase.
 - `#sync <schedule>`, `#sync off`, trigger toggles, and content-category toggles only persist sync settings.
 
@@ -1376,8 +1377,8 @@ If conflict occurs:
 - Leave the merge/rebase state intact.
 - Log error.
 - Show user a short warning with options.
-- `#sync resolve-union` keeps both sides for plaintext Aish files, stages them, commits, and pushes.
-- `#sync continue` continues after manual edits and `git add`.
+- `#sync resolve-union` keeps both sides for Aish-managed conflicts, decrypting and re-encrypting managed `*.jsonl.gpg` files when needed, stages them, commits, and pushes.
+- `#sync continue` continues after manual edits and `git add`; it also tries to auto-resolve remaining enabled encrypted Aish JSONL conflicts before committing.
 - `#sync abort` cancels the interrupted merge or rebase.
 
 ---
@@ -1589,7 +1590,7 @@ Required safety rules:
 - Multi-line paste does not enter draft by default.
 - Multi-line paste execution requires warning by default.
 - Encrypted mode does not persist plaintext search index.
-- Git sync does not auto-resolve conflicts.
+- Git sync only auto-resolves Aish-managed append-only JSONL conflicts where both sides can be preserved.
 - Logs must not include API keys or decrypted secrets.
 
 Dangerous command patterns for extra confirmation:
@@ -1643,7 +1644,7 @@ Aish v1 does not aim to:
 - Replace user shell configuration.
 - Automatically rewrite user commands.
 - Automatically execute multiple AI-generated commands.
-- Auto-resolve git sync conflicts.
+- Auto-resolve unmanaged git sync conflicts.
 - Guarantee secure deletion on all filesystems.
 - Persist plaintext indexes when encryption is enabled.
 

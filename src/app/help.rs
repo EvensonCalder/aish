@@ -320,11 +320,11 @@ const SYNC_HELP: &[HelpEntry] = &[
     },
     HelpEntry {
         usage: "#sync resolve-union",
-        description: "resolve plaintext Aish file conflicts by keeping both sides, then commit and push",
+        description: "resolve Aish-managed conflicts by keeping both sides, then commit and push",
     },
     HelpEntry {
         usage: "#sync continue",
-        description: "continue after manually resolving and staging a sync merge conflict",
+        description: "continue an interrupted sync after auto or manual conflict resolution",
     },
     HelpEntry {
         usage: "#sync abort",

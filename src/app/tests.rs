@@ -1,7 +1,9 @@
 use super::encryption_commands::{StoredApiKey, write_history_rewrite_script};
 use super::startup_unlock::{EncryptedStartupPaths, UnlockMode, load_encrypted_startup_data};
 use super::state::OUTPUT_RING_CAPACITY;
-use super::sync_commands::{run_manual_sync_push, run_startup_sync_check, write_last_sync_attempt};
+use super::sync_commands::{
+    run_manual_sync_push, run_startup_sync_check, set_sync_schedule, write_last_sync_attempt,
+};
 use super::*;
 use crate::completion::{CompletionCandidate, CompletionSource};
 use crate::config::{

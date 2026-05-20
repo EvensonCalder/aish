@@ -520,13 +520,15 @@ Implemented:
 - If `.aish-sync.toml` disagrees with local content category settings, warn and use the repository settings as the private sync authority. Existing local files excluded by those settings are left alone and only warned about.
 - Stop before pushing if remote sync metadata disagrees with the local encryption config, or if local encrypted sync is configured with an email/selector instead of a full fingerprint.
 - Use Git's union merge driver for plaintext Aish JSONL files so independent appends usually merge by keeping both sides.
+- Mark encrypted `*.jsonl.gpg` files as binary in `.gitattributes` so Git never text-union merges ciphertext.
 - Before staging local data, compare enabled managed JSONL record counts against the fetched remote cache, for example `history/regular records local=3 remote=1 (local +2)`, without running another fetch. After merging remote updates, report managed JSONL record-count changes such as `history/regular records 1 -> 2 (+1)`. If an enabled managed record count decreases during the merge, automatically restore the JSONL union so neither side's records are deleted; if that restoration fails, sync stops before pushing.
+- Auto-resolve enabled encrypted Aish JSONL conflicts by reading Git's ours/theirs stages, decrypting both complete payloads, unioning plaintext JSONL records, re-encrypting the merged file, and staging it. This preserves independent appends without ever text-merging ciphertext.
 - Offer `#sync resolve-union`, `#sync continue`, and `#sync abort` when a conflict still needs a user choice.
 - Log sync failures without leaking secret-like values.
 
 Aish does not:
 
-- Auto-resolve encrypted `*.jsonl.gpg` conflicts, because text union can corrupt ciphertext.
+- Auto-resolve unmanaged conflicts or encryption-key conflicts.
 - Rewrite history as part of sync. Encrypted storage history rewrite is a separate `#encrypt rewrite-history ... --confirm-rewrite-history` flow.
 - Run `git rm --cached` automatically.
 - Create scheduler files.
@@ -551,8 +553,8 @@ Sync command boundaries:
 - `#set-remote <git-url>` only saves the private sync remote. It does not initialize Git, fetch, merge, commit, or push.
 - `#sync` prints current sync/encryption status and does not run Git.
 - `#sync now` is the only manual sync run command. It verifies enabled managed data, stages enabled managed files, commits when staged content changed, merges remote updates, verifies/counts the merged data, then pushes.
-- `#sync resolve-union` is only for an interrupted merge with plaintext Aish-managed JSONL conflicts. It keeps both sides, stages the resolved files, commits, and pushes.
-- `#sync continue` is only for a merge that the user resolved and staged manually. It commits and pushes the interrupted sync.
+- `#sync resolve-union` is for an interrupted merge with Aish-managed conflicts. It keeps both sides for managed plaintext files; for encrypted `*.jsonl.gpg`, it decrypts ours/theirs, unions plaintext records, re-encrypts, stages the resolved files, commits, and pushes. It refuses unmanaged conflicts.
+- `#sync continue` continues an interrupted merge. It first tries the same encrypted Aish JSONL union resolver for any remaining managed encrypted conflicts, then commits and pushes once all conflicts are resolved and staged.
 - `#sync abort` is only for an interrupted merge or rebase. It cancels that Git operation.
 - `#sync <schedule>`, `#sync off`, `#sync startup|exit on|off`, and `#sync ai|history|templates|drafts on|off` only update sync settings.
 
