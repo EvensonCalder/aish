@@ -1,5 +1,6 @@
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -18,6 +19,7 @@ const MANAGED_GITATTRIBUTES_LINES: &[&str] = &[
 ];
 const SYNC_METADATA_PATH: &str = ".aish-sync.toml";
 const SYNC_README_PATH: &str = "README.md";
+const INVALID_SYNC_LOCK_STALE_AFTER: Duration = Duration::from_secs(60);
 const SYNC_README_BEGIN: &str = "<!-- BEGIN AISH MANAGED SYNC README -->";
 const SYNC_README_END: &str = "<!-- END AISH MANAGED SYNC README -->";
 const SYNC_README_BODY: &str = r#"# Aish Sync Repository
@@ -155,31 +157,44 @@ impl SyncLock {
             })?;
         }
 
-        let mut options = OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
+        match create_sync_lock_file(path)? {
+            Some(lock) => return Ok(Some(lock)),
+            None => {}
         }
-        match options.open(path) {
-            Ok(file) => {
-                set_private_file_handle_permissions(&file, path)?;
-                write_lock_metadata(file)?;
-                Ok(Some(Self {
-                    path: path.to_path_buf(),
-                    held: true,
-                }))
-            }
-            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => Ok(None),
-            Err(err) => {
-                Err(err).with_context(|| format!("failed to create sync lock {}", path.display()))
-            }
+
+        if stale_sync_lock_was_removed(path)? {
+            return create_sync_lock_file(path);
         }
+
+        Ok(None)
     }
 
     pub fn path(&self) -> &Path {
         &self.path
+    }
+}
+
+fn create_sync_lock_file(path: &Path) -> Result<Option<SyncLock>> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    match options.open(path) {
+        Ok(file) => {
+            set_private_file_handle_permissions(&file, path)?;
+            write_lock_metadata(file)?;
+            Ok(Some(SyncLock {
+                path: path.to_path_buf(),
+                held: true,
+            }))
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => Ok(None),
+        Err(err) => {
+            Err(err).with_context(|| format!("failed to create sync lock {}", path.display()))
+        }
     }
 }
 
@@ -196,6 +211,69 @@ fn write_lock_metadata(mut file: File) -> Result<()> {
     use std::io::Write;
 
     writeln!(file, "pid={}", std::process::id()).context("failed to write sync lock metadata")
+}
+
+fn stale_sync_lock_was_removed(path: &Path) -> Result<bool> {
+    let raw = match fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(true),
+        Err(err) => {
+            Err(err).with_context(|| format!("failed to read sync lock {}", path.display()))?
+        }
+    };
+
+    if let Some(pid) = parse_sync_lock_pid(&raw) {
+        if process_is_running(pid) {
+            return Ok(false);
+        }
+        remove_stale_sync_lock(path)?;
+        return Ok(true);
+    }
+
+    if invalid_sync_lock_is_stale(path)? {
+        remove_stale_sync_lock(path)?;
+        return Ok(true);
+    }
+
+    Ok(false)
+}
+
+fn parse_sync_lock_pid(raw: &str) -> Option<u32> {
+    raw.lines()
+        .find_map(|line| line.trim().strip_prefix("pid=")?.parse::<u32>().ok())
+        .filter(|pid| *pid > 0)
+}
+
+fn invalid_sync_lock_is_stale(path: &Path) -> Result<bool> {
+    let modified = fs::metadata(path)
+        .with_context(|| format!("failed to inspect sync lock {}", path.display()))?
+        .modified()
+        .with_context(|| format!("failed to inspect sync lock mtime {}", path.display()))?;
+    let Ok(age) = SystemTime::now().duration_since(modified) else {
+        return Ok(false);
+    };
+    Ok(age >= INVALID_SYNC_LOCK_STALE_AFTER)
+}
+
+fn remove_stale_sync_lock(path: &Path) -> Result<()> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => {
+            Err(err).with_context(|| format!("failed to remove stale sync lock {}", path.display()))
+        }
+    }
+}
+
+#[cfg(unix)]
+fn process_is_running(pid: u32) -> bool {
+    let result = unsafe { libc::kill(pid as libc::pid_t, 0) };
+    result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+#[cfg(not(unix))]
+fn process_is_running(_pid: u32) -> bool {
+    true
 }
 
 pub fn maintain_managed_gitignore(path: impl AsRef<Path>) -> Result<()> {

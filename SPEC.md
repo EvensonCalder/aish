@@ -1271,6 +1271,8 @@ Policy:
 - Aish can initialize and manage a git repository in `~/.aish`.
 - Sync is conservative.
 - Aish uses a lock file to prevent concurrent sync.
+- Aish must clear sync lock files left by dead Aish processes before refusing a new sync.
+- Each Git sync step must have a finite timeout. On timeout, Aish must kill the Git child process, report the timeout, release the sync lock, and return to the prompt.
 - Sync includes AI history, shell history and notes, templates, and drafts by default.
 - Aish stages managed enabled files automatically before every sync commit.
 - Aish warns, without staging, when existing Aish-managed files are excluded because their sync category is disabled.

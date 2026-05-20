@@ -1,7 +1,9 @@
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 
@@ -25,6 +27,7 @@ use super::{
 
 const DEFAULT_SYNC_GIT_USER_NAME: &str = "Aish Sync";
 const DEFAULT_SYNC_GIT_USER_EMAIL: &str = "aish-sync@localhost";
+const GIT_COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub(super) fn set_sync_remote(
     state: &mut AppState,
@@ -1365,17 +1368,65 @@ impl GitStepResult {
 }
 
 pub(super) fn run_git_command(root: &Path, command: &GitCommandPlan) -> Result<GitStepResult> {
-    let output = Command::new(&command.program)
+    run_git_command_with_timeout(root, command, GIT_COMMAND_TIMEOUT)
+}
+
+fn run_git_command_with_timeout(
+    root: &Path,
+    command: &GitCommandPlan,
+    timeout: Duration,
+) -> Result<GitStepResult> {
+    let mut child = Command::new(&command.program)
         .args(&command.args)
         .current_dir(root)
-        .output()
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .with_context(|| format!("failed to run {}", describe_git_command(command)))?;
-    Ok(GitStepResult {
-        success: output.status.success(),
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        exit_code: output.status.code(),
-    })
+
+    let started = Instant::now();
+    loop {
+        if child
+            .try_wait()
+            .with_context(|| format!("failed to wait for {}", describe_git_command(command)))?
+            .is_some()
+        {
+            let output = child
+                .wait_with_output()
+                .with_context(|| format!("failed to collect {}", describe_git_command(command)))?;
+            return Ok(GitStepResult {
+                success: output.status.success(),
+                stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+                stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+                exit_code: output.status.code(),
+            });
+        }
+        if started.elapsed() >= timeout {
+            let _ = child.kill();
+            let output = child.wait_with_output().with_context(|| {
+                format!(
+                    "failed to collect timed out {}",
+                    describe_git_command(command)
+                )
+            })?;
+            let mut stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+            if !stderr.ends_with('\n') && !stderr.is_empty() {
+                stderr.push('\n');
+            }
+            stderr.push_str(&format!(
+                "git command timed out after {}s",
+                timeout.as_millis().div_ceil(1000)
+            ));
+            return Ok(GitStepResult {
+                success: false,
+                stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+                stderr,
+                exit_code: output.status.code(),
+            });
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
 }
 
 fn is_commit_command(command: &GitCommandPlan) -> bool {
@@ -1395,6 +1446,30 @@ pub(super) fn describe_git_command(command: &GitCommandPlan) -> String {
     parts.push(command.program.as_str());
     parts.extend(command.args.iter().map(String::as_str));
     parts.join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn git_command_timeout_returns_prompt_control_quickly() {
+        let temp = tempfile::tempdir().unwrap();
+        let command = GitCommandPlan {
+            program: "sleep".to_string(),
+            args: vec!["5".to_string()],
+        };
+
+        let started = Instant::now();
+        let result =
+            run_git_command_with_timeout(temp.path(), &command, Duration::from_millis(100))
+                .unwrap();
+
+        assert!(!result.success);
+        assert!(result.stderr.contains("git command timed out after 1s"));
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
 }
 
 fn parse_sync_trigger_toggle(args: &str) -> Option<(&str, bool)> {

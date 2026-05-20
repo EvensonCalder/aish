@@ -18,6 +18,25 @@ fn sync_lock_allows_single_holder_and_removes_on_drop() {
     assert!(SyncLock::acquire(&path).unwrap().is_some());
 }
 
+#[cfg(unix)]
+#[test]
+fn sync_lock_reclaims_dead_process_lock() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("runtime/sync.lock");
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let mut child = std::process::Command::new("true").spawn().unwrap();
+    let pid = child.id();
+    child.wait().unwrap();
+    fs::write(&path, format!("pid={pid}\n")).unwrap();
+
+    let lock = SyncLock::acquire(&path)
+        .unwrap()
+        .expect("stale lock was reclaimed");
+
+    assert!(path.exists());
+    assert_eq!(lock.path(), path.as_path());
+}
+
 #[test]
 fn sync_lock_creates_parent_directory() {
     let temp = tempfile::tempdir().unwrap();

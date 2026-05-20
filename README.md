@@ -506,6 +506,8 @@ Implemented:
 - Persist explicit startup and exit sync triggers.
 - Run `#sync now` against a configured Git remote.
 - Stage managed enabled paths automatically, commit only when staged content changed, merge remote updates with `git pull --no-rebase --no-edit`, then push.
+- Clear stale sync locks left by dead Aish processes before refusing a new sync.
+- Stop an individual Git sync step after 60 seconds, report the timeout, release the sync lock, and return to the Aish prompt.
 - Warn when existing Aish-managed files are present but excluded because their sync category is disabled.
 - Retry pull with `--allow-unrelated-histories` when an existing local sync repository is connected to a populated remote with separate history.
 - If `.aish-sync.toml` disagrees with local content category settings, warn and use the repository settings as the private sync authority. Existing local files excluded by those settings are left alone and only warned about.
