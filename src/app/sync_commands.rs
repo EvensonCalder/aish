@@ -1,4 +1,6 @@
+use std::collections::HashMap;
 use std::fs;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -7,7 +9,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 
-use crate::config;
+use crate::config::{self, write_private_file};
+use crate::encryption::{atomic_gpg_encrypt_bytes, gpg_decrypt_file, gpg_program};
 use crate::log::EventLevel;
 use crate::sync::{
     GitCommandPlan, StartupSyncDecision, SyncFailureKind, SyncLock, SyncRepositoryContentMetadata,
@@ -185,6 +188,9 @@ pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -
         state.encryption_config.enabled,
         out,
     )?;
+    let Some(mut sync_data_snapshot) = verify_sync_data_for_git_write(state, out, &root)? else {
+        return Ok(());
+    };
 
     for command in conservative_sync_plan_for_existing_paths_with_encryption(
         &root,
@@ -198,7 +204,8 @@ pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -
                 let mut pull = pull_merge_allow_unrelated_plan();
                 pull.args.push("origin".to_string());
                 pull.args.push(remote_branch);
-                if !run_sync_pull_step(state, out, &root, &pull)? {
+                if !run_verified_sync_pull_step(state, out, &root, &pull, &mut sync_data_snapshot)?
+                {
                     return Ok(());
                 }
                 if !prepare_sync_repository_metadata_after_pull(state, out, &root)? {
@@ -214,7 +221,8 @@ pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -
         }
         if is_pull_command(&command) {
             if let Some(pull) = sync_pull_plan(&root, false)? {
-                if !run_sync_pull_step(state, out, &root, &pull)? {
+                if !run_verified_sync_pull_step(state, out, &root, &pull, &mut sync_data_snapshot)?
+                {
                     return Ok(());
                 }
                 if !prepare_sync_repository_metadata_after_pull(state, out, &root)? {
@@ -239,7 +247,7 @@ pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -
             continue;
         }
         if is_push_command(&command) {
-            if !run_sync_push_step(state, out, &root, &command)? {
+            if !run_sync_push_step(state, out, &root, &command, &mut sync_data_snapshot)? {
                 return Ok(());
             }
             continue;
@@ -722,6 +730,9 @@ fn commit_interrupted_merge_and_push(
     out: &mut impl Write,
     root: &Path,
 ) -> Result<()> {
+    let Some(mut sync_data_snapshot) = verify_sync_data_for_git_write(state, out, root)? else {
+        return Ok(());
+    };
     let command = GitCommandPlan {
         program: "git".to_string(),
         args: vec!["commit".to_string(), "--no-edit".to_string()],
@@ -737,7 +748,7 @@ fn commit_interrupted_merge_and_push(
         return Ok(());
     }
     let push = push_plan();
-    if !run_sync_push_step(state, out, root, &push)? {
+    if !run_sync_push_step(state, out, root, &push, &mut sync_data_snapshot)? {
         return Ok(());
     }
     state.append_event(EventLevel::Info, "sync push completed")?;
@@ -878,11 +889,326 @@ fn git_has_staged_changes(root: &Path) -> Result<bool> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SyncDataSnapshot {
+    records: Vec<SyncDataRecordCount>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SyncDataRecordCount {
+    label: &'static str,
+    path: String,
+    count: usize,
+    content_hash: u64,
+    plaintext_bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ManagedSyncDataFile {
+    label: &'static str,
+    logical_path: &'static str,
+}
+
+fn verify_sync_data_for_git_write(
+    state: &mut AppState,
+    out: &mut impl Write,
+    root: &Path,
+) -> Result<Option<SyncDataSnapshot>> {
+    let config = state.sync_config.clone();
+    let encryption_enabled = state.encryption_config.enabled;
+    let result = if encryption_enabled {
+        state.run_unlock_passthrough(|_| collect_sync_data_snapshot(root, &config, true))
+    } else {
+        collect_sync_data_snapshot(root, &config, false)
+    };
+    match result {
+        Ok(snapshot) => Ok(Some(snapshot)),
+        Err(err) => {
+            if encryption_enabled {
+                writeln!(
+                    out,
+                    "sync encrypted data cannot be verified; refusing to stage, commit, or push"
+                )?;
+                writeln!(
+                    out,
+                    "Aish must decrypt enabled managed *.jsonl.gpg files before syncing them."
+                )?;
+                writeln!(out, "{err:#}")?;
+                writeln!(
+                    out,
+                    "Run #unlock if GPG needs a passphrase, import the matching private key, or resolve the repository key choice with #encrypt rotate <full-key-fingerprint>."
+                )?;
+            } else {
+                writeln!(
+                    out,
+                    "sync data cannot be verified; refusing to stage, commit, or push"
+                )?;
+                writeln!(out, "{err:#}")?;
+            }
+            Ok(None)
+        }
+    }
+}
+
+fn collect_sync_data_snapshot(
+    root: &Path,
+    config: &config::SyncConfig,
+    encryption_enabled: bool,
+) -> Result<SyncDataSnapshot> {
+    let gpg = encryption_enabled.then(gpg_program);
+    let mut records = Vec::new();
+    for file in managed_sync_data_files(config) {
+        records.push(count_managed_sync_data_file(
+            root,
+            file,
+            encryption_enabled,
+            gpg.as_deref(),
+        )?);
+    }
+    Ok(SyncDataSnapshot { records })
+}
+
+fn managed_sync_data_files(config: &config::SyncConfig) -> Vec<ManagedSyncDataFile> {
+    let mut files = Vec::new();
+    if config.ai {
+        files.push(ManagedSyncDataFile {
+            label: "history/ai",
+            logical_path: "history/ai.jsonl",
+        });
+    }
+    if config.history {
+        files.push(ManagedSyncDataFile {
+            label: "history/notes",
+            logical_path: "history/notes.jsonl",
+        });
+        files.push(ManagedSyncDataFile {
+            label: "history/regular",
+            logical_path: "history/regular.jsonl",
+        });
+    }
+    if config.templates {
+        files.push(ManagedSyncDataFile {
+            label: "templates",
+            logical_path: "templates/templates.jsonl",
+        });
+    }
+    if config.drafts {
+        files.push(ManagedSyncDataFile {
+            label: "history/draft",
+            logical_path: "history/draft.jsonl",
+        });
+    }
+    files
+}
+
+fn count_managed_sync_data_file(
+    root: &Path,
+    file: ManagedSyncDataFile,
+    encryption_enabled: bool,
+    gpg_program: Option<&str>,
+) -> Result<SyncDataRecordCount> {
+    let path = if encryption_enabled {
+        format!("{}.gpg", file.logical_path)
+    } else {
+        file.logical_path.to_string()
+    };
+    let absolute = root.join(&path);
+    let bytes = if !absolute.exists() {
+        Vec::new()
+    } else if encryption_enabled {
+        let Some(program) = gpg_program else {
+            bail!("GPG program is not configured for encrypted sync");
+        };
+        gpg_decrypt_file(program, &absolute)
+            .with_context(|| format!("failed to decrypt managed sync file {path}"))?
+    } else {
+        fs::read(&absolute).with_context(|| format!("failed to read managed sync file {path}"))?
+    };
+    let count = count_jsonl_records(&path, &bytes)?;
+    let mut hasher = DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    Ok(SyncDataRecordCount {
+        label: file.label,
+        path,
+        count,
+        content_hash: hasher.finish(),
+        plaintext_bytes: bytes,
+    })
+}
+
+fn count_jsonl_records(path: &str, bytes: &[u8]) -> Result<usize> {
+    let raw = std::str::from_utf8(bytes)
+        .with_context(|| format!("managed sync file {path} is not valid UTF-8 JSONL"))?;
+    Ok(raw.lines().filter(|line| !line.trim().is_empty()).count())
+}
+
+fn run_verified_sync_pull_step(
+    state: &mut AppState,
+    out: &mut impl Write,
+    root: &Path,
+    command: &GitCommandPlan,
+    snapshot: &mut SyncDataSnapshot,
+) -> Result<bool> {
+    let before = snapshot.clone();
+    if !run_sync_pull_step(state, out, root, command)? {
+        return Ok(false);
+    }
+    let Some(after) = verify_sync_data_for_git_write(state, out, root)? else {
+        return Ok(false);
+    };
+    let Some(reconciled) = reconcile_sync_data_after_pull(state, out, root, &before, after)? else {
+        return Ok(false);
+    };
+    *snapshot = reconciled;
+    Ok(true)
+}
+
+fn reconcile_sync_data_after_pull(
+    state: &mut AppState,
+    out: &mut impl Write,
+    root: &Path,
+    before: &SyncDataSnapshot,
+    after: SyncDataSnapshot,
+) -> Result<Option<SyncDataSnapshot>> {
+    let mut restored = false;
+    for after_record in &after.records {
+        let before_record = before
+            .records
+            .iter()
+            .find(|record| record.label == after_record.label);
+        let before_count = before_record.map_or(0, |record| record.count);
+        if before_count == after_record.count {
+            if before_record.is_some_and(|record| record.content_hash != after_record.content_hash)
+            {
+                writeln!(
+                    out,
+                    "sync data summary: {} records {} -> {} (content changed)",
+                    after_record.label, before_count, after_record.count
+                )?;
+            }
+            continue;
+        }
+        let delta = after_record.count as isize - before_count as isize;
+        if delta < 0 {
+            writeln!(
+                out,
+                "warning: sync data count decreased: {} records {} -> {} ({})",
+                after_record.label,
+                before_count,
+                after_record.count,
+                format_record_delta(delta)
+            )?;
+            let Some(before_record) = before_record else {
+                continue;
+            };
+            let merged = union_jsonl_bytes(
+                &before_record.path,
+                &before_record.plaintext_bytes,
+                &after_record.plaintext_bytes,
+            )?;
+            write_union_restored_sync_data(state, root, after_record, &merged)?;
+            let restored_count = count_jsonl_records(&after_record.path, &merged)?;
+            let restored_delta = restored_count as isize - after_record.count as isize;
+            writeln!(
+                out,
+                "sync data union-restored: {} records {} -> {} ({})",
+                after_record.label,
+                after_record.count,
+                restored_count,
+                format_record_delta(restored_delta)
+            )?;
+            restored = true;
+        } else {
+            writeln!(
+                out,
+                "sync data summary: {} records {} -> {} ({})",
+                after_record.label,
+                before_count,
+                after_record.count,
+                format_record_delta(delta)
+            )?;
+        }
+    }
+    if restored {
+        return verify_sync_data_for_git_write(state, out, root);
+    }
+    Ok(Some(after))
+}
+
+fn format_record_delta(delta: isize) -> String {
+    if delta > 0 {
+        format!("+{delta}")
+    } else {
+        delta.to_string()
+    }
+}
+
+fn union_jsonl_bytes(path: &str, before: &[u8], after: &[u8]) -> Result<Vec<u8>> {
+    let mut output = Vec::new();
+    let before_raw = std::str::from_utf8(before)
+        .with_context(|| format!("managed sync file {path} is not valid UTF-8 JSONL"))?;
+    let after_raw = std::str::from_utf8(after)
+        .with_context(|| format!("managed sync file {path} is not valid UTF-8 JSONL"))?;
+    let mut before_counts = HashMap::<String, usize>::new();
+
+    for line in before_raw.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        *before_counts.entry(line.to_string()).or_default() += 1;
+        output.extend_from_slice(line.as_bytes());
+        output.push(b'\n');
+    }
+
+    let mut after_counts = HashMap::<String, usize>::new();
+    for line in after_raw.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let count = after_counts.entry(line.to_string()).or_default();
+        *count += 1;
+        if *count <= before_counts.get(line).copied().unwrap_or_default() {
+            continue;
+        }
+        output.extend_from_slice(line.as_bytes());
+        output.push(b'\n');
+    }
+    Ok(output)
+}
+
+fn write_union_restored_sync_data(
+    state: &AppState,
+    root: &Path,
+    record: &SyncDataRecordCount,
+    plaintext: &[u8],
+) -> Result<()> {
+    let path = root.join(&record.path);
+    if state.encryption_config.enabled {
+        atomic_gpg_encrypt_bytes(
+            gpg_program(),
+            configured_encryption_key(&state.encryption_config),
+            &path,
+            plaintext,
+        )
+        .with_context(|| {
+            format!(
+                "failed to write union-restored encrypted sync file {}",
+                record.path
+            )
+        })?;
+    } else {
+        write_private_file(&path, plaintext)
+            .with_context(|| format!("failed to write union-restored sync file {}", record.path))?;
+    }
+    Ok(())
+}
+
 fn run_sync_push_step(
     state: &mut AppState,
     out: &mut impl Write,
     root: &Path,
     command: &GitCommandPlan,
+    snapshot: &mut SyncDataSnapshot,
 ) -> Result<bool> {
     let result = run_git_command(root, command)?;
     if result.success {
@@ -895,10 +1221,10 @@ fn run_sync_push_step(
             "sync push needs remote updates; running git pull --no-rebase --no-edit"
         )?;
         let Some(pull) = sync_pull_plan(root, false)? else {
-            handle_failed_sync_step(state, out, command, result)?;
+            handle_failed_sync_step(state, out, root, command, result)?;
             return Ok(false);
         };
-        if !run_sync_pull_step(state, out, root, &pull)? {
+        if !run_verified_sync_pull_step(state, out, root, &pull, snapshot)? {
             return Ok(false);
         }
         if !prepare_sync_repository_metadata_after_pull(state, out, root)? {
@@ -909,10 +1235,10 @@ fn run_sync_push_step(
             writeln!(out, "sync step ok: {}", describe_git_command(command))?;
             return Ok(true);
         }
-        handle_failed_sync_step(state, out, command, retry)?;
+        handle_failed_sync_step(state, out, root, command, retry)?;
         return Ok(false);
     }
-    handle_failed_sync_step(state, out, command, result)?;
+    handle_failed_sync_step(state, out, root, command, result)?;
     Ok(false)
 }
 
@@ -939,7 +1265,7 @@ fn run_sync_pull_step(
             "sync pull needs unrelated-history merge; retrying with --allow-unrelated-histories"
         )?;
         let Some(retry) = sync_pull_plan(root, true)? else {
-            handle_failed_sync_step(state, out, command, result)?;
+            handle_failed_sync_step(state, out, root, command, result)?;
             return Ok(false);
         };
         return run_sync_pull_step(state, out, root, &retry);
@@ -952,7 +1278,7 @@ fn run_sync_pull_step(
         writeln!(out, "sync step ok: {}", describe_git_command(command))?;
         return Ok(true);
     }
-    handle_failed_sync_step(state, out, command, result)?;
+    handle_failed_sync_step(state, out, root, command, result)?;
     Ok(false)
 }
 
@@ -1362,18 +1688,20 @@ fn run_sync_git_step(
         writeln!(out, "sync step ok: {}", describe_git_command(command))?;
         return Ok(true);
     }
-    handle_failed_sync_step(state, out, command, result)?;
+    handle_failed_sync_step(state, out, root, command, result)?;
     Ok(false)
 }
 
 fn handle_failed_sync_step(
     state: &AppState,
     out: &mut impl Write,
+    root: &Path,
     command: &GitCommandPlan,
     result: GitStepResult,
 ) -> Result<()> {
     let detail = result.combined_output();
-    match classify_git_sync_step(false, &result.stdout, &result.stderr) {
+    let outcome = classify_git_sync_step(false, &result.stdout, &result.stderr);
+    match &outcome {
         SyncStepOutcome::AbortConflict { .. } => {
             writeln!(
                 out,
@@ -1396,10 +1724,19 @@ fn handle_failed_sync_step(
     if !detail.is_empty() {
         writeln!(out, "{detail}")?;
     }
-    if matches!(
-        classify_git_sync_step(false, &result.stdout, &result.stderr),
-        SyncStepOutcome::AbortConflict { .. }
-    ) {
+    if matches!(outcome, SyncStepOutcome::AbortConflict { .. }) {
+        match unmerged_paths(root) {
+            Ok(paths) if !paths.is_empty() => {
+                writeln!(out, "sync unresolved conflicts: {}", paths.len())?;
+                for path in paths {
+                    writeln!(out, "conflict: {path}")?;
+                }
+            }
+            Ok(_) => {}
+            Err(err) => {
+                writeln!(out, "sync conflict path listing failed: {err:#}")?;
+            }
+        }
         writeln!(
             out,
             "options: #sync resolve-union for plaintext Aish files, #sync continue after manual resolution, or #sync abort"

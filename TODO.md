@@ -80,6 +80,9 @@ move the result into user-facing documentation if it changes behavior.
     Git branch selection before touching active managed files.
   - Copy or merge validated results back into the active Aish home only after
     conflicts are resolved.
+  - Preserve the current decrypt-before-push guard for encrypted managed data
+    and the record-count decrease union restoration before publishing merged
+    data.
   - Preserve the current lock, timeout, startup sync, exit sync, and
     `#sync abort|continue|resolve-union` semantics while changing the
     implementation boundary.

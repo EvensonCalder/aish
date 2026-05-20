@@ -506,6 +506,7 @@ Implemented:
 - Persist explicit startup and exit sync triggers.
 - Run `#sync now` against a configured Git remote.
 - Stage managed enabled paths automatically, commit only when staged content changed, merge remote updates with `git pull --no-rebase --no-edit`, then push.
+- For encrypted sync, decrypt every enabled managed `*.jsonl.gpg` file before staging, committing, or pushing. If GPG cannot decrypt the data on this machine, sync stops with the path and key-resolution guidance.
 - Treat an empty bare/GitHub remote as a normal first-sync target: skip pull when the remote has no branch, then push with upstream setup.
 - Use explicit remote branches for pulls instead of relying on local Git branch tracking.
 - Inspect remote sync metadata through an isolated temporary Git workspace so a stale local `.aish-sync.toml` cannot be mistaken for the remote repository's current encryption state.
@@ -517,6 +518,7 @@ Implemented:
 - If `.aish-sync.toml` disagrees with local content category settings, warn and use the repository settings as the private sync authority. Existing local files excluded by those settings are left alone and only warned about.
 - Stop before pushing if remote sync metadata disagrees with the local encryption config, or if local encrypted sync is configured with an email/selector instead of a full fingerprint.
 - Use Git's union merge driver for plaintext Aish JSONL files so independent appends usually merge by keeping both sides.
+- After merging remote updates, report managed JSONL record-count changes such as `history/regular records 1 -> 2 (+1)`. If an enabled managed record count decreases during the merge, automatically restore the JSONL union so neither side's records are deleted; if that restoration fails, sync stops before pushing.
 - Offer `#sync resolve-union`, `#sync continue`, and `#sync abort` when a conflict still needs a user choice.
 - Log sync failures without leaking secret-like values.
 
@@ -546,7 +548,7 @@ Sync command boundaries:
 
 - `#set-remote <git-url>` only saves the private sync remote. It does not initialize Git, fetch, merge, commit, or push.
 - `#sync` prints current sync/encryption status and does not run Git.
-- `#sync now` is the only manual sync run command. It stages enabled managed files, commits when staged content changed, merges remote updates, then pushes.
+- `#sync now` is the only manual sync run command. It verifies enabled managed data, stages enabled managed files, commits when staged content changed, merges remote updates, verifies/counts the merged data, then pushes.
 - `#sync resolve-union` is only for an interrupted merge with plaintext Aish-managed JSONL conflicts. It keeps both sides, stages the resolved files, commits, and pushes.
 - `#sync continue` is only for a merge that the user resolved and staged manually. It commits and pushes the interrupted sync.
 - `#sync abort` is only for an interrupted merge or rebase. It cancels that Git operation.

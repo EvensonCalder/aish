@@ -1275,6 +1275,7 @@ Policy:
 - Each Git sync step must have a finite timeout. On timeout, Aish must kill the Git child process, report the timeout, release the sync lock, and return to the prompt.
 - Sync includes AI history, shell history and notes, templates, and drafts by default.
 - Aish stages managed enabled files automatically before every sync commit.
+- When encryption is enabled, Aish must decrypt every enabled managed `*.jsonl.gpg` file before staging, committing, or pushing. If the current machine cannot decrypt the data, sync stops and reports the managed path plus key-resolution guidance.
 - Aish warns, without staging, when existing Aish-managed files are excluded because their sync category is disabled.
 - Aish writes `README.md` into the sync data repository so the remote is identifiable as Aish-managed data when the file is absent or already Aish-managed.
 - Aish writes `.aish-sync.toml` into the sync data repository as non-secret sync metadata. It records the private sync content categories and encryption key metadata. `config.toml` stays local and must not be committed.
@@ -1291,6 +1292,7 @@ Policy:
 - If an existing local sync repository is connected to a populated remote with separate history, Aish reports the unrelated-history case and retries the pull with `--allow-unrelated-histories`.
 - Local bare Git repositories are valid sync remotes.
 - Plaintext Aish JSONL files use Git's union merge driver so independent appends keep both sides.
+- After a successful remote merge, Aish reports managed JSONL record-count changes. If an enabled managed record count decreases during the merge, sync must restore the JSONL union before pushing so neither side's records are deleted. If union restoration fails, sync must stop before pushing.
 - Aish can auto-resolve remaining plaintext Aish file conflicts with `#sync resolve-union`.
 - Aish does not auto-resolve encrypted `*.jsonl.gpg` conflicts because text union can corrupt ciphertext.
 - Aish does not run `git rm --cached` automatically.
@@ -1302,7 +1304,7 @@ Command boundaries:
 
 - `#set-remote <git-url>` persists the private sync remote only and must not run Git.
 - `#sync` reports sync/encryption status only and must not run Git.
-- `#sync now` is the only manual sync run command. It must stage enabled managed paths, commit only when staged content changed, merge remote updates, and push.
+- `#sync now` is the only manual sync run command. It must verify enabled managed data, stage enabled managed paths, commit only when staged content changed, merge remote updates, verify/count merged data, and push.
 - `#sync resolve-union` is valid only during an interrupted merge with plaintext Aish-managed conflicts. It must refuse encrypted or unmanaged conflicts.
 - `#sync continue` is valid only during an interrupted merge after the user has manually resolved and staged conflicts.
 - `#sync abort` is valid only during an interrupted merge or rebase.
@@ -1362,6 +1364,7 @@ Recommended conservative sync:
 git add managed files
 git commit -m "[auto] sync <time>"
 git pull --no-rebase --no-edit
+verify/count merged managed records
 git push
 ```
 

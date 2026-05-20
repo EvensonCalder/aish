@@ -640,11 +640,18 @@ fn encrypted_sync_writes_repository_key_metadata() {
     let seed = temp.path().join("seed");
     let root = temp.path().join("aish-home");
     seed_local_remote(&remote, &seed, &root);
+    let fake_gpg = write_fake_gpg(&temp);
+    let old_gpg = std::env::var_os("AISH_GPG");
+    unsafe {
+        std::env::set_var("AISH_GPG", &fake_gpg);
+    }
 
     fs::create_dir_all(root.join("history")).unwrap();
-    fs::write(
+    atomic_gpg_encrypt_bytes(
+        fake_gpg.to_string_lossy().into_owned(),
+        LOCAL_TEST_FINGERPRINT,
         root.join("history/regular.jsonl.gpg"),
-        "encrypted regular\n",
+        b"{\"command\":\"encrypted regular\"}\n",
     )
     .unwrap();
     let mut state = sync_state_for_root(&root, &remote);
@@ -656,6 +663,12 @@ fn encrypted_sync_writes_repository_key_metadata() {
 
     let mut output = Vec::new();
     run_manual_sync_push(&mut state, &mut output).unwrap();
+    unsafe {
+        match old_gpg {
+            Some(value) => std::env::set_var("AISH_GPG", value),
+            None => std::env::remove_var("AISH_GPG"),
+        }
+    }
 
     let output = String::from_utf8(output).unwrap();
     assert!(
@@ -676,6 +689,57 @@ fn encrypted_sync_writes_repository_key_metadata() {
     );
     assert!(pushed_metadata.contains("enabled = true"));
     assert!(pushed_metadata.contains(LOCAL_TEST_FINGERPRINT));
+}
+
+#[test]
+fn encrypted_sync_refuses_to_stage_when_enabled_data_cannot_decrypt() {
+    let _guard = git_env_guard();
+    let temp = tempfile::tempdir().unwrap();
+    let remote = temp.path().join("remote.git");
+    let seed = temp.path().join("seed");
+    let root = temp.path().join("aish-home");
+    let fail_decrypt_marker = temp.path().join("fail-decrypt");
+    seed_local_remote(&remote, &seed, &root);
+    let fake_gpg = write_decrypt_marker_fake_gpg(&temp, &fail_decrypt_marker);
+    let old_gpg = std::env::var_os("AISH_GPG");
+    unsafe {
+        std::env::set_var("AISH_GPG", &fake_gpg);
+    }
+
+    fs::create_dir_all(root.join("history")).unwrap();
+    atomic_gpg_encrypt_bytes(
+        fake_gpg.to_string_lossy().into_owned(),
+        LOCAL_TEST_FINGERPRINT,
+        root.join("history/regular.jsonl.gpg"),
+        b"{\"command\":\"secret local\"}\n",
+    )
+    .unwrap();
+    fs::write(&fail_decrypt_marker, "fail\n").unwrap();
+    let mut state = sync_state_for_root(&root, &remote);
+    state.encryption_config = EncryptionConfig {
+        enabled: true,
+        key_fingerprint: LOCAL_TEST_FINGERPRINT.to_string(),
+        ..EncryptionConfig::default()
+    };
+
+    let mut output = Vec::new();
+    run_manual_sync_push(&mut state, &mut output).unwrap();
+    unsafe {
+        match old_gpg {
+            Some(value) => std::env::set_var("AISH_GPG", value),
+            None => std::env::remove_var("AISH_GPG"),
+        }
+    }
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(
+        output.contains("sync encrypted data cannot be verified"),
+        "{output}"
+    );
+    assert!(output.contains("history/regular.jsonl.gpg"), "{output}");
+    assert!(!output.contains("sync step ok: git add"), "{output}");
+    assert!(!output.contains("sync step ok: git push"), "{output}");
+    assert!(!output.contains("sync push completed"), "{output}");
 }
 
 #[test]
@@ -1050,6 +1114,10 @@ fn sync_plaintext_history_uses_union_merge_across_two_clones() {
 
     let output_b = String::from_utf8(out_b).unwrap();
     assert!(!output_b.contains("sync aborted on conflict"), "{output_b}");
+    assert!(
+        output_b.contains("sync data summary: history/regular records 1 -> 2 (+1)"),
+        "{output_b}"
+    );
     assert!(output_b.contains("sync push completed"), "{output_b}");
     let pushed_history = run_test_git_stdout(
         temp.path(),
@@ -1062,6 +1130,76 @@ fn sync_plaintext_history_uses_union_merge_across_two_clones() {
     );
     assert!(pushed_history.contains("from-a"), "{pushed_history}");
     assert!(pushed_history.contains("from-b"), "{pushed_history}");
+}
+
+#[test]
+fn sync_union_restores_records_when_pull_decreases_managed_record_count() {
+    let _guard = git_env_guard();
+    let temp = tempfile::tempdir().unwrap();
+    let remote = temp.path().join("remote.git");
+    let seed = temp.path().join("seed");
+    let root = temp.path().join("aish-home");
+    let other = temp.path().join("other");
+    seed_local_remote(&remote, &seed, &root);
+
+    let mut state = sync_state_for_root(&root, &remote);
+    fs::create_dir_all(root.join("history")).unwrap();
+    fs::write(
+        root.join("history/regular.jsonl"),
+        "{\"command\":\"keep\"}\n{\"command\":\"remove-remotely\"}\n",
+    )
+    .unwrap();
+    let mut first = Vec::new();
+    run_manual_sync_push(&mut state, &mut first).unwrap();
+    assert!(
+        String::from_utf8(first)
+            .unwrap()
+            .contains("sync push completed")
+    );
+
+    run_test_git(
+        temp.path(),
+        ["clone", remote.to_str().unwrap(), other.to_str().unwrap()],
+    );
+    run_test_git(&other, ["config", "user.name", "Aish Test"]);
+    run_test_git(&other, ["config", "user.email", "aish@example.invalid"]);
+    run_test_git(&other, ["config", "commit.gpgsign", "false"]);
+    fs::write(
+        other.join("history/regular.jsonl"),
+        "{\"command\":\"keep\"}\n",
+    )
+    .unwrap();
+    run_test_git(&other, ["add", "history/regular.jsonl"]);
+    run_test_git(&other, ["commit", "-m", "drop one record"]);
+    run_test_git(&other, ["push"]);
+
+    let mut second = Vec::new();
+    run_manual_sync_push(&mut state, &mut second).unwrap();
+
+    let output = String::from_utf8(second).unwrap();
+    assert!(
+        output.contains("warning: sync data count decreased: history/regular records 2 -> 1 (-1)"),
+        "{output}"
+    );
+    assert!(
+        output.contains("sync data union-restored: history/regular records 1 -> 2 (+1)"),
+        "{output}"
+    );
+    assert!(output.contains("sync push completed"), "{output}");
+    let pushed_history = run_test_git_stdout(
+        temp.path(),
+        [
+            "--git-dir",
+            remote.to_str().unwrap(),
+            "show",
+            "HEAD:history/regular.jsonl",
+        ],
+    );
+    assert!(pushed_history.contains("keep"), "{pushed_history}");
+    assert!(
+        pushed_history.contains("remove-remotely"),
+        "{pushed_history}"
+    );
 }
 
 #[test]
@@ -1124,6 +1262,14 @@ fn sync_resolve_union_command_keeps_both_sides_after_conflict() {
     let conflict_output = String::from_utf8(conflict_output).unwrap();
     assert!(
         conflict_output.contains("sync aborted on conflict"),
+        "{conflict_output}"
+    );
+    assert!(
+        conflict_output.contains("sync unresolved conflicts: 1"),
+        "{conflict_output}"
+    );
+    assert!(
+        conflict_output.contains("conflict: .gitignore"),
         "{conflict_output}"
     );
     assert!(conflict_output.contains("#sync resolve-union"));
