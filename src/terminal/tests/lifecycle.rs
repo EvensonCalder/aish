@@ -148,8 +148,10 @@ fn exit_persistence_boundary_runs_enabled_exit_sync() {
     persist_draft_and_flush_before_exit(&mut state, &mut output).unwrap();
 
     let output = String::from_utf8(output).unwrap();
-    assert!(output.contains("exit sync enabled; running #sync now"));
-    assert!(output.contains("sync remote is not configured"));
+    assert_eq!(
+        output,
+        "exit sync enabled; running #sync now\r\nsync remote is not configured; run #set-remote <git-url> first\r\n"
+    );
 }
 
 #[test]

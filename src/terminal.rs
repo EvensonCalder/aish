@@ -119,7 +119,11 @@ pub fn run(
 
 fn persist_draft_and_flush_before_exit(state: &mut AppState, out: &mut impl Write) -> Result<()> {
     let _ = save_draft_if_configured(state)?;
-    run_exit_sync_if_enabled(state, out)?;
+    {
+        let mut display_out = CrLfWriter::new(out);
+        run_exit_sync_if_enabled(state, &mut display_out)?;
+        display_out.flush()?;
+    }
     state.flush_encrypted_writes()
 }
 
