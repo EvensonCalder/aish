@@ -157,9 +157,8 @@ impl SyncLock {
             })?;
         }
 
-        match create_sync_lock_file(path)? {
-            Some(lock) => return Ok(Some(lock)),
-            None => {}
+        if let Some(lock) = create_sync_lock_file(path)? {
+            return Ok(Some(lock));
         }
 
         if stale_sync_lock_was_removed(path)? {

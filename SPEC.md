@@ -1278,12 +1278,15 @@ Policy:
 - Aish warns, without staging, when existing Aish-managed files are excluded because their sync category is disabled.
 - Aish writes `README.md` into the sync data repository so the remote is identifiable as Aish-managed data when the file is absent or already Aish-managed.
 - Aish writes `.aish-sync.toml` into the sync data repository as non-secret sync metadata. It records the private sync content categories and encryption key metadata. `config.toml` stays local and must not be committed.
+- Aish must inspect remote `.aish-sync.toml` through a temporary isolated Git workspace, not by trusting the active `~/.aish/.aish-sync.toml` file. The active file is a generated sync output and must not be allowed to masquerade as the remote repository's current metadata.
 - If repository content-category metadata disagrees with local settings, Aish warns, adopts the repository settings, persists them locally, and uses those settings for the current sync. Local existing files excluded by repository settings are not staged; Aish warns about them without deleting them.
 - When encryption is enabled, `.aish-sync.toml` must contain exactly one current full 40-hex GPG key fingerprint. Local encrypted sync must use a full fingerprint, not an email/user selector.
-- If local encryption state or fingerprint disagrees with `.aish-sync.toml`, Aish must stop before pushing and tell the user how to resolve the key choice.
+- If local encryption state or fingerprint disagrees with the remote repository metadata, Aish must stop before pushing and tell the user how to resolve the key choice.
 - If Git identity is not configured, Aish sets local-only `user.name` and `user.email` values inside the sync repository before committing.
 - Empty bare or hosted Git remotes are valid first-sync targets. If the remote has no branch, Aish must skip pull and let push create the branch/upstream.
 - Aish must not rely on local branch tracking for pull. When a remote branch exists, pull must specify the remote and branch explicitly.
+- When the remote has a default branch, Aish should align the local sync branch to that branch before committing so one sync remote does not silently split across `master`, `main`, or another branch.
+- Longer term, remote payload merging should happen in an isolated staging workspace and only publish validated results back into the active Aish home after conflicts, key metadata, and content options are resolved.
 - If an existing non-Git Aish home is connected to an already-populated sync remote, Aish merges the remote default branch with `--allow-unrelated-histories` during the first sync.
 - If an existing local sync repository is connected to a populated remote with separate history, Aish reports the unrelated-history case and retries the pull with `--allow-unrelated-histories`.
 - Local bare Git repositories are valid sync remotes.

@@ -16,9 +16,8 @@ use crate::sync::{
     disabled_existing_managed_paths_with_encryption, encryption_fingerprint_is_valid,
     init_repo_plan, log_sync_failure, maintain_managed_gitattributes, maintain_managed_gitignore,
     maintain_sync_readme, pull_merge_allow_unrelated_plan, pull_merge_plan, push_plan,
-    read_sync_repository_metadata, startup_sync_decision, sync_repository_metadata_file_matches,
-    sync_repository_metadata_for, sync_repository_metadata_path, tracked_managed_files_warning,
-    write_sync_repository_metadata,
+    startup_sync_decision, sync_repository_metadata_file_matches, sync_repository_metadata_for,
+    sync_repository_metadata_path, tracked_managed_files_warning, write_sync_repository_metadata,
 };
 
 use super::{
@@ -171,7 +170,10 @@ pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -
     if !ensure_sync_git_identity(state, out, &root)? {
         return Ok(());
     }
-    if !adopt_remote_sync_repository_metadata(state, out, &root)? {
+    if !align_local_branch_to_remote_sync_branch(state, out, &root)? {
+        return Ok(());
+    }
+    if !adopt_remote_sync_repository_metadata(state, out, &root, &remote)? {
         return Ok(());
     }
     if !prepare_sync_repository_metadata(state, out, &root)? {
@@ -193,17 +195,6 @@ pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -
     {
         if initialized_repo && is_pull_command(&command) {
             if let Some(remote_branch) = remote_sync_branch(&root)? {
-                let rename = GitCommandPlan {
-                    program: "git".to_string(),
-                    args: vec![
-                        "branch".to_string(),
-                        "-M".to_string(),
-                        remote_branch.clone(),
-                    ],
-                };
-                if !run_sync_git_step(state, out, &root, &rename)? {
-                    return Ok(());
-                }
                 let mut pull = pull_merge_allow_unrelated_plan();
                 pull.args.push("origin".to_string());
                 pull.args.push(remote_branch);
@@ -262,6 +253,27 @@ pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -
     Ok(())
 }
 
+fn align_local_branch_to_remote_sync_branch(
+    state: &mut AppState,
+    out: &mut impl Write,
+    root: &Path,
+) -> Result<bool> {
+    let Some(remote_branch) = remote_sync_branch(root)? else {
+        return Ok(true);
+    };
+    let Some(local_branch) = current_branch(root)? else {
+        return Ok(true);
+    };
+    if local_branch == remote_branch {
+        return Ok(true);
+    }
+    let command = GitCommandPlan {
+        program: "git".to_string(),
+        args: vec!["branch".to_string(), "-M".to_string(), remote_branch],
+    };
+    run_sync_git_step(state, out, root, &command)
+}
+
 fn warn_disabled_existing_managed_paths(
     root: &Path,
     config: &config::SyncConfig,
@@ -282,13 +294,18 @@ fn adopt_remote_sync_repository_metadata(
     state: &mut AppState,
     out: &mut impl Write,
     root: &Path,
+    remote: &str,
 ) -> Result<bool> {
-    let metadata = match remote_sync_repository_metadata(root) {
+    let metadata = match remote_sync_repository_metadata(root, remote) {
         Ok(Some(metadata)) => metadata,
         Ok(None) => return Ok(true),
         Err(err) => {
             writeln!(out, "remote sync metadata is invalid; refusing to sync")?;
             writeln!(out, "{err:#}")?;
+            writeln!(
+                out,
+                "Fix the remote .aish-sync.toml on the sync branch, or remove it if this remote should be initialized by this machine, then run #sync now."
+            )?;
             return Ok(false);
         }
     };
@@ -305,15 +322,19 @@ fn adopt_remote_sync_repository_metadata(
     Ok(true)
 }
 
-fn remote_sync_repository_metadata(root: &Path) -> Result<Option<SyncRepositoryMetadata>> {
-    let Some(branch) = remote_sync_branch(root)? else {
+fn remote_sync_repository_metadata(
+    root: &Path,
+    remote: &str,
+) -> Result<Option<SyncRepositoryMetadata>> {
+    let workspace = prepare_remote_metadata_workspace(root, remote)?;
+    let Some(branch) = remote_sync_branch(&workspace)? else {
         return Ok(None);
     };
     let fetch = GitCommandPlan {
         program: "git".to_string(),
         args: vec!["fetch".to_string(), "origin".to_string(), branch],
     };
-    if !run_git_command(root, &fetch)?.success {
+    if !run_git_command(&workspace, &fetch)?.success {
         return Ok(None);
     }
     let show = GitCommandPlan {
@@ -323,13 +344,63 @@ fn remote_sync_repository_metadata(root: &Path) -> Result<Option<SyncRepositoryM
             format!("FETCH_HEAD:{}", sync_repository_metadata_path()),
         ],
     };
-    let result = run_git_command(root, &show)?;
+    let result = run_git_command(&workspace, &show)?;
     if !result.success {
         return Ok(None);
     }
     crate::sync::parse_sync_repository_metadata(&result.stdout)
         .map(Some)
         .context("remote sync metadata is invalid")
+}
+
+fn prepare_remote_metadata_workspace(root: &Path, remote: &str) -> Result<PathBuf> {
+    let workspace = root.join("cache/runtime/sync-remote-metadata");
+    match fs::remove_dir_all(&workspace) {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => {
+            return Err(err).with_context(|| {
+                format!(
+                    "failed to clear remote sync metadata workspace {}",
+                    workspace.display()
+                )
+            });
+        }
+    }
+    fs::create_dir_all(&workspace).with_context(|| {
+        format!(
+            "failed to create remote sync metadata workspace {}",
+            workspace.display()
+        )
+    })?;
+    let init = GitCommandPlan {
+        program: "git".to_string(),
+        args: vec!["init".to_string()],
+    };
+    let init_result = run_git_command(&workspace, &init)?;
+    if !init_result.success {
+        bail!(
+            "failed to initialize remote sync metadata workspace: {}",
+            init_result.combined_output()
+        );
+    }
+    let remote_add = GitCommandPlan {
+        program: "git".to_string(),
+        args: vec![
+            "remote".to_string(),
+            "add".to_string(),
+            "origin".to_string(),
+            remote.to_string(),
+        ],
+    };
+    let remote_result = run_git_command(&workspace, &remote_add)?;
+    if !remote_result.success {
+        bail!(
+            "failed to configure remote sync metadata workspace: {}",
+            remote_result.combined_output()
+        );
+    }
+    Ok(workspace)
 }
 
 fn prepare_sync_repository_metadata(
@@ -341,33 +412,8 @@ fn prepare_sync_repository_metadata(
         return Ok(false);
     };
     let path = root.join(sync_repository_metadata_path());
-    match read_sync_repository_metadata(&path) {
-        Ok(Some(metadata)) => {
-            if !sync_repository_encryption_matches(&metadata, &expected) {
-                write_sync_repository_metadata_mismatch(out, &metadata, &expected)?;
-                return Ok(false);
-            }
-            if metadata.content != expected.content {
-                apply_repository_sync_content_options(state, out, &metadata.content)?;
-            }
-            let expected = local_sync_repository_metadata(state, out)?
-                .expect("validated encryption config remains available");
-            if metadata != expected || !sync_repository_metadata_file_matches(&path, &expected)? {
-                write_sync_repository_metadata(&path, &expected)?;
-            }
-        }
-        Ok(None) => {
-            write_sync_repository_metadata(&path, &expected)?;
-        }
-        Err(err) => {
-            writeln!(out, "sync metadata is invalid; refusing to sync")?;
-            writeln!(out, "{err:#}")?;
-            writeln!(
-                out,
-                "resolve .aish-sync.toml to one repository encryption fingerprint, then run #sync now"
-            )?;
-            return Ok(false);
-        }
+    if !sync_repository_metadata_file_matches(&path, &expected)? {
+        write_sync_repository_metadata(&path, &expected)?;
     }
     Ok(true)
 }
@@ -487,6 +533,10 @@ fn write_sync_repository_metadata_mismatch(
     writeln!(
         out,
         "sync encryption key mismatch; refusing to sync until one repository key is chosen"
+    )?;
+    writeln!(
+        out,
+        "Aish checks remote sync metadata before choosing a merge or decryption path."
     )?;
     writeln!(
         out,
@@ -1142,12 +1192,12 @@ fn sync_pull_plan(root: &Path, allow_unrelated: bool) -> Result<Option<GitComman
 }
 
 fn remote_sync_branch(root: &Path) -> Result<Option<String>> {
-    if let Some(branch) = current_branch(root)?
+    if let Some(branch) = remote_head_branch(root)?
         && remote_branch_exists(root, &branch)?
     {
         return Ok(Some(branch));
     }
-    if let Some(branch) = remote_head_branch(root)?
+    if let Some(branch) = current_branch(root)?
         && remote_branch_exists(root, &branch)?
     {
         return Ok(Some(branch));
@@ -1460,30 +1510,6 @@ pub(super) fn describe_git_command(command: &GitCommandPlan) -> String {
     parts.join(" ")
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[cfg(unix)]
-    #[test]
-    fn git_command_timeout_returns_prompt_control_quickly() {
-        let temp = tempfile::tempdir().unwrap();
-        let command = GitCommandPlan {
-            program: "sleep".to_string(),
-            args: vec!["5".to_string()],
-        };
-
-        let started = Instant::now();
-        let result =
-            run_git_command_with_timeout(temp.path(), &command, Duration::from_millis(100))
-                .unwrap();
-
-        assert!(!result.success);
-        assert!(result.stderr.contains("git command timed out after 1s"));
-        assert!(started.elapsed() < Duration::from_secs(2));
-    }
-}
-
 fn parse_sync_trigger_toggle(args: &str) -> Option<(&str, bool)> {
     parse_named_bool_toggle(args, is_sync_trigger)
 }
@@ -1556,4 +1582,28 @@ fn update_sync_config(
     state.sync_config = config.sync;
     state.append_event(EventLevel::Info, "sync config changed")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn git_command_timeout_returns_prompt_control_quickly() {
+        let temp = tempfile::tempdir().unwrap();
+        let command = GitCommandPlan {
+            program: "sleep".to_string(),
+            args: vec!["5".to_string()],
+        };
+
+        let started = Instant::now();
+        let result =
+            run_git_command_with_timeout(temp.path(), &command, Duration::from_millis(100))
+                .unwrap();
+
+        assert!(!result.success);
+        assert!(result.stderr.contains("git command timed out after 1s"));
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
 }

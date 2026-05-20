@@ -864,6 +864,10 @@ fn validate_template_remote_worktree(out: &mut impl Write, repo: &Path) -> Resul
                 out,
                 "template remote metadata is invalid; refusing to use this repository"
             )?;
+            writeln!(
+                out,
+                "Fix .aish-template-remote.toml, or use a separate empty template remote, then retry #template fetch or #template publish."
+            )?;
             return Ok(false);
         }
         return Ok(true);

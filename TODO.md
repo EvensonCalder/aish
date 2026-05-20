@@ -60,12 +60,33 @@ move the result into user-facing documentation if it changes behavior.
 
 - [ ] Extend template sharing review workflows after the first static remote
   flow is stable.
+  - Keep end-to-end tests for virtual template remotes with at least two
+    publishers and one importer.
+  - Keep encrypted publish/fetch/analyze/import tests using an isolated fake
+    GPG or disposable real `GNUPGHOME`.
   - Add richer diff/preview commands for fetched templates before import.
   - Add trust/signature guidance for public template remotes if sharing expands
     beyond known collaborators.
   - Keep template sharing independent from private sync; do not mix private
     history, drafts, AI history, notes, config, logs, cache, or secrets into
     template remotes.
+
+## Sync Staging
+
+- [ ] Move private sync payload merging into an isolated staging workspace.
+  - Fetch remote data into a temporary Git checkout under `cache/runtime`, not
+    directly into the active Aish home.
+  - Resolve remote metadata, content options, key fingerprint decisions, and
+    Git branch selection before touching active managed files.
+  - Copy or merge validated results back into the active Aish home only after
+    conflicts are resolved.
+  - Preserve the current lock, timeout, startup sync, exit sync, and
+    `#sync abort|continue|resolve-union` semantics while changing the
+    implementation boundary.
+  - Cover virtual Git remotes with two local users, empty remotes, existing
+    unrelated remotes, stale local metadata, different remote default branches,
+    content-option conflicts, key mismatches, startup sync, exit sync, and
+    plaintext union conflict resolution.
 
 ## PTY And Passthrough Hardening
 

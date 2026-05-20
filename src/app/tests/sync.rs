@@ -715,7 +715,7 @@ fn sync_rejects_repository_key_mismatch_before_staging() {
     let root = temp.path().join("aish-home");
     seed_local_remote(&remote, &seed, &root);
     crate::sync::write_sync_repository_metadata(
-        root.join(crate::sync::sync_repository_metadata_path()),
+        seed.join(crate::sync::sync_repository_metadata_path()),
         &crate::sync::sync_repository_metadata_for(
             &SyncConfig::default(),
             true,
@@ -723,6 +723,9 @@ fn sync_rejects_repository_key_mismatch_before_staging() {
         ),
     )
     .unwrap();
+    run_test_git(&seed, ["add", ".aish-sync.toml"]);
+    run_test_git(&seed, ["commit", "-m", "remote metadata"]);
+    run_test_git(&seed, ["push"]);
     let mut state = sync_state_for_root(&root, &remote);
     state.encryption_config = EncryptionConfig {
         enabled: true,
@@ -735,10 +738,47 @@ fn sync_rejects_repository_key_mismatch_before_staging() {
 
     let output = String::from_utf8(output).unwrap();
     assert!(output.contains("sync encryption key mismatch"), "{output}");
+    assert!(
+        output.contains(
+            "Aish checks remote sync metadata before choosing a merge or decryption path"
+        ),
+        "{output}"
+    );
     assert!(output.contains(REMOTE_TEST_FINGERPRINT), "{output}");
     assert!(output.contains(LOCAL_TEST_FINGERPRINT), "{output}");
     assert!(output.contains("#encrypt rotate <chosen-full-key-fingerprint>"));
     assert!(!output.contains("sync push completed"));
+}
+
+#[test]
+fn sync_rejects_invalid_remote_metadata_with_actionable_message() {
+    let _guard = git_env_guard();
+    let temp = tempfile::tempdir().unwrap();
+    let remote = temp.path().join("remote.git");
+    let seed = temp.path().join("seed");
+    let root = temp.path().join("aish-home");
+    seed_local_remote(&remote, &seed, &root);
+
+    fs::write(seed.join(".aish-sync.toml"), "version = \"bad\"\n").unwrap();
+    run_test_git(&seed, ["add", ".aish-sync.toml"]);
+    run_test_git(&seed, ["commit", "-m", "invalid remote metadata"]);
+    run_test_git(&seed, ["push"]);
+
+    let mut state = sync_state_for_root(&root, &remote);
+    let mut output = Vec::new();
+    run_manual_sync_push(&mut state, &mut output).unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(
+        output.contains("remote sync metadata is invalid; refusing to sync"),
+        "{output}"
+    );
+    assert!(
+        output.contains("Fix the remote .aish-sync.toml on the sync branch"),
+        "{output}"
+    );
+    assert!(!output.contains("sync step ok: git add"), "{output}");
+    assert!(!output.contains("sync push completed"), "{output}");
 }
 
 #[test]
@@ -798,6 +838,104 @@ fn sync_rejects_remote_key_mismatch_before_staging_local_changes() {
     assert!(!output.contains("sync step ok: git add"), "{output}");
     assert!(!output.contains("sync step ok: git push"), "{output}");
     assert!(!output.contains("sync push completed"));
+}
+
+#[test]
+fn sync_uses_remote_head_metadata_when_local_file_and_branch_are_stale() {
+    let _guard = git_env_guard();
+    let temp = tempfile::tempdir().unwrap();
+    let remote = temp.path().join("remote.git");
+    let seed = temp.path().join("seed");
+    let root = temp.path().join("aish-home");
+
+    run_test_git(temp.path(), ["init", "--bare", remote.to_str().unwrap()]);
+    fs::create_dir_all(&seed).unwrap();
+    run_test_git(&seed, ["init"]);
+    run_test_git(&seed, ["config", "user.name", "Aish Test"]);
+    run_test_git(&seed, ["config", "user.email", "aish@example.invalid"]);
+    run_test_git(&seed, ["config", "commit.gpgsign", "false"]);
+    crate::sync::write_sync_repository_metadata(
+        seed.join(crate::sync::sync_repository_metadata_path()),
+        &crate::sync::sync_repository_metadata_for(
+            &SyncConfig::default(),
+            true,
+            LOCAL_TEST_FINGERPRINT,
+        ),
+    )
+    .unwrap();
+    run_test_git(&seed, ["add", ".aish-sync.toml"]);
+    run_test_git(&seed, ["commit", "-m", "encrypted metadata"]);
+    run_test_git(&seed, ["branch", "-M", "main"]);
+    run_test_git(&seed, ["remote", "add", "origin", remote.to_str().unwrap()]);
+    run_test_git(&seed, ["push", "-u", "origin", "HEAD"]);
+
+    run_test_git(&seed, ["checkout", "-b", "master"]);
+    crate::sync::write_sync_repository_metadata(
+        seed.join(crate::sync::sync_repository_metadata_path()),
+        &crate::sync::sync_repository_metadata_for(&SyncConfig::default(), false, ""),
+    )
+    .unwrap();
+    run_test_git(&seed, ["add", ".aish-sync.toml"]);
+    run_test_git(&seed, ["commit", "-m", "stale plaintext metadata"]);
+    run_test_git(&seed, ["push", "-u", "origin", "HEAD"]);
+    run_test_git(
+        temp.path(),
+        [
+            "--git-dir",
+            remote.to_str().unwrap(),
+            "symbolic-ref",
+            "HEAD",
+            "refs/heads/main",
+        ],
+    );
+
+    fs::create_dir_all(&root).unwrap();
+    run_test_git(&root, ["init"]);
+    run_test_git(&root, ["config", "user.name", "Aish Test"]);
+    run_test_git(&root, ["config", "user.email", "aish@example.invalid"]);
+    run_test_git(&root, ["config", "commit.gpgsign", "false"]);
+    run_test_git(&root, ["branch", "-M", "master"]);
+    run_test_git(&root, ["remote", "add", "origin", remote.to_str().unwrap()]);
+    crate::sync::write_sync_repository_metadata(
+        root.join(crate::sync::sync_repository_metadata_path()),
+        &crate::sync::sync_repository_metadata_for(&SyncConfig::default(), false, ""),
+    )
+    .unwrap();
+
+    let mut state = sync_state_for_root(&root, &remote);
+    state.encryption_config = EncryptionConfig {
+        enabled: true,
+        key_fingerprint: LOCAL_TEST_FINGERPRINT.to_string(),
+        ..EncryptionConfig::default()
+    };
+    let mut output = Vec::new();
+    run_manual_sync_push(&mut state, &mut output).unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(!output.contains("sync encryption key mismatch"), "{output}");
+    assert!(
+        output.contains("sync step ok: git branch -M main"),
+        "{output}"
+    );
+    assert!(output.contains("sync push completed"), "{output}");
+
+    let pushed_metadata = run_test_git_stdout(
+        temp.path(),
+        [
+            "--git-dir",
+            remote.to_str().unwrap(),
+            "show",
+            "main:.aish-sync.toml",
+        ],
+    );
+    assert!(
+        pushed_metadata.contains("enabled = true"),
+        "{pushed_metadata}"
+    );
+    assert!(
+        pushed_metadata.contains(LOCAL_TEST_FINGERPRINT),
+        "{pushed_metadata}"
+    );
 }
 
 #[test]
@@ -1139,6 +1277,89 @@ fn startup_sync_trigger_runs_without_periodic_schedule() {
         fs::read_to_string(root.join("cache/runtime/sync.last_attempt")).unwrap(),
         "42\n"
     );
+}
+
+#[test]
+fn startup_sync_trigger_runs_full_sync_against_remote() {
+    let _guard = git_env_guard();
+    let temp = tempfile::tempdir().unwrap();
+    let remote = temp.path().join("remote.git");
+    let seed = temp.path().join("seed");
+    let root = temp.path().join("aish-home");
+    seed_local_remote(&remote, &seed, &root);
+
+    fs::create_dir_all(root.join("history")).unwrap();
+    fs::write(
+        root.join("history/regular.jsonl"),
+        "{\"command\":\"startup-trigger\"}\n",
+    )
+    .unwrap();
+    let mut state = sync_state_for_root(&root, &remote);
+    state.sync_config.startup = true;
+    state.clock = || 7_200;
+    let mut output = Vec::new();
+
+    run_startup_sync_check(&mut state, &root, &mut output).unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(
+        output.contains("startup sync enabled; running #sync now"),
+        "{output}"
+    );
+    assert!(output.contains("sync push completed"), "{output}");
+    assert_eq!(
+        fs::read_to_string(root.join("cache/runtime/sync.last_attempt")).unwrap(),
+        "7200\n"
+    );
+    let pushed_history = run_test_git_stdout(
+        temp.path(),
+        [
+            "--git-dir",
+            remote.to_str().unwrap(),
+            "show",
+            "HEAD:history/regular.jsonl",
+        ],
+    );
+    assert!(pushed_history.contains("startup-trigger"));
+}
+
+#[test]
+fn exit_sync_trigger_runs_full_sync_against_remote() {
+    let _guard = git_env_guard();
+    let temp = tempfile::tempdir().unwrap();
+    let remote = temp.path().join("remote.git");
+    let seed = temp.path().join("seed");
+    let root = temp.path().join("aish-home");
+    seed_local_remote(&remote, &seed, &root);
+
+    fs::create_dir_all(root.join("history")).unwrap();
+    fs::write(
+        root.join("history/regular.jsonl"),
+        "{\"command\":\"exit-trigger\"}\n",
+    )
+    .unwrap();
+    let mut state = sync_state_for_root(&root, &remote);
+    state.sync_config.exit = true;
+    let mut output = Vec::new();
+
+    run_exit_sync_if_enabled(&mut state, &mut output).unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(
+        output.contains("exit sync enabled; running #sync now"),
+        "{output}"
+    );
+    assert!(output.contains("sync push completed"), "{output}");
+    let pushed_history = run_test_git_stdout(
+        temp.path(),
+        [
+            "--git-dir",
+            remote.to_str().unwrap(),
+            "show",
+            "HEAD:history/regular.jsonl",
+        ],
+    );
+    assert!(pushed_history.contains("exit-trigger"));
 }
 
 #[test]

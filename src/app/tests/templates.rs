@@ -498,6 +498,81 @@ fn template_publish_writes_template_only_remote() {
 }
 
 #[test]
+fn template_publish_merges_two_publishers_and_imports_from_consumer() {
+    let temp = tempfile::tempdir().unwrap();
+    let remote = temp.path().join("templates.git");
+    run_test_git(temp.path(), ["init", "--bare", remote.to_str().unwrap()]);
+
+    let publisher_a_root = temp.path().join("publisher-a");
+    let mut publisher_a = template_sharing_state(&publisher_a_root);
+    run_template_private_command(
+        &mut publisher_a,
+        &format!("remote add shared {}", remote.display()),
+    );
+    publisher_a
+        .append_template(&TemplateEntry::new("kubectl get pods -n {namespace}"))
+        .unwrap();
+    let output = run_template_private_command(&mut publisher_a, "publish shared");
+    assert!(output.contains("template publish completed: shared (local=1, remote=1"));
+
+    let publisher_b_root = temp.path().join("publisher-b");
+    let mut publisher_b = template_sharing_state(&publisher_b_root);
+    run_template_private_command(
+        &mut publisher_b,
+        &format!("remote add shared {}", remote.display()),
+    );
+    publisher_b
+        .append_template(&TemplateEntry::new("rsync -avz {from} {to}"))
+        .unwrap();
+    fs::create_dir_all(publisher_b_root.join("history")).unwrap();
+    fs::write(
+        publisher_b_root.join("history/regular.jsonl"),
+        "private history\n",
+    )
+    .unwrap();
+    let output = run_template_private_command(&mut publisher_b, "publish shared");
+    assert!(output.contains("template publish completed: shared (local=1, remote=2"));
+
+    let tree = run_test_git_stdout(
+        temp.path(),
+        [
+            "--git-dir",
+            remote.to_str().unwrap(),
+            "ls-tree",
+            "-r",
+            "--name-only",
+            "main",
+        ],
+    );
+    assert!(tree.contains("templates/templates.jsonl"));
+    assert!(!tree.contains("history/"));
+    let templates = run_test_git_stdout(
+        temp.path(),
+        [
+            "--git-dir",
+            remote.to_str().unwrap(),
+            "show",
+            "main:templates/templates.jsonl",
+        ],
+    );
+    assert!(templates.contains("kubectl get pods"));
+    assert!(templates.contains("rsync -avz"));
+
+    let consumer_root = temp.path().join("consumer");
+    let mut consumer = template_sharing_state(&consumer_root);
+    run_template_private_command(
+        &mut consumer,
+        &format!("remote add shared {}", remote.display()),
+    );
+    let output = run_template_private_command(&mut consumer, "fetch shared");
+    assert!(output.contains("template fetch completed: shared (templates=2)"));
+    let output = run_template_private_command(&mut consumer, "import shared all");
+    assert!(output.contains("template import completed: imported=2 skipped=0"));
+    let loaded = consumer.load_templates().unwrap();
+    assert_eq!(loaded.items.len(), 2);
+}
+
+#[test]
 fn template_fetch_analyze_and_import_are_reviewable_and_deduplicated() {
     let temp = tempfile::tempdir().unwrap();
     let remote = temp.path().join("templates.git");
@@ -590,6 +665,59 @@ fn template_fetch_refuses_private_sync_repository() {
     assert!(output.contains(
         "template remote appears to be a private Aish sync repository; use a separate template remote"
     ));
+    assert!(!output.contains("template fetch completed"));
+}
+
+#[test]
+fn template_fetch_rejects_invalid_remote_metadata_with_actionable_message() {
+    let temp = tempfile::tempdir().unwrap();
+    let remote = temp.path().join("templates.git");
+    run_test_git(temp.path(), ["init", "--bare", remote.to_str().unwrap()]);
+    let seed = temp.path().join("seed");
+    fs::create_dir_all(&seed).unwrap();
+    run_test_git(&seed, ["init"]);
+    run_test_git(&seed, ["config", "user.name", "Aish Test"]);
+    run_test_git(&seed, ["config", "user.email", "aish@example.invalid"]);
+    fs::write(
+        seed.join(".aish-template-remote.toml"),
+        "version = 1\nkind = \"wrong\"\ncontent = \"templates-only\"\nencryption = \"none\"\n",
+    )
+    .unwrap();
+    fs::create_dir_all(seed.join("templates")).unwrap();
+    fs::write(
+        seed.join("templates/templates.jsonl"),
+        "{\"body\":\"should not import\"}\n",
+    )
+    .unwrap();
+    run_test_git(
+        &seed,
+        [
+            "add",
+            ".aish-template-remote.toml",
+            "templates/templates.jsonl",
+        ],
+    );
+    run_test_git(&seed, ["commit", "-m", "invalid template metadata"]);
+    run_test_git(&seed, ["branch", "-M", "main"]);
+    run_test_git(&seed, ["remote", "add", "origin", remote.to_str().unwrap()]);
+    run_test_git(&seed, ["push", "-u", "origin", "HEAD"]);
+
+    let root = temp.path().join("home");
+    let mut state = template_sharing_state(&root);
+    run_template_private_command(
+        &mut state,
+        &format!("remote add shared {}", remote.display()),
+    );
+
+    let output = run_template_private_command(&mut state, "fetch shared");
+
+    assert!(
+        output.contains("template remote metadata is invalid; refusing to use this repository")
+    );
+    assert!(
+        output.contains("Fix .aish-template-remote.toml, or use a separate empty template remote"),
+        "{output}"
+    );
     assert!(!output.contains("template fetch completed"));
 }
 

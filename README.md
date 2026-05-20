@@ -508,12 +508,14 @@ Implemented:
 - Stage managed enabled paths automatically, commit only when staged content changed, merge remote updates with `git pull --no-rebase --no-edit`, then push.
 - Treat an empty bare/GitHub remote as a normal first-sync target: skip pull when the remote has no branch, then push with upstream setup.
 - Use explicit remote branches for pulls instead of relying on local Git branch tracking.
+- Inspect remote sync metadata through an isolated temporary Git workspace so a stale local `.aish-sync.toml` cannot be mistaken for the remote repository's current encryption state.
+- Prefer the remote default branch when deciding the sync branch, then align the local sync branch before committing.
 - Clear stale sync locks left by dead Aish processes before refusing a new sync.
 - Stop an individual Git sync step after 60 seconds, report the timeout, release the sync lock, and return to the Aish prompt.
 - Warn when existing Aish-managed files are present but excluded because their sync category is disabled.
 - Retry pull with `--allow-unrelated-histories` when an existing local sync repository is connected to a populated remote with separate history.
 - If `.aish-sync.toml` disagrees with local content category settings, warn and use the repository settings as the private sync authority. Existing local files excluded by those settings are left alone and only warned about.
-- Stop before pushing if `.aish-sync.toml` disagrees with the local encryption config, or if local encrypted sync is configured with an email/selector instead of a full fingerprint.
+- Stop before pushing if remote sync metadata disagrees with the local encryption config, or if local encrypted sync is configured with an email/selector instead of a full fingerprint.
 - Use Git's union merge driver for plaintext Aish JSONL files so independent appends usually merge by keeping both sides.
 - Offer `#sync resolve-union`, `#sync continue`, and `#sync abort` when a conflict still needs a user choice.
 - Log sync failures without leaking secret-like values.
