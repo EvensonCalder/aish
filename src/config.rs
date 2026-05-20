@@ -156,6 +156,10 @@ mod tests {
                         name: "shared".to_string(),
                         remote: "git@example.invalid:duplicate.git".to_string(),
                     },
+                    TemplateRemoteConfig {
+                        name: "badremote".to_string(),
+                        remote: "git@example.invalid:bad.git\n--upload-pack=x".to_string(),
+                    },
                 ],
             },
         };

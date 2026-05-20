@@ -820,7 +820,7 @@ cargo test
 
 Current active inventory:
 
-- 599 library unit tests.
+- 605 library unit tests.
 - 28 draft execution integration tests.
 - 1 first-run integration test.
 - 32 PTY integration tests, with bash/zsh active by default and fish-specific cases opt-in.

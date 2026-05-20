@@ -3,7 +3,7 @@ use std::fs;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -11,6 +11,7 @@ use anyhow::{Context, Result, bail};
 
 use crate::config::{self, write_private_file};
 use crate::encryption::{atomic_gpg_encrypt_bytes, gpg_decrypt_file, gpg_program};
+use crate::git_remote::{sanitize_git_remote, valid_git_branch_name};
 use crate::log::EventLevel;
 use crate::sync::{
     GitCommandPlan, StartupSyncDecision, SyncFailureKind, SyncLock, SyncRepositoryContentMetadata,
@@ -36,18 +37,17 @@ pub(super) fn set_sync_remote(
     out: &mut impl Write,
     args: &str,
 ) -> Result<()> {
-    let remote = args.trim();
-    if remote.is_empty() {
+    let Some(remote) = sanitize_git_remote(args) else {
         writeln!(out, "usage: #set-remote <git-url>")?;
         return Ok(());
-    }
+    };
     if state.config_path.is_none() {
         writeln!(out, "config path is not configured; sync config not saved")?;
         return Ok(());
     }
 
     update_sync_config(state, |config| {
-        config.sync.remote = remote.to_string();
+        config.sync.remote = remote.clone();
     })?;
     writeln!(out, "sync.remote={remote}")?;
     writeln!(out, "no git command run")?;
@@ -131,14 +131,13 @@ pub(super) fn set_sync_schedule(
 }
 
 pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -> Result<()> {
-    let remote = state.sync_config.remote.trim().to_string();
-    if remote.is_empty() {
+    let Some(remote) = sanitize_git_remote(&state.sync_config.remote) else {
         writeln!(
             out,
             "sync remote is not configured; run #set-remote <git-url> first"
         )?;
         return Ok(());
-    }
+    };
     let Some(root) = sync_root(state) else {
         writeln!(out, "config path is not configured; sync push cannot run")?;
         return Ok(());
@@ -459,7 +458,7 @@ fn parse_remote_sync_refs(raw: &str) -> RemoteSyncRefs {
         if let Some(rest) = line.strip_prefix("ref: refs/heads/")
             && let Some((branch, target)) = rest.split_once('\t')
             && target == "HEAD"
-            && valid_remote_branch_name(branch)
+            && valid_git_branch_name(branch)
         {
             head_branch = Some(branch.to_string());
             continue;
@@ -470,7 +469,7 @@ fn parse_remote_sync_refs(raw: &str) -> RemoteSyncRefs {
         let Some(branch) = refname.strip_prefix("refs/heads/") else {
             continue;
         };
-        if valid_remote_branch_name(branch) {
+        if valid_git_branch_name(branch) {
             branches.push(branch.to_string());
         }
     }
@@ -480,10 +479,6 @@ fn parse_remote_sync_refs(raw: &str) -> RemoteSyncRefs {
         head_branch,
         branches,
     }
-}
-
-fn valid_remote_branch_name(branch: &str) -> bool {
-    !branch.is_empty() && !branch.chars().any(char::is_control)
 }
 
 fn select_remote_sync_branch(
@@ -901,6 +896,13 @@ fn commit_interrupted_merge_and_push(
     out: &mut impl Write,
     root: &Path,
 ) -> Result<()> {
+    let Some(remote) = sanitize_git_remote(&state.sync_config.remote) else {
+        writeln!(
+            out,
+            "sync remote is not configured; run #set-remote <git-url> first"
+        )?;
+        return Ok(());
+    };
     let Some(mut sync_data_snapshot) = verify_sync_data_for_git_write(state, out, root)? else {
         return Ok(());
     };
@@ -919,7 +921,6 @@ fn commit_interrupted_merge_and_push(
         return Ok(());
     }
     let push = push_plan();
-    let remote = state.sync_config.remote.trim().to_string();
     let current_branch = current_branch(root)?;
     let mut remote_cache = prepare_remote_sync_cache(root, &remote, current_branch.as_deref())?;
     if !run_sync_push_step(
@@ -1868,12 +1869,15 @@ fn run_git_command_with_timeout(
     command: &GitCommandPlan,
     timeout: Duration,
 ) -> Result<GitStepResult> {
-    let mut child = Command::new(&command.program)
+    let mut process = Command::new(&command.program);
+    process
         .args(&command.args)
         .current_dir(root)
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    configure_git_process(&mut process);
+    let mut child = process
         .spawn()
         .with_context(|| format!("failed to run {}", describe_git_command(command)))?;
 
@@ -1895,7 +1899,7 @@ fn run_git_command_with_timeout(
             });
         }
         if started.elapsed() >= timeout {
-            let _ = child.kill();
+            let _ = terminate_git_child(&mut child);
             let output = child.wait_with_output().with_context(|| {
                 format!(
                     "failed to collect timed out {}",
@@ -1919,6 +1923,41 @@ fn run_git_command_with_timeout(
         }
         thread::sleep(Duration::from_millis(50));
     }
+}
+
+#[cfg(unix)]
+fn configure_git_process(process: &mut Command) {
+    use std::os::unix::process::CommandExt;
+
+    process.process_group(0);
+}
+
+#[cfg(not(unix))]
+fn configure_git_process(_process: &mut Command) {}
+
+#[cfg(unix)]
+fn terminate_git_child(child: &mut Child) -> std::io::Result<()> {
+    let pgid = child.id() as libc::pid_t;
+    unsafe {
+        libc::kill(-pgid, libc::SIGTERM);
+    }
+    for _ in 0..5 {
+        if child.try_wait()?.is_some() {
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    unsafe {
+        libc::kill(-pgid, libc::SIGKILL);
+    }
+    let _ = child.kill();
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn terminate_git_child(child: &mut Child) -> std::io::Result<()> {
+    let _ = child.kill();
+    Ok(())
 }
 
 fn is_commit_command(command: &GitCommandPlan) -> bool {
@@ -2035,5 +2074,66 @@ mod tests {
         assert!(!result.success);
         assert!(result.stderr.contains("git command timed out after 1s"));
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn git_command_timeout_terminates_child_process_group() {
+        let temp = tempfile::tempdir().unwrap();
+        let child_script = temp.path().join("child.sh");
+        let parent_script = temp.path().join("parent.sh");
+        let terminated = temp.path().join("terminated");
+        let child_pid = temp.path().join("child.pid");
+        fs::write(
+            &child_script,
+            r#"trap 'echo terminated > "$1"; exit 0' TERM
+echo $$ > "$2"
+while :; do sleep 1; done
+"#,
+        )
+        .unwrap();
+        fs::write(
+            &parent_script,
+            r#"sh "$1" "$2" "$3" &
+child=$!
+while [ ! -s "$3" ]; do sleep 0.01; done
+wait "$child"
+"#,
+        )
+        .unwrap();
+        let command = GitCommandPlan {
+            program: "sh".to_string(),
+            args: vec![
+                parent_script.display().to_string(),
+                child_script.display().to_string(),
+                terminated.display().to_string(),
+                child_pid.display().to_string(),
+            ],
+        };
+
+        let started = Instant::now();
+        let result =
+            run_git_command_with_timeout(temp.path(), &command, Duration::from_millis(200))
+                .unwrap();
+
+        assert!(!result.success);
+        assert!(result.stderr.contains("git command timed out after 1s"));
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(
+            wait_for_path(&terminated, Duration::from_secs(1)),
+            "timed out git command did not terminate its child process group"
+        );
+    }
+
+    #[cfg(unix)]
+    fn wait_for_path(path: &Path, timeout: Duration) -> bool {
+        let started = Instant::now();
+        while started.elapsed() < timeout {
+            if path.exists() {
+                return true;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        path.exists()
     }
 }

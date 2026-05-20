@@ -78,6 +78,39 @@ fn sync_config_commands_persist_without_running_git() {
 }
 
 #[test]
+fn sync_remote_rejects_control_characters_without_persisting() {
+    let _guard = git_env_guard();
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.toml");
+    let events_path = temp.path().join("logs/events.jsonl");
+    config::save_config(&config_path, &config::Config::default()).unwrap();
+    let mut state = AppState {
+        config_path: Some(config_path.clone()),
+        events_path: Some(events_path.clone()),
+        ..AppState::default()
+    };
+    let mut output = Vec::new();
+
+    set_sync_remote(
+        &mut state,
+        &mut output,
+        "git@example.invalid:aish.git\n--upload-pack=/tmp/side-effect",
+    )
+    .unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert_eq!(output, "usage: #set-remote <git-url>\n");
+    assert!(
+        config::load_config(&config_path)
+            .unwrap()
+            .sync
+            .remote
+            .is_empty()
+    );
+    assert!(load_events(&events_path).unwrap().items.is_empty());
+}
+
+#[test]
 fn sync_now_runs_against_configured_local_git_remote() {
     let _guard = git_env_guard();
     let temp = tempfile::tempdir().unwrap();

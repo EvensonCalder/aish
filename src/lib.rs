@@ -9,6 +9,7 @@ mod display_width;
 pub mod editor;
 pub mod encrypted_writer;
 pub mod encryption;
+mod git_remote;
 pub mod history;
 pub mod input;
 pub mod keybindings;

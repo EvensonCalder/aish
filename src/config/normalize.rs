@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 
+use crate::git_remote::{sanitize_git_remote, valid_template_remote_name};
+
 use super::{CompletionConfig, Config, ContextConfig, PasteConfig, PromptConfig, default_aish_dir};
 
 pub fn normalize_config(config: &mut Config) {
@@ -61,11 +63,11 @@ pub fn normalize_config(config: &mut Config) {
     }
     config.encryption.key_fingerprint = config.encryption.key_fingerprint.trim().to_string();
     config.encryption.recipient = config.encryption.recipient.trim().to_string();
-    config.sync.remote = config.sync.remote.trim().to_string();
+    config.sync.remote = sanitize_git_remote(&config.sync.remote).unwrap_or_default();
     config.sync.schedule = config.sync.schedule.trim().to_string();
     for remote in &mut config.template_sharing.remotes {
         remote.name = remote.name.trim().to_string();
-        remote.remote = remote.remote.trim().to_string();
+        remote.remote = sanitize_git_remote(&remote.remote).unwrap_or_default();
     }
     config.template_sharing.remotes.retain(|remote| {
         !remote.name.is_empty()
@@ -77,11 +79,4 @@ pub fn normalize_config(config: &mut Config) {
         .template_sharing
         .remotes
         .retain(|remote| names.insert(remote.name.clone()));
-}
-
-fn valid_template_remote_name(name: &str) -> bool {
-    !name.is_empty()
-        && name
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
 }

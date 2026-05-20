@@ -444,6 +444,23 @@ fn template_remote_add_rejects_invalid_name_without_persisting() {
 }
 
 #[test]
+fn template_remote_add_rejects_control_character_url_without_persisting() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("home");
+    let mut state = template_sharing_state(&root);
+
+    let output = run_template_private_command(
+        &mut state,
+        "remote add shared git@example.invalid:templates.git\n--upload-pack=/tmp/side-effect",
+    );
+
+    assert!(output.contains("usage: #template remote add <name> <git-url>"));
+    assert!(state.template_sharing_config.remotes.is_empty());
+    let loaded = config::load_config(&root.join("config.toml")).unwrap();
+    assert!(loaded.template_sharing.remotes.is_empty());
+}
+
+#[test]
 fn template_remote_url_change_clears_fetched_review_cache() {
     let temp = tempfile::tempdir().unwrap();
     let old_remote = temp.path().join("old-templates.git");

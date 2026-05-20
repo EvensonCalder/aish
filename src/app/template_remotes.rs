@@ -10,6 +10,7 @@ use crate::config::{self, TemplateRemoteConfig};
 use crate::encryption::{
     atomic_gpg_encrypt_bytes, gpg_decrypt_file, gpg_program, resolve_gpg_key_fingerprint,
 };
+use crate::git_remote::{sanitize_git_remote, valid_git_branch_name, valid_template_remote_name};
 use crate::history::{JsonlLineError, JsonlLoad, rewrite_jsonl};
 use crate::log::EventLevel;
 use crate::sync::GitCommandPlan;
@@ -187,8 +188,14 @@ fn add_template_remote(
     remote: &str,
 ) -> Result<()> {
     let name = name.trim();
-    let remote = remote.trim();
-    if !valid_template_remote_name(name) || remote.is_empty() {
+    let Some(remote) = sanitize_git_remote(remote) else {
+        writeln!(
+            out,
+            "usage: #template remote add <name> <git-url>; name may contain letters, digits, dash, and underscore"
+        )?;
+        return Ok(());
+    };
+    if !valid_template_remote_name(name) {
         writeln!(
             out,
             "usage: #template remote add <name> <git-url>; name may contain letters, digits, dash, and underscore"
@@ -216,11 +223,11 @@ fn add_template_remote(
             .iter_mut()
             .find(|item| item.name == name)
         {
-            existing.remote = remote.to_string();
+            existing.remote = remote.clone();
         } else {
             config.template_sharing.remotes.push(TemplateRemoteConfig {
                 name: name.to_string(),
-                remote: remote.to_string(),
+                remote: remote.clone(),
             });
         }
     })?;
@@ -848,7 +855,7 @@ fn parse_template_remote_refs(raw: &str) -> TemplateRemoteRefs {
         if let Some(rest) = line.strip_prefix("ref: refs/heads/")
             && let Some((branch, target)) = rest.split_once('\t')
             && target == "HEAD"
-            && valid_template_remote_branch_name(branch)
+            && valid_git_branch_name(branch)
         {
             head_branch = Some(branch.to_string());
             continue;
@@ -859,7 +866,7 @@ fn parse_template_remote_refs(raw: &str) -> TemplateRemoteRefs {
         let Some(branch) = refname.strip_prefix("refs/heads/") else {
             continue;
         };
-        if valid_template_remote_branch_name(branch) {
+        if valid_git_branch_name(branch) {
             branches.push(branch.to_string());
         }
     }
@@ -895,10 +902,6 @@ fn select_template_remote_branch(refs: &TemplateRemoteRefs) -> Option<String> {
         return refs.branches.first().cloned();
     }
     None
-}
-
-fn valid_template_remote_branch_name(branch: &str) -> bool {
-    !branch.is_empty() && !branch.chars().any(char::is_control)
 }
 
 fn validate_template_remote_worktree(out: &mut impl Write, repo: &Path) -> Result<bool> {
@@ -1399,11 +1402,4 @@ fn next_word(input: &str) -> Option<(&str, &str)> {
 fn single_word(input: &str) -> Option<&str> {
     let (word, rest) = next_word(input)?;
     rest.trim().is_empty().then_some(word)
-}
-
-fn valid_template_remote_name(name: &str) -> bool {
-    !name.is_empty()
-        && name
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
 }

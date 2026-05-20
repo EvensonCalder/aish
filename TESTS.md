@@ -14,7 +14,7 @@ git diff --check
 
 Current test inventory:
 
-- 599 library unit tests.
+- 605 library unit tests.
 - 28 draft execution integration tests.
 - 1 first-run integration test.
 - 50 tmux screen-capture integration tests.

@@ -6,6 +6,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::config::{SyncConfig, create_private_dir_all, set_private_file_handle_permissions};
+use crate::git_remote::sanitize_git_remote;
 use crate::log::{DEFAULT_MAX_EVENTS, EventLevel, append_event};
 
 const GITIGNORE_BEGIN: &str = "# BEGIN AISH MANAGED";
@@ -598,7 +599,7 @@ pub fn startup_sync_decision(
     if !config.enabled {
         return StartupSyncDecision::Disabled;
     }
-    if config.remote.trim().is_empty() {
+    if sanitize_git_remote(&config.remote).is_none() {
         return StartupSyncDecision::MissingRemote;
     }
     let schedule = config.schedule.trim();
@@ -926,7 +927,7 @@ fn git_add_args(paths: &[String]) -> Vec<String> {
 }
 
 pub fn init_repo_plan(remote: &str) -> Option<InitRepoPlan> {
-    let remote = sanitize_remote(remote)?;
+    let remote = sanitize_git_remote(remote)?;
     Some(InitRepoPlan {
         commands: vec![
             GitCommandPlan {
@@ -944,14 +945,6 @@ pub fn init_repo_plan(remote: &str) -> Option<InitRepoPlan> {
             },
         ],
     })
-}
-
-fn sanitize_remote(remote: &str) -> Option<String> {
-    let remote = remote.trim();
-    if remote.is_empty() || remote.chars().any(char::is_control) {
-        return None;
-    }
-    Some(remote.to_string())
 }
 
 fn sanitize_commit_message(message: &str) -> String {

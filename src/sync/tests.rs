@@ -273,6 +273,12 @@ fn startup_sync_decision_skips_when_not_configured() {
         StartupSyncDecision::MissingRemote
     );
 
+    config.remote = "git@example.test:aish.git\n--upload-pack=x".to_string();
+    assert_eq!(
+        startup_sync_decision(&config, 100, None),
+        StartupSyncDecision::MissingRemote
+    );
+
     config.remote = "git@example.test:aish.git".to_string();
     assert_eq!(
         startup_sync_decision(&config, 100, None),
