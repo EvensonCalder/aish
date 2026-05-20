@@ -321,7 +321,7 @@ pub fn rewrite_jsonl<T: Serialize>(path: &Path, items: &[T]) -> Result<()> {
             .with_context(|| format!("failed to create JSONL directory {}", parent.display()))?;
     }
 
-    let tmp = path.with_extension("jsonl.tmp");
+    let tmp = JsonlRewriteTemp::new(path.with_extension("jsonl.tmp"));
     {
         let mut options = OpenOptions::new();
         options.create(true).truncate(true).write(true);
@@ -330,25 +330,61 @@ pub fn rewrite_jsonl<T: Serialize>(path: &Path, items: &[T]) -> Result<()> {
             use std::os::unix::fs::OpenOptionsExt;
             options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
         }
-        let mut file = options
-            .open(&tmp)
-            .with_context(|| format!("failed to create JSONL temp file {}", tmp.display()))?;
-        set_private_file_handle_permissions(&file, &tmp)?;
+        let mut file = options.open(tmp.path()).with_context(|| {
+            format!("failed to create JSONL temp file {}", tmp.path().display())
+        })?;
+        set_private_file_handle_permissions(&file, tmp.path())?;
         for item in items {
-            serde_json::to_writer(&mut file, item)
-                .with_context(|| format!("failed to serialize JSONL item for {}", tmp.display()))?;
-            file.write_all(b"\n")
-                .with_context(|| format!("failed to write JSONL newline to {}", tmp.display()))?;
+            serde_json::to_writer(&mut file, item).with_context(|| {
+                format!(
+                    "failed to serialize JSONL item for {}",
+                    tmp.path().display()
+                )
+            })?;
+            file.write_all(b"\n").with_context(|| {
+                format!("failed to write JSONL newline to {}", tmp.path().display())
+            })?;
         }
     }
-    fs::rename(&tmp, path).with_context(|| {
+    fs::rename(tmp.path(), path).with_context(|| {
         format!(
             "failed to replace JSONL file {} with {}",
             path.display(),
-            tmp.display()
+            tmp.path().display()
         )
     })?;
+    tmp.disarm();
     Ok(())
+}
+
+struct JsonlRewriteTemp {
+    path: PathBuf,
+    remove_on_drop: bool,
+}
+
+impl JsonlRewriteTemp {
+    fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            remove_on_drop: true,
+        }
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+
+    fn disarm(mut self) {
+        self.remove_on_drop = false;
+    }
+}
+
+impl Drop for JsonlRewriteTemp {
+    fn drop(&mut self) {
+        if self.remove_on_drop {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
 }
 
 pub fn trim_regular_history(path: &Path, max_entries: usize) -> Result<JsonlLoad<HistoryEntry>> {

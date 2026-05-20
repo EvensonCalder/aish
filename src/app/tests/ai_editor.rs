@@ -326,7 +326,10 @@ fn prepare_editor_session_writes_draft_text() {
 
     assert_eq!(state.mode, Mode::Draft);
     assert_eq!(state.draft.as_str(), "git status");
-    assert_eq!(std::fs::read_to_string(session.path).unwrap(), "git status");
+    assert_eq!(
+        std::fs::read_to_string(&session.path).unwrap(),
+        "git status"
+    );
 }
 
 #[test]
@@ -348,7 +351,10 @@ fn prepare_editor_session_copies_history_selection_to_draft_and_file() {
 
     assert_eq!(state.mode, Mode::Draft);
     assert_eq!(state.draft.as_str(), "git status");
-    assert_eq!(std::fs::read_to_string(session.path).unwrap(), "git status");
+    assert_eq!(
+        std::fs::read_to_string(&session.path).unwrap(),
+        "git status"
+    );
 }
 
 #[test]
@@ -380,7 +386,10 @@ fn prepare_editor_session_copies_ai_selection_to_draft_and_file() {
 
     assert_eq!(state.mode, Mode::Draft);
     assert_eq!(state.draft.as_str(), "git status");
-    assert_eq!(std::fs::read_to_string(session.path).unwrap(), "git status");
+    assert_eq!(
+        std::fs::read_to_string(&session.path).unwrap(),
+        "git status"
+    );
 }
 
 #[test]

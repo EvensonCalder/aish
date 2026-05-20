@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::config::AiConfig;
+use crate::env_name::is_shell_variable_name;
 use crate::history::{AiItem, AiItemKind};
 
 pub const AI_SYSTEM_PROMPT: &str = "You generate shell command candidates for Aish. Return final JSON only. Do not include reasoning, markdown, or prose. The JSON must match {\"items\":[{\"kind\":\"command\",\"text\":\"...\"}]} or template items with kind=\"template\", name, and text. Answer only the current user request; do not repeat unrelated examples or previous commands. For concrete values, emit a concrete command. For generic words such as something, message, file, path, pattern, name, or value, use explicit brace placeholders in the command text, for example echo {message}, instead of treating those words as literal arguments. Use template items for reusable command shapes. Do not include secrets or unrelated commands.";
@@ -58,6 +59,9 @@ pub fn read_api_key_from_env(env_key: &str) -> Result<String> {
     let env_key = env_key.trim();
     if env_key.is_empty() {
         bail!("AI API key environment variable is not configured");
+    }
+    if !is_shell_variable_name(env_key) {
+        bail!("AI API key environment variable name is invalid: {env_key}");
     }
     let value = std::env::var(env_key)
         .map_err(|_| anyhow!("AI API key environment variable is not set: {env_key}"))?;
@@ -250,6 +254,13 @@ mod tests {
                 .to_string()
                 .contains("choices[0].message.content")
         );
+    }
+
+    #[test]
+    fn read_api_key_rejects_invalid_env_key_name() {
+        let err = read_api_key_from_env("BAD-NAME").unwrap_err().to_string();
+
+        assert!(err.contains("environment variable name is invalid"));
     }
 
     #[test]

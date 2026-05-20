@@ -14,12 +14,12 @@ git diff --check
 
 Current test inventory:
 
-- 607 library unit tests.
+- 612 library unit tests.
 - 28 draft execution integration tests.
 - 1 first-run integration test.
 - 50 tmux screen-capture integration tests.
 - 9 of the tmux tests are manual-equivalent workflows that replaced deterministic rows from `MANUAL_TESTS.md`: real-world shell commands, prompt editing keys, completion UX mechanics, private commands/notes, templates/editor/default home, AI/context/sync config, local sync, `less` passthrough smoke, and startup failure messages.
-- 32 PTY integration tests, including default bash/zsh coverage and fish cases that skip unless fish opt-in prerequisites are available.
+- 33 PTY integration tests, including default bash/zsh coverage and fish cases that skip unless fish opt-in prerequisites are available.
 - 120 expect-driven end-to-end interactive scenarios.
 - Expect scenarios run with bounded parallelism inside `expect_runner`. Each scenario gets its own artifact directory and timeout; use `AISH_EXPECT_TEST_JOBS=1` to debug timing-sensitive expect failures, and `AISH_EXPECT_TEST_TIMEOUT_SECS` only when diagnosing a long-running scenario.
 - Expect scenarios force `commit.gpgsign=false` through `GIT_CONFIG_COUNT` so temporary local git repositories do not depend on a developer's global GPG/pinentry setup.
@@ -175,6 +175,7 @@ Tests:
 - `pty::tests::parser_reads_ready_marker_cwd_when_status_is_present`
 - `pty::tests::parse_ready_status_output_reads_status_cwd_and_filters_hook_lines`
 - `pty_backend_runs_commands_and_preserves_shell_state`
+- `bash_pty_backend_passthrough_runs_path_commands_from_bashrc`
 - `pty_backend_captures_failed_command_exit_status`
 - `pty_backend_does_not_confuse_user_output_with_prompt_marker`
 - `pty_backend_keeps_user_commands_but_not_aish_internal_markers_in_history`
@@ -333,7 +334,7 @@ Implemented:
 - `Ctrl-X Ctrl-E` resolves to an external-editor launch action without editing draft state.
 - `Ctrl-X` advanced picker chords resolve to launch actions without editing draft state before the picker returns a selection.
 - `#status` reports the configured keybinding count.
-- AI configuration commands `#model`, `#base-url`, and `#env-key` persist to `config.toml`; `#base-url` stores the normalized final chat-completions URL; `#key set` stores the current configured environment API key with GPG when an encryption key fingerprint is configured, and `#key clear` removes the encrypted key file.
+- AI configuration commands `#model`, `#base-url`, and `#env-key` persist to `config.toml`; `#base-url` stores the normalized final chat-completions URL; `#env-key` rejects names that are not valid shell variable names before persisting; `#key set` stores the current configured environment API key with GPG when an encryption key fingerprint is configured, and `#key clear` removes the encrypted key file.
 - AI helpers normalize chat-completions URLs, read API keys from configured environment variables, build strict JSON-only chat request bodies, and parse/validate structured AI item JSON without relying on newline boundaries.
 - AI session helpers persist parsed AI items to `ai.jsonl`, rebuild command indexes, and switch to `%` AI mode at the first command from the new session.
 - Direct `# prompt` AI requests are wired to the configured chat-completions request path; missing config reports a readable error without crashing or mutating AI history.

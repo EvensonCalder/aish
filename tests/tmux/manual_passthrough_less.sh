@@ -13,18 +13,43 @@ fi
 
 mkdir -p "$HOME_DIR"
 tmux new-session -d -x 120 -y 40 -s "$SESSION" "env HOME='$HOME_DIR' AISH_HOME='$HOME_DIR/.aish' LESS= '$AISH_BIN'"
-sleep 5
 
+capture_pane() {
+    tmux capture-pane -p -S - -t "$SESSION" 2>/dev/null || true
+}
+
+wait_for_capture() {
+    pattern="$1"
+    attempts="${2:-50}"
+    attempt=0
+    while [ "$attempt" -lt "$attempts" ]; do
+        if ! tmux has-session -t "$SESSION" >/dev/null 2>&1; then
+            printf 'tmux session exited while waiting for pattern: %s\n' "$pattern" >&2
+            return 1
+        fi
+        CAPTURE="$(capture_pane)"
+        if printf '%s\n' "$CAPTURE" | rg -q "$pattern"; then
+            return 0
+        fi
+        attempt=$((attempt + 1))
+        sleep 0.2
+    done
+    printf 'timed out waiting for pattern: %s\n' "$pattern" >&2
+    printf '%s\n' "$CAPTURE" >&2
+    return 1
+}
+
+wait_for_capture '>[[:space:]]*$' 150
 tmux send-keys -t "$SESSION" 'less README.md' Enter
-sleep 2
+wait_for_capture '^# Aish$'
 tmux send-keys -t "$SESSION" q
-sleep 2
+wait_for_capture '>[[:space:]]*$'
 tmux send-keys -t "$SESSION" C-c
-sleep 1
+wait_for_capture '>[[:space:]]*$'
 tmux send-keys -t "$SESSION" 'echo after-less' Enter
-sleep 2
+wait_for_capture '^after-less$'
 
-CAPTURE="$(tmux capture-pane -p -S - -t "$SESSION")"
+CAPTURE="$(capture_pane)"
 printf '%s\n' "$CAPTURE"
 
 printf '%s\n' "$CAPTURE" | rg -q '^after-less$'

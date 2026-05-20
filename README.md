@@ -233,6 +233,8 @@ AI configuration:
 #env-key <ENV_NAME>
 ```
 
+`#env-key` accepts shell-compatible variable names such as `OPENAI_API_KEY`.
+
 Prompt customization:
 
 ```text
@@ -820,10 +822,10 @@ cargo test
 
 Current active inventory:
 
-- 607 library unit tests.
+- 612 library unit tests.
 - 28 draft execution integration tests.
 - 1 first-run integration test.
-- 32 PTY integration tests, with bash/zsh active by default and fish-specific cases opt-in.
+- 33 PTY integration tests, with bash/zsh active by default and fish-specific cases opt-in.
 - 120 expect-driven end-to-end interactive scenarios.
 - 50 tmux screen-capture integration tests.
 

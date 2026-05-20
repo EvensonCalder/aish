@@ -36,13 +36,6 @@ case "$AISH_BACKEND_KIND" in
             printf '%s\n' "PS1='bashrc-prompt> '"
             printf '%s\n' "PROMPT_COMMAND='export AISH_TMUX_BASH_PROMPT_COMMAND=ran; printf bash-prompt-noise\\\\n'"
         } > "$HOME_DIR/.bashrc"
-        COMMANDS='
-aish_tmux_alias_from_rc
-aish_tmux_function_from_rc
-printf "env:%s\n" "$AISH_TMUX_BASH_ENV"
-from-aish-tmux-bashrc-path
-printf "prompt-command:%s\n" "$AISH_TMUX_BASH_PROMPT_COMMAND"
-'
         FORBIDDEN='bash-prompt-noise|bashrc-prompt|__AISH_STATUS__|__AISH_READY__'
         ;;
     zsh)
@@ -59,13 +52,6 @@ printf "prompt-command:%s\n" "$AISH_TMUX_BASH_PROMPT_COMMAND"
             printf 'export PATH="%s:$PATH"\n' "$HOME_DIR/bin"
             printf '%s\n' "PROMPT='zshrc-prompt> '"
         } > "$HOME_DIR/.zshrc"
-        COMMANDS='
-aish_tmux_alias_from_zshrc
-aish_tmux_function_from_zshrc
-printf "env:%s\n" "$AISH_TMUX_ZSH_ENV"
-from-aish-tmux-zshrc-path
-printf "hooks:%s|%s\n" "$AISH_TMUX_ZSH_PRECMD" "$AISH_TMUX_ZSH_PREEXEC"
-'
         FORBIDDEN='zsh-precmd-noise|zshrc-prompt|__AISH_STATUS__|__AISH_READY__'
         ;;
     fish)
@@ -87,12 +73,6 @@ printf "hooks:%s|%s\n" "$AISH_TMUX_ZSH_PRECMD" "$AISH_TMUX_ZSH_PREEXEC"
             printf '%s\n' "    printf 'fish-config-prompt> '"
             printf '%s\n' 'end'
         } > "$HOME_DIR/.config/fish/config.fish"
-        COMMANDS='
-aish_tmux_function_from_fish_config
-printf "env:%s\n" $AISH_TMUX_FISH_ENV
-from-aish-tmux-fish-config-path
-printf "events:%s|%s\n" $AISH_TMUX_FISH_POSTEXEC $AISH_TMUX_FISH_PREEXEC
-'
         FORBIDDEN='fish-config-prompt|__AISH_STATUS__|__AISH_READY__'
         ;;
     *)
@@ -102,22 +82,63 @@ printf "events:%s|%s\n" $AISH_TMUX_FISH_POSTEXEC $AISH_TMUX_FISH_PREEXEC
 esac
 
 tmux new-session -d -x 120 -y 40 -s "$SESSION" "env HOME='$HOME_DIR' AISH_HOME='$HOME_DIR/.aish' '$AISH_BIN'"
-sleep 6
 
-send_command() {
-    tmux send-keys -t "$SESSION" C-c
-    sleep 1
-    tmux send-keys -t "$SESSION" "$1" Enter
-    sleep 1
+capture_pane() {
+    tmux capture-pane -p -S - -t "$SESSION"
 }
 
-printf '%s\n' "$COMMANDS" | while IFS= read -r command; do
-    [ -n "$command" ] || continue
-    send_command "$command"
-done
-sleep 2
+wait_for_capture() {
+    pattern="$1"
+    attempts="${2:-50}"
+    attempt=0
+    while [ "$attempt" -lt "$attempts" ]; do
+        CAPTURE="$(capture_pane)"
+        if printf '%s\n' "$CAPTURE" | rg -q "$pattern"; then
+            return 0
+        fi
+        attempt=$((attempt + 1))
+        sleep 0.2
+    done
+    printf 'timed out waiting for pattern: %s\n' "$pattern" >&2
+    printf '%s\n' "$CAPTURE" >&2
+    return 1
+}
 
-CAPTURE="$(tmux capture-pane -p -S - -t "$SESSION")"
+send_command_and_wait() {
+    command="$1"
+    expected="$2"
+    tmux send-keys -t "$SESSION" C-c
+    sleep 0.2
+    tmux send-keys -t "$SESSION" "$command" Enter
+    wait_for_capture "$expected"
+}
+
+wait_for_capture '>[[:space:]]*$'
+
+case "$AISH_BACKEND_KIND" in
+    bash)
+        send_command_and_wait 'aish_tmux_alias_from_rc' '^alias-from-bashrc$'
+        send_command_and_wait 'aish_tmux_function_from_rc' '^function-from-bashrc$'
+        send_command_and_wait 'printf "env:%s\n" "$AISH_TMUX_BASH_ENV"' '^env:env-from-bashrc$'
+        send_command_and_wait 'from-aish-tmux-bashrc-path' '^path-from-bashrc$'
+        send_command_and_wait 'printf "prompt-command:%s\n" "$AISH_TMUX_BASH_PROMPT_COMMAND"' '^prompt-command:ran$'
+        ;;
+    zsh)
+        send_command_and_wait 'aish_tmux_alias_from_zshrc' '^alias-from-zshrc$'
+        send_command_and_wait 'aish_tmux_function_from_zshrc' '^function-from-zshrc$'
+        send_command_and_wait 'printf "env:%s\n" "$AISH_TMUX_ZSH_ENV"' '^env:env-from-zshrc$'
+        send_command_and_wait 'from-aish-tmux-zshrc-path' '^path-from-zshrc$'
+        send_command_and_wait 'printf "hooks:%s|%s\n" "$AISH_TMUX_ZSH_PRECMD" "$AISH_TMUX_ZSH_PREEXEC"' '^hooks:ran\|printf'
+        ;;
+    fish)
+        send_command_and_wait 'aish_tmux_function_from_fish_config' '^function-from-fish-config$'
+        send_command_and_wait 'printf "env:%s\n" $AISH_TMUX_FISH_ENV' '^env:env-from-fish-config$'
+        send_command_and_wait 'from-aish-tmux-fish-config-path' '^path-from-fish-config$'
+        send_command_and_wait 'printf "events:%s|%s\n" $AISH_TMUX_FISH_POSTEXEC $AISH_TMUX_FISH_PREEXEC' '^events:ran\|printf'
+        ;;
+esac
+
+CAPTURE="$(capture_pane)"
 printf '%s\n' "$CAPTURE"
 
 case "$AISH_BACKEND_KIND" in

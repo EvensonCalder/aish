@@ -8,38 +8,59 @@ trap 'tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true; rm -rf "$HOME_DIR
 
 mkdir -p "$HOME_DIR"
 tmux new-session -d -x 120 -y 50 -s "$SESSION" "env HOME='$HOME_DIR' AISH_HOME='$HOME_DIR/.aish' '$AISH_BIN'"
-sleep 5
 
-tmux send-keys -t "$SESSION" '#doctor' Enter
-sleep 1
-tmux send-keys -t "$SESSION" '#config' Enter
-sleep 1
-tmux send-keys -t "$SESSION" '#status' Enter
-sleep 1
-tmux send-keys -t "$SESSION" '#completion' Enter
-sleep 1
-tmux send-keys -t "$SESSION" '#editor' Enter
-sleep 1
-tmux send-keys -t "$SESSION" '# NOTE: tmux-note' Enter
-sleep 1
-tmux send-keys -t "$SESSION" '# TODO: tmux-todo' Enter
-sleep 1
-tmux send-keys -t "$SESSION" '#key' Enter
-sleep 1
-tmux send-keys -t "$SESSION" '#key set' Enter
-sleep 1
-tmux send-keys -t "$SESSION" '#key clear' Enter
-sleep 1
-tmux send-keys -t "$SESSION" '#encrypt on' Enter
-sleep 1
-tmux send-keys -t "$SESSION" '#encrypt off' Enter
-sleep 1
-tmux send-keys -t "$SESSION" '#nosuchmanual' Enter
-sleep 1
-tmux send-keys -t "$SESSION" 'echo after-private' Enter
-sleep 2
+capture_pane() {
+    tmux capture-pane -p -S - -t "$SESSION" 2>/dev/null || true
+}
 
-CAPTURE="$(tmux capture-pane -p -S - -t "$SESSION")"
+wait_for_capture() {
+    pattern="$1"
+    attempts="${2:-100}"
+    attempt=0
+    while [ "$attempt" -lt "$attempts" ]; do
+        if ! tmux has-session -t "$SESSION" >/dev/null 2>&1; then
+            printf 'tmux session exited while waiting for pattern: %s\n' "$pattern" >&2
+            return 1
+        fi
+        CAPTURE="$(capture_pane)"
+        if printf '%s\n' "$CAPTURE" | rg -q "$pattern"; then
+            return 0
+        fi
+        attempt=$((attempt + 1))
+        sleep 0.2
+    done
+    printf 'timed out waiting for pattern: %s\n' "$pattern" >&2
+    printf '%s\n' "$CAPTURE" >&2
+    return 1
+}
+
+send_command_and_wait() {
+    command="$1"
+    expected="$2"
+    tmux send-keys -t "$SESSION" C-c
+    sleep 0.2
+    tmux send-keys -t "$SESSION" "$command" Enter
+    wait_for_capture "$expected"
+    sleep 0.2
+}
+
+wait_for_capture '>[[:space:]]*$' 150
+send_command_and_wait '#doctor' '^Aish doctor$'
+send_command_and_wait '#config' '^Aish config$'
+send_command_and_wait '#status' '^Aish status$'
+send_command_and_wait '#completion' '^completion.tab_accept=word$'
+send_command_and_wait '#editor' '^Aish editor$'
+send_command_and_wait '# NOTE: tmux-note' '^note stored$'
+send_command_and_wait '# TODO: tmux-todo' '^note stored$'
+send_command_and_wait '#key' '^usage: #key set \| #key clear$'
+send_command_and_wait '#key set' '^encryption key is not configured; run #encrypt on <key-fingerprint>$'
+send_command_and_wait '#key clear' '^no stored key to clear$'
+send_command_and_wait '#encrypt on' '^encryption key is not configured; run #encrypt on <key-fingerprint>$'
+send_command_and_wait '#encrypt off' '^plaintext history and templates will be written from now on$'
+send_command_and_wait '#nosuchmanual' 'not implemented yet: #nosuchmanual'
+send_command_and_wait 'echo after-private' '^after-private$'
+
+CAPTURE="$(capture_pane)"
 printf '%s\n' "$CAPTURE"
 
 printf '%s\n' "$CAPTURE" | rg -q '^Aish doctor$'

@@ -6,6 +6,7 @@ use crate::ai::normalize_chat_completions_url;
 use crate::config::{
     self, CompletionConfig, CompletionMode, CompletionTabAccept, ContextConfig, PasteConfig,
 };
+use crate::env_name::is_shell_variable_name;
 use crate::log::EventLevel;
 
 use super::AppState;
@@ -19,6 +20,13 @@ pub(super) fn update_ai_config_field(
     let value = args.trim();
     if value.is_empty() {
         write_ai_config_value(out, name, state)?;
+        return Ok(());
+    }
+    if name == "env-key" && !is_shell_variable_name(value) {
+        writeln!(
+            out,
+            "AI API key environment variable name must be a valid shell variable name"
+        )?;
         return Ok(());
     }
     let Some(path) = &state.config_path else {

@@ -13,9 +13,15 @@ pub struct EditorCommand {
     pub argv: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct PreparedEditorSession {
     pub path: PathBuf,
+}
+
+impl Drop for PreparedEditorSession {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,9 +67,12 @@ pub fn prepare_editor_file(root: &Path, initial_text: &str) -> Result<PreparedEd
         }
         match options.open(&path) {
             Ok(mut file) => {
-                file.write_all(initial_text.as_bytes()).with_context(|| {
-                    format!("failed to write editor temp file {}", path.display())
-                })?;
+                if let Err(error) = file.write_all(initial_text.as_bytes()) {
+                    let _ = fs::remove_file(&path);
+                    return Err(error).with_context(|| {
+                        format!("failed to write editor temp file {}", path.display())
+                    });
+                }
                 return Ok(PreparedEditorSession { path });
             }
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
@@ -225,6 +234,19 @@ mod tests {
     }
 
     #[test]
+    fn prepared_editor_session_removes_temp_file_on_drop() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = {
+            let session = prepare_editor_file(temp.path(), "draft").unwrap();
+            let path = session.path.clone();
+            assert!(path.exists());
+            path
+        };
+
+        assert!(!path.exists());
+    }
+
+    #[test]
     fn run_editor_command_appends_session_path_and_waits() {
         let temp = tempfile::tempdir().unwrap();
         let script = temp.path().join("fake-editor.sh");
@@ -254,7 +276,7 @@ mod tests {
             fs::read_to_string(output).unwrap(),
             format!("--flag|value|{}", session.path.display())
         );
-        assert_eq!(fs::read_to_string(session.path).unwrap(), "draft");
+        assert_eq!(fs::read_to_string(&session.path).unwrap(), "draft");
     }
 
     #[test]
@@ -271,7 +293,7 @@ mod tests {
         let result = run_editor_command(&command, &session).unwrap();
 
         assert_eq!(result.exit_code, Some(7));
-        assert_eq!(fs::read_to_string(session.path).unwrap(), "changed");
+        assert_eq!(fs::read_to_string(&session.path).unwrap(), "changed");
     }
 
     #[test]

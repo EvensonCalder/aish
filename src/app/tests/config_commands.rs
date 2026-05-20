@@ -436,6 +436,39 @@ fn ai_config_commands_persist_and_report_values() {
 }
 
 #[test]
+fn ai_env_key_rejects_invalid_shell_name_without_persisting() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.toml");
+    let mut config = config::Config::default();
+    config.ai.env_key = "OPENAI_API_KEY".to_string();
+    config::save_config(&config_path, &config).unwrap();
+    let mut state = AppState {
+        config_path: Some(config_path.clone()),
+        ai_config: config.ai.clone(),
+        ..AppState::default()
+    };
+    state.draft.insert_str("#env-key BAD-NAME");
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.contains("must be a valid shell variable name"));
+    assert_eq!(state.ai_config.env_key, "OPENAI_API_KEY");
+    assert_eq!(
+        config::load_config(&config_path).unwrap().ai.env_key,
+        "OPENAI_API_KEY"
+    );
+}
+
+#[test]
 fn ai_config_commands_report_unconfigured_without_config_path() {
     for (line, expected) in [
         ("#model", "#model=unconfigured"),

@@ -117,6 +117,42 @@ fn bash_pty_backend_loads_user_bashrc_without_prompt_noise() {
 }
 
 #[test]
+fn bash_pty_backend_passthrough_runs_path_commands_from_bashrc() {
+    let _guard = pty_test_guard();
+    let home = tempfile::tempdir().unwrap();
+    let bin_dir = home.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    fs::write(
+        bin_dir.join("from-aish-rc-path"),
+        "#!/bin/sh\nprintf 'path-from-bashrc\\n'\n",
+    )
+    .unwrap();
+    std::process::Command::new("chmod")
+        .arg("+x")
+        .arg(bin_dir.join("from-aish-rc-path"))
+        .status()
+        .unwrap();
+    fs::write(
+        home.path().join(".bashrc"),
+        format!(
+            "[ -z \"$PS1\" ] && return\n\
+             export PATH=\"{}:$PATH\"\n",
+            bin_dir.display()
+        ),
+    )
+    .unwrap();
+    let _home_guard = EnvVarGuard::set("HOME", home.path().as_os_str());
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+
+    let result = backend
+        .run_command_passthrough_with_event_callback("from-aish-rc-path", |_, _| Ok(false))
+        .unwrap();
+
+    assert_eq!(result.exit_code, 0);
+    assert_eq!(result.output.trim(), "path-from-bashrc");
+}
+
+#[test]
 fn bash_pty_backend_suppresses_ps0_noise_from_bashrc() {
     let _guard = pty_test_guard();
     let home = tempfile::tempdir().unwrap();

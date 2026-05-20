@@ -45,7 +45,7 @@ const COMMAND_HELP: &[HelpEntry] = &[
     },
     HelpEntry {
         usage: "#env-key [ENV_NAME]",
-        description: "show or update the API key environment variable name",
+        description: "show or update the shell variable name for the API key",
     },
     HelpEntry {
         usage: "#key set | #key clear",
@@ -140,7 +140,7 @@ const AI_HELP: &[HelpEntry] = &[
     },
     HelpEntry {
         usage: "#env-key [ENV_NAME]",
-        description: "show or update the API key environment variable name",
+        description: "show or update the shell variable name for the API key",
     },
     HelpEntry {
         usage: "#key set | #key clear",

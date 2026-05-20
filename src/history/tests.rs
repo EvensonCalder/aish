@@ -140,6 +140,30 @@ fn rewrite_jsonl_replaces_existing_contents() {
     }
 }
 
+struct FailingSerialize;
+
+impl Serialize for FailingSerialize {
+    fn serialize<S>(&self, _serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        Err(serde::ser::Error::custom("forced serialization failure"))
+    }
+}
+
+#[test]
+fn rewrite_jsonl_removes_temp_file_on_failure() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("history/regular.jsonl");
+    let tmp = path.with_extension("jsonl.tmp");
+
+    let error = rewrite_jsonl(&path, &[FailingSerialize]).unwrap_err();
+
+    assert!(error.to_string().contains("failed to serialize JSONL item"));
+    assert!(!tmp.exists());
+    assert!(!path.exists());
+}
+
 #[test]
 fn trim_regular_history_keeps_newest_entries_and_skips_bad_lines() {
     let temp = tempfile::tempdir().unwrap();

@@ -4,6 +4,7 @@ use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, bail};
 
+use crate::env_name::is_shell_variable_name;
 use crate::history::{AiItemKind, AiSession, HistoryEntry};
 use crate::templates::TemplateEntry;
 
@@ -114,15 +115,6 @@ pub fn env_var_picker_candidates_from_names(
 
 pub fn shell_env_var_reference(name: &str) -> Option<String> {
     is_shell_variable_name(name).then(|| format!("${name}"))
-}
-
-fn is_shell_variable_name(name: &str) -> bool {
-    let mut chars = name.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    (first.is_ascii_alphabetic() || first == '_')
-        && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
 }
 
 fn collect_file_candidates(root: &Path, dir: &Path, candidates: &mut Vec<String>) -> Result<()> {
