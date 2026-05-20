@@ -194,6 +194,12 @@ pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -
     let Some(mut sync_data_snapshot) = verify_sync_data_for_git_write(state, out, &root)? else {
         return Ok(());
     };
+    let Some(remote_sync_data_snapshot) =
+        verify_remote_sync_data_for_git_read(state, out, &remote_cache)?
+    else {
+        return Ok(());
+    };
+    write_sync_data_remote_comparison(out, &sync_data_snapshot, &remote_sync_data_snapshot)?;
 
     for command in conservative_sync_plan_for_existing_paths_with_encryption(
         &root,
@@ -356,7 +362,6 @@ fn adopt_remote_sync_repository_metadata(
 #[derive(Debug, Clone)]
 struct RemoteSyncCache {
     workspace: PathBuf,
-    remote: String,
     branch: Option<String>,
 }
 
@@ -403,16 +408,7 @@ fn prepare_remote_sync_cache(
     if let Some(branch) = &branch {
         fetch_remote_cache_branch(&workspace, branch)?;
     }
-    Ok(RemoteSyncCache {
-        workspace,
-        remote: remote.to_string(),
-        branch,
-    })
-}
-
-fn refresh_remote_sync_cache(root: &Path, previous: &RemoteSyncCache) -> Result<RemoteSyncCache> {
-    let current_branch = current_branch(root)?;
-    prepare_remote_sync_cache(root, &previous.remote, current_branch.as_deref())
+    Ok(RemoteSyncCache { workspace, branch })
 }
 
 fn fetch_remote_cache_branch(workspace: &Path, branch: &str) -> Result<()> {
@@ -1072,6 +1068,25 @@ fn git_has_staged_changes(root: &Path) -> Result<bool> {
     }
 }
 
+fn git_blob_bytes(root: &Path, rev: &str, path: &str) -> Result<Option<Vec<u8>>> {
+    let pathspec = format!("{rev}:{path}");
+    let command = GitCommandPlan {
+        program: "git".to_string(),
+        args: vec!["show".to_string(), pathspec],
+    };
+    let result = run_git_command_bytes(root, &command)?;
+    if result.success {
+        return Ok(Some(result.stdout));
+    }
+    if result.exit_code == Some(128) {
+        return Ok(None);
+    }
+    bail!(
+        "failed to read git blob {rev}:{path}: {}",
+        result.combined_output()
+    )
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SyncDataSnapshot {
     records: Vec<SyncDataRecordCount>,
@@ -1133,6 +1148,49 @@ fn verify_sync_data_for_git_write(
     }
 }
 
+fn verify_remote_sync_data_for_git_read(
+    state: &mut AppState,
+    out: &mut impl Write,
+    remote_cache: &RemoteSyncCache,
+) -> Result<Option<SyncDataSnapshot>> {
+    let config = state.sync_config.clone();
+    let encryption_enabled = state.encryption_config.enabled;
+    let result = if encryption_enabled {
+        state.run_unlock_passthrough(|_| {
+            collect_remote_sync_data_snapshot(remote_cache, &config, true)
+        })
+    } else {
+        collect_remote_sync_data_snapshot(remote_cache, &config, false)
+    };
+    match result {
+        Ok(snapshot) => Ok(Some(snapshot)),
+        Err(err) => {
+            if encryption_enabled {
+                writeln!(
+                    out,
+                    "sync remote encrypted data cannot be verified; refusing to stage, commit, or push"
+                )?;
+                writeln!(
+                    out,
+                    "Aish must decrypt enabled remote managed *.jsonl.gpg files before comparing or merging them."
+                )?;
+                writeln!(out, "{err:#}")?;
+                writeln!(
+                    out,
+                    "Run #unlock if GPG needs a passphrase, import the matching private key, or resolve the repository key choice with #encrypt rotate <full-key-fingerprint>."
+                )?;
+            } else {
+                writeln!(
+                    out,
+                    "sync remote data cannot be verified; refusing to stage, commit, or push"
+                )?;
+                writeln!(out, "{err:#}")?;
+            }
+            Ok(None)
+        }
+    }
+}
+
 fn collect_sync_data_snapshot(
     root: &Path,
     config: &config::SyncConfig,
@@ -1143,6 +1201,26 @@ fn collect_sync_data_snapshot(
     for file in managed_sync_data_files(config) {
         records.push(count_managed_sync_data_file(
             root,
+            file,
+            encryption_enabled,
+            gpg.as_deref(),
+        )?);
+    }
+    Ok(SyncDataSnapshot { records })
+}
+
+fn collect_remote_sync_data_snapshot(
+    remote_cache: &RemoteSyncCache,
+    config: &config::SyncConfig,
+    encryption_enabled: bool,
+) -> Result<SyncDataSnapshot> {
+    let gpg = encryption_enabled.then(gpg_program);
+    let fetched_ref = remote_cache.fetched_ref();
+    let mut records = Vec::new();
+    for file in managed_sync_data_files(config) {
+        records.push(count_managed_remote_sync_data_file(
+            remote_cache,
+            fetched_ref.as_deref(),
             file,
             encryption_enabled,
             gpg.as_deref(),
@@ -1207,22 +1285,146 @@ fn count_managed_sync_data_file(
     } else {
         fs::read(&absolute).with_context(|| format!("failed to read managed sync file {path}"))?
     };
-    let count = count_jsonl_records(&path, &bytes)?;
+    sync_data_record(file.label, path, bytes)
+}
+
+fn count_managed_remote_sync_data_file(
+    remote_cache: &RemoteSyncCache,
+    fetched_ref: Option<&str>,
+    file: ManagedSyncDataFile,
+    encryption_enabled: bool,
+    gpg_program: Option<&str>,
+) -> Result<SyncDataRecordCount> {
+    let path = if encryption_enabled {
+        format!("{}.gpg", file.logical_path)
+    } else {
+        file.logical_path.to_string()
+    };
+    let bytes = match fetched_ref {
+        Some(fetched_ref) => {
+            let Some(blob) = git_blob_bytes(&remote_cache.workspace, fetched_ref, &path)? else {
+                return sync_data_record(file.label, path, Vec::new());
+            };
+            if encryption_enabled {
+                let Some(program) = gpg_program else {
+                    bail!("GPG program is not configured for encrypted sync");
+                };
+                decrypt_remote_managed_sync_blob(program, &remote_cache.workspace, &path, &blob)?
+            } else {
+                blob
+            }
+        }
+        None => Vec::new(),
+    };
+    sync_data_record(file.label, path, bytes)
+}
+
+fn sync_data_record(
+    label: &'static str,
+    path: String,
+    plaintext_bytes: Vec<u8>,
+) -> Result<SyncDataRecordCount> {
+    let count = count_jsonl_records(&path, &plaintext_bytes)?;
     let mut hasher = DefaultHasher::new();
-    bytes.hash(&mut hasher);
+    plaintext_bytes.hash(&mut hasher);
     Ok(SyncDataRecordCount {
-        label: file.label,
+        label,
         path,
         count,
         content_hash: hasher.finish(),
-        plaintext_bytes: bytes,
+        plaintext_bytes,
     })
+}
+
+fn decrypt_remote_managed_sync_blob(
+    gpg_program: &str,
+    workspace: &Path,
+    path: &str,
+    ciphertext: &[u8],
+) -> Result<Vec<u8>> {
+    let temp_path = remote_blob_temp_path(workspace, path, ciphertext);
+    let _cleanup = RemoveFileOnDrop {
+        path: temp_path.clone(),
+    };
+    write_private_file(&temp_path, ciphertext).with_context(|| {
+        format!(
+            "failed to write temporary encrypted remote sync file {}",
+            temp_path.display()
+        )
+    })?;
+    gpg_decrypt_file(gpg_program, &temp_path)
+        .with_context(|| format!("failed to decrypt remote managed sync file {path}"))
+}
+
+fn remote_blob_temp_path(workspace: &Path, path: &str, ciphertext: &[u8]) -> PathBuf {
+    let mut hasher = DefaultHasher::new();
+    std::process::id().hash(&mut hasher);
+    path.hash(&mut hasher);
+    ciphertext.len().hash(&mut hasher);
+    workspace.join(format!(
+        ".aish-sync-remote-blob-{:016x}.gpg.tmp",
+        hasher.finish()
+    ))
+}
+
+struct RemoveFileOnDrop {
+    path: PathBuf,
+}
+
+impl Drop for RemoveFileOnDrop {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
 }
 
 fn count_jsonl_records(path: &str, bytes: &[u8]) -> Result<usize> {
     let raw = std::str::from_utf8(bytes)
         .with_context(|| format!("managed sync file {path} is not valid UTF-8 JSONL"))?;
     Ok(raw.lines().filter(|line| !line.trim().is_empty()).count())
+}
+
+fn write_sync_data_remote_comparison(
+    out: &mut impl Write,
+    local: &SyncDataSnapshot,
+    remote: &SyncDataSnapshot,
+) -> Result<()> {
+    let mut wrote_difference = false;
+    for local_record in &local.records {
+        let remote_record = remote
+            .records
+            .iter()
+            .find(|record| record.label == local_record.label);
+        let remote_count = remote_record.map_or(0, |record| record.count);
+        if local_record.count == remote_count {
+            if remote_record.is_some_and(|record| record.content_hash != local_record.content_hash)
+            {
+                writeln!(
+                    out,
+                    "sync data comparison: {} records local={} remote={} (content differs)",
+                    local_record.label, local_record.count, remote_count
+                )?;
+                wrote_difference = true;
+            }
+            continue;
+        }
+        let delta = local_record.count as isize - remote_count as isize;
+        writeln!(
+            out,
+            "sync data comparison: {} records local={} remote={} (local {})",
+            local_record.label,
+            local_record.count,
+            remote_count,
+            format_record_delta(delta)
+        )?;
+        wrote_difference = true;
+    }
+    if !wrote_difference {
+        writeln!(
+            out,
+            "sync data comparison: managed record counts match remote"
+        )?;
+    }
+    Ok(())
 }
 
 fn reconcile_sync_data_after_pull(
@@ -1370,8 +1572,8 @@ fn run_sync_push_step(
     out: &mut impl Write,
     root: &Path,
     command: &GitCommandPlan,
-    remote_cache: &mut RemoteSyncCache,
-    snapshot: &mut SyncDataSnapshot,
+    _remote_cache: &mut RemoteSyncCache,
+    _snapshot: &mut SyncDataSnapshot,
 ) -> Result<bool> {
     let result = run_git_command(root, command)?;
     if result.success {
@@ -1381,28 +1583,9 @@ fn run_sync_push_step(
     if git_output_suggests_remote_changed(&result.combined_output()) {
         writeln!(
             out,
-            "sync push needs remote updates; refreshing remote cache and merging"
+            "sync push needs remote updates; run #sync now again to fetch, merge, and push the latest remote state"
         )?;
-        *remote_cache = refresh_remote_sync_cache(root, remote_cache)?;
-        if !adopt_remote_sync_repository_metadata(state, out, remote_cache)? {
-            return Ok(false);
-        }
-        if remote_cache.branch.is_none() {
-            handle_failed_sync_step(state, out, root, command, result)?;
-            return Ok(false);
-        }
-        if !run_verified_sync_cache_merge_step(state, out, root, remote_cache, false, snapshot)? {
-            return Ok(false);
-        }
-        if !prepare_sync_repository_metadata_after_pull(state, out, root)? {
-            return Ok(false);
-        }
-        let retry = run_git_command(root, command)?;
-        if retry.success {
-            writeln!(out, "sync step ok: {}", describe_git_command(command))?;
-            return Ok(true);
-        }
-        handle_failed_sync_step(state, out, root, command, retry)?;
+        handle_failed_sync_step(state, out, root, command, result)?;
         return Ok(false);
     }
     handle_failed_sync_step(state, out, root, command, result)?;
@@ -1861,8 +2044,34 @@ impl GitStepResult {
     }
 }
 
+#[derive(Debug)]
+struct GitBytesResult {
+    success: bool,
+    stdout: Vec<u8>,
+    stderr: String,
+    exit_code: Option<i32>,
+}
+
+impl GitBytesResult {
+    fn combined_output(&self) -> String {
+        let stdout = String::from_utf8_lossy(&self.stdout);
+        let stdout = stdout.trim();
+        let stderr = self.stderr.trim();
+        match (stdout.is_empty(), stderr.is_empty()) {
+            (true, true) => String::new(),
+            (false, true) => stdout.to_string(),
+            (true, false) => stderr.to_string(),
+            (false, false) => format!("{stdout}\n{stderr}"),
+        }
+    }
+}
+
 pub(super) fn run_git_command(root: &Path, command: &GitCommandPlan) -> Result<GitStepResult> {
     run_git_command_with_timeout(root, command, GIT_COMMAND_TIMEOUT)
+}
+
+fn run_git_command_bytes(root: &Path, command: &GitCommandPlan) -> Result<GitBytesResult> {
+    run_git_command_bytes_with_timeout(root, command, GIT_COMMAND_TIMEOUT)
 }
 
 fn run_git_command_with_timeout(
@@ -1870,6 +2079,20 @@ fn run_git_command_with_timeout(
     command: &GitCommandPlan,
     timeout: Duration,
 ) -> Result<GitStepResult> {
+    let result = run_git_command_bytes_with_timeout(root, command, timeout)?;
+    Ok(GitStepResult {
+        success: result.success,
+        stdout: String::from_utf8_lossy(&result.stdout).into_owned(),
+        stderr: result.stderr,
+        exit_code: result.exit_code,
+    })
+}
+
+fn run_git_command_bytes_with_timeout(
+    root: &Path,
+    command: &GitCommandPlan,
+    timeout: Duration,
+) -> Result<GitBytesResult> {
     let mut process = Command::new(&command.program);
     process
         .args(&command.args)
@@ -1892,9 +2115,9 @@ fn run_git_command_with_timeout(
             let output = child
                 .wait_with_output()
                 .with_context(|| format!("failed to collect {}", describe_git_command(command)))?;
-            return Ok(GitStepResult {
+            return Ok(GitBytesResult {
                 success: output.status.success(),
-                stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+                stdout: output.stdout,
                 stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
                 exit_code: output.status.code(),
             });
@@ -1919,9 +2142,9 @@ fn run_git_command_with_timeout(
                 "git command timed out after {}s",
                 timeout.as_millis().div_ceil(1000)
             ));
-            return Ok(GitStepResult {
+            return Ok(GitBytesResult {
                 success: false,
-                stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+                stdout: output.stdout,
                 stderr,
                 exit_code: output.status.code(),
             });

@@ -685,6 +685,13 @@ fn encrypted_sync_writes_repository_key_metadata() {
         b"{\"command\":\"encrypted regular\"}\n",
     )
     .unwrap();
+    atomic_gpg_encrypt_bytes(
+        fake_gpg.to_string_lossy().into_owned(),
+        LOCAL_TEST_FINGERPRINT,
+        root.join("history/draft.jsonl.gpg"),
+        b"{\"command\":\"encrypted draft\"}\n",
+    )
+    .unwrap();
     let mut state = sync_state_for_root(&root, &remote);
     state.encryption_config = EncryptionConfig {
         enabled: true,
@@ -703,8 +710,17 @@ fn encrypted_sync_writes_repository_key_metadata() {
 
     let output = String::from_utf8(output).unwrap();
     assert!(
+        output
+            .contains("sync data comparison: history/regular records local=1 remote=0 (local +1)"),
+        "{output}"
+    );
+    assert!(
+        output.contains("sync data comparison: history/draft records local=1 remote=0 (local +1)"),
+        "{output}"
+    );
+    assert!(
         output.contains(
-            "sync step ok: git add -- .aish-sync.toml .gitattributes .gitignore README.md history/regular.jsonl.gpg"
+            "sync step ok: git add -- .aish-sync.toml .gitattributes .gitignore README.md history/draft.jsonl.gpg history/regular.jsonl.gpg"
         ),
         "{output}"
     );
@@ -720,6 +736,85 @@ fn encrypted_sync_writes_repository_key_metadata() {
     );
     assert!(pushed_metadata.contains("enabled = true"));
     assert!(pushed_metadata.contains(LOCAL_TEST_FINGERPRINT));
+}
+
+#[test]
+fn encrypted_sync_cleans_temporary_remote_count_blobs() {
+    let _guard = git_env_guard();
+    let temp = tempfile::tempdir().unwrap();
+    let remote = temp.path().join("remote.git");
+    let seed = temp.path().join("seed");
+    let root = temp.path().join("aish-home");
+    let fake_gpg = write_fake_gpg(&temp);
+    let old_gpg = std::env::var_os("AISH_GPG");
+    unsafe {
+        std::env::set_var("AISH_GPG", &fake_gpg);
+    }
+
+    run_test_git(temp.path(), ["init", "--bare", remote.to_str().unwrap()]);
+    fs::create_dir_all(seed.join("history")).unwrap();
+    run_test_git(&seed, ["init"]);
+    run_test_git(&seed, ["config", "user.name", "Aish Test"]);
+    run_test_git(&seed, ["config", "user.email", "aish@example.invalid"]);
+    run_test_git(&seed, ["config", "commit.gpgsign", "false"]);
+    crate::sync::write_sync_repository_metadata(
+        seed.join(crate::sync::sync_repository_metadata_path()),
+        &crate::sync::sync_repository_metadata_for(
+            &SyncConfig::default(),
+            true,
+            LOCAL_TEST_FINGERPRINT,
+        ),
+    )
+    .unwrap();
+    atomic_gpg_encrypt_bytes(
+        fake_gpg.to_string_lossy().into_owned(),
+        LOCAL_TEST_FINGERPRINT,
+        seed.join("history/regular.jsonl.gpg"),
+        b"{\"command\":\"remote encrypted\"}\n",
+    )
+    .unwrap();
+    run_test_git(
+        &seed,
+        ["add", "--", ".aish-sync.toml", "history/regular.jsonl.gpg"],
+    );
+    run_test_git(&seed, ["commit", "-m", "encrypted remote records"]);
+    run_test_git(&seed, ["remote", "add", "origin", remote.to_str().unwrap()]);
+    run_test_git(&seed, ["push", "-u", "origin", "HEAD"]);
+    run_test_git(
+        temp.path(),
+        ["clone", remote.to_str().unwrap(), root.to_str().unwrap()],
+    );
+    run_test_git(&root, ["config", "user.name", "Aish Test"]);
+    run_test_git(&root, ["config", "user.email", "aish@example.invalid"]);
+    run_test_git(&root, ["config", "commit.gpgsign", "false"]);
+
+    let mut state = sync_state_for_root(&root, &remote);
+    state.encryption_config = EncryptionConfig {
+        enabled: true,
+        key_fingerprint: LOCAL_TEST_FINGERPRINT.to_string(),
+        ..EncryptionConfig::default()
+    };
+    let mut output = Vec::new();
+    run_manual_sync_push(&mut state, &mut output).unwrap();
+    unsafe {
+        match old_gpg {
+            Some(value) => std::env::set_var("AISH_GPG", value),
+            None => std::env::remove_var("AISH_GPG"),
+        }
+    }
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(
+        output.contains("sync data comparison: managed record counts match remote"),
+        "{output}"
+    );
+    let cache = root.join("cache/runtime/sync-remote-cache");
+    let leaked_temp_blob = fs::read_dir(cache)
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .any(|name| name.starts_with(".aish-sync-remote-blob-"));
+    assert!(!leaked_temp_blob);
 }
 
 #[test]
@@ -1161,6 +1256,88 @@ fn sync_plaintext_history_uses_union_merge_across_two_clones() {
     );
     assert!(pushed_history.contains("from-a"), "{pushed_history}");
     assert!(pushed_history.contains("from-b"), "{pushed_history}");
+}
+
+#[test]
+fn sync_reports_local_remote_managed_record_count_differences() {
+    let _guard = git_env_guard();
+    let temp = tempfile::tempdir().unwrap();
+    let remote = temp.path().join("remote.git");
+    let seed = temp.path().join("seed");
+    let root = temp.path().join("aish-home");
+    seed_local_remote(&remote, &seed, &root);
+
+    fs::create_dir_all(seed.join("history")).unwrap();
+    fs::write(
+        seed.join("history/regular.jsonl"),
+        "{\"command\":\"remote-one\"}\n{\"command\":\"remote-two\"}\n",
+    )
+    .unwrap();
+    fs::write(
+        seed.join("history/draft.jsonl"),
+        "{\"command\":\"remote-draft\"}\n",
+    )
+    .unwrap();
+    run_test_git(
+        &seed,
+        ["add", "--", "history/regular.jsonl", "history/draft.jsonl"],
+    );
+    run_test_git(&seed, ["commit", "-m", "remote managed records"]);
+    run_test_git(&seed, ["push"]);
+
+    fs::create_dir_all(root.join("history")).unwrap();
+    fs::create_dir_all(root.join("templates")).unwrap();
+    fs::write(
+        root.join("history/ai.jsonl"),
+        "{\"text\":\"local-ai-one\"}\n{\"text\":\"local-ai-two\"}\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("history/regular.jsonl"),
+        "{\"command\":\"local-regular\"}\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("templates/templates.jsonl"),
+        "{\"body\":\"local-template\"}\n",
+    )
+    .unwrap();
+
+    let mut state = sync_state_for_root(&root, &remote);
+    let mut output = Vec::new();
+    run_manual_sync_push(&mut state, &mut output).unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(
+        output.contains("sync data comparison: history/ai records local=2 remote=0 (local +2)"),
+        "{output}"
+    );
+    assert!(
+        output
+            .contains("sync data comparison: history/regular records local=1 remote=2 (local -1)"),
+        "{output}"
+    );
+    assert!(
+        output.contains("sync data comparison: templates records local=1 remote=0 (local +1)"),
+        "{output}"
+    );
+    assert!(
+        output.contains("sync data comparison: history/draft records local=0 remote=1 (local -1)"),
+        "{output}"
+    );
+    assert_eq!(
+        output.matches("sync step ok: git fetch ").count(),
+        1,
+        "{output}"
+    );
+    assert_eq!(
+        output
+            .matches("sync step ok: git push -u origin HEAD")
+            .count(),
+        1,
+        "{output}"
+    );
+    assert!(output.contains("sync push completed"), "{output}");
 }
 
 #[test]

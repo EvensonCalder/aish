@@ -105,7 +105,7 @@ fn exit_persistence_boundary_flushes_pending_encrypted_draft() {
     let release_for_thread = release_path.clone();
     let started_for_thread = started_path.clone();
     let releaser = std::thread::spawn(move || {
-        for _ in 0..200 {
+        for _ in 0..1000 {
             if started_for_thread.exists() {
                 std::thread::sleep(Duration::from_millis(120));
                 std::fs::write(&release_for_thread, b"go\n").unwrap();
@@ -113,6 +113,7 @@ fn exit_persistence_boundary_flushes_pending_encrypted_draft() {
             }
             std::thread::sleep(Duration::from_millis(10));
         }
+        let _ = std::fs::write(&release_for_thread, b"go\n");
         panic!("fake gpg did not start");
     });
 
