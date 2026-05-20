@@ -3,7 +3,7 @@ use std::fs;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -13,6 +13,7 @@ use crate::config::{self, write_private_file};
 use crate::encryption::{atomic_gpg_encrypt_bytes, gpg_decrypt_file, gpg_program};
 use crate::git_remote::{sanitize_git_remote, valid_git_branch_name};
 use crate::log::EventLevel;
+use crate::process_control::{configure_new_process_group, terminate_child_process_group};
 use crate::sync::{
     GitCommandPlan, StartupSyncDecision, SyncFailureKind, SyncLock, SyncRepositoryContentMetadata,
     SyncRepositoryMetadata, SyncStepOutcome, classify_git_sync_step,
@@ -1683,7 +1684,7 @@ fn current_branch(root: &Path) -> Result<Option<String>> {
         return Ok(None);
     }
     let branch = result.stdout.trim();
-    Ok((!branch.is_empty() && !branch.chars().any(char::is_control)).then(|| branch.to_string()))
+    Ok(valid_git_branch_name(branch).then(|| branch.to_string()))
 }
 
 pub(super) fn run_startup_sync_check(
@@ -1876,7 +1877,7 @@ fn run_git_command_with_timeout(
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    configure_git_process(&mut process);
+    configure_new_process_group(&mut process);
     let mut child = process
         .spawn()
         .with_context(|| format!("failed to run {}", describe_git_command(command)))?;
@@ -1899,7 +1900,11 @@ fn run_git_command_with_timeout(
             });
         }
         if started.elapsed() >= timeout {
-            let _ = terminate_git_child(&mut child);
+            let _ = terminate_child_process_group(
+                &mut child,
+                Duration::from_millis(50),
+                Duration::from_millis(10),
+            );
             let output = child.wait_with_output().with_context(|| {
                 format!(
                     "failed to collect timed out {}",
@@ -1923,41 +1928,6 @@ fn run_git_command_with_timeout(
         }
         thread::sleep(Duration::from_millis(50));
     }
-}
-
-#[cfg(unix)]
-fn configure_git_process(process: &mut Command) {
-    use std::os::unix::process::CommandExt;
-
-    process.process_group(0);
-}
-
-#[cfg(not(unix))]
-fn configure_git_process(_process: &mut Command) {}
-
-#[cfg(unix)]
-fn terminate_git_child(child: &mut Child) -> std::io::Result<()> {
-    let pgid = child.id() as libc::pid_t;
-    unsafe {
-        libc::kill(-pgid, libc::SIGTERM);
-    }
-    for _ in 0..5 {
-        if child.try_wait()?.is_some() {
-            return Ok(());
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
-    unsafe {
-        libc::kill(-pgid, libc::SIGKILL);
-    }
-    let _ = child.kill();
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn terminate_git_child(child: &mut Child) -> std::io::Result<()> {
-    let _ = child.kill();
-    Ok(())
 }
 
 fn is_commit_command(command: &GitCommandPlan) -> bool {
@@ -2122,6 +2092,24 @@ wait "$child"
         assert!(
             wait_for_path(&terminated, Duration::from_secs(1)),
             "timed out git command did not terminate its child process group"
+        );
+    }
+
+    #[test]
+    fn remote_sync_refs_drop_invalid_branch_names_before_fetching() {
+        let refs = parse_remote_sync_refs(
+            "ref: refs/heads/-option\tHEAD\n\
+             1111111111111111111111111111111111111111\trefs/heads/main\n\
+             2222222222222222222222222222222222222222\trefs/heads/feature/aish-sync\n\
+             3333333333333333333333333333333333333333\trefs/heads/-option\n\
+             4444444444444444444444444444444444444444\trefs/heads/feature/main.lock\n\
+             5555555555555555555555555555555555555555\trefs/heads/bad name\n",
+        );
+
+        assert_eq!(refs.head_branch, None);
+        assert_eq!(
+            refs.branches,
+            vec!["feature/aish-sync".to_string(), "main".to_string()]
         );
     }
 

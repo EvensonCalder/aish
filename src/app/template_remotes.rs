@@ -1403,3 +1403,26 @@ fn single_word(input: &str) -> Option<&str> {
     let (word, rest) = next_word(input)?;
     rest.trim().is_empty().then_some(word)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn template_remote_refs_drop_invalid_branch_names_before_fetching() {
+        let refs = parse_template_remote_refs(
+            "ref: refs/heads/main\tHEAD\n\
+             1111111111111111111111111111111111111111\trefs/heads/main\n\
+             2222222222222222222222222222222222222222\trefs/heads/team/templates\n\
+             3333333333333333333333333333333333333333\trefs/heads/--upload-pack=/tmp/hook\n\
+             4444444444444444444444444444444444444444\trefs/heads/team//templates\n\
+             5555555555555555555555555555555555555555\trefs/heads/team templates\n",
+        );
+
+        assert_eq!(refs.head_branch, Some("main".to_string()));
+        assert_eq!(
+            refs.branches,
+            vec!["main".to_string(), "team/templates".to_string()]
+        );
+    }
+}

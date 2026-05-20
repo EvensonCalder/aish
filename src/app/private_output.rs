@@ -1,15 +1,16 @@
 use std::fs::OpenOptions;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::process::{Command, ExitStatus, Stdio};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 
 use crate::config::set_private_file_handle_permissions;
 use crate::log::EventLevel;
 use crate::modes::Mode;
+use crate::process_control::{configure_new_process_group, wait_child_with_timeout};
 
 use super::AppState;
 use super::execution::foreground_shell_args;
@@ -385,7 +386,7 @@ fn run_pipe_command(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    configure_pipe_process(&mut process);
+    configure_new_process_group(&mut process);
     if let Some(cwd) = cwd {
         process.current_dir(cwd);
     }
@@ -401,8 +402,13 @@ fn run_pipe_command(
     let stdout_reader = thread::spawn(move || read_stream_capped(stdout, max_output_bytes));
     let stderr_reader = thread::spawn(move || read_stream_capped(stderr, max_output_bytes));
 
-    let (status, timed_out) = wait_child_with_timeout(&mut child, timeout)
-        .with_context(|| format!("failed to wait for pipe command: {command}"))?;
+    let (status, timed_out) = wait_child_with_timeout(
+        &mut child,
+        timeout,
+        Duration::from_millis(10),
+        Duration::from_millis(50),
+    )
+    .with_context(|| format!("failed to wait for pipe command: {command}"))?;
     match stdin_writer
         .join()
         .map_err(|_| anyhow!("pipe command stdin writer panicked"))?
@@ -453,16 +459,6 @@ fn output_shell_args(shell: &str, command: &str) -> Vec<String> {
     foreground_shell_args(shell, command)
 }
 
-#[cfg(unix)]
-fn configure_pipe_process(process: &mut Command) {
-    use std::os::unix::process::CommandExt;
-
-    process.process_group(0);
-}
-
-#[cfg(not(unix))]
-fn configure_pipe_process(_process: &mut Command) {}
-
 #[derive(Debug)]
 struct CappedStream {
     bytes: Vec<u8>,
@@ -498,50 +494,6 @@ fn join_stream_reader(
         .join()
         .map_err(|_| anyhow!("pipe command {name} reader panicked"))?
         .with_context(|| format!("failed to read pipe command {name}"))
-}
-
-fn wait_child_with_timeout(
-    child: &mut Child,
-    timeout: Duration,
-) -> io::Result<(Option<ExitStatus>, bool)> {
-    let started = Instant::now();
-    loop {
-        if let Some(status) = child.try_wait()? {
-            return Ok((Some(status), false));
-        }
-        let elapsed = started.elapsed();
-        if elapsed >= timeout {
-            let status = terminate_pipe_child(child)?;
-            return Ok((Some(status), true));
-        }
-        let remaining = timeout.saturating_sub(elapsed);
-        thread::sleep(remaining.min(Duration::from_millis(10)));
-    }
-}
-
-#[cfg(unix)]
-fn terminate_pipe_child(child: &mut Child) -> io::Result<ExitStatus> {
-    let pgid = child.id() as libc::pid_t;
-    unsafe {
-        libc::kill(-pgid, libc::SIGTERM);
-    }
-    for _ in 0..5 {
-        if let Some(status) = child.try_wait()? {
-            return Ok(status);
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
-    unsafe {
-        libc::kill(-pgid, libc::SIGKILL);
-    }
-    let _ = child.kill();
-    child.wait()
-}
-
-#[cfg(not(unix))]
-fn terminate_pipe_child(child: &mut Child) -> io::Result<ExitStatus> {
-    let _ = child.kill();
-    child.wait()
 }
 
 fn combine_stdout_stderr(stdout: &[u8], stderr: &[u8]) -> Vec<u8> {

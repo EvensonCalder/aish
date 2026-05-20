@@ -101,9 +101,10 @@ where
 
         if start.elapsed() >= timeout {
             on_timeout();
-            terminate_process_tree(child.id());
+            signal_process_tree(child.id(), "TERM");
             std::thread::sleep(Duration::from_millis(500));
             if child.try_wait()?.is_none() {
+                signal_process_tree(child.id(), "KILL");
                 let _ = child.kill();
             }
             return child.wait_with_output().map(|output| ScriptOutput {
@@ -116,11 +117,11 @@ where
     }
 }
 
-fn terminate_process_tree(pid: u32) {
+fn signal_process_tree(pid: u32, signal: &str) {
     #[cfg(unix)]
     {
         let _ = Command::new("kill")
-            .arg("-TERM")
+            .arg(format!("-{signal}"))
             .arg(format!("-{pid}"))
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -128,7 +129,7 @@ fn terminate_process_tree(pid: u32) {
     }
 
     let _ = Command::new("kill")
-        .arg("-TERM")
+        .arg(format!("-{signal}"))
         .arg(pid.to_string())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

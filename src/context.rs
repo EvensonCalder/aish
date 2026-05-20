@@ -1,12 +1,13 @@
 use std::io::{self, Read};
 use std::path::Path;
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::process::{Command, Stdio};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 
 use crate::log::redact_secrets;
+use crate::process_control::{configure_new_process_group, wait_child_with_timeout};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextCommandResult {
@@ -50,7 +51,7 @@ pub fn run_context_command(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    configure_context_process(&mut process);
+    configure_new_process_group(&mut process);
     if let Some(cwd) = cwd {
         process.current_dir(cwd);
     }
@@ -63,8 +64,13 @@ pub fn run_context_command(
     let stdout_reader = thread::spawn(move || read_stream_capped(stdout, max_bytes));
     let stderr_reader = thread::spawn(move || read_stream_capped(stderr, max_bytes));
 
-    let (status, timed_out) = wait_child_with_timeout(&mut child, timeout)
-        .with_context(|| format!("failed to wait for context command: {command}"))?;
+    let (status, timed_out) = wait_child_with_timeout(
+        &mut child,
+        timeout,
+        Duration::from_millis(10),
+        Duration::from_millis(50),
+    )
+    .with_context(|| format!("failed to wait for context command: {command}"))?;
     let stdout = join_stream_reader(stdout_reader, "stdout")?;
     let mut stderr = join_stream_reader(stderr_reader, "stderr")?;
     if timed_out {
@@ -88,16 +94,6 @@ pub fn run_context_command(
         truncated: stdout.truncated || stderr.truncated || cap_truncated,
     })
 }
-
-#[cfg(unix)]
-fn configure_context_process(process: &mut Command) {
-    use std::os::unix::process::CommandExt;
-
-    process.process_group(0);
-}
-
-#[cfg(not(unix))]
-fn configure_context_process(_process: &mut Command) {}
 
 #[derive(Debug)]
 struct CappedStream {
@@ -134,50 +130,6 @@ fn join_stream_reader(
         .join()
         .map_err(|_| anyhow!("context {name} reader panicked"))?
         .with_context(|| format!("failed to read context command {name}"))
-}
-
-fn wait_child_with_timeout(
-    child: &mut Child,
-    timeout: Duration,
-) -> io::Result<(Option<ExitStatus>, bool)> {
-    let started = Instant::now();
-    loop {
-        if let Some(status) = child.try_wait()? {
-            return Ok((Some(status), false));
-        }
-        let elapsed = started.elapsed();
-        if elapsed >= timeout {
-            let status = terminate_context_child(child)?;
-            return Ok((Some(status), true));
-        }
-        let remaining = timeout.saturating_sub(elapsed);
-        thread::sleep(remaining.min(Duration::from_millis(10)));
-    }
-}
-
-#[cfg(unix)]
-fn terminate_context_child(child: &mut Child) -> io::Result<ExitStatus> {
-    let pgid = child.id() as libc::pid_t;
-    unsafe {
-        libc::kill(-pgid, libc::SIGTERM);
-    }
-    for _ in 0..5 {
-        if let Some(status) = child.try_wait()? {
-            return Ok(status);
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
-    unsafe {
-        libc::kill(-pgid, libc::SIGKILL);
-    }
-    let _ = child.kill();
-    child.wait()
-}
-
-#[cfg(not(unix))]
-fn terminate_context_child(child: &mut Child) -> io::Result<ExitStatus> {
-    let _ = child.kill();
-    child.wait()
 }
 
 pub fn build_contextual_ai_prompt(
@@ -233,6 +185,7 @@ fn output_status_code(status: std::process::ExitStatus) -> Option<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
 
     #[test]
     fn dangerous_context_command_detection_catches_destructive_patterns() {
