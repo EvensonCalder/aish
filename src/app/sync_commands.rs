@@ -18,9 +18,9 @@ use crate::sync::{
     conservative_sync_plan_for_existing_paths_with_encryption,
     disabled_existing_managed_paths_with_encryption, encryption_fingerprint_is_valid,
     init_repo_plan, log_sync_failure, maintain_managed_gitattributes, maintain_managed_gitignore,
-    maintain_sync_readme, pull_merge_allow_unrelated_plan, pull_merge_plan, push_plan,
-    startup_sync_decision, sync_repository_metadata_file_matches, sync_repository_metadata_for,
-    sync_repository_metadata_path, tracked_managed_files_warning, write_sync_repository_metadata,
+    maintain_sync_readme, push_plan, startup_sync_decision, sync_repository_metadata_file_matches,
+    sync_repository_metadata_for, sync_repository_metadata_path, tracked_managed_files_warning,
+    write_sync_repository_metadata,
 };
 
 use super::{
@@ -173,10 +173,13 @@ pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -
     if !ensure_sync_git_identity(state, out, &root)? {
         return Ok(());
     }
-    if !align_local_branch_to_remote_sync_branch(state, out, &root)? {
+    let current_branch = current_branch(&root)?;
+    let mut remote_cache = prepare_remote_sync_cache(&root, &remote, current_branch.as_deref())?;
+    if !align_local_branch_to_remote_sync_branch(state, out, &root, remote_cache.branch.as_deref())?
+    {
         return Ok(());
     }
-    if !adopt_remote_sync_repository_metadata(state, out, &root, &remote)? {
+    if !adopt_remote_sync_repository_metadata(state, out, &remote_cache)? {
         return Ok(());
     }
     if !prepare_sync_repository_metadata(state, out, &root)? {
@@ -200,12 +203,15 @@ pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -
     .commands
     {
         if initialized_repo && is_pull_command(&command) {
-            if let Some(remote_branch) = remote_sync_branch(&root)? {
-                let mut pull = pull_merge_allow_unrelated_plan();
-                pull.args.push("origin".to_string());
-                pull.args.push(remote_branch);
-                if !run_verified_sync_pull_step(state, out, &root, &pull, &mut sync_data_snapshot)?
-                {
+            if remote_cache.branch.is_some() {
+                if !run_verified_sync_cache_merge_step(
+                    state,
+                    out,
+                    &root,
+                    &remote_cache,
+                    true,
+                    &mut sync_data_snapshot,
+                )? {
                     return Ok(());
                 }
                 if !prepare_sync_repository_metadata_after_pull(state, out, &root)? {
@@ -214,15 +220,21 @@ pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -
             } else {
                 writeln!(
                     out,
-                    "sync step skipped: git pull --no-rebase --no-edit for new repository"
+                    "sync step skipped: remote cache has no branch to merge for new repository"
                 )?;
             }
             continue;
         }
         if is_pull_command(&command) {
-            if let Some(pull) = sync_pull_plan(&root, false)? {
-                if !run_verified_sync_pull_step(state, out, &root, &pull, &mut sync_data_snapshot)?
-                {
+            if remote_cache.branch.is_some() {
+                if !run_verified_sync_cache_merge_step(
+                    state,
+                    out,
+                    &root,
+                    &remote_cache,
+                    false,
+                    &mut sync_data_snapshot,
+                )? {
                     return Ok(());
                 }
                 if !prepare_sync_repository_metadata_after_pull(state, out, &root)? {
@@ -231,7 +243,7 @@ pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -
             } else {
                 writeln!(
                     out,
-                    "sync step skipped: git pull --no-rebase --no-edit because remote has no branch"
+                    "sync step skipped: remote cache has no branch to merge because remote has no branch"
                 )?;
             }
             continue;
@@ -247,7 +259,14 @@ pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -
             continue;
         }
         if is_push_command(&command) {
-            if !run_sync_push_step(state, out, &root, &command, &mut sync_data_snapshot)? {
+            if !run_sync_push_step(
+                state,
+                out,
+                &root,
+                &command,
+                &mut remote_cache,
+                &mut sync_data_snapshot,
+            )? {
                 return Ok(());
             }
             continue;
@@ -265,8 +284,9 @@ fn align_local_branch_to_remote_sync_branch(
     state: &mut AppState,
     out: &mut impl Write,
     root: &Path,
+    remote_branch: Option<&str>,
 ) -> Result<bool> {
-    let Some(remote_branch) = remote_sync_branch(root)? else {
+    let Some(remote_branch) = remote_branch else {
         return Ok(true);
     };
     let Some(local_branch) = current_branch(root)? else {
@@ -277,7 +297,11 @@ fn align_local_branch_to_remote_sync_branch(
     }
     let command = GitCommandPlan {
         program: "git".to_string(),
-        args: vec!["branch".to_string(), "-M".to_string(), remote_branch],
+        args: vec![
+            "branch".to_string(),
+            "-M".to_string(),
+            remote_branch.to_string(),
+        ],
     };
     run_sync_git_step(state, out, root, &command)
 }
@@ -301,10 +325,9 @@ fn warn_disabled_existing_managed_paths(
 fn adopt_remote_sync_repository_metadata(
     state: &mut AppState,
     out: &mut impl Write,
-    root: &Path,
-    remote: &str,
+    remote_cache: &RemoteSyncCache,
 ) -> Result<bool> {
-    let metadata = match remote_sync_repository_metadata(root, remote) {
+    let metadata = match remote_cache.metadata() {
         Ok(Some(metadata)) => metadata,
         Ok(None) => return Ok(true),
         Err(err) => {
@@ -330,46 +353,168 @@ fn adopt_remote_sync_repository_metadata(
     Ok(true)
 }
 
-fn remote_sync_repository_metadata(
-    root: &Path,
-    remote: &str,
-) -> Result<Option<SyncRepositoryMetadata>> {
-    let workspace = prepare_remote_metadata_workspace(root, remote)?;
-    let Some(branch) = remote_sync_branch(&workspace)? else {
-        return Ok(None);
-    };
-    let fetch = GitCommandPlan {
-        program: "git".to_string(),
-        args: vec!["fetch".to_string(), "origin".to_string(), branch],
-    };
-    if !run_git_command(&workspace, &fetch)?.success {
-        return Ok(None);
-    }
-    let show = GitCommandPlan {
-        program: "git".to_string(),
-        args: vec![
-            "show".to_string(),
-            format!("FETCH_HEAD:{}", sync_repository_metadata_path()),
-        ],
-    };
-    let result = run_git_command(&workspace, &show)?;
-    if !result.success {
-        return Ok(None);
-    }
-    crate::sync::parse_sync_repository_metadata(&result.stdout)
-        .map(Some)
-        .context("remote sync metadata is invalid")
+#[derive(Debug, Clone)]
+struct RemoteSyncCache {
+    workspace: PathBuf,
+    remote: String,
+    branch: Option<String>,
 }
 
-fn prepare_remote_metadata_workspace(root: &Path, remote: &str) -> Result<PathBuf> {
-    let workspace = root.join("cache/runtime/sync-remote-metadata");
+impl RemoteSyncCache {
+    fn fetched_ref(&self) -> Option<String> {
+        self.branch
+            .as_ref()
+            .map(|branch| format!("refs/remotes/origin/{branch}"))
+    }
+
+    fn metadata(&self) -> Result<Option<SyncRepositoryMetadata>> {
+        let Some(fetched_ref) = self.fetched_ref() else {
+            return Ok(None);
+        };
+        let pathspec = format!("{fetched_ref}:{}", sync_repository_metadata_path());
+        let show = GitCommandPlan {
+            program: "git".to_string(),
+            args: vec!["show".to_string(), pathspec],
+        };
+        let result = run_git_command(&self.workspace, &show)?;
+        if !result.success {
+            return Ok(None);
+        }
+        crate::sync::parse_sync_repository_metadata(&result.stdout)
+            .map(Some)
+            .context("remote sync metadata is invalid")
+    }
+}
+
+#[derive(Debug, Clone)]
+struct RemoteSyncRefs {
+    head_branch: Option<String>,
+    branches: Vec<String>,
+}
+
+fn prepare_remote_sync_cache(
+    root: &Path,
+    remote: &str,
+    current_branch: Option<&str>,
+) -> Result<RemoteSyncCache> {
+    let workspace = prepare_remote_cache_workspace(root, remote)?;
+    let refs = remote_sync_refs(&workspace)?;
+    let branch = select_remote_sync_branch(&refs, current_branch);
+    if let Some(branch) = &branch {
+        fetch_remote_cache_branch(&workspace, branch)?;
+    }
+    Ok(RemoteSyncCache {
+        workspace,
+        remote: remote.to_string(),
+        branch,
+    })
+}
+
+fn refresh_remote_sync_cache(root: &Path, previous: &RemoteSyncCache) -> Result<RemoteSyncCache> {
+    let current_branch = current_branch(root)?;
+    prepare_remote_sync_cache(root, &previous.remote, current_branch.as_deref())
+}
+
+fn fetch_remote_cache_branch(workspace: &Path, branch: &str) -> Result<()> {
+    let refspec = format!("+refs/heads/{branch}:refs/remotes/origin/{branch}");
+    let fetch = GitCommandPlan {
+        program: "git".to_string(),
+        args: vec!["fetch".to_string(), "origin".to_string(), refspec],
+    };
+    let result = run_git_command(workspace, &fetch)?;
+    if !result.success {
+        bail!(
+            "failed to fetch remote sync cache: {}",
+            result.combined_output()
+        );
+    }
+    Ok(())
+}
+
+fn remote_sync_refs(workspace: &Path) -> Result<RemoteSyncRefs> {
+    let command = GitCommandPlan {
+        program: "git".to_string(),
+        args: vec![
+            "ls-remote".to_string(),
+            "--symref".to_string(),
+            "origin".to_string(),
+            "HEAD".to_string(),
+            "refs/heads/*".to_string(),
+        ],
+    };
+    let result = run_git_command(workspace, &command)?;
+    if !result.success {
+        return Ok(RemoteSyncRefs {
+            head_branch: None,
+            branches: Vec::new(),
+        });
+    }
+    Ok(parse_remote_sync_refs(&result.stdout))
+}
+
+fn parse_remote_sync_refs(raw: &str) -> RemoteSyncRefs {
+    let mut head_branch = None;
+    let mut branches = Vec::new();
+    for line in raw.lines() {
+        if let Some(rest) = line.strip_prefix("ref: refs/heads/")
+            && let Some((branch, target)) = rest.split_once('\t')
+            && target == "HEAD"
+            && valid_remote_branch_name(branch)
+        {
+            head_branch = Some(branch.to_string());
+            continue;
+        }
+        let Some((_, refname)) = line.split_once('\t') else {
+            continue;
+        };
+        let Some(branch) = refname.strip_prefix("refs/heads/") else {
+            continue;
+        };
+        if valid_remote_branch_name(branch) {
+            branches.push(branch.to_string());
+        }
+    }
+    branches.sort();
+    branches.dedup();
+    RemoteSyncRefs {
+        head_branch,
+        branches,
+    }
+}
+
+fn valid_remote_branch_name(branch: &str) -> bool {
+    !branch.is_empty() && !branch.chars().any(char::is_control)
+}
+
+fn select_remote_sync_branch(
+    refs: &RemoteSyncRefs,
+    current_branch: Option<&str>,
+) -> Option<String> {
+    if let Some(branch) = &refs.head_branch
+        && refs.branches.iter().any(|candidate| candidate == branch)
+    {
+        return Some(branch.clone());
+    }
+    if let Some(branch) = current_branch
+        && refs.branches.iter().any(|candidate| candidate == branch)
+    {
+        return Some(branch.to_string());
+    }
+    if refs.branches.len() == 1 {
+        return refs.branches.first().cloned();
+    }
+    None
+}
+
+fn prepare_remote_cache_workspace(root: &Path, remote: &str) -> Result<PathBuf> {
+    let workspace = root.join("cache/runtime/sync-remote-cache");
     match fs::remove_dir_all(&workspace) {
         Ok(()) => {}
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
         Err(err) => {
             return Err(err).with_context(|| {
                 format!(
-                    "failed to clear remote sync metadata workspace {}",
+                    "failed to clear remote sync cache workspace {}",
                     workspace.display()
                 )
             });
@@ -377,7 +522,7 @@ fn prepare_remote_metadata_workspace(root: &Path, remote: &str) -> Result<PathBu
     }
     fs::create_dir_all(&workspace).with_context(|| {
         format!(
-            "failed to create remote sync metadata workspace {}",
+            "failed to create remote sync cache workspace {}",
             workspace.display()
         )
     })?;
@@ -388,7 +533,7 @@ fn prepare_remote_metadata_workspace(root: &Path, remote: &str) -> Result<PathBu
     let init_result = run_git_command(&workspace, &init)?;
     if !init_result.success {
         bail!(
-            "failed to initialize remote sync metadata workspace: {}",
+            "failed to initialize remote sync cache workspace: {}",
             init_result.combined_output()
         );
     }
@@ -404,11 +549,37 @@ fn prepare_remote_metadata_workspace(root: &Path, remote: &str) -> Result<PathBu
     let remote_result = run_git_command(&workspace, &remote_add)?;
     if !remote_result.success {
         bail!(
-            "failed to configure remote sync metadata workspace: {}",
+            "failed to configure remote sync cache workspace: {}",
             remote_result.combined_output()
         );
     }
     Ok(workspace)
+}
+
+fn fetch_remote_cache_into_active_repo(
+    state: &AppState,
+    out: &mut impl Write,
+    root: &Path,
+    remote_cache: &RemoteSyncCache,
+) -> Result<bool> {
+    let Some(fetched_ref) = remote_cache.fetched_ref() else {
+        return Ok(false);
+    };
+    let show = GitCommandPlan {
+        program: "git".to_string(),
+        args: vec![
+            "fetch".to_string(),
+            remote_cache.workspace.display().to_string(),
+            fetched_ref,
+        ],
+    };
+    let result = run_git_command(root, &show)?;
+    if result.success {
+        writeln!(out, "sync step ok: {}", describe_git_command(&show))?;
+        return Ok(true);
+    }
+    handle_failed_sync_step(state, out, root, &show, result)?;
+    Ok(false)
 }
 
 fn prepare_sync_repository_metadata(
@@ -748,7 +919,17 @@ fn commit_interrupted_merge_and_push(
         return Ok(());
     }
     let push = push_plan();
-    if !run_sync_push_step(state, out, root, &push, &mut sync_data_snapshot)? {
+    let remote = state.sync_config.remote.trim().to_string();
+    let current_branch = current_branch(root)?;
+    let mut remote_cache = prepare_remote_sync_cache(root, &remote, current_branch.as_deref())?;
+    if !run_sync_push_step(
+        state,
+        out,
+        root,
+        &push,
+        &mut remote_cache,
+        &mut sync_data_snapshot,
+    )? {
         return Ok(());
     }
     state.append_event(EventLevel::Info, "sync push completed")?;
@@ -1042,27 +1223,6 @@ fn count_jsonl_records(path: &str, bytes: &[u8]) -> Result<usize> {
     Ok(raw.lines().filter(|line| !line.trim().is_empty()).count())
 }
 
-fn run_verified_sync_pull_step(
-    state: &mut AppState,
-    out: &mut impl Write,
-    root: &Path,
-    command: &GitCommandPlan,
-    snapshot: &mut SyncDataSnapshot,
-) -> Result<bool> {
-    let before = snapshot.clone();
-    if !run_sync_pull_step(state, out, root, command)? {
-        return Ok(false);
-    }
-    let Some(after) = verify_sync_data_for_git_write(state, out, root)? else {
-        return Ok(false);
-    };
-    let Some(reconciled) = reconcile_sync_data_after_pull(state, out, root, &before, after)? else {
-        return Ok(false);
-    };
-    *snapshot = reconciled;
-    Ok(true)
-}
-
 fn reconcile_sync_data_after_pull(
     state: &mut AppState,
     out: &mut impl Write,
@@ -1208,6 +1368,7 @@ fn run_sync_push_step(
     out: &mut impl Write,
     root: &Path,
     command: &GitCommandPlan,
+    remote_cache: &mut RemoteSyncCache,
     snapshot: &mut SyncDataSnapshot,
 ) -> Result<bool> {
     let result = run_git_command(root, command)?;
@@ -1218,13 +1379,17 @@ fn run_sync_push_step(
     if git_output_suggests_remote_changed(&result.combined_output()) {
         writeln!(
             out,
-            "sync push needs remote updates; running git pull --no-rebase --no-edit"
+            "sync push needs remote updates; refreshing remote cache and merging"
         )?;
-        let Some(pull) = sync_pull_plan(root, false)? else {
+        *remote_cache = refresh_remote_sync_cache(root, remote_cache)?;
+        if !adopt_remote_sync_repository_metadata(state, out, remote_cache)? {
+            return Ok(false);
+        }
+        if remote_cache.branch.is_none() {
             handle_failed_sync_step(state, out, root, command, result)?;
             return Ok(false);
-        };
-        if !run_verified_sync_pull_step(state, out, root, &pull, snapshot)? {
+        }
+        if !run_verified_sync_cache_merge_step(state, out, root, remote_cache, false, snapshot)? {
             return Ok(false);
         }
         if !prepare_sync_repository_metadata_after_pull(state, out, root)? {
@@ -1242,44 +1407,76 @@ fn run_sync_push_step(
     Ok(false)
 }
 
-fn run_sync_pull_step(
+fn run_verified_sync_cache_merge_step(
     state: &mut AppState,
     out: &mut impl Write,
     root: &Path,
-    command: &GitCommandPlan,
+    remote_cache: &RemoteSyncCache,
+    allow_unrelated: bool,
+    snapshot: &mut SyncDataSnapshot,
 ) -> Result<bool> {
-    let result = run_git_command(root, command)?;
+    let before = snapshot.clone();
+    if !fetch_remote_cache_into_active_repo(state, out, root, remote_cache)? {
+        return Ok(false);
+    }
+    if !run_sync_merge_step(state, out, root, allow_unrelated)? {
+        return Ok(false);
+    }
+    let Some(after) = verify_sync_data_for_git_write(state, out, root)? else {
+        return Ok(false);
+    };
+    let Some(reconciled) = reconcile_sync_data_after_pull(state, out, root, &before, after)? else {
+        return Ok(false);
+    };
+    *snapshot = reconciled;
+    Ok(true)
+}
+
+fn run_sync_merge_step(
+    state: &mut AppState,
+    out: &mut impl Write,
+    root: &Path,
+    allow_unrelated: bool,
+) -> Result<bool> {
+    let command = merge_fetch_head_plan(allow_unrelated);
+    let result = run_git_command(root, &command)?;
     if result.success {
-        writeln!(out, "sync step ok: {}", describe_git_command(command))?;
+        writeln!(out, "sync step ok: {}", describe_git_command(&command))?;
         return Ok(true);
     }
     let detail = result.combined_output();
-    if git_output_suggests_unrelated_histories(&detail)
-        && !command
-            .args
-            .iter()
-            .any(|arg| arg == "--allow-unrelated-histories")
-    {
+    if git_output_suggests_unrelated_histories(&detail) && !allow_unrelated {
         writeln!(
             out,
-            "sync pull needs unrelated-history merge; retrying with --allow-unrelated-histories"
+            "sync merge needs unrelated-history merge; retrying with --allow-unrelated-histories"
         )?;
-        let Some(retry) = sync_pull_plan(root, true)? else {
-            handle_failed_sync_step(state, out, root, command, result)?;
-            return Ok(false);
-        };
-        return run_sync_pull_step(state, out, root, &retry);
+        return run_sync_merge_step(state, out, root, true);
     }
     if matches!(
         classify_git_sync_step(false, &result.stdout, &result.stderr),
         SyncStepOutcome::AbortConflict { .. }
     ) && try_resolve_sync_metadata_pull_conflict(state, out, root)?
     {
-        writeln!(out, "sync step ok: {}", describe_git_command(command))?;
+        writeln!(out, "sync step ok: {}", describe_git_command(&command))?;
         return Ok(true);
     }
-    handle_failed_sync_step(state, out, root, command, result)?;
+    handle_failed_sync_step(state, out, root, &command, result)?;
     Ok(false)
+}
+
+fn merge_fetch_head_plan(allow_unrelated: bool) -> GitCommandPlan {
+    let mut args = vec![
+        "merge".to_string(),
+        "--no-edit".to_string(),
+        "FETCH_HEAD".to_string(),
+    ];
+    if allow_unrelated {
+        args.insert(2, "--allow-unrelated-histories".to_string());
+    }
+    GitCommandPlan {
+        program: "git".to_string(),
+        args,
+    }
 }
 
 fn try_resolve_sync_metadata_pull_conflict(
@@ -1475,66 +1672,6 @@ fn git_config_value(root: &Path, key: &str) -> Result<Option<String>> {
     )
 }
 
-fn remote_head_branch(root: &Path) -> Result<Option<String>> {
-    let command = GitCommandPlan {
-        program: "git".to_string(),
-        args: vec![
-            "ls-remote".to_string(),
-            "--symref".to_string(),
-            "origin".to_string(),
-            "HEAD".to_string(),
-        ],
-    };
-    let result = run_git_command(root, &command)?;
-    if !result.success {
-        return Ok(None);
-    }
-    for line in result.stdout.lines() {
-        let Some(rest) = line.strip_prefix("ref: refs/heads/") else {
-            continue;
-        };
-        let Some((branch, target)) = rest.split_once('\t') else {
-            continue;
-        };
-        if target == "HEAD" && !branch.is_empty() && !branch.chars().any(char::is_control) {
-            return Ok(Some(branch.to_string()));
-        }
-    }
-    Ok(None)
-}
-
-fn sync_pull_plan(root: &Path, allow_unrelated: bool) -> Result<Option<GitCommandPlan>> {
-    let Some(branch) = remote_sync_branch(root)? else {
-        return Ok(None);
-    };
-    let mut plan = if allow_unrelated {
-        pull_merge_allow_unrelated_plan()
-    } else {
-        pull_merge_plan()
-    };
-    plan.args.push("origin".to_string());
-    plan.args.push(branch);
-    Ok(Some(plan))
-}
-
-fn remote_sync_branch(root: &Path) -> Result<Option<String>> {
-    if let Some(branch) = remote_head_branch(root)?
-        && remote_branch_exists(root, &branch)?
-    {
-        return Ok(Some(branch));
-    }
-    if let Some(branch) = current_branch(root)?
-        && remote_branch_exists(root, &branch)?
-    {
-        return Ok(Some(branch));
-    }
-    let branches = remote_branch_candidates(root)?;
-    if branches.len() == 1 {
-        return Ok(branches.into_iter().next());
-    }
-    Ok(None)
-}
-
 fn current_branch(root: &Path) -> Result<Option<String>> {
     let command = GitCommandPlan {
         program: "git".to_string(),
@@ -1546,50 +1683,6 @@ fn current_branch(root: &Path) -> Result<Option<String>> {
     }
     let branch = result.stdout.trim();
     Ok((!branch.is_empty() && !branch.chars().any(char::is_control)).then(|| branch.to_string()))
-}
-
-fn remote_branch_exists(root: &Path, branch: &str) -> Result<bool> {
-    let command = GitCommandPlan {
-        program: "git".to_string(),
-        args: vec![
-            "ls-remote".to_string(),
-            "--heads".to_string(),
-            "origin".to_string(),
-            branch.to_string(),
-        ],
-    };
-    let result = run_git_command(root, &command)?;
-    Ok(result.success && !result.stdout.trim().is_empty())
-}
-
-fn remote_branch_candidates(root: &Path) -> Result<Vec<String>> {
-    let command = GitCommandPlan {
-        program: "git".to_string(),
-        args: vec![
-            "ls-remote".to_string(),
-            "--heads".to_string(),
-            "origin".to_string(),
-        ],
-    };
-    let result = run_git_command(root, &command)?;
-    if !result.success {
-        return Ok(Vec::new());
-    }
-    let mut branches = Vec::new();
-    for line in result.stdout.lines() {
-        let Some((_, refname)) = line.split_once('\t') else {
-            continue;
-        };
-        let Some(branch) = refname.strip_prefix("refs/heads/") else {
-            continue;
-        };
-        if !branch.is_empty() && !branch.chars().any(char::is_control) {
-            branches.push(branch.to_string());
-        }
-    }
-    branches.sort();
-    branches.dedup();
-    Ok(branches)
 }
 
 pub(super) fn run_startup_sync_check(

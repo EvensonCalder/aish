@@ -505,16 +505,16 @@ Implemented:
 - Persist a conservative subset of periodic schedules checked at startup.
 - Persist explicit startup and exit sync triggers.
 - Run `#sync now` against a configured Git remote.
-- Stage managed enabled paths automatically, commit only when staged content changed, merge remote updates with `git pull --no-rebase --no-edit`, then push.
+- Stage managed enabled paths automatically, commit only when staged content changed, fetch the selected remote branch once into an isolated runtime cache, merge the cached `FETCH_HEAD`, then push.
 - For encrypted sync, decrypt every enabled managed `*.jsonl.gpg` file before staging, committing, or pushing. If GPG cannot decrypt the data on this machine, sync stops with the path and key-resolution guidance.
-- Treat an empty bare/GitHub remote as a normal first-sync target: skip pull when the remote has no branch, then push with upstream setup.
-- Use explicit remote branches for pulls instead of relying on local Git branch tracking.
-- Inspect remote sync metadata through an isolated temporary Git workspace so a stale local `.aish-sync.toml` cannot be mistaken for the remote repository's current encryption state.
+- Treat an empty bare/GitHub remote as a normal first-sync target: skip the cached merge when the remote has no branch, then push with upstream setup.
+- Use an explicit selected remote branch for cached merges instead of relying on local Git branch tracking.
+- Inspect remote sync metadata through the isolated runtime remote cache so a stale local `.aish-sync.toml` cannot be mistaken for the remote repository's current encryption state.
 - Prefer the remote default branch when deciding the sync branch, then align the local sync branch before committing.
 - Clear stale sync locks left by dead Aish processes before refusing a new sync.
 - Stop an individual Git sync step after 60 seconds, report the timeout, release the sync lock, and return to the Aish prompt.
 - Warn when existing Aish-managed files are present but excluded because their sync category is disabled.
-- Retry pull with `--allow-unrelated-histories` when an existing local sync repository is connected to a populated remote with separate history.
+- Retry cached merge with `--allow-unrelated-histories` when an existing local sync repository is connected to a populated remote with separate history.
 - If `.aish-sync.toml` disagrees with local content category settings, warn and use the repository settings as the private sync authority. Existing local files excluded by those settings are left alone and only warned about.
 - Stop before pushing if remote sync metadata disagrees with the local encryption config, or if local encrypted sync is configured with an email/selector instead of a full fingerprint.
 - Use Git's union merge driver for plaintext Aish JSONL files so independent appends usually merge by keeping both sides.
@@ -635,6 +635,13 @@ templates. If no local templates exist, publishing still initializes the remote
 with a README, metadata, and an empty template payload that the owner can edit
 later.
 
+`#template publish` and `#template fetch` take one remote-ref snapshot, fetch the
+selected branch into the named local template cache, then work from that cache.
+If a publish push is rejected because the remote changed, Aish refreshes that
+snapshot once, merges by template ID again, and retries the push. `#template
+analyze` and `#template import` do not contact the remote; they read only the
+last fetched review cache.
+
 By default, template payloads are plaintext. `#template publish <name> --encrypt
 <key>` encrypts only the template payload for the chosen GPG recipient; the
 remote README and metadata remain readable so importers can identify the remote.
@@ -651,7 +658,7 @@ for a separate template remote.
 
 Template sharing command boundaries:
 
-- `#template remote add|list|rm` only manages named template remote config. It does not fetch, publish, or import templates.
+- `#template remote add|list|rm` only manages named template remote config. It does not fetch, publish, or import templates. Removing a remote, or repointing an existing remote name to a different URL, clears that name's local review cache so later analyze/import cannot read stale templates from the old URL.
 - `#template publish <name>` writes local templates to the named template-only remote. Plaintext is the default; `--encrypt <key>` encrypts only the payload for the chosen recipient.
 - `#template fetch <name>` updates only the local review cache for that remote.
 - `#template analyze <name> [query]` reads the fetched cache and local template store, reports `new` or `present`, and does not write local templates.

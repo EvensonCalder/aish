@@ -444,6 +444,51 @@ fn template_remote_add_rejects_invalid_name_without_persisting() {
 }
 
 #[test]
+fn template_remote_url_change_clears_fetched_review_cache() {
+    let temp = tempfile::tempdir().unwrap();
+    let old_remote = temp.path().join("old-templates.git");
+    let new_remote = temp.path().join("new-templates.git");
+    run_test_git(
+        temp.path(),
+        ["init", "--bare", old_remote.to_str().unwrap()],
+    );
+    run_test_git(
+        temp.path(),
+        ["init", "--bare", new_remote.to_str().unwrap()],
+    );
+
+    let publisher_root = temp.path().join("publisher");
+    let mut publisher = template_sharing_state(&publisher_root);
+    run_template_private_command(
+        &mut publisher,
+        &format!("remote add shared {}", old_remote.display()),
+    );
+    publisher
+        .append_template(&TemplateEntry::new("old shared template"))
+        .unwrap();
+    run_template_private_command(&mut publisher, "publish shared");
+
+    let consumer_root = temp.path().join("consumer");
+    let mut consumer = template_sharing_state(&consumer_root);
+    run_template_private_command(
+        &mut consumer,
+        &format!("remote add shared {}", old_remote.display()),
+    );
+    let output = run_template_private_command(&mut consumer, "fetch shared");
+    assert!(output.contains("template fetch completed: shared (templates=1)"));
+
+    let output = run_template_private_command(
+        &mut consumer,
+        &format!("remote add shared {}", new_remote.display()),
+    );
+    assert!(output.contains("template remote cache reset: shared"));
+
+    let output = run_template_private_command(&mut consumer, "analyze shared");
+    assert!(output.contains("no fetched templates for remote shared"));
+    assert!(!output.contains("old shared template"));
+}
+
+#[test]
 fn template_publish_writes_template_only_remote() {
     let temp = tempfile::tempdir().unwrap();
     let remote = temp.path().join("templates.git");
@@ -604,6 +649,7 @@ fn template_fetch_analyze_and_import_are_reviewable_and_deduplicated() {
 
     let output = run_template_private_command(&mut consumer, "fetch shared");
     assert!(output.contains("template fetch completed: shared (templates=2)"));
+    fs::remove_dir_all(&remote).unwrap();
 
     let output = run_template_private_command(&mut consumer, "analyze shared rsync");
     let rsync_id = template_id("rsync -avz {from} {to}");

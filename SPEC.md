@@ -1279,17 +1279,17 @@ Policy:
 - Aish warns, without staging, when existing Aish-managed files are excluded because their sync category is disabled.
 - Aish writes `README.md` into the sync data repository so the remote is identifiable as Aish-managed data when the file is absent or already Aish-managed.
 - Aish writes `.aish-sync.toml` into the sync data repository as non-secret sync metadata. It records the private sync content categories and encryption key metadata. `config.toml` stays local and must not be committed.
-- Aish must inspect remote `.aish-sync.toml` through a temporary isolated Git workspace, not by trusting the active `~/.aish/.aish-sync.toml` file. The active file is a generated sync output and must not be allowed to masquerade as the remote repository's current metadata.
+- Aish must inspect remote `.aish-sync.toml` through the isolated runtime remote cache, not by trusting the active `~/.aish/.aish-sync.toml` file. The active file is a generated sync output and must not be allowed to masquerade as the remote repository's current metadata.
 - If repository content-category metadata disagrees with local settings, Aish warns, adopts the repository settings, persists them locally, and uses those settings for the current sync. Local existing files excluded by repository settings are not staged; Aish warns about them without deleting them.
 - When encryption is enabled, `.aish-sync.toml` must contain exactly one current full 40-hex GPG key fingerprint. Local encrypted sync must use a full fingerprint, not an email/user selector.
 - If local encryption state or fingerprint disagrees with the remote repository metadata, Aish must stop before pushing and tell the user how to resolve the key choice.
 - If Git identity is not configured, Aish sets local-only `user.name` and `user.email` values inside the sync repository before committing.
-- Empty bare or hosted Git remotes are valid first-sync targets. If the remote has no branch, Aish must skip pull and let push create the branch/upstream.
-- Aish must not rely on local branch tracking for pull. When a remote branch exists, pull must specify the remote and branch explicitly.
+- Empty bare or hosted Git remotes are valid first-sync targets. If the remote has no branch, Aish must skip the cached merge and let push create the branch/upstream.
+- Aish must not rely on local branch tracking for remote integration. When a remote branch exists, Aish must select it explicitly, fetch it into the isolated runtime cache, and merge that cached ref.
 - When the remote has a default branch, Aish should align the local sync branch to that branch before committing so one sync remote does not silently split across `master`, `main`, or another branch.
 - Longer term, remote payload merging should happen in an isolated staging workspace and only publish validated results back into the active Aish home after conflicts, key metadata, and content options are resolved.
 - If an existing non-Git Aish home is connected to an already-populated sync remote, Aish merges the remote default branch with `--allow-unrelated-histories` during the first sync.
-- If an existing local sync repository is connected to a populated remote with separate history, Aish reports the unrelated-history case and retries the pull with `--allow-unrelated-histories`.
+- If an existing local sync repository is connected to a populated remote with separate history, Aish reports the unrelated-history case and retries the cached merge with `--allow-unrelated-histories`.
 - Local bare Git repositories are valid sync remotes.
 - Plaintext Aish JSONL files use Git's union merge driver so independent appends keep both sides.
 - After a successful remote merge, Aish reports managed JSONL record-count changes. If an enabled managed record count decreases during the merge, sync must restore the JSONL union before pushing so neither side's records are deleted. If union restoration fails, sync must stop before pushing.
@@ -1323,6 +1323,7 @@ Template sharing:
 - Fetching, analyzing, and importing an encrypted template payload requires the matching local private key. This sharing encryption is independent from private sync's single repository fingerprint rule.
 - Publishing with no local templates still initializes the remote with README, metadata, and an empty template payload so the owner can edit it later.
 - Publishing merges by stable template ID/body hash: existing remote templates are kept and local templates are added, so publishing from one machine does not prune templates published by another machine.
+- Publishing and fetching must minimize remote round trips by taking one remote-ref snapshot, fetching the selected branch into `cache/template-remotes/<name>/repo`, and then reading/writing the local cache. If a publish push is rejected because the remote changed, Aish may refresh that snapshot once, merge by template ID again, and retry.
 - Fetching templates updates only the local review cache. Local templates change only after `#template import`.
 - `#template analyze <name> [query]` compares fetched templates with local templates and marks each fetched template as `new` or `present`.
 - `#template import <name> <id|all>` imports selected fetched templates into the local template store.
@@ -1332,10 +1333,10 @@ Template sharing:
 
 Template sharing command boundaries:
 
-- `#template remote add|list|rm` manages named template remote config only.
+- `#template remote add|list|rm` manages named template remote config only. If a name is removed or repointed to a different URL, Aish clears that name's local review cache to prevent stale imports from the old URL.
 - `#template publish <name>` is the only template sharing command that writes to a template remote. Plaintext is the default; `--encrypt <key>` encrypts only the template payload for that recipient.
 - `#template fetch <name>` updates only the local review cache.
-- `#template analyze <name> [query]` reads the review cache and local template store, reports import status, and must not modify local templates.
+- `#template analyze <name> [query]` reads the review cache and local template store, reports import status, must not contact the remote, and must not modify local templates.
 - `#template import <name> <id|all>` is the only template sharing command that appends fetched templates into the local template store.
 
 Commit messages:
@@ -1363,7 +1364,9 @@ Recommended conservative sync:
 ```text
 git add managed files
 git commit -m "[auto] sync <time>"
-git pull --no-rebase --no-edit
+git fetch selected branch into isolated runtime cache
+git fetch local runtime cache into active sync repository
+git merge --no-edit FETCH_HEAD
 verify/count merged managed records
 git push
 ```

@@ -202,6 +202,13 @@ fn add_template_remote(
         )?;
         return Ok(());
     }
+    let cache_is_stale = state
+        .template_sharing_config
+        .remotes
+        .iter()
+        .find(|item| item.name == name)
+        .map(|item| item.remote != remote)
+        .unwrap_or(false);
     update_template_sharing_config(state, |config| {
         if let Some(existing) = config
             .template_sharing
@@ -217,6 +224,9 @@ fn add_template_remote(
             });
         }
     })?;
+    if cache_is_stale {
+        clear_template_remote_cache(state, out, name)?;
+    }
     writeln!(out, "template.remote.{name}={remote}")?;
     writeln!(out, "no git command run")?;
     Ok(())
@@ -256,6 +266,7 @@ fn remove_template_remote(state: &mut AppState, out: &mut impl Write, name: &str
         removed = before != config.template_sharing.remotes.len();
     })?;
     if removed {
+        clear_template_remote_cache(state, out, name)?;
         writeln!(out, "template remote removed: {name}")?;
     } else {
         writeln!(out, "template remote not found: {name}")?;
@@ -285,9 +296,10 @@ fn publish_templates(
     let Some(repo) = ensure_template_remote_repo(state, out, &remote)? else {
         return Ok(());
     };
-    let branch = remote_template_branch(&repo)?
-        .unwrap_or_else(|| DEFAULT_TEMPLATE_REMOTE_BRANCH.to_string());
-    if !checkout_template_publish_branch(out, &repo, &branch)? {
+    let Some(mut snapshot) = prepare_template_remote_snapshot(out, &repo)? else {
+        return Ok(());
+    };
+    if !checkout_template_publish_branch(out, &repo, &snapshot)? {
         return Ok(());
     }
     if !validate_template_remote_worktree(out, &repo)? {
@@ -305,9 +317,11 @@ fn publish_templates(
     match run_template_push_step(out, &repo, &push)? {
         TemplatePushResult::Pushed => {}
         TemplatePushResult::RemoteChanged => {
-            let branch = remote_template_branch(&repo)?
-                .unwrap_or_else(|| DEFAULT_TEMPLATE_REMOTE_BRANCH.to_string());
-            if !checkout_template_publish_branch(out, &repo, &branch)? {
+            let Some(refreshed_snapshot) = prepare_template_remote_snapshot(out, &repo)? else {
+                return Ok(());
+            };
+            snapshot = refreshed_snapshot;
+            if !checkout_template_publish_branch(out, &repo, &snapshot)? {
                 return Ok(());
             }
             if !validate_template_remote_worktree(out, &repo)? {
@@ -359,27 +373,10 @@ fn fetch_templates(state: &mut AppState, out: &mut impl Write, name: &str) -> Re
     let Some(repo) = ensure_template_remote_repo(state, out, &remote)? else {
         return Ok(());
     };
-    let Some(branch) = remote_template_branch(&repo)? else {
-        writeln!(out, "template remote has no branch to fetch: {name}")?;
+    let Some(snapshot) = prepare_template_remote_snapshot(out, &repo)? else {
         return Ok(());
     };
-    let fetch = GitCommandPlan {
-        program: "git".to_string(),
-        args: vec!["fetch".to_string(), "origin".to_string(), branch.clone()],
-    };
-    if !run_template_git_step(out, &repo, &fetch)? {
-        return Ok(());
-    }
-    let checkout = GitCommandPlan {
-        program: "git".to_string(),
-        args: vec![
-            "checkout".to_string(),
-            "-B".to_string(),
-            branch,
-            "FETCH_HEAD".to_string(),
-        ],
-    };
-    if !run_template_git_step(out, &repo, &checkout)? {
+    if !checkout_template_fetched_branch(out, &repo, &snapshot, name)? {
         return Ok(());
     }
     if !validate_template_remote_worktree(out, &repo)? {
@@ -395,6 +392,28 @@ fn fetch_templates(state: &mut AppState, out: &mut impl Write, name: &str) -> Re
         loaded.items.len()
     )?;
     Ok(())
+}
+
+fn checkout_template_fetched_branch(
+    out: &mut impl Write,
+    repo: &Path,
+    snapshot: &TemplateRemoteSnapshot,
+    name: &str,
+) -> Result<bool> {
+    let Some(branch) = snapshot.branch.as_deref() else {
+        writeln!(out, "template remote has no branch to fetch: {name}")?;
+        return Ok(false);
+    };
+    let checkout = GitCommandPlan {
+        program: "git".to_string(),
+        args: vec![
+            "checkout".to_string(),
+            "-B".to_string(),
+            branch.to_string(),
+            snapshot.fetched_ref(branch),
+        ],
+    };
+    run_template_git_step(out, repo, &checkout)
 }
 
 fn analyze_templates(
@@ -662,20 +681,21 @@ fn ensure_template_remote_repo(
     let repo = template_remote_repo_path(state, remote)?;
     fs::create_dir_all(&repo)
         .with_context(|| format!("failed to create template remote cache {}", repo.display()))?;
-    if repo.join(".git").is_dir() {
-        let set_url = GitCommandPlan {
-            program: "git".to_string(),
-            args: vec![
-                "remote".to_string(),
-                "set-url".to_string(),
-                "origin".to_string(),
-                remote.remote.clone(),
-            ],
-        };
-        if !run_template_git_step(out, &repo, &set_url)? {
-            return Ok(None);
+    let mut needs_init = !repo.join(".git").is_dir();
+    if !needs_init {
+        let origin_url = git_config_value(&repo, "remote.origin.url")?;
+        if origin_url.as_deref() != Some(remote.remote.as_str()) {
+            fs::remove_dir_all(&repo).with_context(|| {
+                format!("failed to reset template remote cache {}", repo.display())
+            })?;
+            fs::create_dir_all(&repo).with_context(|| {
+                format!("failed to create template remote cache {}", repo.display())
+            })?;
+            writeln!(out, "template remote cache reset: {}", remote.name)?;
+            needs_init = true;
         }
-    } else {
+    }
+    if needs_init {
         let init = GitCommandPlan {
             program: "git".to_string(),
             args: vec!["init".to_string()],
@@ -718,65 +738,87 @@ fn template_remote_repo_path(state: &AppState, remote: &TemplateRemoteConfig) ->
         .join("repo"))
 }
 
+fn clear_template_remote_cache(state: &AppState, out: &mut impl Write, name: &str) -> Result<()> {
+    let config = TemplateRemoteConfig {
+        name: name.to_string(),
+        remote: String::new(),
+    };
+    let repo = template_remote_repo_path(state, &config)?;
+    match fs::remove_dir_all(&repo) {
+        Ok(()) => {
+            writeln!(out, "template remote cache reset: {name}")?;
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => {
+            return Err(err).with_context(|| {
+                format!("failed to reset template remote cache {}", repo.display())
+            });
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone)]
+struct TemplateRemoteSnapshot {
+    branch: Option<String>,
+}
+
+impl TemplateRemoteSnapshot {
+    fn fetched_ref(&self, branch: &str) -> String {
+        format!("refs/remotes/origin/{branch}")
+    }
+}
+
+#[derive(Debug, Clone)]
+struct TemplateRemoteRefs {
+    head_branch: Option<String>,
+    branches: Vec<String>,
+}
+
+fn prepare_template_remote_snapshot(
+    out: &mut impl Write,
+    repo: &Path,
+) -> Result<Option<TemplateRemoteSnapshot>> {
+    let refs = template_remote_refs(repo)?;
+    let branch = select_template_remote_branch(&refs);
+    if let Some(branch) = &branch
+        && !fetch_template_remote_branch(out, repo, branch)?
+    {
+        return Ok(None);
+    }
+    Ok(Some(TemplateRemoteSnapshot { branch }))
+}
+
+fn fetch_template_remote_branch(out: &mut impl Write, repo: &Path, branch: &str) -> Result<bool> {
+    let refspec = format!("+refs/heads/{branch}:refs/remotes/origin/{branch}");
+    let fetch = GitCommandPlan {
+        program: "git".to_string(),
+        args: vec!["fetch".to_string(), "origin".to_string(), refspec],
+    };
+    run_template_git_step(out, repo, &fetch)
+}
+
 fn checkout_template_publish_branch(
     out: &mut impl Write,
     repo: &Path,
-    branch: &str,
+    snapshot: &TemplateRemoteSnapshot,
 ) -> Result<bool> {
-    let checkout = if remote_branch_exists(repo, branch)? {
-        let fetch = GitCommandPlan {
-            program: "git".to_string(),
-            args: vec![
-                "fetch".to_string(),
-                "origin".to_string(),
-                branch.to_string(),
-            ],
-        };
-        if !run_template_git_step(out, repo, &fetch)? {
-            return Ok(false);
-        }
-        GitCommandPlan {
-            program: "git".to_string(),
-            args: vec![
-                "checkout".to_string(),
-                "-B".to_string(),
-                branch.to_string(),
-                "FETCH_HEAD".to_string(),
-            ],
-        }
-    } else {
-        GitCommandPlan {
-            program: "git".to_string(),
-            args: vec!["checkout".to_string(), "-B".to_string(), branch.to_string()],
-        }
+    let branch = snapshot
+        .branch
+        .as_deref()
+        .unwrap_or(DEFAULT_TEMPLATE_REMOTE_BRANCH);
+    let mut args = vec!["checkout".to_string(), "-B".to_string(), branch.to_string()];
+    if snapshot.branch.is_some() {
+        args.push(snapshot.fetched_ref(branch));
+    }
+    let checkout = GitCommandPlan {
+        program: "git".to_string(),
+        args,
     };
     run_template_git_step(out, repo, &checkout)
 }
 
-fn remote_template_branch(repo: &Path) -> Result<Option<String>> {
-    if let Some(branch) = remote_head_branch(repo)? {
-        return Ok(Some(branch));
-    }
-    let branches = remote_branch_candidates(repo)?;
-    if branches
-        .iter()
-        .any(|branch| branch == DEFAULT_TEMPLATE_REMOTE_BRANCH)
-    {
-        return Ok(Some(DEFAULT_TEMPLATE_REMOTE_BRANCH.to_string()));
-    }
-    if branches
-        .iter()
-        .any(|branch| branch == FALLBACK_TEMPLATE_REMOTE_BRANCH)
-    {
-        return Ok(Some(FALLBACK_TEMPLATE_REMOTE_BRANCH.to_string()));
-    }
-    if branches.len() == 1 {
-        return Ok(branches.into_iter().next());
-    }
-    Ok(None)
-}
-
-fn remote_head_branch(repo: &Path) -> Result<Option<String>> {
+fn template_remote_refs(repo: &Path) -> Result<TemplateRemoteRefs> {
     let result = run_git_command(
         repo,
         &GitCommandPlan {
@@ -786,62 +828,77 @@ fn remote_head_branch(repo: &Path) -> Result<Option<String>> {
                 "--symref".to_string(),
                 "origin".to_string(),
                 "HEAD".to_string(),
+                "refs/heads/*".to_string(),
             ],
         },
     )?;
     if !result.success {
-        return Ok(None);
+        return Ok(TemplateRemoteRefs {
+            head_branch: None,
+            branches: Vec::new(),
+        });
     }
-    for line in result.stdout.lines() {
-        let Some(rest) = line.strip_prefix("ref: refs/heads/") else {
-            continue;
-        };
-        let Some((branch, target)) = rest.split_once('\t') else {
-            continue;
-        };
-        if target == "HEAD" && !branch.is_empty() && !branch.chars().any(char::is_control) {
-            return Ok(Some(branch.to_string()));
-        }
-    }
-    Ok(None)
+    Ok(parse_template_remote_refs(&result.stdout))
 }
 
-fn remote_branch_candidates(repo: &Path) -> Result<Vec<String>> {
-    let result = run_git_command(
-        repo,
-        &GitCommandPlan {
-            program: "git".to_string(),
-            args: vec![
-                "ls-remote".to_string(),
-                "--heads".to_string(),
-                "origin".to_string(),
-            ],
-        },
-    )?;
-    if !result.success {
-        return Ok(Vec::new());
-    }
+fn parse_template_remote_refs(raw: &str) -> TemplateRemoteRefs {
+    let mut head_branch = None;
     let mut branches = Vec::new();
-    for line in result.stdout.lines() {
+    for line in raw.lines() {
+        if let Some(rest) = line.strip_prefix("ref: refs/heads/")
+            && let Some((branch, target)) = rest.split_once('\t')
+            && target == "HEAD"
+            && valid_template_remote_branch_name(branch)
+        {
+            head_branch = Some(branch.to_string());
+            continue;
+        }
         let Some((_, refname)) = line.split_once('\t') else {
             continue;
         };
         let Some(branch) = refname.strip_prefix("refs/heads/") else {
             continue;
         };
-        if !branch.is_empty() && !branch.chars().any(char::is_control) {
+        if valid_template_remote_branch_name(branch) {
             branches.push(branch.to_string());
         }
     }
     branches.sort();
     branches.dedup();
-    Ok(branches)
+    TemplateRemoteRefs {
+        head_branch,
+        branches,
+    }
 }
 
-fn remote_branch_exists(repo: &Path, branch: &str) -> Result<bool> {
-    Ok(remote_branch_candidates(repo)?
+fn select_template_remote_branch(refs: &TemplateRemoteRefs) -> Option<String> {
+    if let Some(branch) = &refs.head_branch
+        && refs.branches.iter().any(|candidate| candidate == branch)
+    {
+        return Some(branch.clone());
+    }
+    if refs
+        .branches
         .iter()
-        .any(|candidate| candidate == branch))
+        .any(|branch| branch == DEFAULT_TEMPLATE_REMOTE_BRANCH)
+    {
+        return Some(DEFAULT_TEMPLATE_REMOTE_BRANCH.to_string());
+    }
+    if refs
+        .branches
+        .iter()
+        .any(|branch| branch == FALLBACK_TEMPLATE_REMOTE_BRANCH)
+    {
+        return Some(FALLBACK_TEMPLATE_REMOTE_BRANCH.to_string());
+    }
+    if refs.branches.len() == 1 {
+        return refs.branches.first().cloned();
+    }
+    None
+}
+
+fn valid_template_remote_branch_name(branch: &str) -> bool {
+    !branch.is_empty() && !branch.chars().any(char::is_control)
 }
 
 fn validate_template_remote_worktree(out: &mut impl Write, repo: &Path) -> Result<bool> {

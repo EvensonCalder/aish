@@ -150,7 +150,7 @@ fn sync_now_runs_against_configured_local_git_remote() {
         "{output}"
     );
     assert!(
-        output.contains("sync step ok: git pull --no-rebase --no-edit"),
+        output.contains("sync step ok: git merge --no-edit FETCH_HEAD"),
         "{output}"
     );
     assert!(output.contains("sync step ok: git commit"), "{output}");
@@ -226,7 +226,7 @@ fn existing_repo_with_empty_bare_remote_skips_pull_without_tracking_error() {
     let output = String::from_utf8(output).unwrap();
     assert!(
         output.contains(
-            "sync step skipped: git pull --no-rebase --no-edit because remote has no branch"
+            "sync step skipped: remote cache has no branch to merge because remote has no branch"
         ),
         "{output}"
     );
@@ -361,7 +361,7 @@ fn first_sync_merges_existing_remote_when_local_home_was_not_git_repo() {
 
     let output = String::from_utf8(output).unwrap();
     assert!(
-        output.contains("git pull --no-rebase --no-edit --allow-unrelated-histories origin"),
+        output.contains("git merge --no-edit --allow-unrelated-histories FETCH_HEAD"),
         "{output}"
     );
     assert!(output.contains("sync push completed"), "{output}");
@@ -432,9 +432,7 @@ fn first_sync_uses_single_remote_branch_when_remote_head_is_unborn() {
         "{output}"
     );
     assert!(
-        output.contains(
-            "git pull --no-rebase --no-edit --allow-unrelated-histories origin sync-data"
-        ),
+        output.contains("git merge --no-edit --allow-unrelated-histories FETCH_HEAD"),
         "{output}"
     );
     assert!(output.contains("sync push completed"), "{output}");
@@ -458,7 +456,7 @@ fn first_sync_uses_single_remote_branch_when_remote_head_is_unborn() {
 }
 
 #[test]
-fn existing_repo_retries_unrelated_remote_pull_with_merge_option() {
+fn existing_repo_retries_unrelated_remote_merge_with_merge_option() {
     let _guard = git_env_guard();
     let temp = tempfile::tempdir().unwrap();
     let remote = temp.path().join("remote.git");
@@ -493,12 +491,12 @@ fn existing_repo_retries_unrelated_remote_pull_with_merge_option() {
     let output = String::from_utf8(output).unwrap();
     assert!(
         output.contains(
-            "sync pull needs unrelated-history merge; retrying with --allow-unrelated-histories"
+            "sync merge needs unrelated-history merge; retrying with --allow-unrelated-histories"
         ),
         "{output}"
     );
     assert!(
-        output.contains("git pull --no-rebase --no-edit --allow-unrelated-histories origin"),
+        output.contains("git merge --no-edit --allow-unrelated-histories FETCH_HEAD"),
         "{output}"
     );
     assert!(output.contains("sync push completed"), "{output}");
