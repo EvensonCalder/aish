@@ -17,11 +17,7 @@ aish_wait_prompt
 
 aish_send "#sync now"
 aish_enter
-aish_expect "sync step ok: git init"
-aish_expect "sync step ok: git remote add origin $missing_remote"
-aish_expect "sync step ok: git add -- .aish-sync.toml .gitattributes .gitignore README.md"
-aish_expect "sync step ok: git commit"
-aish_expect "sync step skipped: remote cache has no branch to merge for new repository"
+aish_expect "sync started in background"
 aish_expect "sync failed: git push -u origin HEAD"
 aish_wait_prompt
 

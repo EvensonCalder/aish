@@ -351,12 +351,13 @@ Use only disposable repositories.
 | --- | --- | --- | --- |
 | SYNC-001 | Configure a local bare git remote in `/tmp`. | Remote setup does not use network or personal credentials. | Paste commands. |
 | SYNC-002 | Run `#set-remote <local-bare-repo-url>`. | Config persists the remote. | Paste `#config` output. |
-| SYNC-003 | Create history/templates/notes, then run `#sync now`. | Aish commits only managed enabled paths and pushes successfully. | Paste output. |
-| SYNC-004 | Run `#sync now` again with no changes. | Aish reports no changes or succeeds without creating unnecessary commits. | Paste output. |
-| SYNC-005 | Create a deterministic unmanaged conflict in the disposable remote, then run `#sync now`. | Aish reports the conflict/failure and does not auto-resolve unmanaged files, delete, or rewrite history. | Paste output. |
+| SYNC-003 | Create history/templates/notes, then run `#sync now`. | Aish starts sync in the background, keeps the prompt usable, commits only managed enabled paths, pushes successfully, and prints only compact sync data/completion output. | Paste output. |
+| SYNC-004 | Run `#sync now` again with no changes. | Aish starts sync in the background and succeeds without creating unnecessary commits or printing routine Git step noise. | Paste output. |
+| SYNC-005 | Create a deterministic unmanaged conflict in the disposable remote, then run `#sync now`. | Aish reports the compact conflict/failure, keeps the prompt usable, and does not auto-resolve unmanaged files, delete, or rewrite history. | Paste output. |
 | SYNC-006 | With encrypted sync enabled and matching keys, create independent history appends on two disposable clones, then sync the stale clone. | Aish treats `*.jsonl.gpg` as binary for Git, decrypts both sides, unions plaintext records, re-encrypts, stages, commits, and pushes without losing either side. | Paste output. |
 | SYNC-007 | Run `#sync off`, `#sync ai on`, `#sync history on`, `#sync templates on`, and `#sync drafts on`. | Category config persists; no scheduler files are created. | Paste output. |
-| SYNC-008 | Configure a real private remote only if explicitly safe and disposable. | Auth prompts do not wedge terminal; Aish remains conservative. | Describe result. |
+| SYNC-008 | Run `#sync quiet on`, then run a successful background sync and a failing background sync. | Routine start/success notices are hidden, failures remain visible, and no scheduler files are created. | Paste output. |
+| SYNC-009 | Configure a real private remote only if explicitly safe and disposable. | Auth prompts do not wedge terminal; Aish remains conservative. | Describe result. |
 
 ## Encryption And GPG
 

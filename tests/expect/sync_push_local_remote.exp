@@ -45,11 +45,7 @@ aish_wait_prompt
 
 aish_send "#sync now"
 aish_enter
-aish_expect "sync step ok: git add -- .aish-sync.toml .gitattributes .gitignore README.md"
-aish_expect "sync step ok: git commit"
-aish_expect "sync step ok: git fetch"
-aish_expect "sync step ok: git merge --no-edit FETCH_HEAD"
-aish_expect "sync step ok: git push"
+aish_expect "sync started in background"
 aish_expect "sync push completed"
 aish_wait_prompt
 

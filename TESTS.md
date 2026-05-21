@@ -341,7 +341,7 @@ Implemented:
 - Context configuration persists `#context on|off`, `#context confirm on|off`, and `#context <bytes>` to `config.toml`; context confirmation stores a pending prompt and accepts `Y`/`Enter` or skips with `n`/`Esc`/`Ctrl-C`.
 - Context pseudo-pipe helpers run context commands through a controlled `/bin/sh -c` subprocess, capture stdout and stderr, enforce byte caps and timeouts, disclose truncation/timeouts, detect dangerous command patterns, and build contextual AI prompts with common secret token shapes redacted from command/output context.
 - Event log helpers append to `logs/events.jsonl`, trim to 1000 events by default, redact common secret token shapes, record config update errors, record secret/encryption-adjacent changes such as `#key clear`, record sync config changes, and `#log <count>` prints recent events.
-- Sync config commands persist remote, schedule/off state, startup/exit triggers, and category toggles for AI/history/templates/drafts without running git or creating scheduler files.
+- Sync config commands persist remote, schedule/off state, startup/exit/quiet triggers, and category toggles for AI/history/templates/drafts without running git or creating scheduler files.
 - Sync lock helper atomically creates a lock file, rejects a second holder, writes metadata, and removes the lock on drop.
 - Managed sync `.gitignore` helper preserves user content, replaces only the Aish managed section, and is idempotent.
 - Tracked managed files warning helper identifies Aish-managed paths that may already be tracked and explicitly avoids automatic `git rm --cached` behavior.
@@ -355,8 +355,8 @@ Implemented:
 - Git repository initialization plan helper emits fixed `git init` and `git remote add origin <remote>` arguments while rejecting empty/control-character remotes without running git.
 - Ctrl-L and real `clear`-style command output handling is covered with a virtual terminal screen test that interprets CR/LF and ANSI home/clear sequences, proving the final prompt renders on row 0 instead of leaving a blank first line.
 - Conservative sync flow plan helper orders remote-cache fetch/merge, managed add, commit, and push steps using fixed git argument arrays without running git.
-- Manual `#sync now` sync is covered against a local bare git remote, including remote-cache fetch/merge, managed `.gitignore` add, commit, push, and completion event logging without network access.
-- Startup `#sync <schedule>` behavior is covered for due and not-due schedules using a runtime timestamp file, sync lock, and local bare git remote without creating scheduler files. Explicit startup and exit sync triggers have Rust coverage.
+- Manual `#sync now` sync is covered against a local bare git remote as a background job, including remote-cache fetch/merge, managed `.gitignore` add, commit, push, compact completion output, state reload, and completion event logging without network access.
+- Periodic `#sync <schedule>` behavior is covered for due and not-due schedules using a runtime timestamp file, sync lock, and local bare git remote without creating scheduler files. Explicit startup and exit sync triggers have Rust coverage; startup/periodic sync run in the background, while exit sync remains blocking.
 - Marker-based shell integration now emits and parses command-start markers, with shell-quoting tests and PTY coverage that bash reports `started_command` without leaking internal markers into history.
 - Bash marker integration has PTY coverage for prompt-ready initial cwd, command-start reporting, command-finish exit status, and cwd reporting after command execution.
 - Zsh hook integration has PTY coverage for `preexec` command-start reporting, `precmd` finish status, and cwd reporting after command execution when `/bin/zsh` is available.
@@ -371,8 +371,8 @@ Implemented:
 - Prompt redraw after ordinary command output has both a Rust virtual-screen regression and a real `tmux` pane-capture regression proving repeated final visible shell output remains above the next prompt in actual use; the tmux scripts run the Cargo-provided `CARGO_BIN_EXE_aish` binary via `AISH_BIN` so they cannot accidentally validate a stale `target/debug/aish`.
 - Common real-world shell workflows have expect and backend-specific tmux coverage proving Aish passes through persistent `cd`, `mkdir`, file redirection, `cat | grep`, quoted arguments, exported environment variables, file tests, failing commands, and recovery after failure across bash and zsh by default; fish coverage is opt-in with `AISH_TEST_FISH=1`.
 - Command output followed by mode-switch redraw and unique completion acceptance has expect coverage through the real binary.
-- Manual `#sync now` sync has expect coverage against a local temporary bare git remote, including managed `.gitignore` push and no scheduler file creation.
-- Manual `#sync now` sync failure has expect coverage with a missing local remote, including visible failure output, event-log recording, and no scheduler file creation.
+- Manual `#sync now` sync has expect coverage against a local temporary bare git remote, including background start, compact success output, managed `.gitignore` push, and no scheduler file creation.
+- Manual `#sync now` sync failure has expect coverage with a missing local remote, including background start, visible failure output, event-log recording, and no scheduler file creation.
 - Representative private-command safe failures have expect coverage for invalid history/log/template/context/sync usage, followed by a backend command proving the session remains usable.
 - Unicode command output has real `tmux` pane-capture coverage so UTF-8 behavior is checked against final visible terminal state without relying on Tcl/expect Unicode handling.
 - Terminal size has expect coverage proving startup outer terminal rows/columns propagate to backend child commands via `stty size`; runtime backend resize is covered by PTY integration.
@@ -659,7 +659,7 @@ Known gaps:
 
 - Lazy startup passphrase-required unlock is explicit through `#unlock`; prompt startup unlock mode is implemented for users who want passphrase entry before the first prompt.
 - Real passphrase/pinentry GPG behavior is human-only and has been manually validated; fake-GPG command boundaries, startup unlock fallback, append-without-decrypt behavior, and storage migration are automated.
-- There is no planned in-process scheduled background sync; supported automatic sync points are startup periodic checks, explicit startup sync, and exit sync.
+- Periodic sync runs as an in-process background check during frontend ticks; no scheduler files are created. Exit sync remains the blocking durability boundary.
 
 ### Regular History Storage
 

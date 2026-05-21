@@ -154,6 +154,8 @@ pub(super) fn write_encryption_sync_status(state: &AppState, out: &mut impl Writ
     )?;
     writeln!(out, "sync.startup={}", state.sync_config.startup)?;
     writeln!(out, "sync.exit={}", state.sync_config.exit)?;
+    writeln!(out, "sync.quiet={}", state.sync_config.quiet)?;
+    writeln!(out, "sync.running={}", state.background_sync.is_some())?;
     writeln!(out, "sync.ai={}", state.sync_config.ai)?;
     writeln!(out, "sync.history={}", state.sync_config.history)?;
     writeln!(out, "sync.templates={}", state.sync_config.templates)?;

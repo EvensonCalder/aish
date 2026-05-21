@@ -83,8 +83,10 @@ aish_wait_prompt
 
 aish_send "#sync now"
 aish_enter
+aish_expect "sync started in background"
 aish_expect "sync aborted on conflict: git merge --no-edit FETCH_HEAD"
-aish_expect "CONFLICT"
+aish_expect "sync unresolved conflicts: 1"
+aish_expect "conflict: .gitignore"
 aish_expect "options: #sync resolve-union"
 aish_wait_prompt
 

@@ -653,6 +653,7 @@ Inside Aish:
 #set-remote <path-to-bare-repo>
 #status
 #sync now
+#sync quiet on
 ```
 
 Create disposable history/templates/notes before pushing.
@@ -660,6 +661,8 @@ Create disposable history/templates/notes before pushing.
 Expected:
 
 - Aish commits and pushes only managed enabled data.
+- `#sync now` starts in the background, keeps the prompt usable, and prints compact sync output instead of routine Git step logs.
+- `#sync quiet on` suppresses routine background sync start/success notices while keeping failures visible.
 - Repeated push with no changes does not create unnecessary commits.
 - Conflict failures are readable and conservative.
 - No scheduler files are created.

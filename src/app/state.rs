@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, mpsc};
 use std::time::Instant;
 
 use anyhow::{Context, Result};
@@ -15,7 +15,7 @@ use crate::config::{
 use crate::encrypted_writer::EncryptedWriteQueue;
 use crate::encryption::{
     append_encrypted_jsonl, encrypted_path, gpg_program, load_encrypted_jsonl_with_bytes,
-    rewrite_encrypted_jsonl,
+    load_encrypted_jsonl_with_bytes_noninteractive, rewrite_encrypted_jsonl,
 };
 use crate::history::{
     AiCommandIndex, AiItem, AiSession, DraftEntry, HistoryEntry, JsonlLineError, JsonlLoad,
@@ -39,6 +39,7 @@ use super::startup_unlock::{
     EncryptedStartupData, EncryptedStartupPaths, EncryptedStartupUnlock, UnlockMode,
     load_encrypted_startup_data,
 };
+use super::sync_commands::BackgroundSyncJob;
 use super::{PendingPrivateOutput, PromptTemplates, configured_encryption_key, unix_timestamp};
 
 pub(crate) const OUTPUT_RING_CAPACITY: usize = 100;
@@ -105,6 +106,8 @@ pub struct AppState {
     pub pending_locked_notes: Vec<NoteEntry>,
     pub pending_locked_templates: Vec<TemplateEntry>,
     pub sync_config: SyncConfig,
+    pub background_sync: Option<BackgroundSyncJob>,
+    pub next_periodic_sync_check: Option<Instant>,
     pub template_sharing_config: TemplateSharingConfig,
     pub pending_context: Option<PendingContextPrompt>,
     pub pending_private_output: Option<PendingPrivateOutput>,
@@ -205,6 +208,8 @@ impl Default for AppState {
             pending_locked_notes: Vec::new(),
             pending_locked_templates: Vec::new(),
             sync_config: SyncConfig::default(),
+            background_sync: None,
+            next_periodic_sync_check: None,
             template_sharing_config: TemplateSharingConfig::default(),
             pending_context: None,
             pending_private_output: None,
@@ -680,6 +685,22 @@ impl AppState {
         }
     }
 
+    pub(crate) fn reload_synced_private_data_noninteractive(&mut self) -> Result<()> {
+        if self.encryption_config.enabled {
+            if self.encrypted_storage_is_locked() {
+                if let Some(paths) = self.encrypted_startup_paths() {
+                    self.encrypted_startup_unlock = Some(EncryptedStartupUnlock::start(paths));
+                    self.encrypted_startup_unlock_message =
+                        Some("encrypted storage unlocking in background".into());
+                }
+                return Ok(());
+            }
+            self.reload_encrypted_synced_private_data_noninteractive()
+        } else {
+            self.reload_plaintext_synced_private_data()
+        }
+    }
+
     fn reload_plaintext_synced_private_data(&mut self) -> Result<()> {
         if self.sync_config.history
             && let Some(path) = &self.regular_history_path
@@ -747,6 +768,63 @@ impl AppState {
         {
             let (loaded, bytes) = load_encrypted_jsonl_with_bytes::<TemplateEntry>(&program, path)
                 .with_context(|| format!("failed to reload synced {}", path.display()))?;
+            self.templates = loaded.items;
+            self.template_errors = loaded.errors;
+            encrypted_cache.insert(path.clone(), bytes);
+        }
+        self.finish_synced_private_data_reload();
+        if let Some(writer) = &self.encrypted_writer {
+            writer.replace_cache(encrypted_cache)?;
+        } else {
+            self.start_encrypted_writer_with_cache(encrypted_cache);
+        }
+        self.encrypted_storage_unlocked = true;
+        Ok(())
+    }
+
+    fn reload_encrypted_synced_private_data_noninteractive(&mut self) -> Result<()> {
+        let program = gpg_program();
+        let mut encrypted_cache = HashMap::new();
+        if self.sync_config.history {
+            if let Some(path) = &self.regular_history_path {
+                let (loaded, bytes) =
+                    load_encrypted_jsonl_with_bytes_noninteractive::<HistoryEntry>(&program, path)
+                        .with_context(|| format!("failed to reload synced {}", path.display()))?;
+                self.regular_history = loaded.items;
+                encrypted_cache.insert(path.clone(), bytes);
+            }
+            if let Some(path) = &self.notes_path {
+                let (_, bytes) =
+                    load_encrypted_jsonl_with_bytes_noninteractive::<NoteEntry>(&program, path)
+                        .with_context(|| format!("failed to reload synced {}", path.display()))?;
+                encrypted_cache.insert(path.clone(), bytes);
+            }
+        }
+        if self.sync_config.drafts
+            && let Some(path) = &self.draft_history_path
+        {
+            let (loaded, bytes) =
+                load_encrypted_jsonl_with_bytes_noninteractive::<DraftEntry>(&program, path)
+                    .with_context(|| format!("failed to reload synced {}", path.display()))?;
+            self.draft_history = loaded.items;
+            encrypted_cache.insert(path.clone(), bytes);
+        }
+        if self.sync_config.ai
+            && let Some(path) = &self.ai_history_path
+        {
+            let (loaded, bytes) =
+                load_encrypted_jsonl_with_bytes_noninteractive::<AiSession>(&program, path)
+                    .with_context(|| format!("failed to reload synced {}", path.display()))?;
+            self.ai_sessions = loaded.items;
+            self.ai_command_indices = ai_command_indices(&self.ai_sessions);
+            encrypted_cache.insert(path.clone(), bytes);
+        }
+        if self.sync_config.templates
+            && let Some(path) = &self.template_store_path
+        {
+            let (loaded, bytes) =
+                load_encrypted_jsonl_with_bytes_noninteractive::<TemplateEntry>(&program, path)
+                    .with_context(|| format!("failed to reload synced {}", path.display()))?;
             self.templates = loaded.items;
             self.template_errors = loaded.errors;
             encrypted_cache.insert(path.clone(), bytes);
@@ -926,6 +1004,15 @@ impl AppState {
             writer.flush().context("pending encrypted writes failed")?;
         }
         Ok(())
+    }
+
+    pub fn begin_encrypted_write_flush(
+        &self,
+    ) -> Result<Option<mpsc::Receiver<std::result::Result<(), String>>>> {
+        self.encrypted_writer
+            .as_ref()
+            .map(|writer| writer.begin_flush())
+            .transpose()
     }
 
     pub fn invalidate_encrypted_writer_cache(&self, paths: Vec<PathBuf>) -> Result<()> {

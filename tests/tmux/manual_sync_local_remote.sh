@@ -44,11 +44,7 @@ CAPTURE="$(tmux capture-pane -p -S - -t "$SESSION")"
 printf '%s\n' "$CAPTURE"
 
 printf '%s\n' "$CAPTURE" | rg -q "^sync.remote=$REMOTE$"
-printf '%s\n' "$CAPTURE" | rg -q '^sync step ok: git add -- \.aish-sync\.toml \.gitattributes \.gitignore README\.md$'
-printf '%s\n' "$CAPTURE" | rg -q '^sync step ok: git commit'
-printf '%s\n' "$CAPTURE" | rg -q '^sync step ok: git (pull --no-rebase --no-edit|fetch )'
-printf '%s\n' "$CAPTURE" | rg -q '^sync step ok: git (merge --no-edit|pull --no-rebase --no-edit)'
-printf '%s\n' "$CAPTURE" | rg -q '^sync step ok: git push'
+printf '%s\n' "$CAPTURE" | rg -q '^sync started in background$'
 printf '%s\n' "$CAPTURE" | rg -q '^sync push completed$'
 printf '%s\n' "$CAPTURE" | rg -q '^after-local-sync$'
 

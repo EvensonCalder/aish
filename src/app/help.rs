@@ -316,31 +316,35 @@ const SYNC_HELP: &[HelpEntry] = &[
     },
     HelpEntry {
         usage: "#sync now",
-        description: "stage managed files, commit local changes, merge remote updates, and push",
+        description: "start background sync: stage managed files, merge remote updates, and push",
     },
     HelpEntry {
         usage: "#sync resolve-union",
-        description: "resolve Aish-managed conflicts by keeping both sides, then commit and push",
+        description: "start background recovery for Aish-managed conflicts, then commit and push",
     },
     HelpEntry {
         usage: "#sync continue",
-        description: "continue an interrupted sync after auto or manual conflict resolution",
+        description: "start background continuation after auto or manual conflict resolution",
     },
     HelpEntry {
         usage: "#sync abort",
-        description: "abort an interrupted sync merge or rebase",
+        description: "start background abort for an interrupted sync merge or rebase",
     },
     HelpEntry {
         usage: "#sync <schedule>",
-        description: "save the startup sync schedule",
+        description: "save the periodic background sync schedule",
     },
     HelpEntry {
         usage: "#sync off",
-        description: "disable periodic startup sync",
+        description: "disable periodic background sync",
     },
     HelpEntry {
         usage: "#sync startup|exit on|off",
         description: "enable or disable sync every startup or on exit",
+    },
+    HelpEntry {
+        usage: "#sync quiet|silent on|off",
+        description: "hide routine background sync start/success notices; failures stay visible",
     },
     HelpEntry {
         usage: "#sync ai|history|templates|drafts on|off",

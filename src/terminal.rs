@@ -6,8 +6,9 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crossterm::terminal::size;
 
 use crate::app::{
-    AppState, answer_context_confirmation, answer_private_output_confirmation, execute_draft,
-    run_exit_sync_if_enabled, save_draft_if_configured,
+    AppState, answer_context_confirmation, answer_private_output_confirmation,
+    drain_background_sync_events, execute_draft, queue_due_periodic_sync_if_needed,
+    run_exit_sync_if_enabled, save_draft_if_configured, wait_for_background_sync_on_exit,
 };
 use crate::config::CompletionMode;
 use crate::display_width::{visual_line_count, visual_position};
@@ -121,6 +122,9 @@ fn persist_draft_and_flush_before_exit(state: &mut AppState, out: &mut impl Writ
     let _ = save_draft_if_configured(state)?;
     {
         let mut display_out = CrLfWriter::new(out);
+        for message in wait_for_background_sync_on_exit(state)? {
+            writeln!(display_out, "{message}")?;
+        }
         run_exit_sync_if_enabled(state, &mut display_out)?;
         display_out.flush()?;
     }
@@ -129,6 +133,25 @@ fn persist_draft_and_flush_before_exit(state: &mut AppState, out: &mut impl Writ
 
 fn refresh_after_background_events(state: &mut AppState, out: &mut impl Write) -> Result<()> {
     let mut should_redraw = false;
+    let mut sync_messages = Vec::new();
+    {
+        let mut sync_start_output = Vec::new();
+        queue_due_periodic_sync_if_needed(state, &mut sync_start_output)?;
+        sync_messages.extend(sync_output_lines(sync_start_output));
+    }
+    let sync_drain = drain_background_sync_events(state)?;
+    if sync_drain.completed {
+        let previous_inline = state.completion_inline.clone();
+        let previous_panel = state.completion_panel.clone();
+        refresh_live_completion_ui(state)?;
+        should_redraw |=
+            state.completion_inline != previous_inline || state.completion_panel != previous_panel;
+    }
+    sync_messages.extend(sync_drain.messages);
+    if !sync_messages.is_empty() {
+        write_background_messages(state, out, &sync_messages)?;
+        should_redraw = true;
+    }
     if let Some(candidates) = state.drain_live_completion_events()
         && should_apply_completion_event_update(state)
     {
@@ -153,6 +176,29 @@ fn refresh_after_background_events(state: &mut AppState, out: &mut impl Write) -
     if should_redraw {
         redraw(state, out)?;
     }
+    Ok(())
+}
+
+fn sync_output_lines(output: Vec<u8>) -> Vec<String> {
+    String::from_utf8_lossy(&output)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn write_background_messages(
+    state: &mut AppState,
+    out: &mut impl Write,
+    messages: &[String],
+) -> Result<()> {
+    move_to_rendered_end(state, out, terminal_display_width())?;
+    invalidate_render_anchor(state);
+    for message in messages {
+        write!(out, "\r\n{message}")?;
+    }
+    write!(out, "\r\n")?;
     Ok(())
 }
 

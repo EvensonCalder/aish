@@ -24,6 +24,7 @@ aish_wait_prompt
 
 aish_send "#sync now"
 aish_enter
+aish_expect "sync started in background"
 aish_expect "sync remote is not configured; run #set-remote <git-url> first"
 aish_wait_prompt
 

@@ -321,6 +321,7 @@ Sync:
 #sync off
 #sync startup on|off
 #sync exit on|off
+#sync quiet on|off
 #sync ai on|off
 #sync history on|off
 #sync templates on|off
@@ -504,9 +505,9 @@ Implemented:
 - Keep `config.toml`, cache, logs, secrets, and temporary files local by default.
 - Write `README.md` into the sync data repository as a warning/guide for anyone opening the remote when it is absent or already Aish-managed.
 - Write `.aish-sync.toml` into the sync data repository as non-secret metadata. It records the private sync content categories and, when encryption is enabled, the single full GPG fingerprint that current synced data must use.
-- Persist a conservative subset of periodic schedules checked at startup.
+- Persist a conservative subset of periodic schedules checked while Aish is running.
 - Persist explicit startup and exit sync triggers.
-- Run `#sync now` against a configured Git remote.
+- Run `#sync now` against a configured Git remote in the background; the prompt returns immediately.
 - Stage managed enabled paths automatically, commit only when staged content changed, fetch the selected remote branch once into an isolated runtime cache, merge the cached `FETCH_HEAD`, then push once. If the remote changes before that push lands, Aish stops and asks you to rerun `#sync now` instead of starting a second fetch/merge/push round.
 - For encrypted sync, decrypt every enabled managed `*.jsonl.gpg` file before staging, committing, or pushing. If GPG cannot decrypt the data on this machine, sync stops with the path and key-resolution guidance.
 - Treat an empty bare/GitHub remote as a normal first-sync target: skip the cached merge when the remote has no branch, then push with upstream setup.
@@ -514,7 +515,7 @@ Implemented:
 - Inspect remote sync metadata through the isolated runtime remote cache so a stale local `.aish-sync.toml` cannot be mistaken for the remote repository's current encryption state.
 - Prefer the remote default branch when deciding the sync branch, then align the local sync branch before committing.
 - Clear stale sync locks left by dead Aish processes before refusing a new sync.
-- Stop an individual Git sync step after 60 seconds, report the timeout, release the sync lock, and return to the Aish prompt.
+- Stop an individual Git sync step after 60 seconds, report the timeout, and release the sync lock.
 - Warn when existing Aish-managed files are present but excluded because their sync category is disabled.
 - Retry cached merge with `--allow-unrelated-histories` when an existing local sync repository is connected to a populated remote with separate history.
 - If `.aish-sync.toml` disagrees with local content category settings, warn and use the repository settings as the private sync authority. Existing local files excluded by those settings are left alone and only warned about.
@@ -524,6 +525,7 @@ Implemented:
 - Before staging local data, compare enabled managed JSONL record counts against the fetched remote cache, for example `history/regular records local=3 remote=1 (local +2)`, without running another fetch. After merging remote updates, report managed JSONL record-count changes such as `history/regular records 1 -> 2 (+1)`. If an enabled managed record count decreases during the merge, automatically restore the JSONL union so neither side's records are deleted; if that restoration fails, sync stops before pushing.
 - Auto-resolve enabled encrypted Aish JSONL conflicts by reading Git's ours/theirs stages, decrypting both complete payloads, unioning plaintext JSONL records, re-encrypting the merged file, and staging it. This preserves independent appends without ever text-merging ciphertext.
 - Offer `#sync resolve-union`, `#sync continue`, and `#sync abort` when a conflict still needs a user choice.
+- Keep manual sync commands, startup sync, and periodic sync non-blocking in the interactive prompt. Background sync prints a compact summary of record-count changes, warnings, conflicts, or completion instead of every Git step. `#sync quiet on` hides routine start/success notices while keeping failures visible. Exit sync remains blocking so Aish can finish the durability boundary before the process exits.
 - Log sync failures without leaking secret-like values.
 
 Aish does not:
@@ -542,21 +544,21 @@ repository data, run `#unlock` if needed, then run `#encrypt rotate
 the data, import the needed private key or resolve the rotation on another
 machine that can decrypt it.
 
-Sync does not have a long-running scheduler. The supported automatic triggers are:
+Supported automatic triggers:
 
-- periodic startup check: `#sync <schedule>` runs the same sync flow as `#sync now` at startup only when the saved interval is due. Supported forms are `@hourly`, `@daily`, `*/N * * * *`, `0 */N * * *`, `0 0 * * *`, and `0 0 */N * *`; unsupported schedules are logged and do not run git.
-- every startup: `#sync startup on` runs the same sync flow once when Aish starts.
+- periodic background check: `#sync <schedule>` runs the same sync flow as `#sync now` while Aish is running when the saved interval is due. Supported forms are `@hourly`, `@daily`, `*/N * * * *`, `0 */N * * *`, `0 0 * * *`, and `0 0 */N * *`; unsupported schedules are logged and do not run git.
+- every startup: `#sync startup on` queues the same sync flow once when Aish starts.
 - exit: `#sync exit on` runs the same sync flow during the exit durability boundary.
 
 Sync command boundaries:
 
 - `#set-remote <git-url>` only saves the private sync remote. It does not initialize Git, fetch, merge, commit, or push.
 - `#sync` prints current sync/encryption status and does not run Git.
-- `#sync now` is the only manual sync run command. It verifies enabled managed data, stages enabled managed files, commits when staged content changed, merges remote updates, verifies/counts the merged data, then pushes.
-- `#sync resolve-union` is for an interrupted merge with Aish-managed conflicts. It keeps both sides for managed plaintext files; for encrypted `*.jsonl.gpg`, it decrypts ours/theirs, unions plaintext records, re-encrypts, stages the resolved files, commits, and pushes. It refuses unmanaged conflicts.
-- `#sync continue` continues an interrupted merge. It first tries the same encrypted Aish JSONL union resolver for any remaining managed encrypted conflicts, then commits and pushes once all conflicts are resolved and staged.
-- `#sync abort` is only for an interrupted merge or rebase. It cancels that Git operation.
-- `#sync <schedule>`, `#sync off`, `#sync startup|exit on|off`, and `#sync ai|history|templates|drafts on|off` only update sync settings.
+- `#sync now` is the only manual sync run command. It queues a background sync that verifies enabled managed data, stages enabled managed files, commits when staged content changed, merges remote updates, verifies/counts the merged data, then pushes.
+- `#sync resolve-union` queues background recovery for an interrupted merge with Aish-managed conflicts. It keeps both sides for managed plaintext files; for encrypted `*.jsonl.gpg`, it decrypts ours/theirs, unions plaintext records, re-encrypts, stages the resolved files, commits, and pushes. It refuses unmanaged conflicts.
+- `#sync continue` queues background continuation of an interrupted merge. It first tries the same encrypted Aish JSONL union resolver for any remaining managed encrypted conflicts, then commits and pushes once all conflicts are resolved and staged.
+- `#sync abort` queues background abort for an interrupted merge or rebase.
+- `#sync <schedule>`, `#sync off`, `#sync startup|exit|quiet|silent on|off`, and `#sync ai|history|templates|drafts on|off` only update sync settings.
 
 Local bare Git repositories work as remotes:
 
@@ -584,7 +586,7 @@ Current behavior:
 - `#encrypt rotate <key>` explicitly re-encrypts current managed storage for a new fingerprint. If `secrets/key.json.gpg` exists, the stored API key is re-encrypted for the new fingerprint too.
 - `#encrypt unlock-mode lazy|prompt` selects startup behavior. `lazy` starts immediately and unlocks old encrypted history/templates in the background when possible; `prompt` requires interactive GPG/pinentry unlock before the Aish prompt opens.
 - Future writes go to encrypted JSONL files while encryption is enabled. Normal history, draft, note, AI, and template appends are queued through a serialized background encrypted writer so command output and prompt redraws do not wait for GPG. Appends update one complete encrypted JSONL payload from the unlocked plaintext cache rather than concatenating multiple GPG messages.
-- Aish flushes pending encrypted writes before exit, `#sync now`, `#history`, `#encrypt off`, key rotation, and confirmed history rewrite. A background write completion wakes the frontend tick path and refreshes live completion UI.
+- Aish flushes pending encrypted writes before exit, `#history`, `#encrypt off`, key rotation, and confirmed history rewrite. `#sync now` queues that flush inside the background sync worker so the interactive prompt does not wait for GPG. A background write completion wakes the frontend tick path and refreshes live completion UI.
 - Direct decrypt operations that may need a passphrase, including stored-key fallback, `#encrypt off`, key rotation, and confirmed history rewrite, enter a dedicated unlock passthrough state. Aish clears stale completion UI, yields terminal control to GPG/pinentry, sets `GPG_TTY` when possible, and restores the previous Aish mode when the operation completes or fails. Current-storage encryption changes snapshot managed files first and restore them if a migration step fails.
 - In lazy startup mode, Aish tries to unlock history/templates in the background using noninteractive GPG so startup does not block on passphrase entry. If `gpg-agent` can decrypt without prompting, history/templates load automatically. If a passphrase is needed, old history/templates stay locked, history/AI views can show `history is still unlocking...`, and `#unlock` runs the interactive GPG/pinentry passthrough.
 - Commands entered before lazy startup unlock completes remain usable. If old encrypted storage is still locked, new appends are buffered in memory and merged into encrypted storage when `#unlock` succeeds; old data-dependent views stay locked until then.

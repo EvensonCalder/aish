@@ -1214,7 +1214,7 @@ Behavior:
 - Normal encrypted JSONL appends should be serialized through a background writer. Foreground command execution updates in-memory state and enqueues persistence work; command output and prompt redraw must not wait for GPG encryption.
 - Encrypted JSONL appends update one complete encrypted JSONL payload for each managed file, using the writer's decrypted byte cache when available. They do not concatenate multiple independent GPG messages into one file.
 - The background encrypted writer must preserve write order per Aish process and fail closed after a write failure until the error is surfaced and pending writes are flushed or the process is restarted. Whole-file rewrites such as key rotation, decryption, and template removal should still use atomic encrypted file replacement.
-- Operations that need durable storage or rewrite storage globally must flush pending encrypted writes first. This includes exit, `#sync now`, `#history`, `#encrypt off`, key rotation, and confirmed history rewrite.
+- Operations that need durable storage or rewrite storage globally must flush pending encrypted writes first. This includes exit, `#history`, `#encrypt off`, key rotation, and confirmed history rewrite. `#sync now` must enqueue the encrypted-writer flush inside the background sync worker so the prompt does not wait for GPG.
 - Encrypted-write completion and failure events are frontend background events. Draining those events should refresh live completion and redraw the prompt when needed.
 - Direct GPG decrypt operations that may need pinentry should enter `UnlockPassthrough`, clear stale live completion state, yield terminal control, set `GPG_TTY` when possible, and restore raw mode and the previous Aish mode after completion or failure.
 - In `startup_unlock = "lazy"` mode, startup decrypt should first use a noninteractive background GPG attempt (`--batch --pinentry-mode error`) so startup never blocks on passphrase entry or lets pinentry fight the raw-mode UI.
@@ -1260,6 +1260,7 @@ Commands:
 #sync off
 #sync startup on|off
 #sync exit on|off
+#sync quiet on|off
 #sync ai on|off
 #sync history on|off
 #sync templates on|off
@@ -1272,7 +1273,10 @@ Policy:
 - Sync is conservative.
 - Aish uses a lock file to prevent concurrent sync.
 - Aish must clear sync lock files left by dead Aish processes before refusing a new sync.
-- Each Git sync step must have a finite timeout. On timeout, Aish must kill the Git child process, report the timeout, release the sync lock, and return to the prompt.
+- Each Git sync step must have a finite timeout. On timeout, Aish must kill the Git child process, report the timeout, and release the sync lock.
+- Manual sync commands, startup sync, and periodic sync must run in the background so the prompt remains usable. Exit sync is the blocking durability boundary.
+- Background sync output should be compact: record-count differences/summaries, warnings, conflicts, final success, or failure. Routine per-step Git output should stay out of the interactive terminal.
+- `sync.quiet` / `#sync quiet on` must suppress routine background sync start/success notices while keeping failures visible.
 - Sync includes AI history, shell history and notes, templates, and drafts by default.
 - Aish stages managed enabled files automatically before every sync commit.
 - When encryption is enabled, Aish must decrypt every enabled managed `*.jsonl.gpg` file before staging, committing, or pushing. If the current machine cannot decrypt the data, sync stops and reports the managed path plus key-resolution guidance.
@@ -1305,11 +1309,11 @@ Command boundaries:
 
 - `#set-remote <git-url>` persists the private sync remote only and must not run Git.
 - `#sync` reports sync/encryption status only and must not run Git.
-- `#sync now` is the only manual sync run command. It must verify enabled managed data, stage enabled managed paths, commit only when staged content changed, merge remote updates, verify/count merged data, and push.
-- `#sync resolve-union` is valid only during an interrupted merge with Aish-managed conflicts. It must union managed plaintext files directly, union encrypted `*.jsonl.gpg` by decrypting ours/theirs and re-encrypting the merged plaintext, and refuse unmanaged conflicts.
-- `#sync continue` is valid only during an interrupted merge. It may auto-resolve remaining enabled encrypted Aish JSONL conflicts before committing; unmanaged conflicts still require manual resolution and staging.
-- `#sync abort` is valid only during an interrupted merge or rebase.
-- `#sync <schedule>`, `#sync off`, trigger toggles, and content-category toggles only persist sync settings.
+- `#sync now` is the only manual sync run command. It must queue a background sync that verifies enabled managed data, stage enabled managed paths, commit only when staged content changed, merge remote updates, verify/count merged data, and push.
+- `#sync resolve-union` queues background recovery and is valid only during an interrupted merge with Aish-managed conflicts. It must union managed plaintext files directly, union encrypted `*.jsonl.gpg` by decrypting ours/theirs and re-encrypting the merged plaintext, and refuse unmanaged conflicts.
+- `#sync continue` queues background continuation and is valid only during an interrupted merge. It may auto-resolve remaining enabled encrypted Aish JSONL conflicts before committing; unmanaged conflicts still require manual resolution and staging.
+- `#sync abort` queues background abort and is valid only during an interrupted merge or rebase.
+- `#sync <schedule>`, `#sync off`, trigger/quiet toggles, and content-category toggles only persist sync settings.
 
 Template sharing:
 
@@ -1349,16 +1353,16 @@ Commit messages:
 
 Sync triggers:
 
-1. `#sync now` runs the manual sync flow immediately.
-2. `#sync <schedule>` persists a conservative periodic interval that is checked only at startup. No scheduler files are created.
-3. `#sync startup on|off` controls whether the manual sync flow runs once every startup, independent of the periodic due check.
+1. `#sync now` queues the manual sync flow immediately and returns control to the prompt.
+2. `#sync <schedule>` persists a conservative periodic interval that is checked while Aish is running. No scheduler files are created.
+3. `#sync startup on|off` controls whether the manual sync flow is queued once every startup, independent of the periodic due check.
 4. `#sync exit on|off` controls whether the manual sync flow runs during the exit durability boundary.
 5. Multiple triggers may be enabled. A single startup invocation should not run duplicate syncs for the same trigger path.
 6. Every automatic trigger must acquire the same sync lock as manual `#sync now`.
 7. Every automatic trigger must use the same conservative sync plan as manual `#sync now`.
 8. Log success/failure.
 
-Aish does not run an in-process periodic scheduler and must not create scheduler files. Periodic sync means "check whether the saved interval is due when Aish starts." Supported schedule forms are intentionally conservative: `@hourly`, `@daily`, `*/N * * * *`, `0 */N * * *`, `0 0 * * *`, and `0 0 */N * *`. Unsupported schedules are logged and do not run git.
+Aish must not create scheduler files. Periodic sync means "check whether the saved interval is due during normal frontend ticks and queue a background sync when due." Supported schedule forms are intentionally conservative: `@hourly`, `@daily`, `*/N * * * *`, `0 */N * * *`, `0 0 * * *`, and `0 0 */N * *`. Unsupported schedules are logged and do not run git.
 
 Recommended conservative sync:
 

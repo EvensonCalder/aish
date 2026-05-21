@@ -4,6 +4,21 @@ fn git_env_guard() -> std::sync::MutexGuard<'static, ()> {
     ENV_LOCK.lock().unwrap()
 }
 
+fn drain_background_sync_until_done(state: &mut AppState, output: &mut Vec<u8>) {
+    for _ in 0..500 {
+        let drained = drain_background_sync_events(state).unwrap();
+        for message in drained.messages {
+            output.extend_from_slice(message.as_bytes());
+            output.push(b'\n');
+        }
+        if drained.completed {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("background sync did not finish");
+}
+
 const LOCAL_TEST_FINGERPRINT: &str = "ABCDEF0123456789ABCDEF0123456789ABCDEF01";
 const REMOTE_TEST_FINGERPRINT: &str = "FEDCBA9876543210FEDCBA9876543210FEDCBA98";
 
@@ -36,6 +51,8 @@ fn sync_config_commands_persist_without_running_git() {
         ("#sync drafts off", "sync.drafts=false"),
         ("#sync startup on", "sync.startup=true"),
         ("#sync exit on", "sync.exit=true"),
+        ("#sync quiet on", "sync.quiet=true"),
+        ("#sync silent off", "sync.quiet=false"),
         ("#sync off", "sync.enabled=false"),
     ] {
         state.draft.insert_str(line);
@@ -67,8 +84,9 @@ fn sync_config_commands_persist_without_running_git() {
     assert!(!loaded.sync.drafts);
     assert!(loaded.sync.startup);
     assert!(loaded.sync.exit);
+    assert!(!loaded.sync.quiet);
     let events = load_events(&events_path).unwrap();
-    assert_eq!(events.items.len(), 10);
+    assert_eq!(events.items.len(), 12);
     assert!(
         events
             .items
@@ -176,18 +194,18 @@ fn sync_now_runs_against_configured_local_git_remote() {
         Duration::from_secs(10),
     )
     .unwrap();
+    drain_background_sync_until_done(&mut state, &mut output);
 
     let output = String::from_utf8(output).unwrap();
+    assert!(output.contains("sync started in background"), "{output}");
     assert!(
-        output.contains("sync step ok: git add -- .aish-sync.toml .gitattributes .gitignore README.md history/ai.jsonl history/draft.jsonl history/notes.jsonl history/regular.jsonl templates/templates.jsonl"),
-        "{output}"
+        !output.contains("sync step ok:"),
+        "background sync should keep routine git step output out of the terminal: {output}"
     );
     assert!(
-        output.contains("sync step ok: git merge --no-edit FETCH_HEAD"),
+        output.contains("sync data comparison: history/ai records local=1 remote=0 (local +1)"),
         "{output}"
     );
-    assert!(output.contains("sync step ok: git commit"), "{output}");
-    assert!(output.contains("sync step ok: git push"), "{output}");
     assert!(output.contains("sync push completed"), "{output}");
     assert!(root.join(".gitignore").exists());
     assert!(root.join(".gitattributes").exists());
@@ -932,6 +950,7 @@ fn startup_sync_reload_updates_encrypted_history_drafts_and_writer_cache_after_r
     let mut output = Vec::new();
 
     run_startup_sync_check(&mut state, &root, &mut output).unwrap();
+    drain_background_sync_until_done(&mut state, &mut output);
 
     let output = String::from_utf8(output).unwrap();
     assert!(output.contains("sync push completed"), "{output}");
@@ -1737,8 +1756,13 @@ fn sync_continue_auto_unions_existing_encrypted_conflict() {
     };
     let mut output = Vec::new();
     set_sync_schedule(&mut state_b, &mut output, "continue").unwrap();
+    drain_background_sync_until_done(&mut state_b, &mut output);
 
     let output = String::from_utf8(output).unwrap();
+    assert!(
+        output.contains("sync continue started in background"),
+        "{output}"
+    );
     assert!(
         output.contains(
             "sync encrypted conflict union-resolved: history/regular.jsonl.gpg records ours=2 theirs=2 merged=3"
@@ -2017,8 +2041,13 @@ fn sync_resolve_union_command_keeps_both_sides_after_conflict() {
         Duration::from_secs(10),
     )
     .unwrap();
+    drain_background_sync_until_done(&mut state, &mut resolve_output);
 
     let resolve_output = String::from_utf8(resolve_output).unwrap();
+    assert!(
+        resolve_output.contains("sync resolve-union started in background"),
+        "{resolve_output}"
+    );
     assert!(
         resolve_output.contains("sync conflict union-resolved: .gitignore"),
         "{resolve_output}"
@@ -2120,10 +2149,11 @@ fn startup_sync_runs_due_schedule_against_local_git_remote() {
     let mut output = Vec::new();
 
     run_startup_sync_check(&mut state, &root, &mut output).unwrap();
+    drain_background_sync_until_done(&mut state, &mut output);
 
     let output = String::from_utf8(output).unwrap();
     assert!(
-        output.contains("startup sync due; running #sync now"),
+        output.contains("startup sync started in background"),
         "{output}"
     );
     assert!(output.contains("sync push completed"), "{output}");
@@ -2156,9 +2186,10 @@ fn startup_sync_trigger_runs_without_periodic_schedule() {
     let mut output = Vec::new();
 
     run_startup_sync_check(&mut state, root, &mut output).unwrap();
+    drain_background_sync_until_done(&mut state, &mut output);
 
     let output = String::from_utf8(output).unwrap();
-    assert!(output.contains("startup sync enabled; running #sync now"));
+    assert!(output.contains("startup sync started in background"));
     assert!(output.contains("sync remote is not configured"));
     assert_eq!(
         fs::read_to_string(root.join("cache/runtime/sync.last_attempt")).unwrap(),
@@ -2187,10 +2218,11 @@ fn startup_sync_trigger_runs_full_sync_against_remote() {
     let mut output = Vec::new();
 
     run_startup_sync_check(&mut state, &root, &mut output).unwrap();
+    drain_background_sync_until_done(&mut state, &mut output);
 
     let output = String::from_utf8(output).unwrap();
     assert!(
-        output.contains("startup sync enabled; running #sync now"),
+        output.contains("startup sync started in background"),
         "{output}"
     );
     assert!(output.contains("sync push completed"), "{output}");
@@ -2208,6 +2240,85 @@ fn startup_sync_trigger_runs_full_sync_against_remote() {
         ],
     );
     assert!(pushed_history.contains("startup-trigger"));
+}
+
+#[test]
+fn quiet_background_sync_suppresses_routine_success_output() {
+    let _guard = git_env_guard();
+    let temp = tempfile::tempdir().unwrap();
+    let remote = temp.path().join("remote.git");
+    let seed = temp.path().join("seed");
+    let root = temp.path().join("aish-home");
+    seed_local_remote(&remote, &seed, &root);
+
+    let mut state = sync_state_for_root(&root, &remote);
+    state.sync_config.startup = true;
+    state.sync_config.quiet = true;
+    state.clock = || 8_400;
+    let mut output = Vec::new();
+
+    run_startup_sync_check(&mut state, &root, &mut output).unwrap();
+    drain_background_sync_until_done(&mut state, &mut output);
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.is_empty(), "{output}");
+    let pushed_metadata = run_test_git_stdout(
+        temp.path(),
+        [
+            "--git-dir",
+            remote.to_str().unwrap(),
+            "show",
+            "HEAD:.aish-sync.toml",
+        ],
+    );
+    assert!(pushed_metadata.contains("enabled = false"));
+}
+
+#[test]
+fn periodic_sync_runs_in_background_during_frontend_ticks() {
+    let _guard = git_env_guard();
+    let temp = tempfile::tempdir().unwrap();
+    let remote = temp.path().join("remote.git");
+    let seed = temp.path().join("seed");
+    let root = temp.path().join("aish-home");
+    seed_local_remote(&remote, &seed, &root);
+
+    fs::create_dir_all(root.join("history")).unwrap();
+    fs::write(
+        root.join("history/regular.jsonl"),
+        "{\"command\":\"periodic-trigger\"}\n",
+    )
+    .unwrap();
+    let mut state = sync_state_for_root(&root, &remote);
+    state.sync_config.enabled = true;
+    state.sync_config.schedule = "@hourly".into();
+    state.clock = || 3_600;
+    let mut output = Vec::new();
+
+    queue_due_periodic_sync_if_needed(&mut state, &mut output).unwrap();
+    assert!(state.background_sync.is_some());
+    drain_background_sync_until_done(&mut state, &mut output);
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(
+        output.contains("periodic sync started in background"),
+        "{output}"
+    );
+    assert!(output.contains("sync push completed"), "{output}");
+    assert_eq!(
+        fs::read_to_string(root.join("cache/runtime/sync.last_attempt")).unwrap(),
+        "3600\n"
+    );
+    let pushed_history = run_test_git_stdout(
+        temp.path(),
+        [
+            "--git-dir",
+            remote.to_str().unwrap(),
+            "show",
+            "HEAD:history/regular.jsonl",
+        ],
+    );
+    assert!(pushed_history.contains("periodic-trigger"));
 }
 
 #[test]
@@ -2265,6 +2376,7 @@ fn startup_sync_reload_updates_plaintext_history_and_drafts_after_remote_merge()
     let mut output = Vec::new();
 
     run_startup_sync_check(&mut state, &root, &mut output).unwrap();
+    drain_background_sync_until_done(&mut state, &mut output);
 
     let output = String::from_utf8(output).unwrap();
     assert!(output.contains("sync push completed"), "{output}");

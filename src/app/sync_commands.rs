@@ -4,13 +4,16 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 
 use crate::config::{self, write_private_file};
-use crate::encryption::{atomic_gpg_encrypt_bytes, gpg_decrypt_file, gpg_program};
+use crate::encryption::{
+    atomic_gpg_encrypt_bytes, gpg_decrypt_file, gpg_decrypt_file_noninteractive, gpg_program,
+};
 use crate::git_remote::{sanitize_git_remote, valid_git_branch_name};
 use crate::log::EventLevel;
 use crate::process_control::{configure_new_process_group, terminate_child_process_group};
@@ -32,6 +35,70 @@ use super::{
 const DEFAULT_SYNC_GIT_USER_NAME: &str = "Aish Sync";
 const DEFAULT_SYNC_GIT_USER_EMAIL: &str = "aish-sync@localhost";
 const GIT_COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
+const PERIODIC_SYNC_POLL_INTERVAL: Duration = Duration::from_secs(30);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SyncDecryptMode {
+    Interactive,
+    Noninteractive,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SyncRunOptions {
+    decrypt_mode: SyncDecryptMode,
+    reload_after_success: bool,
+}
+
+impl SyncRunOptions {
+    fn foreground() -> Self {
+        Self {
+            decrypt_mode: SyncDecryptMode::Interactive,
+            reload_after_success: true,
+        }
+    }
+
+    fn background() -> Self {
+        Self {
+            decrypt_mode: SyncDecryptMode::Noninteractive,
+            reload_after_success: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BackgroundSyncTrigger {
+    Manual,
+    Startup,
+    Periodic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BackgroundSyncAction {
+    Push,
+    Continue,
+    ResolveUnion,
+    Abort,
+}
+
+#[derive(Debug)]
+pub struct BackgroundSyncJob {
+    receiver: mpsc::Receiver<BackgroundSyncOutcome>,
+    trigger: BackgroundSyncTrigger,
+    action: BackgroundSyncAction,
+    quiet: bool,
+}
+
+#[derive(Debug)]
+struct BackgroundSyncOutcome {
+    output: String,
+    error: Option<String>,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct BackgroundSyncDrain {
+    pub(crate) completed: bool,
+    pub(crate) messages: Vec<String>,
+}
 
 pub(super) fn set_sync_remote(
     state: &mut AppState,
@@ -67,10 +134,31 @@ pub(super) fn set_sync_schedule(
         return Ok(());
     }
     match args {
-        "now" => return run_manual_sync_push(state, out),
-        "abort" => return abort_interrupted_sync(state, out),
-        "continue" => return continue_interrupted_sync(state, out),
-        "resolve-union" => return resolve_interrupted_sync_with_union(state, out),
+        "now" => return queue_background_sync_push(state, out, BackgroundSyncTrigger::Manual),
+        "abort" => {
+            return queue_background_sync(
+                state,
+                out,
+                BackgroundSyncTrigger::Manual,
+                BackgroundSyncAction::Abort,
+            );
+        }
+        "continue" => {
+            return queue_background_sync(
+                state,
+                out,
+                BackgroundSyncTrigger::Manual,
+                BackgroundSyncAction::Continue,
+            );
+        }
+        "resolve-union" => {
+            return queue_background_sync(
+                state,
+                out,
+                BackgroundSyncTrigger::Manual,
+                BackgroundSyncAction::ResolveUnion,
+            );
+        }
         "union" => {
             writeln!(out, "usage: #sync resolve-union")?;
             return Ok(());
@@ -94,14 +182,20 @@ pub(super) fn set_sync_schedule(
         update_sync_config(state, |config| match trigger {
             "startup" => config.sync.startup = enabled,
             "exit" => config.sync.exit = enabled,
+            "quiet" | "silent" => config.sync.quiet = enabled,
             _ => unreachable!("validated trigger"),
         })?;
-        writeln!(out, "sync.{trigger}={enabled}")?;
+        let key = if trigger == "silent" {
+            "quiet"
+        } else {
+            trigger
+        };
+        writeln!(out, "sync.{key}={enabled}")?;
         writeln!(out, "no scheduler file created")?;
         return Ok(());
     }
     if is_malformed_sync_trigger_toggle(args) {
-        writeln!(out, "usage: #sync startup|exit on|off")?;
+        writeln!(out, "usage: #sync startup|exit|quiet|silent on|off")?;
         return Ok(());
     }
     if let Some((category, enabled)) = parse_sync_category_toggle(args) {
@@ -132,6 +226,14 @@ pub(super) fn set_sync_schedule(
 }
 
 pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -> Result<()> {
+    run_manual_sync_push_with_options(state, out, SyncRunOptions::foreground())
+}
+
+fn run_manual_sync_push_with_options(
+    state: &mut AppState,
+    out: &mut impl Write,
+    options: SyncRunOptions,
+) -> Result<()> {
     let Some(remote) = sanitize_git_remote(&state.sync_config.remote) else {
         writeln!(
             out,
@@ -191,11 +293,13 @@ pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -
         state.encryption_config.enabled,
         out,
     )?;
-    let Some(mut sync_data_snapshot) = verify_sync_data_for_git_write(state, out, &root)? else {
+    let Some(mut sync_data_snapshot) =
+        verify_sync_data_for_git_write(state, out, &root, options.decrypt_mode)?
+    else {
         return Ok(());
     };
     let Some(remote_sync_data_snapshot) =
-        verify_remote_sync_data_for_git_read(state, out, &remote_cache)?
+        verify_remote_sync_data_for_git_read(state, out, &remote_cache, options.decrypt_mode)?
     else {
         return Ok(());
     };
@@ -217,6 +321,7 @@ pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -
                     &remote_cache,
                     true,
                     &mut sync_data_snapshot,
+                    options,
                 )? {
                     return Ok(());
                 }
@@ -240,6 +345,7 @@ pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -
                     &remote_cache,
                     false,
                     &mut sync_data_snapshot,
+                    options,
                 )? {
                     return Ok(());
                 }
@@ -281,10 +387,320 @@ pub(super) fn run_manual_sync_push(state: &mut AppState, out: &mut impl Write) -
             return Ok(());
         }
     }
-    state.reload_synced_private_data()?;
+    if options.reload_after_success {
+        state.reload_synced_private_data()?;
+    }
     state.append_event(EventLevel::Info, "sync push completed")?;
     writeln!(out, "sync push completed")?;
     Ok(())
+}
+
+fn queue_background_sync_push(
+    state: &mut AppState,
+    out: &mut impl Write,
+    trigger: BackgroundSyncTrigger,
+) -> Result<()> {
+    queue_background_sync(state, out, trigger, BackgroundSyncAction::Push)
+}
+
+fn queue_background_sync(
+    state: &mut AppState,
+    out: &mut impl Write,
+    trigger: BackgroundSyncTrigger,
+    action: BackgroundSyncAction,
+) -> Result<()> {
+    if state.background_sync.is_some() {
+        if !state.sync_config.quiet {
+            writeln!(out, "sync is already running in background")?;
+        }
+        return Ok(());
+    }
+
+    let quiet = state.sync_config.quiet;
+    let flush = state.begin_encrypted_write_flush()?;
+    let mut worker_state = sync_worker_state(state);
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let mut output = Vec::new();
+        let error = match wait_for_encrypted_write_flush(flush, &mut worker_state, &mut output) {
+            Ok(()) => run_background_sync_action(&mut worker_state, &mut output, action)
+                .err()
+                .map(|err| format!("{err:#}")),
+            Err(err) => Some(format!("{err:#}")),
+        };
+        let _ = sender.send(BackgroundSyncOutcome {
+            output: String::from_utf8_lossy(&output).into_owned(),
+            error,
+        });
+    });
+
+    state.background_sync = Some(BackgroundSyncJob {
+        receiver,
+        trigger,
+        action,
+        quiet,
+    });
+    if !quiet {
+        writeln!(out, "{}", background_sync_started_message(trigger, action))?;
+    }
+    Ok(())
+}
+
+fn run_background_sync_action(
+    state: &mut AppState,
+    out: &mut impl Write,
+    action: BackgroundSyncAction,
+) -> Result<()> {
+    match action {
+        BackgroundSyncAction::Push => {
+            run_manual_sync_push_with_options(state, out, SyncRunOptions::background())
+        }
+        BackgroundSyncAction::Continue => {
+            continue_interrupted_sync_with_options(state, out, SyncRunOptions::background())
+        }
+        BackgroundSyncAction::ResolveUnion => {
+            resolve_interrupted_sync_with_options(state, out, SyncRunOptions::background())
+        }
+        BackgroundSyncAction::Abort => abort_interrupted_sync(state, out),
+    }
+}
+
+fn wait_for_encrypted_write_flush(
+    receiver: Option<mpsc::Receiver<std::result::Result<(), String>>>,
+    state: &mut AppState,
+    out: &mut impl Write,
+) -> Result<()> {
+    let Some(receiver) = receiver else {
+        return Ok(());
+    };
+    match receiver
+        .recv()
+        .context("encrypted write queue stopped before sync flush completed")?
+    {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            writeln!(out, "sync encrypted write flush failed; sync not started")?;
+            writeln!(out, "{error}")?;
+            let _ = state.append_event(EventLevel::Error, "sync encrypted write flush failed");
+            bail!("pending encrypted writes failed: {error}")
+        }
+    }
+}
+
+fn sync_worker_state(state: &AppState) -> AppState {
+    AppState {
+        regular_history_path: state.regular_history_path.clone(),
+        ai_history_path: state.ai_history_path.clone(),
+        notes_path: state.notes_path.clone(),
+        draft_history_path: state.draft_history_path.clone(),
+        events_path: state.events_path.clone(),
+        template_store_path: state.template_store_path.clone(),
+        config_path: state.config_path.clone(),
+        encryption_config: state.encryption_config.clone(),
+        encrypted_storage_unlocked: state.encrypted_storage_unlocked,
+        sync_config: state.sync_config.clone(),
+        clock: state.clock,
+        ..AppState::default()
+    }
+}
+
+fn background_sync_started_message(
+    trigger: BackgroundSyncTrigger,
+    action: BackgroundSyncAction,
+) -> &'static str {
+    match (trigger, action) {
+        (BackgroundSyncTrigger::Manual, BackgroundSyncAction::Push) => "sync started in background",
+        (BackgroundSyncTrigger::Manual, BackgroundSyncAction::Continue) => {
+            "sync continue started in background"
+        }
+        (BackgroundSyncTrigger::Manual, BackgroundSyncAction::ResolveUnion) => {
+            "sync resolve-union started in background"
+        }
+        (BackgroundSyncTrigger::Manual, BackgroundSyncAction::Abort) => {
+            "sync abort started in background"
+        }
+        (BackgroundSyncTrigger::Startup, _) => "startup sync started in background",
+        (BackgroundSyncTrigger::Periodic, _) => "periodic sync started in background",
+    }
+}
+
+pub(crate) fn drain_background_sync_events(state: &mut AppState) -> Result<BackgroundSyncDrain> {
+    let Some(outcome) = background_sync_try_recv(state) else {
+        return Ok(BackgroundSyncDrain::default());
+    };
+    let (trigger, action, quiet, outcome) = outcome;
+    let mut output = outcome.output;
+    if let Some(error) = outcome.error {
+        if !output.ends_with('\n') && !output.is_empty() {
+            output.push('\n');
+        }
+        output.push_str(&format!("sync failed: {error}\n"));
+    }
+    let success = background_sync_succeeded(&output, action);
+    if let Err(err) = reload_sync_config_from_disk(state) {
+        let _ = state.append_event(EventLevel::Error, "sync config reload failed");
+        output.push_str(&format!(
+            "warning: sync completed but config reload failed: {err:#}\n"
+        ));
+    }
+    if success {
+        if let Err(err) = state.reload_synced_private_data_noninteractive() {
+            let _ = state.append_event(EventLevel::Error, "sync reload failed");
+            output.push_str(&format!(
+                "warning: sync completed but reload failed: {err:#}\n"
+            ));
+        }
+    } else {
+        let _ = state.append_event(EventLevel::Error, "background sync failed");
+    }
+
+    if quiet && success {
+        return Ok(BackgroundSyncDrain {
+            completed: true,
+            messages: Vec::new(),
+        });
+    }
+    Ok(BackgroundSyncDrain {
+        completed: true,
+        messages: compact_background_sync_output(&output, success, trigger, action),
+    })
+}
+
+pub(crate) fn wait_for_background_sync_on_exit(state: &mut AppState) -> Result<Vec<String>> {
+    let mut messages = Vec::new();
+    while state.background_sync.is_some() {
+        let drained = drain_background_sync_events(state)?;
+        messages.extend(drained.messages);
+        if drained.completed {
+            break;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    Ok(messages)
+}
+
+fn background_sync_try_recv(
+    state: &mut AppState,
+) -> Option<(
+    BackgroundSyncTrigger,
+    BackgroundSyncAction,
+    bool,
+    BackgroundSyncOutcome,
+)> {
+    let job = state.background_sync.as_ref()?;
+    match job.receiver.try_recv() {
+        Ok(outcome) => {
+            let job = state
+                .background_sync
+                .take()
+                .expect("checked background sync");
+            Some((job.trigger, job.action, job.quiet, outcome))
+        }
+        Err(mpsc::TryRecvError::Empty) => None,
+        Err(mpsc::TryRecvError::Disconnected) => {
+            let job = state
+                .background_sync
+                .take()
+                .expect("checked background sync");
+            Some((
+                job.trigger,
+                job.action,
+                job.quiet,
+                BackgroundSyncOutcome {
+                    output: String::new(),
+                    error: Some("background sync worker stopped before reporting a result".into()),
+                },
+            ))
+        }
+    }
+}
+
+fn background_sync_succeeded(output: &str, action: BackgroundSyncAction) -> bool {
+    match action {
+        BackgroundSyncAction::Push
+        | BackgroundSyncAction::Continue
+        | BackgroundSyncAction::ResolveUnion => {
+            output.lines().any(|line| line == "sync push completed")
+        }
+        BackgroundSyncAction::Abort => output
+            .lines()
+            .any(|line| line == "sync abort completed" || line == "no interrupted sync to abort"),
+    }
+}
+
+fn reload_sync_config_from_disk(state: &mut AppState) -> Result<()> {
+    let Some(path) = &state.config_path else {
+        return Ok(());
+    };
+    let config = config::load_config(path)?;
+    state.sync_config = config.sync;
+    Ok(())
+}
+
+fn compact_background_sync_output(
+    output: &str,
+    success: bool,
+    _trigger: BackgroundSyncTrigger,
+    action: BackgroundSyncAction,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+    for line in output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
+        if success {
+            if (line.starts_with("sync data comparison:")
+                && line != "sync data comparison: managed record counts match remote")
+                || line.starts_with("sync data summary:")
+                || line.starts_with("sync data union-restored:")
+                || line.starts_with("sync conflict union-resolved:")
+                || line.starts_with("sync encrypted conflict union-resolved:")
+                || line.starts_with("warning:")
+                || (action == BackgroundSyncAction::Abort
+                    && (line == "sync abort completed" || line == "no interrupted sync to abort"))
+                || line == "sync push completed"
+            {
+                lines.push(line.to_string());
+            }
+        } else if is_important_sync_failure_line(line) {
+            lines.push(line.to_string());
+        }
+    }
+    if lines.is_empty() {
+        lines.push(if success {
+            if action == BackgroundSyncAction::Abort {
+                "sync abort completed".to_string()
+            } else {
+                "sync push completed".to_string()
+            }
+        } else {
+            "sync failed".to_string()
+        });
+    }
+    const MAX_BACKGROUND_SYNC_NOTICE_LINES: usize = 10;
+    if lines.len() > MAX_BACKGROUND_SYNC_NOTICE_LINES {
+        lines.truncate(MAX_BACKGROUND_SYNC_NOTICE_LINES);
+        lines.push("sync output truncated; run #log 10 for recent failures".to_string());
+    }
+    lines
+}
+
+fn is_important_sync_failure_line(line: &str) -> bool {
+    line.starts_with("sync failed:")
+        || line.starts_with("sync aborted on conflict:")
+        || line.starts_with("sync push needs remote updates")
+        || line.starts_with("sync remote is not configured")
+        || line.starts_with("sync data cannot be verified")
+        || line.starts_with("sync encrypted data cannot be verified")
+        || line.starts_with("sync remote data cannot be verified")
+        || line.starts_with("sync remote encrypted data cannot be verified")
+        || line.starts_with("sync encryption key")
+        || line.starts_with("remote sync metadata is invalid")
+        || line.starts_with("sync unresolved conflicts:")
+        || line.starts_with("conflict:")
+        || line.starts_with("options:")
+        || line.starts_with("warning:")
 }
 
 fn align_local_branch_to_remote_sync_branch(
@@ -796,7 +1212,11 @@ fn abort_interrupted_sync(state: &mut AppState, out: &mut impl Write) -> Result<
     Ok(())
 }
 
-fn continue_interrupted_sync(state: &mut AppState, out: &mut impl Write) -> Result<()> {
+fn continue_interrupted_sync_with_options(
+    state: &mut AppState,
+    out: &mut impl Write,
+    options: SyncRunOptions,
+) -> Result<()> {
     let Some(root) = sync_root(state) else {
         writeln!(
             out,
@@ -811,7 +1231,7 @@ fn continue_interrupted_sync(state: &mut AppState, out: &mut impl Write) -> Resu
     };
 
     if has_interrupted_merge(&root) {
-        return commit_interrupted_merge_and_push(state, out, &root);
+        return commit_interrupted_merge_and_push(state, out, &root, options);
     }
     if has_interrupted_rebase(&root) {
         writeln!(
@@ -825,7 +1245,11 @@ fn continue_interrupted_sync(state: &mut AppState, out: &mut impl Write) -> Resu
     Ok(())
 }
 
-fn resolve_interrupted_sync_with_union(state: &mut AppState, out: &mut impl Write) -> Result<()> {
+fn resolve_interrupted_sync_with_options(
+    state: &mut AppState,
+    out: &mut impl Write,
+    options: SyncRunOptions,
+) -> Result<()> {
     let Some(root) = sync_root(state) else {
         writeln!(
             out,
@@ -885,7 +1309,7 @@ fn resolve_interrupted_sync_with_union(state: &mut AppState, out: &mut impl Writ
         writeln!(out, "sync conflict union-resolved: {path}")?;
     }
     for path in &encrypted_paths {
-        resolve_encrypted_conflict_file_by_union(state, out, &root, path)
+        resolve_encrypted_conflict_file_by_union(state, out, &root, path, options.decrypt_mode)
             .with_context(|| format!("failed to union-resolve encrypted {}", path))?;
     }
     let add_command = GitCommandPlan {
@@ -895,13 +1319,14 @@ fn resolve_interrupted_sync_with_union(state: &mut AppState, out: &mut impl Writ
     if !run_sync_git_step(state, out, &root, &add_command)? {
         return Ok(());
     }
-    commit_interrupted_merge_and_push(state, out, &root)
+    commit_interrupted_merge_and_push(state, out, &root, options)
 }
 
 fn commit_interrupted_merge_and_push(
     state: &mut AppState,
     out: &mut impl Write,
     root: &Path,
+    options: SyncRunOptions,
 ) -> Result<()> {
     let Some(remote) = sanitize_git_remote(&state.sync_config.remote) else {
         writeln!(
@@ -910,8 +1335,10 @@ fn commit_interrupted_merge_and_push(
         )?;
         return Ok(());
     };
-    let _ = try_resolve_encrypted_sync_data_conflicts(state, out, root)?;
-    let Some(mut sync_data_snapshot) = verify_sync_data_for_git_write(state, out, root)? else {
+    let _ = try_resolve_encrypted_sync_data_conflicts(state, out, root, options.decrypt_mode)?;
+    let Some(mut sync_data_snapshot) =
+        verify_sync_data_for_git_write(state, out, root, options.decrypt_mode)?
+    else {
         return Ok(());
     };
     let command = GitCommandPlan {
@@ -941,7 +1368,9 @@ fn commit_interrupted_merge_and_push(
     )? {
         return Ok(());
     }
-    state.reload_synced_private_data()?;
+    if options.reload_after_success {
+        state.reload_synced_private_data()?;
+    }
     state.append_event(EventLevel::Info, "sync push completed")?;
     writeln!(out, "sync push completed")?;
     Ok(())
@@ -1064,6 +1493,7 @@ fn try_resolve_encrypted_sync_data_conflicts(
     state: &AppState,
     out: &mut impl Write,
     root: &Path,
+    decrypt_mode: SyncDecryptMode,
 ) -> Result<bool> {
     if !state.encryption_config.enabled {
         return Ok(false);
@@ -1077,7 +1507,7 @@ fn try_resolve_encrypted_sync_data_conflicts(
     }
 
     for path in &encrypted_paths {
-        resolve_encrypted_conflict_file_by_union(state, out, root, path)
+        resolve_encrypted_conflict_file_by_union(state, out, root, path, decrypt_mode)
             .with_context(|| format!("failed to union-resolve encrypted {}", path))?;
     }
     let add_command = GitCommandPlan {
@@ -1095,6 +1525,7 @@ fn resolve_encrypted_conflict_file_by_union(
     out: &mut impl Write,
     root: &Path,
     path: &str,
+    decrypt_mode: SyncDecryptMode,
 ) -> Result<()> {
     let program = gpg_program();
     let ours = git_stage_blob_bytes(root, 2, path)?;
@@ -1102,8 +1533,10 @@ fn resolve_encrypted_conflict_file_by_union(
     if ours.is_none() && theirs.is_none() {
         bail!("git conflict has neither ours nor theirs stage for {path}");
     }
-    let ours_plaintext = decrypt_conflict_stage_blob(&program, root, path, ours.as_deref())?;
-    let theirs_plaintext = decrypt_conflict_stage_blob(&program, root, path, theirs.as_deref())?;
+    let ours_plaintext =
+        decrypt_conflict_stage_blob(&program, root, path, ours.as_deref(), decrypt_mode)?;
+    let theirs_plaintext =
+        decrypt_conflict_stage_blob(&program, root, path, theirs.as_deref(), decrypt_mode)?;
     let merged = union_jsonl_bytes(path, &ours_plaintext, &theirs_plaintext)?;
     let ours_count = count_jsonl_records(path, &ours_plaintext)?;
     let theirs_count = count_jsonl_records(path, &theirs_plaintext)?;
@@ -1127,6 +1560,7 @@ fn decrypt_conflict_stage_blob(
     root: &Path,
     path: &str,
     ciphertext: Option<&[u8]>,
+    decrypt_mode: SyncDecryptMode,
 ) -> Result<Vec<u8>> {
     let Some(ciphertext) = ciphertext else {
         return Ok(Vec::new());
@@ -1134,7 +1568,7 @@ fn decrypt_conflict_stage_blob(
     if ciphertext.is_empty() {
         return Ok(Vec::new());
     }
-    decrypt_remote_managed_sync_blob(gpg_program, root, path, ciphertext)
+    decrypt_remote_managed_sync_blob(gpg_program, root, path, ciphertext, decrypt_mode)
 }
 
 fn git_stage_blob_bytes(root: &Path, stage: u8, path: &str) -> Result<Option<Vec<u8>>> {
@@ -1226,13 +1660,16 @@ fn verify_sync_data_for_git_write(
     state: &mut AppState,
     out: &mut impl Write,
     root: &Path,
+    decrypt_mode: SyncDecryptMode,
 ) -> Result<Option<SyncDataSnapshot>> {
     let config = state.sync_config.clone();
     let encryption_enabled = state.encryption_config.enabled;
     let result = if encryption_enabled {
-        state.run_unlock_passthrough(|_| collect_sync_data_snapshot(root, &config, true))
+        state.run_unlock_passthrough(|_| {
+            collect_sync_data_snapshot(root, &config, true, decrypt_mode)
+        })
     } else {
-        collect_sync_data_snapshot(root, &config, false)
+        collect_sync_data_snapshot(root, &config, false, decrypt_mode)
     };
     match result {
         Ok(snapshot) => Ok(Some(snapshot)),
@@ -1267,15 +1704,16 @@ fn verify_remote_sync_data_for_git_read(
     state: &mut AppState,
     out: &mut impl Write,
     remote_cache: &RemoteSyncCache,
+    decrypt_mode: SyncDecryptMode,
 ) -> Result<Option<SyncDataSnapshot>> {
     let config = state.sync_config.clone();
     let encryption_enabled = state.encryption_config.enabled;
     let result = if encryption_enabled {
         state.run_unlock_passthrough(|_| {
-            collect_remote_sync_data_snapshot(remote_cache, &config, true)
+            collect_remote_sync_data_snapshot(remote_cache, &config, true, decrypt_mode)
         })
     } else {
-        collect_remote_sync_data_snapshot(remote_cache, &config, false)
+        collect_remote_sync_data_snapshot(remote_cache, &config, false, decrypt_mode)
     };
     match result {
         Ok(snapshot) => Ok(Some(snapshot)),
@@ -1310,6 +1748,7 @@ fn collect_sync_data_snapshot(
     root: &Path,
     config: &config::SyncConfig,
     encryption_enabled: bool,
+    decrypt_mode: SyncDecryptMode,
 ) -> Result<SyncDataSnapshot> {
     let gpg = encryption_enabled.then(gpg_program);
     let mut records = Vec::new();
@@ -1319,6 +1758,7 @@ fn collect_sync_data_snapshot(
             file,
             encryption_enabled,
             gpg.as_deref(),
+            decrypt_mode,
         )?);
     }
     Ok(SyncDataSnapshot { records })
@@ -1328,6 +1768,7 @@ fn collect_remote_sync_data_snapshot(
     remote_cache: &RemoteSyncCache,
     config: &config::SyncConfig,
     encryption_enabled: bool,
+    decrypt_mode: SyncDecryptMode,
 ) -> Result<SyncDataSnapshot> {
     let gpg = encryption_enabled.then(gpg_program);
     let fetched_ref = remote_cache.fetched_ref();
@@ -1339,6 +1780,7 @@ fn collect_remote_sync_data_snapshot(
             file,
             encryption_enabled,
             gpg.as_deref(),
+            decrypt_mode,
         )?);
     }
     Ok(SyncDataSnapshot { records })
@@ -1382,6 +1824,7 @@ fn count_managed_sync_data_file(
     file: ManagedSyncDataFile,
     encryption_enabled: bool,
     gpg_program: Option<&str>,
+    decrypt_mode: SyncDecryptMode,
 ) -> Result<SyncDataRecordCount> {
     let path = if encryption_enabled {
         format!("{}.gpg", file.logical_path)
@@ -1395,7 +1838,7 @@ fn count_managed_sync_data_file(
         let Some(program) = gpg_program else {
             bail!("GPG program is not configured for encrypted sync");
         };
-        gpg_decrypt_file(program, &absolute)
+        decrypt_sync_file(program, &absolute, decrypt_mode)
             .with_context(|| format!("failed to decrypt managed sync file {path}"))?
     } else {
         fs::read(&absolute).with_context(|| format!("failed to read managed sync file {path}"))?
@@ -1409,6 +1852,7 @@ fn count_managed_remote_sync_data_file(
     file: ManagedSyncDataFile,
     encryption_enabled: bool,
     gpg_program: Option<&str>,
+    decrypt_mode: SyncDecryptMode,
 ) -> Result<SyncDataRecordCount> {
     let path = if encryption_enabled {
         format!("{}.gpg", file.logical_path)
@@ -1424,7 +1868,13 @@ fn count_managed_remote_sync_data_file(
                 let Some(program) = gpg_program else {
                     bail!("GPG program is not configured for encrypted sync");
                 };
-                decrypt_remote_managed_sync_blob(program, &remote_cache.workspace, &path, &blob)?
+                decrypt_remote_managed_sync_blob(
+                    program,
+                    &remote_cache.workspace,
+                    &path,
+                    &blob,
+                    decrypt_mode,
+                )?
             } else {
                 blob
             }
@@ -1456,6 +1906,7 @@ fn decrypt_remote_managed_sync_blob(
     workspace: &Path,
     path: &str,
     ciphertext: &[u8],
+    decrypt_mode: SyncDecryptMode,
 ) -> Result<Vec<u8>> {
     let temp_path = remote_blob_temp_path(workspace, path, ciphertext);
     let _cleanup = RemoveFileOnDrop {
@@ -1467,8 +1918,19 @@ fn decrypt_remote_managed_sync_blob(
             temp_path.display()
         )
     })?;
-    gpg_decrypt_file(gpg_program, &temp_path)
+    decrypt_sync_file(gpg_program, &temp_path, decrypt_mode)
         .with_context(|| format!("failed to decrypt remote managed sync file {path}"))
+}
+
+fn decrypt_sync_file(
+    gpg_program: &str,
+    path: &Path,
+    decrypt_mode: SyncDecryptMode,
+) -> Result<Vec<u8>> {
+    match decrypt_mode {
+        SyncDecryptMode::Interactive => gpg_decrypt_file(gpg_program, path),
+        SyncDecryptMode::Noninteractive => gpg_decrypt_file_noninteractive(gpg_program, path),
+    }
 }
 
 fn remote_blob_temp_path(workspace: &Path, path: &str, ciphertext: &[u8]) -> PathBuf {
@@ -1548,6 +2010,7 @@ fn reconcile_sync_data_after_pull(
     root: &Path,
     before: &SyncDataSnapshot,
     after: SyncDataSnapshot,
+    decrypt_mode: SyncDecryptMode,
 ) -> Result<Option<SyncDataSnapshot>> {
     let mut restored = false;
     for after_record in &after.records {
@@ -1609,7 +2072,7 @@ fn reconcile_sync_data_after_pull(
         }
     }
     if restored {
-        return verify_sync_data_for_git_write(state, out, root);
+        return verify_sync_data_for_git_write(state, out, root, decrypt_mode);
     }
     Ok(Some(after))
 }
@@ -1714,18 +2177,22 @@ fn run_verified_sync_cache_merge_step(
     remote_cache: &RemoteSyncCache,
     allow_unrelated: bool,
     snapshot: &mut SyncDataSnapshot,
+    options: SyncRunOptions,
 ) -> Result<bool> {
     let before = snapshot.clone();
     if !fetch_remote_cache_into_active_repo(state, out, root, remote_cache)? {
         return Ok(false);
     }
-    if !run_sync_merge_step(state, out, root, allow_unrelated)? {
+    if !run_sync_merge_step(state, out, root, allow_unrelated, options.decrypt_mode)? {
         return Ok(false);
     }
-    let Some(after) = verify_sync_data_for_git_write(state, out, root)? else {
+    let Some(after) = verify_sync_data_for_git_write(state, out, root, options.decrypt_mode)?
+    else {
         return Ok(false);
     };
-    let Some(reconciled) = reconcile_sync_data_after_pull(state, out, root, &before, after)? else {
+    let Some(reconciled) =
+        reconcile_sync_data_after_pull(state, out, root, &before, after, options.decrypt_mode)?
+    else {
         return Ok(false);
     };
     *snapshot = reconciled;
@@ -1737,6 +2204,7 @@ fn run_sync_merge_step(
     out: &mut impl Write,
     root: &Path,
     allow_unrelated: bool,
+    decrypt_mode: SyncDecryptMode,
 ) -> Result<bool> {
     let command = merge_fetch_head_plan(allow_unrelated);
     let result = run_git_command(root, &command)?;
@@ -1750,14 +2218,15 @@ fn run_sync_merge_step(
             out,
             "sync merge needs unrelated-history merge; retrying with --allow-unrelated-histories"
         )?;
-        return run_sync_merge_step(state, out, root, true);
+        return run_sync_merge_step(state, out, root, true, decrypt_mode);
     }
     if matches!(
         classify_git_sync_step(false, &result.stdout, &result.stderr),
         SyncStepOutcome::AbortConflict { .. }
     ) {
         let metadata_resolved = try_resolve_sync_metadata_pull_conflict(state, out, root)?;
-        let encrypted_resolved = try_resolve_encrypted_sync_data_conflicts(state, out, root)?;
+        let encrypted_resolved =
+            try_resolve_encrypted_sync_data_conflicts(state, out, root, decrypt_mode)?;
         if (metadata_resolved || encrypted_resolved) && unmerged_paths(root)?.is_empty() {
             writeln!(out, "sync step ok: {}", describe_git_command(&command))?;
             return Ok(true);
@@ -1997,8 +2466,7 @@ pub(super) fn run_startup_sync_check(
     let now = (state.clock)();
     if state.sync_config.startup {
         write_last_sync_attempt(&last_attempt_path, now)?;
-        writeln!(out, "startup sync enabled; running #sync now")?;
-        return run_manual_sync_push(state, out);
+        return queue_background_sync_push(state, out, BackgroundSyncTrigger::Startup);
     }
     match startup_sync_decision(
         &state.sync_config,
@@ -2007,13 +2475,55 @@ pub(super) fn run_startup_sync_check(
     ) {
         StartupSyncDecision::Due => {
             write_last_sync_attempt(&last_attempt_path, now)?;
-            writeln!(out, "startup sync due; running #sync now")?;
-            run_manual_sync_push(state, out)?;
+            queue_background_sync_push(state, out, BackgroundSyncTrigger::Startup)?;
         }
         StartupSyncDecision::UnsupportedSchedule(schedule) => {
             state.append_event(
                 EventLevel::Warn,
                 &format!("startup sync unsupported schedule: {schedule}"),
+            )?;
+        }
+        StartupSyncDecision::Disabled
+        | StartupSyncDecision::MissingRemote
+        | StartupSyncDecision::MissingSchedule
+        | StartupSyncDecision::NotDue { .. } => {}
+    }
+    Ok(())
+}
+
+pub(crate) fn queue_due_periodic_sync_if_needed(
+    state: &mut AppState,
+    out: &mut impl Write,
+) -> Result<()> {
+    let now_instant = Instant::now();
+    if state
+        .next_periodic_sync_check
+        .is_some_and(|next| now_instant < next)
+    {
+        return Ok(());
+    }
+    state.next_periodic_sync_check = Some(now_instant + PERIODIC_SYNC_POLL_INTERVAL);
+    if state.background_sync.is_some() {
+        return Ok(());
+    }
+    let Some(root) = sync_root(state) else {
+        return Ok(());
+    };
+    let last_attempt_path = root.join("cache/runtime/sync.last_attempt");
+    let now = (state.clock)();
+    match startup_sync_decision(
+        &state.sync_config,
+        now,
+        read_last_sync_attempt(&last_attempt_path)?,
+    ) {
+        StartupSyncDecision::Due => {
+            write_last_sync_attempt(&last_attempt_path, now)?;
+            queue_background_sync_push(state, out, BackgroundSyncTrigger::Periodic)?;
+        }
+        StartupSyncDecision::UnsupportedSchedule(schedule) => {
+            state.append_event(
+                EventLevel::Warn,
+                &format!("periodic sync unsupported schedule: {schedule}"),
             )?;
         }
         StartupSyncDecision::Disabled
@@ -2303,7 +2813,7 @@ fn is_malformed_sync_trigger_toggle(args: &str) -> bool {
 }
 
 fn is_sync_trigger(value: &str) -> bool {
-    matches!(value, "startup" | "exit")
+    matches!(value, "startup" | "exit" | "quiet" | "silent")
 }
 
 fn parse_sync_category_toggle(args: &str) -> Option<(&str, bool)> {

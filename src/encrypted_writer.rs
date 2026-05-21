@@ -138,10 +138,7 @@ impl EncryptedWriteQueue {
     }
 
     pub fn flush(&self) -> Result<()> {
-        let (reply, receiver) = mpsc::channel();
-        self.sender
-            .send(EncryptedWriteJob::Flush { reply })
-            .context("encrypted write queue is not running")?;
+        let receiver = self.begin_flush()?;
         match receiver
             .recv()
             .context("encrypted write queue stopped before flush completed")?
@@ -149,6 +146,14 @@ impl EncryptedWriteQueue {
             Ok(()) => Ok(()),
             Err(error) => Err(anyhow!(error)),
         }
+    }
+
+    pub fn begin_flush(&self) -> Result<mpsc::Receiver<std::result::Result<(), String>>> {
+        let (reply, receiver) = mpsc::channel();
+        self.sender
+            .send(EncryptedWriteJob::Flush { reply })
+            .context("encrypted write queue is not running")?;
+        Ok(receiver)
     }
 
     pub fn drain_events(&self) -> Vec<EncryptedWriteEvent> {
