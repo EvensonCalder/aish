@@ -1,7 +1,6 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParsedLine<'a> {
     Ordinary(&'a str),
-    Note { tag: NoteTag, text: &'a str },
     Private { name: &'a str, args: &'a str },
     AiPrompt(&'a str),
     AiPromptWithContext { prompt: &'a str, command: &'a str },
@@ -68,13 +67,9 @@ pub fn parse_line(line: &str) -> ParsedLine<'_> {
         return ParsedLine::EmptyPrivate;
     }
 
-    if let Some((tag, text)) = parse_note(rest) {
-        return ParsedLine::Note { tag, text };
-    }
-
     if let Some(prompt) = rest.strip_prefix(' ') {
         let prompt = prompt.trim();
-        if let Some((prompt, command)) = parse_context_prompt(prompt) {
+        if let Some((prompt, command)) = parse_ai_prompt_context(prompt) {
             return ParsedLine::AiPromptWithContext { prompt, command };
         }
         return ParsedLine::AiPrompt(prompt);
@@ -89,27 +84,11 @@ pub fn parse_line(line: &str) -> ParsedLine<'_> {
     }
 }
 
-fn parse_context_prompt(prompt: &str) -> Option<(&str, &str)> {
+pub fn parse_ai_prompt_context(prompt: &str) -> Option<(&str, &str)> {
     let (prompt, command) = prompt.split_once('<')?;
     let prompt = prompt.trim();
     let command = command.trim();
     (!prompt.is_empty() && !command.is_empty()).then_some((prompt, command))
-}
-
-fn parse_note(rest: &str) -> Option<(NoteTag, &str)> {
-    let trimmed = rest.trim_start();
-    for (prefix, tag) in [
-        ("TODO:", NoteTag::Todo),
-        ("NOTE:", NoteTag::Note),
-        ("FIXME:", NoteTag::Fixme),
-        ("HACK:", NoteTag::Hack),
-        ("XXX:", NoteTag::Xxx),
-    ] {
-        if let Some(text) = trimmed.strip_prefix(prefix) {
-            return Some((tag, text.trim_start()));
-        }
-    }
-    None
 }
 
 pub fn suggest_private_command(name: &str) -> Option<&'static str> {
@@ -206,7 +185,17 @@ mod tests {
     }
 
     #[test]
-    fn incomplete_context_syntax_stays_plain_ai_prompt() {
+    fn explicit_ai_prompt_context_syntax_is_detected_from_prompt_body() {
+        assert_eq!(
+            parse_ai_prompt_context("explain remotes < git -h && git remote -h"),
+            Some(("explain remotes", "git -h && git remote -h"))
+        );
+    }
+
+    #[test]
+    fn incomplete_context_syntax_is_not_context_prompt() {
+        assert_eq!(parse_ai_prompt_context("explain remotes < "), None);
+        assert_eq!(parse_ai_prompt_context("< git status"), None);
         assert_eq!(
             parse_line("# explain remotes < "),
             ParsedLine::AiPrompt("explain remotes <")
@@ -236,19 +225,16 @@ mod tests {
     }
 
     #[test]
-    fn notes_are_detected_with_or_without_space_after_hash() {
+    fn note_like_lines_are_not_special_cased() {
         assert_eq!(
             parse_line("# TODO: deploy later"),
-            ParsedLine::Note {
-                tag: NoteTag::Todo,
-                text: "deploy later"
-            }
+            ParsedLine::AiPrompt("TODO: deploy later")
         );
         assert_eq!(
             parse_line("#TODO: deploy later"),
-            ParsedLine::Note {
-                tag: NoteTag::Todo,
-                text: "deploy later"
+            ParsedLine::Private {
+                name: "TODO:",
+                args: "deploy later"
             }
         );
     }

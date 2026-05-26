@@ -123,8 +123,8 @@ expect_scenarios! {
     home_default_key_clear_removes_stored_key => "home_default_key_clear_removes_stored_key.exp",
     home_default_encrypt_on_migrates_storage => "home_default_encrypt_on_migrates_storage.exp",
     status_doctor_config => "status_doctor_config.exp",
-    notes_are_swallowed => "notes_are_swallowed.exp",
-    home_default_notes_are_swallowed => "home_default_notes_are_swallowed.exp",
+    hash_note_prefix_reports_unknown_private => "hash_note_prefix_reports_unknown_private.exp",
+    home_default_hash_note_prefix_reports_unknown_private => "home_default_hash_note_prefix_reports_unknown_private.exp",
     template_placeholder_blocks_execution => "template_placeholder_blocks_execution.exp",
     context_confirmation_skip => "context_confirmation_skip.exp",
     context_config_persists => "context_config_persists.exp",
@@ -157,5 +157,5 @@ expect_scenarios! {
     ctrl_x_unknown_chord_cancels => "ctrl_x_unknown_chord_cancels.exp",
     history_trim_persists => "history_trim_persists.exp",
     template_crud => "template_crud.exp",
-    editor_hash_content_uses_private_parser => "editor_hash_content_uses_private_parser.exp",
+    editor_hash_content_goes_to_shell => "editor_hash_content_goes_to_shell.exp",
 }

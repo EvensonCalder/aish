@@ -66,7 +66,7 @@ fn execute_draft_appends_failed_command_to_regular_history() {
 }
 
 #[test]
-fn execute_draft_stores_notes_without_sending_them_to_shell() {
+fn note_like_private_line_reports_unknown_command_without_storing_note() {
     let _guard = pty_execution_guard();
     let temp = tempfile::tempdir().unwrap();
     let notes_path = temp.path().join("history/notes.jsonl");
@@ -77,7 +77,7 @@ fn execute_draft_stores_notes_without_sending_them_to_shell() {
     let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
     let mut output = Vec::new();
 
-    state.draft.insert_str("# TODO: deploy later");
+    state.draft.insert_str("#TODO: deploy later");
 
     execute_draft(
         &mut state,
@@ -88,16 +88,11 @@ fn execute_draft_stores_notes_without_sending_them_to_shell() {
     .unwrap();
 
     let output = String::from_utf8(output).unwrap();
-    assert!(output.contains("note stored"));
+    assert!(output.contains("unknown Aish command: #TODO:"));
     assert_eq!(state.last_status, None);
     assert_eq!(state.mode, Mode::Draft);
     assert!(state.draft.is_empty());
-
-    let loaded = load_jsonl::<NoteEntry>(&notes_path).unwrap();
-    assert_eq!(loaded.errors, []);
-    assert_eq!(loaded.items.len(), 1);
-    assert_eq!(loaded.items[0].tag, NoteTag::Todo);
-    assert_eq!(loaded.items[0].text, "deploy later");
+    assert!(!notes_path.exists());
 }
 
 #[test]
@@ -216,4 +211,41 @@ fn execute_history_selection_runs_selected_command() {
     assert_eq!(loaded.items.len(), 1);
     assert_eq!(loaded.items[0].command, "printf 'from history\\n'");
     assert_eq!(state.regular_history.len(), 2);
+}
+
+#[test]
+fn execute_history_selection_hash_content_goes_to_backend_shell() {
+    let _guard = pty_execution_guard();
+    let temp = tempfile::tempdir().unwrap();
+    let history_path = temp.path().join("history/regular.jsonl");
+    let mut state = AppState {
+        mode: Mode::History,
+        regular_history_path: Some(history_path),
+        regular_history: vec![HistoryEntry {
+            t: 1,
+            command: "#status\nprintf 'history-hash-shell\\n'".to_string(),
+            exit_code: Some(0),
+            source: HistorySource::User,
+        }],
+        selected_history_index: Some(0),
+        clock: fixed_clock,
+        ..AppState::default()
+    };
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.contains("history-hash-shell"));
+    assert!(!output.contains("Aish status"));
+    assert_eq!(state.last_status, Some(0));
+    assert_eq!(state.mode, Mode::Draft);
+    assert!(state.draft.is_empty());
 }

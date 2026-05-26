@@ -553,19 +553,13 @@ fn split_logical_commands_skips_standalone_comments() {
 }
 
 #[test]
-fn split_logical_commands_can_extract_comment_only_notes() {
+fn split_logical_commands_skips_comment_only_note_like_lines() {
     let input =
         "# TODO: ship it\npwd\n  # NOTE: check logs\necho '# TODO: not a note'\n# plain comment\n";
 
-    let (commands, notes) = split_logical_commands_and_comment_notes(input);
-
-    assert_eq!(commands, ["pwd", "echo '# TODO: not a note'"]);
     assert_eq!(
-        notes,
-        [
-            (NoteTag::Todo, "ship it".to_string()),
-            (NoteTag::Note, "check logs".to_string())
-        ]
+        split_logical_commands(input),
+        ["pwd", "echo '# TODO: not a note'"]
     );
 }
 

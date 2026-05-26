@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn editor_draft_line_leading_hash_uses_private_parser() {
+fn editor_draft_line_leading_hash_goes_to_backend_shell() {
     let _guard = pty_execution_guard();
     let temp = tempfile::tempdir().unwrap();
     let session = prepare_editor_file(temp.path(), "").unwrap();
@@ -25,9 +25,9 @@ fn editor_draft_line_leading_hash_uses_private_parser() {
     .unwrap();
 
     let output = String::from_utf8(output).unwrap();
-    assert!(!marker.exists());
-    assert!(output.contains("Aish command not implemented yet: #nosuch"));
-    assert_eq!(state.last_status, None);
+    assert!(marker.exists());
+    assert!(!output.contains("unknown Aish command"));
+    assert_eq!(state.last_status, Some(0));
     assert!(!state.draft_from_editor);
     assert!(state.draft.is_empty());
 }

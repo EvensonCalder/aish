@@ -250,14 +250,14 @@ Use a fresh isolated `AISH_HOME` when possible so history-based suggestions are 
 | CONT-004 | Type a command ending in a trailing backslash and continue on the next line. | Backslash continuation works. | Paste output. |
 | CONT-005 | Start a continuation and press `Ctrl-C`. | Continuation cancels and prompt returns usable. | Describe result. |
 
-## Private Commands, Notes, And Diagnostics
+## Private Commands And Diagnostics
 
 | ID | What To Do | Expected Behavior | Evidence |
 | --- | --- | --- | --- |
 | PRIV-001 | Run `#help`. | Help lists available commands and keybindings accurately. | Paste output. |
 | PRIV-002 | Run an unknown private command such as `#does-not-exist`. | Aish reports an unknown command and does not send it to the backend shell. | Paste output. |
 | PRIV-003 | Run `#history 5`. | History limit updates or reports a readable error according to command syntax. | Paste output. |
-| PRIV-004 | Type `# TODO: manual test note`. | The note is stored as a note and not executed by the backend shell. | Confirm no shell error. |
+| PRIV-004 | Type `#TODO: manual test note`. | Aish reports an unknown private command and does not store a note or send the line to the backend shell. | Paste output. |
 | PRIV-005 | Run `#log 20`. | Recent events are shown and sensitive-looking values are redacted. | Paste output. |
 | PRIV-006 | Run `#model test-model`, `#base-url http://127.0.0.1:9/v1`, and `#env-key AISH_TEST_KEY`. | AI config persists and secrets are not printed. | Paste `#config` output. |
 | PRIV-007 | Run `#key set` before configuring an encryption key fingerprint. | Aish reports that the encryption key is not configured and does not print or store any secret. | Paste output. |
@@ -351,7 +351,7 @@ Use only disposable repositories.
 | --- | --- | --- | --- |
 | SYNC-001 | Configure a local bare git remote in `/tmp`. | Remote setup does not use network or personal credentials. | Paste commands. |
 | SYNC-002 | Run `#set-remote <local-bare-repo-url>`. | Config persists the remote. | Paste `#config` output. |
-| SYNC-003 | Create history/templates/notes, then run `#sync now`. | Aish starts sync in the background, keeps the prompt usable, commits only managed enabled paths, pushes successfully, and prints only compact sync data/completion output. | Paste output. |
+| SYNC-003 | Create history/templates, then run `#sync now`. | Aish starts sync in the background, keeps the prompt usable, commits only managed enabled paths, pushes successfully, and prints only compact sync data/completion output. | Paste output. |
 | SYNC-004 | Run `#sync now` again with no changes. | Aish starts sync in the background and succeeds without creating unnecessary commits or printing routine Git step noise. | Paste output. |
 | SYNC-005 | Create a deterministic unmanaged conflict in the disposable remote, then run `#sync now`. | Aish reports the compact conflict/failure, keeps the prompt usable, and does not auto-resolve unmanaged files, delete, or rewrite history. | Paste output. |
 | SYNC-006 | With encrypted sync enabled and matching keys, create independent history appends on two disposable clones, then sync the stale clone. | Aish treats `*.jsonl.gpg` as binary for Git, decrypts both sides, unions plaintext records, re-encrypts, stages, commits, and pushes without losing either side. | Paste output. |
@@ -367,8 +367,8 @@ Use an isolated `AISH_HOME` and an isolated `GNUPGHOME` with disposable keys for
 | --- | --- | --- | --- |
 | ENC-001 | Before configuring encryption, run `#key set`. | Aish reports that an encryption key is not configured and does not print or persist a secret. | Paste output. |
 | ENC-002 | Run `#key clear`. | Removes an existing key file if present, or safely reports none. | Paste output. |
-| ENC-003 | Configure a disposable GPG key and run `#encrypt on <fingerprint>`. | Managed history, notes, drafts, AI history, and templates migrate to `*.jsonl.gpg`; plaintext JSONL files are removed after successful encryption; the Git history warning names the explicit rewrite flow. | Paste output and file listing. |
-| ENC-004 | While encryption is enabled, run commands/templates/notes, then inspect storage. | New writes are encrypted through the background writer and no plaintext managed JSONL files are left behind after flush/exit. | Paste output and file listing. |
+| ENC-003 | Configure a disposable GPG key and run `#encrypt on <fingerprint>`. | Managed history, legacy note files, drafts, AI history, and templates migrate to `*.jsonl.gpg`; plaintext JSONL files are removed after successful encryption; the Git history warning names the explicit rewrite flow. | Paste output and file listing. |
+| ENC-004 | While encryption is enabled, run commands/templates, then inspect storage. | New writes are encrypted through the background writer and no plaintext managed JSONL files are left behind after flush/exit. | Paste output and file listing. |
 | ENC-005 | Run real `gpg` or `gpg --version` from Aish. | GPG-related passthrough does not wedge Aish. | Paste output or describe. |
 | ENC-006 | With `#env-key AISH_TEST_KEY` set and the environment variable present before launch, run `#key set`, then relaunch without the variable and submit an AI request against a disposable endpoint if available. | The API key is stored encrypted, never printed, and can be used only after GPG decrypt succeeds. | Paste sanitized output. |
 | ENC-007 | Run `#encrypt rotate <second-fingerprint>` if a second disposable key exists. | Existing encrypted managed storage is decrypted and re-encrypted for the new fingerprint. | Paste output and file listing. |

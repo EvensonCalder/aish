@@ -330,6 +330,34 @@ fn unresolved_template_placeholders_do_not_execute() {
 }
 
 #[test]
+fn resolved_template_hash_content_goes_to_backend_shell() {
+    let mut state = AppState {
+        draft_from_template: true,
+        ..AppState::default()
+    };
+    state
+        .draft
+        .insert_str("#status\nprintf 'template-hash-shell\\n'");
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.contains("template-hash-shell"));
+    assert!(!output.contains("Aish status"));
+    assert_eq!(state.last_status, Some(0));
+    assert!(!state.draft_from_template);
+    assert!(state.draft.is_empty());
+}
+
+#[test]
 fn template_show_prints_newest_matching_body() {
     let temp = tempfile::tempdir().unwrap();
     let template_path = temp.path().join("templates/templates.jsonl");

@@ -533,18 +533,6 @@ impl AppState {
         Ok(Some(removal))
     }
 
-    pub(crate) fn append_note(&mut self, entry: NoteEntry) -> Result<()> {
-        let Some(path) = &self.notes_path else {
-            return Ok(());
-        };
-        if self.encrypted_storage_is_locked() {
-            self.append_locked_jsonl_item(path, &entry)?;
-            self.pending_locked_notes.push(entry);
-            return Ok(());
-        }
-        self.append_jsonl_item(path, &entry)
-    }
-
     pub(crate) fn append_draft_entry(&mut self, entry: &DraftEntry) -> Result<()> {
         let Some(path) = &self.draft_history_path else {
             return Ok(());

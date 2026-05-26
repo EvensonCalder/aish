@@ -16,7 +16,9 @@ Aish does **not** try to replace Bash, Zsh, or Fish. The backend shell remains r
 5. **History and AI results are read-only sources.** Any edit copies the selected item into draft mode.
 6. **Draft is the only editable command state.**
 7. **Multi-line pasted content does not enter draft by default.** It opens an editor-review flow or executes with warning, depending on config.
-8. **Editor and paste-review drafts use the same submit parser as direct prompt input.** A leading `#` at the start of submitted draft text remains reserved for Aish private commands, notes, and AI prompts; text parsed as ordinary shell input is sent to the backend shell unchanged.
+8. **Only direct prompt input parses Aish commands.** Editor, paste-review,
+history, template, and AI-mode command drafts are submitted to the backend shell
+as shell text; a leading `#` there is shell syntax.
 9. **Encryption prioritizes confidentiality over speed.** When encrypted, Aish does not persist plaintext search indexes.
 10. **Git sync is conservative.** Sync only auto-resolves Aish-managed append-only JSONL conflicts where both sides can be preserved; it never auto-resolves unmanaged conflicts, never rewrites history, and never runs `git rm --cached` automatically. Encrypted-storage Git history rewrite is a separate explicit command with destructive confirmation.
 11. **Backend shell history is not Aish history.** Aish stores executed commands in its own managed history and must suppress Bash, Zsh, and Fish native history in the backend shell so Aish-submitted commands are not written to `~/.bash_history`, `~/.zsh_history`, Fish history files, or their in-memory native history lists.
@@ -176,7 +178,8 @@ Triggered by `Ctrl-X Ctrl-E` or configured editor actions.
 - On save and exit, editor content replaces the current draft buffer.
 - By default, content is **not executed automatically**. The user presses `Enter` to execute.
 - Optional config can enable execute-after-save for users who want that behavior.
-- Content from this mode is submitted through the normal Aish parser. A leading `#` at the start of the saved editor draft remains an Aish private command, note, or AI prompt; ordinary shell text is then sent to the backend shell unchanged.
+- Content from this mode is submitted to the backend shell as shell text. A
+  leading `#` in saved editor content is a shell comment, not an Aish command.
 
 #### PasteReviewEditor mode
 
@@ -185,7 +188,7 @@ Legacy name for the multi-line paste review state. In the current design, this i
 - Multi-line paste with `paste.multiline = "editor"` becomes an opaque editor draft.
 - The main prompt shows only the editor draft summary.
 - `Ctrl-X Ctrl-E` can open the external editor for that content.
-- `Enter` submits the editor draft through the normal Aish parser; ordinary shell text is sent to the backend shell unchanged.
+- `Enter` submits the editor draft to the backend shell as shell text.
 - `paste.multiline = "execute"` with `confirm_execute = true` also uses the editor draft as the confirmation step.
 
 #### Picker modes
@@ -258,32 +261,18 @@ Types:
 #<private-command> ...   Aish private command
 # <prompt>               AI prompt
 # <prompt> < <command>   AI prompt with context command
-# TODO: ...              Aish note/comment
-# NOTE: ...              Aish note/comment
-# FIXME: ...             Aish note/comment
 ```
 
-This reservation applies to submitted draft text, including direct prompt input, external editor drafts, and paste-review drafts. It is based on the first character of the submitted draft; `#` characters later inside ordinary multi-line shell text remain backend shell content.
+This reservation applies only to direct prompt input. External editor drafts,
+paste-review drafts, history/AI selections, and template drafts are submitted to
+the backend shell as shell text; a leading `#` in those paths is shell syntax.
 
-### 5.3 Aish notes/comments
+### 5.3 Reserved hash-line behavior
 
-Aish should recognize common note/comment prefixes and swallow them instead of sending them to the shell or AI:
-
-```text
-# TODO: deploy later
-#TODO: deploy later
-# NOTE: remember this
-# FIXME: clean this up
-# HACK: temporary workaround
-# XXX: revisit this
-```
-
-Recommended behavior:
-
-- Store as a note event or note history item.
-- Do not execute.
-- Do not call AI.
-- Make notes searchable via history search, but do not treat them as executable commands.
+Common comment-like prefixes such as `# TODO:` and `# NOTE:` are not special
+annotation syntax. A line using `#<name>` private-command form must dispatch
+to that private command or report an unknown Aish command. A line using
+`# <prompt>` is an AI prompt by definition.
 
 ### 5.4 Private command syntax
 
@@ -436,9 +425,14 @@ Editor drafts are opaque in the main prompt. Aish should show a summary such as 
 
 AI prompt editor drafts are a separate editor-draft subtype. They use the same opaque summary pattern, but `Enter` sends the editor content to the AI request path. They must not be treated as raw shell input, and `editor.execute_after_save` must not auto-send them.
 
-Editor content is visually opaque in the prompt, but submission still uses the normal Aish parser. If the saved content starts with `#`, it is handled as a private command, note, or AI prompt. Otherwise the backend shell interprets the ordinary shell content exactly as submitted.
+Editor content is visually opaque in the prompt, and submission sends the saved
+content to the backend shell exactly as shell text. If the saved content starts
+with `#`, the backend shell treats it as shell syntax.
 
-`execute_after_save = false` means editor exit only writes back an editor draft. It does not execute. If `execute_after_save = true`, Aish submits only after a successful editor exit status and preserves the same parser semantics as pressing `Enter` on that editor draft.
+`execute_after_save = false` means editor exit only writes back an editor draft.
+It does not execute. If `execute_after_save = true`, Aish submits only after a
+successful editor exit status and preserves the same shell-submission semantics
+as pressing `Enter` on that editor draft.
 
 ### 6.3 Multi-line paste
 
@@ -499,7 +493,7 @@ Future shell-aware splitting can be added as a configurable enhancement, but it 
 - Preserve quoted multi-line strings as part of one logical command.
 - Preserve heredoc blocks as part of one logical command.
 - Ignore blank lines.
-- Store comment-only lines as notes if note storage is enabled, not as commands.
+- Preserve comment-only lines when faithfully storing a multi-line draft for replay.
 
 Until that exists, history must prefer faithful replay over prettier browsing.
 
@@ -517,7 +511,8 @@ draft history     unfinished or user-created drafts
 AI history        AI-generated command items grouped by session
 ```
 
-Optional notes may be stored separately or inside draft history as non-executable note items.
+Optional non-executable annotations may be stored separately in the future, but
+there is no implicit `# TODO:`/`# NOTE:` input syntax for them.
 
 ### 7.2 Read-only source rule
 
@@ -1056,7 +1051,7 @@ Recommended layout:
     regular.jsonl
     ai.jsonl
     draft.jsonl
-    notes.jsonl
+    notes.jsonl  # legacy compatibility
 
   templates/
     templates.jsonl
@@ -1220,7 +1215,7 @@ Behavior:
 - `#encrypt unlock-mode lazy|prompt` updates the startup unlock policy.
 - If encryption is already enabled and the resolved fingerprint differs from the stored fingerprint, Aish decrypts existing managed encrypted files with GPG and re-encrypts them for the new fingerprint.
 - `#encrypt rotate <key>` explicitly performs the same current-storage key rotation.
-- Encrypt regular history, AI history, draft history, notes, and templates.
+- Encrypt regular history, AI history, draft history, legacy note files, and templates.
 - Encrypt template payload metadata as well as bodies. User-facing template names are not part of the product model; template IDs are stable content-hash handles used for exact operations, and no plaintext template search/list index should be persisted when encryption is enabled.
 - Secrets are always stored encrypted.
 - When encryption is enabled, do not store plaintext search indexes.
@@ -1291,7 +1286,7 @@ Policy:
 - Manual sync commands, startup sync, and periodic sync must run in the background so the prompt remains usable. Exit sync is the blocking durability boundary.
 - Background sync output should be compact: record-count differences/summaries, warnings, conflicts, final success, or failure. Routine per-step Git output should stay out of the interactive terminal.
 - `sync.quiet` / `#sync quiet on` must suppress routine background sync start/success notices while keeping failures visible.
-- Sync includes AI history, shell history and notes, templates, and drafts by default.
+- Sync includes AI history, shell history, legacy note files, templates, and drafts by default.
 - Aish stages managed enabled files automatically before every sync commit.
 - When encryption is enabled, Aish must decrypt every enabled managed `*.jsonl.gpg` file before staging, committing, or pushing. If the current machine cannot decrypt the data, sync stops and reports the managed path plus key-resolution guidance.
 - Aish warns, without staging, when existing Aish-managed files are excluded because their sync category is disabled.
@@ -1335,7 +1330,7 @@ Template sharing:
 - Private sync is dynamic personal state; template sharing is static published template content that is fetched, analyzed, and explicitly imported.
 - Named template remotes are configured with `#template remote add <name> <git-url>`.
 - Template remote caches live under `cache/template-remotes/<name>/repo`.
-- Template sharing commands must never stage private history, AI prompts, drafts, notes, config, logs, cache, or secrets.
+- Template sharing commands must never stage private history, AI prompts, drafts, legacy notes, config, logs, cache, or secrets.
 - Publishing templates writes only `README.md`, `.aish-template-remote.toml`, and either `templates/templates.jsonl` or `templates/templates.jsonl.gpg`.
 - Template remote README and metadata remain readable even when the template payload is encrypted.
 - `#template publish <name>` publishes plaintext templates. `#template publish <name> --encrypt <key>` resolves the GPG recipient and encrypts the template payload for that recipient.
@@ -1529,7 +1524,7 @@ Initial command set:
 ```
 
 `#help` must print grouped in-terminal help for private commands, keybindings,
-AI prompt forms, notes, paste review, completion, templates, sync, encryption, and
+AI prompt forms, paste review, completion, templates, sync, encryption, and
 configuration/diagnostics. `#help <topic>` prints only that topic. Unknown help
 topics must show a usage line and must not reach the backend shell.
 
@@ -1676,7 +1671,7 @@ A usable MVP includes:
 1. PTY backend using `$SHELL`.
 2. Draft/history/AI modes with default `>`, `$`, `%` prompts.
 3. Ordinary command execution through backend shell.
-4. Line-leading `#` dispatch for private commands, AI prompts, notes, and context prompt syntax.
+4. Line-leading `#` dispatch for private commands, AI prompts, and context prompt syntax.
 5. Read-only history and AI mode; edits copy to draft.
 6. AI JSON output parsing into AI sessions/items.
 7. AI `Enter` execution rule: success advances, failure stays, last success returns to draft.

@@ -1,7 +1,6 @@
 #!/usr/bin/env expect
-# Editor-returned content goes through the same command parser as direct input.
-# A leading `#` from the editor should run the Aish private command, not bypass
-# parser safety and reach the backend shell as opaque text.
+# Editor-returned content is submitted to the backend shell as shell text. A
+# leading `#` from the editor is a shell comment, not an Aish command.
 
 set timeout 10
 source [file dirname [info script]]/_lib.exp
@@ -9,7 +8,7 @@ source [file dirname [info script]]/_lib.exp
 set editor "$::env(AISH_EXPECT_ARTIFACT_DIR)/aish-fake-editor-hash-[pid]-[clock clicks].sh"
 set fh [open $editor w]
 puts $fh {#!/bin/sh}
-puts $fh {printf '#status\n' > "$1"}
+puts $fh {printf '%s\n' '#status' 'echo editor-hash-shell-ok' > "$1"}
 puts $fh {exit 0}
 close $fh
 file attributes $editor -permissions 0755
@@ -18,13 +17,12 @@ set ::env(EDITOR) $editor
 aish_spawn
 
 aish_send "\x18\x05"
-aish_expect "\[draft: 1 line"
+aish_expect "\[draft: 2 lines"
 aish_expect "Enter run"
 aish_expect "Ctrl-X Ctrl-E edit"
 
 aish_enter
-aish_expect "Aish status"
-aish_expect "completion.enabled=true"
+aish_expect "editor-hash-shell-ok"
 aish_wait_prompt
 
 aish_quit

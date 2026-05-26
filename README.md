@@ -18,7 +18,7 @@ Implemented and covered:
 - Shell continuation drafts for unfinished quotes and trailing backslashes.
 - Live inline completion with below-prompt hints.
 - External editor and multiline paste review.
-- History, notes, templates, and event log storage.
+- History, templates, event log storage, and legacy note-file compatibility.
 - Safe AI request plumbing and context pseudo-pipe flow.
 - `fzf`-based history, file, template, git branch, and environment pickers.
 - Backend-driven passthrough for interactive commands through the persistent PTY shell.
@@ -74,7 +74,10 @@ keyboard / terminal
  real programs and shell semantics
 ```
 
-Submitted draft text from the prompt, external editor, and paste review enters the same Aish submit parser. If the submitted text starts with line-leading `#`, it is handled as an Aish private command, note, or AI prompt. Text parsed as ordinary shell input is sent to the backend shell unchanged.
+Direct prompt input is parsed by Aish before shell execution. In that path,
+line-leading `# ` sends an AI prompt and `#name` dispatches an Aish private
+command. Editor and paste-review drafts are submitted to the backend shell as
+shell text; a leading `#` there is a shell comment, not an Aish command.
 
 ## Modes
 
@@ -284,7 +287,7 @@ Context:
 #context <max-bytes>
 ```
 
-History, notes, and templates:
+History, drafts, AI, and templates:
 
 ```text
 #history list [>|>> <path> | | <command>]
@@ -351,15 +354,9 @@ Exit:
 #quit
 ```
 
-Recognized note lines are stored as notes rather than reaching the shell:
-
-```text
-# TODO: ...
-# NOTE: ...
-# FIXME: ...
-# HACK: ...
-# XXX: ...
-```
+Line-leading `#` is reserved for Aish. `#name` dispatches a private command,
+`# <prompt>` sends an AI prompt, and unknown private commands are reported
+instead of reaching the backend shell.
 
 ## AI And Context
 
@@ -406,11 +403,13 @@ AI requests use a chat-completions-compatible endpoint. Configure the model, bas
 5. `vim`.
 6. `vi`.
 
-Saved editor content returns as an opaque editor draft. It is not executed until you press `Enter`, and pressing `Enter` runs it through the same submit parser used for direct prompt input.
+Saved editor content returns as an opaque editor draft. It is not executed until
+you press `Enter`, and pressing `Enter` sends it to the backend shell as shell
+text.
 
 For AI prompts, type `# ` and press `Enter` to open the editor for a multi-line AI instruction. `Ctrl-X Ctrl-E` on an existing `# ...` prompt opens the same AI prompt editor and preserves the current prompt body. The returned draft shows an AI prompt summary; pressing `Enter` sends it to the AI pipeline rather than to the backend shell.
 
-Multiline paste defaults to editor-review behavior. Aish shows a compact draft summary and a bounded escaped preview instead of rendering the full pasted content inline. This prevents accidental execution and keeps the prompt usable. `Ctrl-X Ctrl-E` opens the full pasted content in the editor, and `Enter` submits the editor draft through the same parser used for direct prompt input.
+Multiline paste defaults to editor-review behavior. Aish shows a compact draft summary and a bounded escaped preview instead of rendering the full pasted content inline. This prevents accidental execution and keeps the prompt usable. `Ctrl-X Ctrl-E` opens the full pasted content in the editor, and `Enter` submits the editor draft to the backend shell as shell text.
 
 Paste preview is controlled by:
 
@@ -503,7 +502,7 @@ repository so the remote is clearly identifiable as Aish-managed data.
 Implemented:
 
 - Persist remote and sync category config.
-- Sync AI history, shell history and notes, templates, and drafts by default.
+- Sync AI history, shell history, legacy note files, templates, and drafts by default.
 - Keep `config.toml`, cache, logs, secrets, and temporary files local by default.
 - Write `README.md` into the sync data repository as a warning/guide for anyone opening the remote when it is absent or already Aish-managed.
 - Write `.aish-sync.toml` into the sync data repository as non-secret metadata. It records the private sync content categories and, when encryption is enabled, the single full GPG fingerprint that current synced data must use.
@@ -583,11 +582,11 @@ Current behavior:
 
 - Configure `[encryption].key_fingerprint` in `config.toml`, or pass a key selector once with `#encrypt on <key-fingerprint>`.
 - A full GPG key fingerprint is the stable key identity. An email/user ID is accepted only when GPG resolves it to exactly one public key.
-- `#encrypt on` migrates managed history, notes, drafts, AI history, and templates to `*.jsonl.gpg` files and removes the plaintext JSONL files after successful encryption.
+- `#encrypt on` migrates managed history, legacy note files, drafts, AI history, and templates to `*.jsonl.gpg` files and removes the plaintext JSONL files after successful encryption.
 - If encryption is already enabled and the target fingerprint changes, Aish decrypts the existing managed encrypted files and re-encrypts them for the new fingerprint.
 - `#encrypt rotate <key>` explicitly re-encrypts current managed storage for a new fingerprint. If `secrets/key.json.gpg` exists, the stored API key is re-encrypted for the new fingerprint too.
 - `#encrypt unlock-mode lazy|prompt` selects startup behavior. `lazy` starts immediately and unlocks old encrypted history/templates in the background when possible; `prompt` requires interactive GPG/pinentry unlock before the Aish prompt opens.
-- Future writes go to encrypted JSONL files while encryption is enabled. Normal history, draft, note, AI, and template appends are queued through a serialized background encrypted writer so command output and prompt redraws do not wait for GPG. Appends update one complete encrypted JSONL payload from the unlocked plaintext cache rather than concatenating multiple GPG messages.
+- Future writes go to encrypted JSONL files while encryption is enabled. Normal history, draft, AI, template, and legacy note-file appends are queued through a serialized background encrypted writer so command output and prompt redraws do not wait for GPG. Appends update one complete encrypted JSONL payload from the unlocked plaintext cache rather than concatenating multiple GPG messages.
 - Aish flushes pending encrypted writes before exit, `#history`, `#encrypt off`, key rotation, and confirmed history rewrite. `#sync now` queues that flush inside the background sync worker so the interactive prompt does not wait for GPG. A background write completion wakes the frontend tick path and refreshes live completion UI.
 - Direct decrypt operations that may need a passphrase, including stored-key fallback, `#encrypt off`, key rotation, and confirmed history rewrite, enter a dedicated unlock passthrough state. Aish clears stale completion UI, yields terminal control to GPG/pinentry, sets `GPG_TTY` when possible, and restores the previous Aish mode when the operation completes or fails. Current-storage encryption changes snapshot managed files first and restore them if a migration step fails.
 - In lazy startup mode, Aish tries to unlock history/templates in the background using noninteractive GPG so startup does not block on passphrase entry. If `gpg-agent` can decrypt without prompting, history/templates load automatically. If a passphrase is needed, old history/templates stay locked, history/AI views can show `history is still unlocking...`, and `#unlock` runs the interactive GPG/pinentry passthrough.
@@ -609,7 +608,7 @@ Choose a full fingerprint from the listed keys, then enable encryption inside Ai
 #encrypt on ABCDEF0123456789ABCDEF0123456789ABCDEF01
 ```
 
-After that, history, notes, drafts, AI history, and templates are written as encrypted `*.jsonl.gpg` files. `config.toml` remains plaintext because Aish needs it to find the key fingerprint and startup settings.
+After that, history, legacy note files, drafts, AI history, and templates are written as encrypted `*.jsonl.gpg` files. `config.toml` remains plaintext because Aish needs it to find the key fingerprint and startup settings.
 
 During sync, the non-secret `.aish-sync.toml` file is committed to the sync
 repository and records that fingerprint plus the repository's content category
@@ -620,7 +619,7 @@ settings. `config.toml` remains local and is not committed.
 The private sync remote is dynamic personal state for one user across machines.
 Template sharing is a separate, more static publishing/import flow using named
 Git remotes. A template remote must never stage private history, AI prompts,
-drafts, notes, config, logs, cache, or secrets.
+drafts, legacy notes, config, logs, cache, or secrets.
 
 Commands:
 
@@ -752,7 +751,7 @@ history/
   regular.jsonl
   ai.jsonl
   draft.jsonl
-  notes.jsonl
+  notes.jsonl  # legacy compatibility
 templates/
   templates.jsonl
 logs/

@@ -1,0 +1,20 @@
+#!/usr/bin/env expect
+# Comment-like prefixes are not special syntax. Without a space after `#`, they
+# are parsed as private Aish commands and reported when unknown.
+
+set timeout 10
+source [file dirname [info script]]/_lib.exp
+
+aish_spawn
+
+aish_send "#TODO: remember expect boundary"
+aish_enter
+aish_expect "unknown Aish command: #TODO:"
+aish_wait_prompt
+
+aish_send "echo hash-prefix-shell-ok"
+aish_enter
+aish_expect "hash-prefix-shell-ok"
+aish_wait_prompt
+
+aish_quit

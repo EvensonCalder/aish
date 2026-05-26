@@ -242,7 +242,7 @@ fn unknown_private_command_prints_suggestion() {
     .unwrap();
 
     let output = String::from_utf8(output).unwrap();
-    assert!(output.contains("Aish command not implemented yet: #statsu"));
+    assert!(output.contains("unknown Aish command: #statsu"));
     assert!(output.contains("Did you mean #status?"));
     assert_eq!(state.last_status, None);
     assert!(state.draft.is_empty());

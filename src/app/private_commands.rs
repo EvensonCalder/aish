@@ -68,9 +68,9 @@ pub(super) fn execute_private_command(
         _ => match suggest_private_command(name) {
             Some(suggestion) => writeln!(
                 out,
-                "Aish command not implemented yet: #{name}. Did you mean #{suggestion}?"
+                "unknown Aish command: #{name}. Did you mean #{suggestion}?"
             )?,
-            None => writeln!(out, "Aish command not implemented yet: #{name}")?,
+            None => writeln!(out, "unknown Aish command: #{name}")?,
         },
     }
     state.clear_draft_for_new_draft();

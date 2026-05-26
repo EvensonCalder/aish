@@ -15,10 +15,10 @@ git diff --check
 Current test inventory:
 
 - 619 library unit tests.
-- 28 draft execution integration tests.
+- 30 draft execution integration tests.
 - 1 first-run integration test.
 - 50 tmux screen-capture integration tests.
-- 9 of the tmux tests are manual-equivalent workflows that replaced deterministic rows from `MANUAL_TESTS.md`: real-world shell commands, prompt editing keys, completion UX mechanics, private commands/notes, templates/editor/default home, AI/context/sync config, local sync, `less` passthrough smoke, and startup failure messages.
+- 9 of the tmux tests are manual-equivalent workflows that replaced deterministic rows from `MANUAL_TESTS.md`: real-world shell commands, prompt editing keys, completion UX mechanics, private command boundaries, templates/editor/default home, AI/context/sync config, local sync, `less` passthrough smoke, and startup failure messages.
 - 33 PTY integration tests, including default bash/zsh coverage and fish cases that skip unless fish opt-in prerequisites are available.
 - 120 expect-driven end-to-end interactive scenarios.
 - Expect scenarios run with bounded parallelism inside `expect_runner`. Each scenario gets its own artifact directory and timeout; use `AISH_EXPECT_TEST_JOBS=1` to debug timing-sensitive expect failures, and `AISH_EXPECT_TEST_TIMEOUT_SECS` only when diagnosing a long-running scenario.
@@ -73,10 +73,10 @@ Expect scenarios are the acceptance layer for user-visible terminal behavior. Th
 | Mode switching and read-only behavior | `empty_tab_cycles_modes`, `tmux_mode_redraw_preserves_prior_output_and_shell_recovers`, `history_mode_execute`, `tmux_history_mode_executes_selected_command`, `history_persists_across_restarts`, `home_default_history_persists`, `home_default_history_trim_persists`, `draft_persists_across_restarts`, `home_default_draft_persists`, `read_only_edit_copies_to_draft`, `ai_mode_executes_sequence`, `home_default_ai_mode_executes_sequence`, `ai_mode_edit_copies_to_draft`, `home_default_ai_mode_edit_copies_to_draft`, `output_then_redraw_interactions` | Covered | Add more mode redraw regressions only for observed failures. |
 | Completion UI | `completion_accept_single`, `completion_panel_multiple`, `completion_inline_off_accepts_first`, `completion_tab_accept_word`, `completion_no_matches_panel`, `tmux_completion_no_matches_remains_quiet_and_usable`, `completion_right_accepts_first`, `tmux_completion_right_accepts_first_and_executes`, `completion_typo_correction_accepts_whole_command`, `completion_directory_typo_accepts_local_directory`, `template_completion_placeholder_name`, `tmux_template_completion_accepts_placeholder_name_as_protected_draft`, `tmux_completion_auto_panel_does_not_leak_to_scrollback`, `tmux_completion_panel_at_bottom_does_not_repeat_in_scrollback`, `tmux_completion_panel_is_cleared_before_enter_executes`, `tmux_inline_completion_matches_bash_backend_real_terminal_screen`, `tmux_inline_completion_matches_zsh_backend_real_terminal_screen`, `tmux_manual_completion_workflow_matches_visible_terminal_behavior`, `completion_config_persists`, `completion_first_token_source_order`, `home_default_completion_ui`, `output_then_redraw_interactions` | Covered for bash/zsh by default | Fish backend completion remains opt-in with `AISH_TEST_FISH=1` until cross-platform fish behavior is validated. Completion rows show full replacement commands for non-inline candidates and elide by word boundary in narrow terminals. |
 | Picker cancellation UX | `history_picker_cancel_preserves_draft`, `home_default_history_picker_cancel_preserves_draft`, `file_picker_cancel_preserves_draft`, `home_default_file_picker_cancel_preserves_draft`, `template_picker_cancel_preserves_draft`, `home_default_template_picker_cancel_preserves_draft`, `git_branch_picker_cancel_preserves_draft`, `home_default_git_branch_picker_cancel_preserves_draft`, `env_var_picker_cancel_preserves_draft`, `env_var_picker_uses_backend_environment`, `home_default_env_var_picker_cancel_preserves_draft`, `tmux_picker_cancellation_message_starts_on_own_line` | Covered | Add picker success-path expect scenarios only when picker replacement UI changes; Rust tests cover replacement logic. |
-| Private command UX and diagnostics | `first_run_doctor`, `home_default_first_run_doctor`, `home_default_config_persists`, `home_default_ai_key_source_redacts_secret`, `invalid_config_startup`, `home_default_invalid_config_startup`, `home_missing_fails_cleanly`, `aish_home_empty_uses_home`, `aish_home_relative_fails_cleanly`, `home_unwritable_fails_cleanly`, `home_path_with_spaces_works`, `home_aish_path_file_fails_cleanly`, `tmux_manual_startup_failures_are_readable_in_terminal`, `help_lists_commands`, `unknown_private_command`, `private_command_safe_failures`, `status_doctor_config`, `tmux_status_command_is_visible_and_shell_recovers`, `tmux_manual_private_config_notes_workflow_matches_visible_terminal_behavior`, `key_encryption_sync_safe_failures`, `key_clear_removes_stored_key`, `ai_config_persists` | Covered | Add new safe-failure scenarios when new private commands are added. |
-| Notes, context, and logs | `notes_are_swallowed`, `home_default_notes_are_swallowed`, `tmux_manual_private_config_notes_workflow_matches_visible_terminal_behavior`, `context_config_persists`, `context_off_blocks_pseudopipe`, `context_confirm_off_runs_immediately`, `context_confirmation_skip`, `context_dangerous_refusal`, `context_dangerous_still_prompts_when_confirm_off`, `context_truncation_reports_limit`, `tmux_manual_ai_context_and_sync_config_match_visible_terminal_behavior`, `home_default_context_dangerous_refusal`, `log_shows_context_skip`, `home_default_event_log_persists` | Covered | Add new context scenarios only for observed regressions. |
+| Private command UX and diagnostics | `first_run_doctor`, `home_default_first_run_doctor`, `home_default_config_persists`, `home_default_ai_key_source_redacts_secret`, `invalid_config_startup`, `home_default_invalid_config_startup`, `home_missing_fails_cleanly`, `aish_home_empty_uses_home`, `aish_home_relative_fails_cleanly`, `home_unwritable_fails_cleanly`, `home_path_with_spaces_works`, `home_aish_path_file_fails_cleanly`, `tmux_manual_startup_failures_are_readable_in_terminal`, `help_lists_commands`, `unknown_private_command`, `hash_note_prefix_reports_unknown_private`, `home_default_hash_note_prefix_reports_unknown_private`, `private_command_safe_failures`, `status_doctor_config`, `tmux_status_command_is_visible_and_shell_recovers`, `tmux_manual_private_config_hash_boundaries_workflow_matches_visible_terminal_behavior`, `key_encryption_sync_safe_failures`, `key_clear_removes_stored_key`, `ai_config_persists` | Covered | Add new safe-failure scenarios when new private commands are added. |
+| Context and logs | `context_config_persists`, `context_off_blocks_pseudopipe`, `context_confirm_off_runs_immediately`, `context_confirmation_skip`, `context_dangerous_refusal`, `context_dangerous_still_prompts_when_confirm_off`, `context_truncation_reports_limit`, `tmux_manual_ai_context_and_sync_config_match_visible_terminal_behavior`, `home_default_context_dangerous_refusal`, `log_shows_context_skip`, `home_default_event_log_persists` | Covered | Add new context scenarios only for observed regressions. |
 | Templates | `template_use_executes`, `template_crud`, `template_placeholder_blocks_execution`, `home_default_template_persists`, Rust template sharing tests for publish/fetch/analyze/import, encrypted template remotes, two publishers plus one importer, analyze/import from fetched cache without remote access, remote URL cache reset, invalid template metadata, and private-sync remote refusal, `tmux_manual_templates_editor_and_default_home_match_visible_terminal_behavior` | Covered | Add completion/template interaction if UI changes. |
-| Editor and paste flows | `external_editor_roundtrip`, `home_default_external_editor_roundtrip`, `external_editor_failure_preserves_draft`, `home_default_external_editor_failure_preserves_draft`, `tmux_manual_templates_editor_and_default_home_match_visible_terminal_behavior`, `tmux_editor_and_paste_review_render_cleanly`, `editor_hash_content_uses_private_parser`, `multiline_paste_editor_review`, `home_default_multiline_paste_editor_review` | Covered | Real OS clipboard and full-screen editor behavior remains human-only in `MANUAL_TESTS.md`. |
+| Editor and paste flows | `external_editor_roundtrip`, `home_default_external_editor_roundtrip`, `external_editor_failure_preserves_draft`, `home_default_external_editor_failure_preserves_draft`, `tmux_manual_templates_editor_and_default_home_match_visible_terminal_behavior`, `tmux_editor_and_paste_review_render_cleanly`, `editor_hash_content_goes_to_shell`, `multiline_paste_editor_review`, `home_default_multiline_paste_editor_review` | Covered | Real OS clipboard and full-screen editor behavior remains human-only in `MANUAL_TESTS.md`. |
 | Sync | `key_encryption_sync_safe_failures`, `home_default_sync_config_persists`, `home_default_startup_sync_runs`, `home_default_startup_sync_unsupported_schedule`, `home_default_startup_sync_failure_logs`, `home_default_startup_sync_disabled_noops`, `home_default_sync_push_local_remote`, `sync_push_local_remote`, `sync_push_failure_logs`, `sync_push_conflict_logs`, Rust virtual-Git tests for `#sync now`, startup sync, exit sync, empty remotes, populated remotes, unrelated histories, two local users, stale local metadata, remote default-branch selection, content-option adoption, key mismatch refusal, invalid remote metadata, plaintext union conflict resolution, encrypted data decrypt-before-stage refusal, encrypted binary-conflict auto-union during `#sync now` and `#sync continue`, merge record-count summaries, and count-decrease union restoration, `tmux_manual_ai_context_and_sync_config_match_visible_terminal_behavior`, `tmux_manual_sync_local_remote_matches_visible_terminal_behavior` | Covered | Real remote auth and human review of unmanaged conflicts remain manual-only. |
 | Passthrough/interactive programs | `passthrough_less`, `tmux_manual_passthrough_less_recovers_prompt_when_available` when `less` is available, `tmux_python_repl_passthrough_recovers_prompt_when_available` when `python3` is available, `tmux_stdin_and_gpg_like_passthrough_recovers_prompt`, `tmux_unknown_tui_passthrough_recovers_prompt`, backend interrupt recovery through `pty_backend_wait_callback_can_interrupt_long_running_commands`; key forwarding is Rust-covered | Covered for current backend-driven portable cases | Add focused regressions for newly reported real-world interactive programs. |
 | Encryption/GPG | `key_clear_removes_stored_key`, `home_default_key_clear_removes_stored_key`, `home_default_encrypt_on_migrates_storage`, `encrypted_startup_unlock`, `encrypt_ambiguous_key_recovers`, `key_encryption_sync_safe_failures`; Rust coverage for `key_set_encrypts_env_api_key_without_printing_secret`, `ai_prompt_uses_gpg_stored_key_when_env_key_is_missing`, `encrypt_on_migrates_plaintext_storage_and_persists_config`, `encrypt_rotate_reencrypts_existing_storage_and_persists_fingerprint`, `encrypt_off_decrypts_storage_and_persists_config`, `encrypt_unlock_mode_persists_startup_unlock_policy`, `encrypted_writes_use_gpg_files_without_plaintext_jsonl`, `encrypted_jsonl_append_does_not_decrypt_existing_file`, `encrypted_history_append_does_not_block_command_completion`, `encrypted_completion_uses_cached_templates_without_gpg_on_keypress`, lazy startup unlock merge behavior, noninteractive GPG decrypt boundaries, and rewrite-history planning/script safety | Automated with fake GPG plus human real-pinentry validation | Real passphrase-protected key and pinentry behavior remains human-only in `MANUAL_TESTS.md`; latest manual validation reported no issues for lazy `#unlock` and prompt startup unlock. |
@@ -321,7 +321,7 @@ Implemented:
 
 - Line-leading `#` is parsed before shell execution.
 - Ordinary input is sent to shell.
-- Notes are recognized.
+- Common note-like prefixes are not special-cased.
 - Private commands are recognized.
 - AI prompts are parsed and routed to the AI request pipeline.
 - AI prompts with context pseudo-pipe syntax are parsed and can execute controlled context collection.
@@ -406,7 +406,7 @@ Implemented:
 - Editor process runner appends the prepared file path to the resolved command and waits for exit status without reading or executing content.
 - Editor read-back replaces the draft buffer with saved file content without executing it.
 - Editor read-back preserves saved content as an editor draft without filtering line-leading `#` lines.
-- Editor drafts are opaque in the prompt but submit through the same parser as direct input; a leading `#` remains protected as a private command, note, or AI prompt.
+- Editor drafts are opaque in the prompt and submit to the backend shell as shell text; a leading `#` is shell syntax in that path.
 - Editor drafts render as opaque prompt summaries and direct inline editing keys leave the hidden editor content unchanged.
 - Multi-line paste content is normalized and stored as an opaque editor draft by default.
 - `paste.multiline = "discard"` ignores multi-line paste without changing draft state.
@@ -422,11 +422,11 @@ Implemented:
 - Optional shell logical splitter ignores standalone comments and preserves inline `#` content.
 - Optional shell logical splitter preserves single-quoted and double-quoted newlines.
 - Optional shell logical splitter preserves heredoc blocks.
-- Optional shell logical splitter can extract standalone note comments as note candidates while preserving default command splitting behavior.
+- Optional shell logical splitter skips standalone comment-like lines without extracting note records.
 - Optional shell logical splitter common-case coverage includes simple lines, blank lines, comments, backslash continuations, quotes, heredocs, and mixed command streams.
 - Editor roundtrip helper prepares a file, runs a fake editor, and reads successful edits back into draft while preserving the original draft on editor failure.
 - `Ctrl-X Ctrl-E` terminal handling resolves the editor, suspends raw mode when needed, runs the roundtrip, restores raw mode when needed, and reports success/failure.
-- `editor.execute_after_save = true` submits a successfully saved editor draft immediately with the same parser semantics as pressing `Enter`.
+- `editor.execute_after_save = true` submits a successfully saved editor draft immediately with the same shell-submission semantics as pressing `Enter`.
 - Template commands can create, list, search, find, remove, replace, show, and use JSONL-backed body-first templates. `#template list` can print one body per line and supports the privacy-confirmed private-output export flow.
 - Template placeholders support `{name}`, `{name:description}`, and `{name...}` syntax.
 - Template use copies rendered content to a protected template draft and blocks execution while placeholders remain unresolved.
@@ -448,7 +448,7 @@ Tests:
 - `commands::tests::continuation_normalization_rejects_mixed_or_single_lines`
 - `commands::tests::private_command_allows_no_space_after_hash`
 - `commands::tests::unknown_private_command_suggestion_uses_nearest_implemented_command`
-- `commands::tests::notes_are_detected_with_or_without_space_after_hash`
+- `commands::tests::note_like_lines_are_not_special_cased`
 - `execute_draft_does_not_send_line_leading_hash_to_backend_shell`
 - `editor_draft_can_send_line_leading_hash_to_shell`
 - `editor_draft_sends_multiline_backslash_continuation_to_shell`
@@ -731,20 +731,20 @@ Known gaps:
 
 - Draft history browsing is implemented for saved drafts; no additional search-specific draft index exists yet.
 
-### Note Storage
+### Note Storage Compatibility
 
 Implemented:
 
 - `NoteTag` JSON serialization.
 - `NoteEntry` JSONL format.
-- `# TODO:`, `# NOTE:`, `# FIXME:`, `# HACK:`, `# XXX:` are recognized.
-- Notes are stored without shell execution.
+- There is no implicit `# TODO:`/`# NOTE:` input syntax.
+- Existing note records remain loadable for sync/encryption compatibility.
 
 Tests:
 
-- `commands::tests::notes_are_detected_with_or_without_space_after_hash`
+- `commands::tests::note_like_lines_are_not_special_cased`
 - `history::tests::note_entry_serializes_tag_as_snake_case`
-- `execute_draft_stores_notes_without_sending_them_to_shell`
+- `note_like_private_line_reports_unknown_command_without_storing_note`
 
 Status:
 
@@ -892,7 +892,7 @@ Tests:
 - `history::tests::split_logical_commands_splits_simple_non_empty_lines`
 - `history::tests::split_logical_commands_preserves_backslash_continuations`
 - `history::tests::split_logical_commands_skips_standalone_comments`
-- `history::tests::split_logical_commands_can_extract_comment_only_notes`
+- `history::tests::split_logical_commands_skips_comment_only_note_like_lines`
 - `history::tests::split_logical_commands_preserves_inline_hash_content`
 - `history::tests::split_logical_commands_preserves_single_quoted_newlines`
 - `history::tests::split_logical_commands_preserves_double_quoted_newlines`
@@ -909,7 +909,7 @@ Status:
 Implemented:
 
 - A Rust integration harness runs `expect` scenarios against the built `aish` binary with isolated `AISH_HOME` directories.
-- Interactive smoke coverage now checks real terminal input/output for basic command execution, cwd persistence, mode cycling, private command safety, help output, status/config/doctor diagnostics, notes, context confirmation skip, event log output, clear screen, exit paths, completion, readline-style editing keys, unknown `Ctrl-X` chord cancellation, history execution, persisted history trimming, AI command sequencing, AI config persistence and key-source redaction, read-only edit-copy behavior, template execution, template CRUD, unresolved template blocking, external editor roundtrip, editor hash-content private-parser safety, multiline paste editor-review warning/execution, key/encryption/sync safe-failure behavior, quote continuation, backslash continuation, Ctrl-C continuation cancellation, and backend prompt leak prevention.
+- Interactive smoke coverage now checks real terminal input/output for basic command execution, cwd persistence, mode cycling, private command safety, help output, status/config/doctor diagnostics, hash-command boundaries, context confirmation skip, event log output, clear screen, exit paths, completion, readline-style editing keys, unknown `Ctrl-X` chord cancellation, history execution, persisted history trimming, AI command sequencing, AI config persistence and key-source redaction, read-only edit-copy behavior, template execution, template CRUD, unresolved template blocking, external editor roundtrip, editor hash-content shell submission, multiline paste editor-review warning/execution, key/encryption/sync safe-failure behavior, quote continuation, backslash continuation, Ctrl-C continuation cancellation, and backend prompt leak prevention.
 - Encrypted startup unlock has expect coverage for nonblocking locked startup, the visible `history is still unlocking...` state, explicit `#unlock`, and restored encrypted history after unlock.
 - Each new user-facing interactive feature should now receive both Rust-level tests and at least one expect scenario when it affects real terminal behavior.
 
@@ -937,7 +937,7 @@ Tests:
 - `expect_runner::key_encryption_sync_safe_failures`
 - `expect_runner::key_clear_removes_stored_key`
 - `expect_runner::status_doctor_config`
-- `expect_runner::notes_are_swallowed`
+- `expect_runner::hash_note_prefix_reports_unknown_private`
 - `expect_runner::template_placeholder_blocks_execution`
 - `expect_runner::context_confirmation_skip`
 - `expect_runner::external_editor_roundtrip`
@@ -952,7 +952,7 @@ Tests:
 - `expect_runner::ctrl_x_unknown_chord_cancels`
 - `expect_runner::history_trim_persists`
 - `expect_runner::template_crud`
-- `expect_runner::editor_hash_content_uses_private_parser`
+- `expect_runner::editor_hash_content_goes_to_shell`
 
 Status:
 

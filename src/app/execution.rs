@@ -7,8 +7,8 @@ use anyhow::Result;
 use crossterm::event::{self, Event};
 use crossterm::terminal::{is_raw_mode_enabled, size};
 
-use crate::commands::{ParsedLine, parse_line};
-use crate::history::{HistoryEntry, HistorySource, NoteEntry};
+use crate::commands::{ParsedLine, parse_ai_prompt_context, parse_line};
+use crate::history::{HistoryEntry, HistorySource};
 use crate::modes::Mode;
 use crate::pty::{BackendShellClosed, PtyBackend, PtyCommandEvent, pty_size};
 #[cfg(not(unix))]
@@ -77,7 +77,8 @@ pub fn execute_draft(
         return Ok(());
     }
 
-    if state.draft.is_empty() && state.mode == Mode::History {
+    let executing_history = state.draft.is_empty() && state.mode == Mode::History;
+    if executing_history {
         state.copy_selected_history_to_draft();
     }
     let executing_ai = state.draft.is_empty() && state.mode == Mode::Ai;
@@ -96,14 +97,11 @@ pub fn execute_draft(
             state.clear_draft_for_new_draft();
             return Ok(());
         }
-        let ai_line = format!("# {prompt}");
         let mut display_out = DisplayWriter::new(out);
-        match parse_line(&ai_line) {
-            ParsedLine::AiPrompt(prompt) => submit_ai_prompt(state, prompt, &mut display_out)?,
-            ParsedLine::AiPromptWithContext { prompt, command } => {
-                submit_ai_prompt_with_context(state, prompt, command, &mut display_out, timeout)?;
-            }
-            _ => unreachable!("AI editor drafts are submitted as AI prompts"),
+        if let Some((prompt, command)) = parse_ai_prompt_context(prompt) {
+            submit_ai_prompt_with_context(state, prompt, command, &mut display_out, timeout)?;
+        } else {
+            submit_ai_prompt(state, prompt, &mut display_out)?;
         }
         state.clear_draft_preserving_mode();
         return Ok(());
@@ -121,49 +119,46 @@ pub fn execute_draft(
             return Ok(());
         }
     }
-    match parse_line(&command) {
-        ParsedLine::Ordinary(_) => {}
-        ParsedLine::EmptyPrivate => {
-            let mut display_out = DisplayWriter::new(out);
-            writeln!(display_out, "empty Aish command")?;
-            state.clear_draft_for_new_draft();
-            return Ok(());
-        }
-        ParsedLine::Note { tag, text } => {
-            state.append_note(NoteEntry {
-                tag,
-                text: text.to_string(),
-            })?;
-            let mut display_out = DisplayWriter::new(out);
-            writeln!(display_out, "note stored")?;
-            state.clear_draft_for_new_draft();
-            return Ok(());
-        }
-        ParsedLine::Private { name, args } => {
-            let mut display_out = DisplayWriter::new(out);
-            if let Err(err) =
-                private_commands::execute_private_command(state, &mut display_out, name, args)
-            {
-                writeln!(display_out, "Error: {err}")?;
-                let _ = state.append_event(crate::log::EventLevel::Error, "private command failed");
+    let should_parse_aish = !state.draft_from_editor
+        && !state.draft_from_template
+        && !executing_history
+        && !executing_ai;
+    if should_parse_aish {
+        match parse_line(&command) {
+            ParsedLine::Ordinary(_) => {}
+            ParsedLine::EmptyPrivate => {
+                let mut display_out = DisplayWriter::new(out);
+                writeln!(display_out, "empty Aish command")?;
                 state.clear_draft_for_new_draft();
+                return Ok(());
             }
-            return Ok(());
-        }
-        ParsedLine::AiPrompt(prompt) => {
-            let mut display_out = DisplayWriter::new(out);
-            submit_ai_prompt(state, prompt, &mut display_out)?;
-            state.clear_draft_preserving_mode();
-            return Ok(());
-        }
-        ParsedLine::AiPromptWithContext { prompt, command } => {
-            let mut display_out = DisplayWriter::new(out);
-            submit_ai_prompt_with_context(state, prompt, command, &mut display_out, timeout)?;
-            state.clear_draft_preserving_mode();
-            return Ok(());
+            ParsedLine::Private { name, args } => {
+                let mut display_out = DisplayWriter::new(out);
+                if let Err(err) =
+                    private_commands::execute_private_command(state, &mut display_out, name, args)
+                {
+                    writeln!(display_out, "Error: {err}")?;
+                    let _ =
+                        state.append_event(crate::log::EventLevel::Error, "private command failed");
+                    state.clear_draft_for_new_draft();
+                }
+                return Ok(());
+            }
+            ParsedLine::AiPrompt(prompt) => {
+                let mut display_out = DisplayWriter::new(out);
+                submit_ai_prompt(state, prompt, &mut display_out)?;
+                state.clear_draft_preserving_mode();
+                return Ok(());
+            }
+            ParsedLine::AiPromptWithContext { prompt, command } => {
+                let mut display_out = DisplayWriter::new(out);
+                submit_ai_prompt_with_context(state, prompt, command, &mut display_out, timeout)?;
+                state.clear_draft_preserving_mode();
+                return Ok(());
+            }
         }
     }
-    if is_plain_exit_command(&command) {
+    if should_parse_aish && is_plain_exit_command(&command) {
         state.exit_requested = true;
         state.clear_draft_for_new_draft();
         return Ok(());

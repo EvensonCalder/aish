@@ -2,12 +2,11 @@ use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use aish::app::{AppState, execute_draft};
-use aish::commands::NoteTag;
 use aish::config::AiConfig;
 use aish::editor::prepare_editor_file;
 use aish::history::{
-    AiCommandIndex, AiItem, AiItemKind, AiSession, HistoryEntry, HistorySource, NoteEntry,
-    append_jsonl, load_jsonl,
+    AiCommandIndex, AiItem, AiItemKind, AiSession, HistoryEntry, HistorySource, append_jsonl,
+    load_jsonl,
 };
 use aish::modes::Mode;
 use aish::pty::PtyBackend;
@@ -18,8 +17,8 @@ mod ai;
 mod basic;
 #[path = "draft_execution/editor.rs"]
 mod editor;
-#[path = "draft_execution/history_notes.rs"]
-mod history_notes;
+#[path = "draft_execution/history.rs"]
+mod history;
 
 fn fixed_clock() -> i64 {
     1234567890

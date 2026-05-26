@@ -268,7 +268,7 @@ fn execute_draft_does_not_send_line_leading_hash_to_backend_shell() {
     .unwrap();
 
     let output = String::from_utf8(output).unwrap();
-    assert!(output.contains("Aish command not implemented yet"));
+    assert!(output.contains("unknown Aish command"));
     assert_eq!(state.last_status, None);
     assert_eq!(state.mode, Mode::Draft);
     assert!(state.draft.is_empty());

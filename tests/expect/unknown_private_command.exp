@@ -9,7 +9,7 @@ aish_spawn
 
 aish_send "#nosuchcommand"
 aish_enter
-aish_expect "not implemented yet: #nosuchcommand"
+aish_expect "unknown Aish command: #nosuchcommand"
 aish_wait_prompt
 
 aish_quit

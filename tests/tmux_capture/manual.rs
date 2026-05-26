@@ -25,8 +25,8 @@ fn tmux_manual_completion_workflow_matches_visible_terminal_behavior() {
 }
 
 #[test]
-fn tmux_manual_private_config_notes_workflow_matches_visible_terminal_behavior() {
-    let Some(captured) = run_tmux_script("manual_private_config_notes.sh") else {
+fn tmux_manual_private_config_hash_boundaries_workflow_matches_visible_terminal_behavior() {
+    let Some(captured) = run_tmux_script("manual_private_config_hash_boundaries.sh") else {
         return;
     };
     assert_line_present(&captured, "after-private");

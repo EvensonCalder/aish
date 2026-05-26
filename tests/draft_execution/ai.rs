@@ -140,6 +140,31 @@ fn execute_ai_selection_success_advances_to_next_command() {
 }
 
 #[test]
+fn execute_ai_selection_hash_content_goes_to_backend_shell() {
+    let _guard = pty_execution_guard();
+    let temp = tempfile::tempdir().unwrap();
+    let history_path = temp.path().join("history/regular.jsonl");
+    let mut state = ai_state(&["#status\nprintf 'ai-hash-shell\\n'"], 0, history_path);
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+    let mut output = Vec::new();
+
+    execute_draft(
+        &mut state,
+        &mut backend,
+        &mut output,
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.contains("ai-hash-shell"));
+    assert!(!output.contains("Aish status"));
+    assert_eq!(state.last_status, Some(0));
+    assert_eq!(state.mode, Mode::Draft);
+    assert!(state.draft.is_empty());
+}
+
+#[test]
 fn execute_ai_selection_failure_stays_on_current_command() {
     let _guard = pty_execution_guard();
     let temp = tempfile::tempdir().unwrap();

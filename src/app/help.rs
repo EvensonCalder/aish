@@ -150,26 +150,6 @@ const AI_HELP: &[HelpEntry] = &[
         usage: "#context [on|off|confirm on|confirm off|<bytes>]",
         description: "show or update context capture settings",
     },
-    HelpEntry {
-        usage: "# TODO: <text>",
-        description: "store a note",
-    },
-    HelpEntry {
-        usage: "# NOTE: <text>",
-        description: "store a note",
-    },
-    HelpEntry {
-        usage: "# FIXME: <text>",
-        description: "store a note",
-    },
-    HelpEntry {
-        usage: "# HACK: <text>",
-        description: "store a note",
-    },
-    HelpEntry {
-        usage: "# XXX: <text>",
-        description: "store a note",
-    },
 ];
 
 const COMPLETION_HELP: &[HelpEntry] = &[
@@ -492,7 +472,7 @@ fn write_keys_help(out: &mut impl Write, keybindings: &KeybindingConfig) -> Resu
 }
 
 fn write_ai_help(out: &mut impl Write) -> Result<()> {
-    writeln!(out, "AI and notes:")?;
+    writeln!(out, "AI:")?;
     write_entries(out, AI_HELP)
 }
 

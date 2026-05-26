@@ -42,9 +42,9 @@ fn ordinary_shell_exit_requests_clean_app_exit() {
 }
 
 #[test]
-fn editor_draft_private_command_uses_aish_parser() {
+fn editor_draft_hash_content_goes_to_backend_shell() {
     let mut state = AppState::default();
-    state.draft.insert_str("#status");
+    state.draft.insert_str("#status\nprintf 'editor-shell\\n'");
     state.draft_from_editor = true;
     let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
     let mut output = Vec::new();
@@ -58,7 +58,9 @@ fn editor_draft_private_command_uses_aish_parser() {
     .unwrap();
 
     let output = String::from_utf8(output).unwrap();
-    assert!(output.contains("Aish status"));
+    assert!(!output.contains("Aish status"));
+    assert!(output.contains("editor-shell"));
+    assert_eq!(state.last_status, Some(0));
     assert!(state.draft.is_empty());
     assert!(!state.draft_from_editor);
 }
@@ -167,16 +169,16 @@ fn private_help_prints_available_commands() {
         )
     );
     assert!(output.contains("Ctrl-X Ctrl-E - open the configured external editor"));
-    assert!(output.contains("AI and notes:"));
+    assert!(output.contains("AI:"));
     assert!(output.contains("# <prompt> - send an AI prompt"));
-    assert!(output.contains("# TODO: <text> - store a note"));
+    assert!(!output.contains("store a note"));
     assert!(state.draft.is_empty());
 }
 
 #[test]
 fn removed_duplicate_private_commands_do_not_dispatch() {
     for (line, expected) in [
-        ("#push", "Aish command not implemented yet: #push"),
+        ("#push", "unknown Aish command: #push"),
         ("#sync union", "usage: #sync resolve-union"),
         ("#template pending shared", "usage: #template"),
         (

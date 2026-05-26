@@ -50,14 +50,13 @@ send_command_and_wait '#config' '^Aish config$'
 send_command_and_wait '#status' '^Aish status$'
 send_command_and_wait '#completion' '^completion.tab_accept=word$'
 send_command_and_wait '#editor' '^Aish editor$'
-send_command_and_wait '# NOTE: tmux-note' '^note stored$'
-send_command_and_wait '# TODO: tmux-todo' '^note stored$'
+send_command_and_wait '#TODO: tmux-hash-prefix' 'unknown Aish command: #TODO:'
 send_command_and_wait '#key' '^usage: #key set \| #key clear$'
 send_command_and_wait '#key set' '^encryption key is not configured; run #encrypt on <key-fingerprint>$'
 send_command_and_wait '#key clear' '^no stored key to clear$'
 send_command_and_wait '#encrypt on' '^encryption key is not configured; run #encrypt on <key-fingerprint>$'
 send_command_and_wait '#encrypt off' '^plaintext history and templates will be written from now on$'
-send_command_and_wait '#nosuchmanual' 'not implemented yet: #nosuchmanual'
+send_command_and_wait '#nosuchmanual' 'unknown Aish command: #nosuchmanual'
 send_command_and_wait 'echo after-private' '^after-private$'
 
 CAPTURE="$(capture_pane)"
@@ -73,14 +72,11 @@ printf '%s\n' "$CAPTURE" | rg -q '^completion.display_delay_ms=120$'
 printf '%s\n' "$CAPTURE" | rg -q '^completion.inline=true$'
 printf '%s\n' "$CAPTURE" | rg -q '^completion.fuzzy=true$'
 printf '%s\n' "$CAPTURE" | rg -q '^completion.tab_accept=word$'
+printf '%s\n' "$CAPTURE" | rg -q 'unknown Aish command: #TODO:'
 printf '%s\n' "$CAPTURE" | rg -q '^usage: #key set \| #key clear$'
 printf '%s\n' "$CAPTURE" | rg -q '^encryption key is not configured; run #encrypt on <key-fingerprint>$'
 printf '%s\n' "$CAPTURE" | rg -q '^no stored key to clear$'
 printf '%s\n' "$CAPTURE" | rg -q '^encryption=off$'
 printf '%s\n' "$CAPTURE" | rg -q '^plaintext history and templates will be written from now on$'
-printf '%s\n' "$CAPTURE" | rg -q 'not implemented yet: #nosuchmanual'
+printf '%s\n' "$CAPTURE" | rg -q 'unknown Aish command: #nosuchmanual'
 printf '%s\n' "$CAPTURE" | rg -q '^after-private$'
-
-test -f "$HOME_DIR/.aish/history/notes.jsonl"
-rg -q 'tmux-note' "$HOME_DIR/.aish/history/notes.jsonl"
-rg -q 'tmux-todo' "$HOME_DIR/.aish/history/notes.jsonl"

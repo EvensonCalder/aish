@@ -19,7 +19,7 @@ aish_expect {#paste [subcommand]}
 aish_expect {#completion [subcommand]}
 aish_expect "Keybindings:"
 aish_expect "Tab - empty draft cycles modes"
-aish_expect "AI and notes:"
+aish_expect "AI:"
 aish_expect "# <prompt> - send an AI prompt"
 aish_expect "Paste help"
 aish_expect "Completion help"
