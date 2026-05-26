@@ -560,7 +560,7 @@ fn pty_backend_does_not_export_control_fd_to_user_commands() {
 }
 
 #[test]
-fn pty_backend_keeps_user_commands_but_not_aish_internal_markers_in_history() {
+fn bash_pty_backend_does_not_record_aish_commands_in_native_history() {
     let _guard = pty_test_guard();
     let home = tempfile::tempdir().unwrap();
     let _home_guard = EnvVarGuard::set("HOME", home.path().as_os_str());
@@ -578,8 +578,42 @@ fn pty_backend_keeps_user_commands_but_not_aish_internal_markers_in_history() {
         .unwrap();
 
     assert_eq!(history.exit_code, 0);
-    assert!(history.output.contains(user_command));
+    assert!(!history.output.contains(user_command), "{history:?}");
     assert!(!history.output.contains("__aish_status=$?"));
     assert!(!history.output.contains("__AISH_STATUS__"));
     assert!(!history.output.contains("__AISH_READY__"));
+}
+
+#[test]
+fn bash_pty_backend_does_not_flush_aish_commands_to_bash_history_file() {
+    let _guard = pty_test_guard();
+    let home = tempfile::tempdir().unwrap();
+    let history_path = home.path().join(".bash_history");
+    fs::write(&history_path, "preexisting-bash-history\n").unwrap();
+    fs::write(
+        home.path().join(".bashrc"),
+        "HISTFILE=$HOME/.bash_history\n\
+         HISTSIZE=1000\n\
+         shopt -s histappend\n\
+         PROMPT_COMMAND='history -a'\n",
+    )
+    .unwrap();
+    let _home_guard = EnvVarGuard::set("HOME", home.path().as_os_str());
+    let mut backend = PtyBackend::spawn("/bin/bash").unwrap();
+
+    let user_command = "printf 'aish-bash-disk-history-target\\n'";
+    let run = backend
+        .run_command(user_command, Duration::from_secs(5))
+        .unwrap();
+    assert_eq!(run.exit_code, 0);
+    assert_eq!(run.output.trim(), "aish-bash-disk-history-target");
+
+    let flush = backend
+        .run_command("history -a 2>/dev/null || true", Duration::from_secs(5))
+        .unwrap();
+    assert_eq!(flush.exit_code, 0);
+
+    let disk_history = fs::read_to_string(&history_path).unwrap();
+    assert_eq!(disk_history, "preexisting-bash-history\n");
+    assert!(!disk_history.contains("aish-bash-disk-history-target"));
 }

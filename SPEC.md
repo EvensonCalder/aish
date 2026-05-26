@@ -19,7 +19,8 @@ Aish does **not** try to replace Bash, Zsh, or Fish. The backend shell remains r
 8. **Editor and paste-review drafts use the same submit parser as direct prompt input.** A leading `#` at the start of submitted draft text remains reserved for Aish private commands, notes, and AI prompts; text parsed as ordinary shell input is sent to the backend shell unchanged.
 9. **Encryption prioritizes confidentiality over speed.** When encrypted, Aish does not persist plaintext search indexes.
 10. **Git sync is conservative.** Sync only auto-resolves Aish-managed append-only JSONL conflicts where both sides can be preserved; it never auto-resolves unmanaged conflicts, never rewrites history, and never runs `git rm --cached` automatically. Encrypted-storage Git history rewrite is a separate explicit command with destructive confirmation.
-11. **End-to-end behavior must be tested as users experience it.** Every user-visible feature needs expect-driven coverage in addition to Rust unit/integration tests, including rendering, redraw boundaries, PTY output framing, shell continuation, keybindings, mode transitions, error paths, and regression cases.
+11. **Backend shell history is not Aish history.** Aish stores executed commands in its own managed history and must suppress Bash, Zsh, and Fish native history in the backend shell so Aish-submitted commands are not written to `~/.bash_history`, `~/.zsh_history`, Fish history files, or their in-memory native history lists.
+12. **End-to-end behavior must be tested as users experience it.** Every user-visible feature needs expect-driven coverage in addition to Rust unit/integration tests, including rendering, redraw boundaries, PTY output framing, shell continuation, keybindings, mode transitions, error paths, and regression cases.
 
 ---
 
@@ -573,7 +574,20 @@ Example `history/ai.jsonl` entry:
 
 Command boundaries are determined by JSON `items`, not by newlines inside an item.
 
-### 7.5 History limit
+### 7.5 Native shell history boundary
+
+Aish is the owner of command history for commands submitted through the Aish prompt, editor flow, history mode, AI mode, and template execution. The persistent backend shell must not treat those commands as ordinary interactive shell history.
+
+Backend requirements:
+
+- Bash backend sessions disable native history, unset `HISTFILE`, keep `HISTSIZE=0`, and clear the in-memory native history list after startup and around prompt-ready handling.
+- Zsh backend sessions use an empty private history stack and keep `HISTFILE` unset with `HISTSIZE=0` and `SAVEHIST=0`; append/share history options from user rc files must be neutralized after rc loading.
+- Fish backend sessions use Fish private mode when available, set an empty `fish_history` value, and clear the current session history after startup and post-execution.
+- Aish internal marker commands and user-submitted commands should be absent from backend shell native history queries such as Bash `history`, Zsh `fc -l`, and Fish `history search`.
+- Forcing a native history flush from inside the backend shell, such as Bash `history -a`, Zsh `fc -W`, or Fish `history save`, must not append Aish-submitted commands to the user's native history files.
+- Aish must not delete or rewrite preexisting user shell history files. The suppression boundary applies to the backend shell session used by Aish.
+
+### 7.6 History limit
 
 Command:
 
@@ -587,7 +601,7 @@ Meaning:
 - AI sessions count by item count, not by session count.
 - If all items in an AI session are trimmed, the session can be removed.
 
-### 7.6 Failed commands
+### 7.7 Failed commands
 
 Failed commands should be stored with exit code. Failed commands are useful for later search and AI repair prompts.
 
@@ -1572,10 +1586,11 @@ current working directory
 
 Shell history responsibility:
 
-- Aish-owned functional shell injections such as readiness markers, status markers, or similar internal integration commands must not pollute backend shell history when Aish can prevent that safely.
-- For Bash and Zsh, Aish should prefer prevention over deletion by using shell-supported history-ignore behavior for Aish-injected internal commands.
-- If Aish ever needs to remove an entry after the fact, removal must be exact and conservative: only entries Aish can confidently attribute to its own injected functional commands may be touched.
-- If exact attribution is not possible, Aish must leave shell history unchanged.
+- Aish-owned functional shell injections such as readiness markers, status markers, or similar internal integration commands must not pollute backend shell history.
+- Commands submitted through Aish must be stored in Aish-managed history only, not in the backend shell's native Bash, Zsh, or Fish history.
+- Aish should prefer prevention over deletion by disabling or isolating native backend history after user rc loading.
+- If a backend requires after-the-fact cleanup, removal must be scoped to the current backend session and must not delete preexisting user shell history.
+- If exact attribution is not possible, Aish must leave preexisting shell history unchanged.
 
 ---
 

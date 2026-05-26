@@ -81,6 +81,9 @@ fn shell_name(program: &str) -> String {
 
 fn fish_launch_args(program: &str) -> Vec<String> {
     let mut args = Vec::new();
+    if fish_supports_private_mode(program) {
+        args.push("--private".to_string());
+    }
     if fish_supports_features(program, "no-query-term,no-mark-prompt") {
         args.push("--features".to_string());
         args.push("no-query-term,no-mark-prompt".to_string());
@@ -116,6 +119,13 @@ trap - DEBUG 2>/dev/null || true
 __aish_preserve_status() {
   return "$1"
 }
+__aish_disable_history() {
+  unset HISTFILE
+  HISTSIZE=0
+  HISTIGNORE='*'
+  set +o history 2>/dev/null || true
+  history -c 2>/dev/null || true
+}
 __aish_run_prompt_command() {
   if [ "$__aish_prompt_command_set" = 1 ]; then
     if [ "$__aish_prompt_command_is_array" = 1 ]; then
@@ -130,18 +140,20 @@ __aish_run_prompt_command() {
 }
 __aish_emit_ready() {
   local __aish_status=$?
+  __aish_disable_history
   {
     printf '@READY_MARKER@\t%s\t%s\n' "$__aish_status" "$PWD" >&@CONTROL_FD@
   } 2>/dev/null || true
   stty -echo
   __aish_run_prompt_command >/dev/null 2>&1
+  __aish_disable_history
   return "$__aish_status"
 }
 bind 'set enable-bracketed-paste off' 2>/dev/null || true
 PS0=''
 PS1=''
 PS2=''
-set -o history 2>/dev/null || true
+__aish_disable_history
 stty -echo
 PROMPT_COMMAND=__aish_emit_ready
 }
@@ -154,10 +166,17 @@ PROMPT_COMMAND=__aish_emit_ready
 
 fn zsh_init_command(ready_marker: &str, start_marker: &str, control_fd: i32) -> String {
     fill_shell_init_template(
-        r#" setopt histignorespace
+        r#" setopt histignorespace; unset HISTFILE; HISTSIZE=0; SAVEHIST=0
+ unsetopt append_history inc_append_history inc_append_history_time share_history 2>/dev/null || true
+ fc -p /dev/null 0 0 2>/dev/null || true
 stty -echo
  {
 unset AISH_CONTROL_FD
+unset HISTFILE
+HISTSIZE=0
+SAVEHIST=0
+unsetopt append_history inc_append_history inc_append_history_time share_history 2>/dev/null || true
+fc -p /dev/null 0 0 2>/dev/null || true
 unsetopt zle prompt_cr prompt_sp
 PROMPT=''
 RPROMPT=''
@@ -177,6 +196,12 @@ if functions precmd >/dev/null 2>&1; then
 fi
 function __aish_preserve_status() {
   return "$1"
+}
+function __aish_disable_history() {
+  unset HISTFILE
+  HISTSIZE=0
+  SAVEHIST=0
+  unsetopt append_history inc_append_history inc_append_history_time share_history 2>/dev/null || true
 }
 function __aish_run_user_preexec() {
   if functions __aish_user_preexec_function >/dev/null 2>&1; then
@@ -207,21 +232,24 @@ function __aish_emit_start() {
 }
 function __aish_preexec() {
   stty echo
+  __aish_disable_history
   __aish_run_user_preexec "$@"
   __aish_emit_start "$1"
 }
 function __aish_precmd() {
   local __aish_status=$?
+  __aish_disable_history
   __aish_run_user_precmd
+  __aish_disable_history
   stty -echo
   {
     printf '@READY_MARKER@\t%s\t%s\n' "$__aish_status" "$PWD" >&@CONTROL_FD@
   } 2>/dev/null || true
   return "$__aish_status"
 }
-fc -p 2>/dev/null || true
 preexec_functions=(__aish_preexec)
 precmd_functions=(__aish_precmd)
+__aish_disable_history
 }
 "#,
         ready_marker,
@@ -232,11 +260,18 @@ precmd_functions=(__aish_precmd)
 
 fn fish_init_command(ready_marker: &str, start_marker: &str, control_fd: i32) -> String {
     fill_shell_init_template(
-        r#"stty -echo
+        r#"set -g fish_history ""; builtin history clear-session >/dev/null 2>&1; or true
+stty -echo
 begin
 set -g __aish_initializing
 set -e AISH_CONTROL_FD
 set -g fish_greeting
+set -g fish_history ""
+function __aish_clear_fish_history
+  set -g fish_history ""
+  builtin history clear-session >/dev/null 2>&1; or true
+end
+__aish_clear_fish_history
 function fish_title
 end
 set -g __aish_user_fish_preexec_functions
@@ -286,6 +321,7 @@ function __aish_preexec --on-event fish_preexec
   if set -q __aish_initializing
     return
   end
+  __aish_clear_fish_history
   stty echo
   __aish_run_user_fish_preexec $argv
   printf '@START_MARKER@\t%s\n' $argv[1] >&@CONTROL_FD@ 2>/dev/null; or true
@@ -309,6 +345,7 @@ function __aish_postexec --on-event fish_postexec
   end
   stty -echo
   __aish_run_user_fish_postexec $__aish_status $argv
+  __aish_clear_fish_history
   __aish_emit_ready $__aish_status
 end
 function fish_prompt
@@ -320,6 +357,7 @@ end
 function __aish_finish_init
   set -g __aish_suppress_next_postexec
   set -e __aish_initializing
+  __aish_clear_fish_history
   __aish_emit_ready
 end
 end
@@ -353,6 +391,16 @@ fn fish_supports_features(program: &str, features: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn fish_supports_private_mode(program: &str) -> bool {
+    ProcessCommand::new(program)
+        .args(["--private", "-c", "true"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
 pub(super) fn shell_command_builder(launch: &ShellLaunch) -> Command {
     let mut command = Command::new(&launch.program);
     for arg in &launch.args {
@@ -362,6 +410,13 @@ pub(super) fn shell_command_builder(launch: &ShellLaunch) -> Command {
         command.current_dir(cwd);
     }
     command.env("BASH_SILENCE_DEPRECATION_WARNING", "1");
+    if launch.integration == ShellIntegration::BashPromptCommand {
+        command.env("HISTCONTROL", "ignorespace");
+        command.env("HISTIGNORE", "*");
+    }
+    if launch.integration == ShellIntegration::FishEvents {
+        command.env("fish_history", "");
+    }
     command.env_remove("AISH_CONTROL_FD");
     command
 }

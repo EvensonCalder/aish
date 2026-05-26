@@ -155,9 +155,9 @@ Implemented:
 - Marker parsing waits for marker plus exit status and line ending.
 - Marker parsing handles echoed marker injection commands.
 - PTY CRLF output normalization.
-- Bash and zsh startup enable shell-native ignore-space history behavior for Aish internal integration commands.
+- Bash, zsh, and fish startup suppress backend shell native history for Aish-submitted commands and internal integration markers.
 - Ready-marker cleanup hides internal ready lines from displayed output.
-- A dedicated bash PTY integration test isolates `HOME` and verifies user commands remain in shell history while Aish internal marker commands do not.
+- Dedicated PTY integration tests isolate `HOME` and verify Aish-submitted commands stay out of backend native history and native history files.
 - Backend shell is killed on `PtyBackend` drop.
 - Real bash shell state persistence is tested with `pwd`, `cd /tmp`, `pwd`.
 
@@ -178,7 +178,8 @@ Tests:
 - `bash_pty_backend_passthrough_runs_path_commands_from_bashrc`
 - `pty_backend_captures_failed_command_exit_status`
 - `pty_backend_does_not_confuse_user_output_with_prompt_marker`
-- `pty_backend_keeps_user_commands_but_not_aish_internal_markers_in_history`
+- `bash_pty_backend_does_not_record_aish_commands_in_native_history`
+- `bash_pty_backend_does_not_flush_aish_commands_to_bash_history_file`
 
 Status:
 
@@ -190,15 +191,16 @@ Implemented:
 
 - zsh launch preparation uses `zsh -f -o histignorespace`.
 - zsh startup disables prompt/ZLE behavior needed for the PTY hook flow.
-- zsh startup enables ignore-space history behavior for Aish internal integration commands.
+- zsh startup uses an empty private history stack and disables native history file persistence for Aish-submitted commands.
 - zsh PTY command execution preserves shell state and reports exit status/cwd through core `preexec` / `precmd` hooks.
 - zsh `preexec` start markers are consumed, filtered from command output, and exposed as `CommandResult::started_command`.
-- A dedicated zsh PTY integration test isolates `HOME` and verifies user commands remain in shell history while Aish internal marker commands do not.
+- Dedicated zsh PTY integration tests isolate `HOME` and verify Aish-submitted commands stay out of zsh native history and `.zsh_history`.
 
 Tests:
 
 - `zsh_pty_backend_runs_commands_and_preserves_shell_state_when_available`
-- `zsh_pty_backend_keeps_user_commands_but_not_aish_internal_markers_in_history`
+- `zsh_pty_backend_does_not_record_aish_commands_in_native_history`
+- `zsh_pty_backend_does_not_flush_aish_commands_to_zsh_history_file`
 
 Status:
 
@@ -357,10 +359,10 @@ Implemented:
 - Conservative sync flow plan helper orders remote-cache fetch/merge, managed add, commit, and push steps using fixed git argument arrays without running git.
 - Manual `#sync now` sync is covered against a local bare git remote as a background job, including remote-cache fetch/merge, managed `.gitignore` add, commit, push, compact completion output, state reload, and completion event logging without network access.
 - Periodic `#sync <schedule>` behavior is covered for due and not-due schedules using a runtime timestamp file, sync lock, and local bare git remote without creating scheduler files. Explicit startup and exit sync triggers have Rust coverage; startup/periodic sync run in the background, while exit sync remains blocking.
-- Marker-based shell integration now emits and parses command-start markers, with shell-quoting tests and PTY coverage that bash reports `started_command` without leaking internal markers into history.
+- Marker-based shell integration now emits and parses command-start markers, with shell-quoting tests and PTY coverage that bash reports `started_command` without leaking Aish-submitted commands or internal markers into native shell history.
 - Bash marker integration has PTY coverage for prompt-ready initial cwd, command-start reporting, command-finish exit status, and cwd reporting after command execution.
 - Zsh hook integration has PTY coverage for `preexec` command-start reporting, `precmd` finish status, and cwd reporting after command execution when `/bin/zsh` is available.
-- Fish event integration has launch/unit coverage for `fish_preexec`, `fish_postexec`, explicit ready emission, and prompt suppression setup plus opt-in PTY coverage for command-start, finish status, cwd reporting, streaming output, config inheritance, and command-token-like output preservation when `AISH_TEST_FISH=1` is set.
+- Fish event integration has launch/unit coverage for `fish_preexec`, `fish_postexec`, explicit ready emission, prompt suppression setup, private-mode history suppression, and native history cleanup plus opt-in PTY coverage for command-start, finish status, cwd reporting, streaming output, config inheritance, disk history suppression, and command-token-like output preservation when `AISH_TEST_FISH=1` is set.
 - User commands run through backend-driven passthrough while Aish bridges frontend terminal input/output and waits for backend shell readiness over shell integration, not command-name allowlists.
 - Interactive stdin, prompt, and alternate-screen regressions are covered with representative tmux and PTY scenarios, including `less`, Python REPL, stdin readers, sudo-like password prompts, write-protected `rm`, unknown TUI behavior, and raw function-key forwarding.
 - Alternate-screen buffer detection tracks common enter/exit CSI sequences (`?47`, `?1047`, `?1049`) and ignores unrelated terminal styling escapes.

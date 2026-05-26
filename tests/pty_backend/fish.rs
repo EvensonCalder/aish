@@ -96,6 +96,96 @@ fn fish_pty_backend_runs_commands_and_reports_cwd_when_available() {
 }
 
 #[test]
+fn fish_pty_backend_does_not_record_aish_commands_in_native_history_when_available() {
+    let _guard = pty_test_guard();
+    if !fish_backend_tests_enabled() {
+        eprintln!("skipping fish PTY backend history test: set AISH_TEST_FISH=1 to opt in");
+        return;
+    }
+    let Some(fish) = find_shell(&[
+        "/opt/homebrew/bin/fish",
+        "/usr/local/bin/fish",
+        "/usr/bin/fish",
+        "/bin/fish",
+    ]) else {
+        return;
+    };
+
+    let home = tempfile::tempdir().unwrap();
+    let _home_guard = EnvVarGuard::set("HOME", home.path().as_os_str());
+    let mut backend = PtyBackend::spawn(fish).unwrap();
+
+    let user_command = "echo aish-fish-history-target";
+    let run = backend
+        .run_command(user_command, Duration::from_secs(5))
+        .unwrap();
+    assert_eq!(run.exit_code, 0);
+    assert_eq!(run.output.trim(), "aish-fish-history-target");
+
+    let history = backend
+        .run_command(
+            "history search --exact 'echo aish-fish-history-target'",
+            Duration::from_secs(5),
+        )
+        .unwrap();
+
+    assert_eq!(history.exit_code, 0);
+    assert!(!history.output.contains(user_command), "{history:?}");
+    assert!(!history.output.contains("__AISH_START__"));
+    assert!(!history.output.contains("__AISH_READY__"));
+}
+
+#[test]
+fn fish_pty_backend_does_not_flush_aish_commands_to_history_file_when_available() {
+    let _guard = pty_test_guard();
+    if !fish_backend_tests_enabled() {
+        eprintln!("skipping fish PTY backend disk history test: set AISH_TEST_FISH=1 to opt in");
+        return;
+    }
+    let Some(fish) = find_shell(&[
+        "/opt/homebrew/bin/fish",
+        "/usr/local/bin/fish",
+        "/usr/bin/fish",
+        "/bin/fish",
+    ]) else {
+        return;
+    };
+
+    let home = tempfile::tempdir().unwrap();
+    let data_home = home.path().join("data");
+    let fish_data_dir = data_home.join("fish");
+    fs::create_dir_all(&fish_data_dir).unwrap();
+    let history_path = fish_data_dir.join("fish_history");
+    fs::write(&history_path, "- cmd: preexisting-fish-history\n").unwrap();
+    let fish_config_dir = home.path().join(".config/fish");
+    fs::create_dir_all(&fish_config_dir).unwrap();
+    fs::write(
+        fish_config_dir.join("config.fish"),
+        "set -g fish_history fish\n",
+    )
+    .unwrap();
+    let _home_guard = EnvVarGuard::set("HOME", home.path().as_os_str());
+    let _xdg_guard = EnvVarGuard::set("XDG_DATA_HOME", data_home.as_os_str());
+    let mut backend = PtyBackend::spawn(fish).unwrap();
+
+    let user_command = "echo aish-fish-disk-history-target";
+    let run = backend
+        .run_command(user_command, Duration::from_secs(5))
+        .unwrap();
+    assert_eq!(run.exit_code, 0);
+    assert_eq!(run.output.trim(), "aish-fish-disk-history-target");
+
+    let flush = backend
+        .run_command("history save; or true", Duration::from_secs(5))
+        .unwrap();
+    assert_eq!(flush.exit_code, 0);
+
+    let disk_history = fs::read_to_string(&history_path).unwrap();
+    assert_eq!(disk_history, "- cmd: preexisting-fish-history\n");
+    assert!(!disk_history.contains("aish-fish-disk-history-target"));
+}
+
+#[test]
 fn fish_pty_backend_does_not_export_control_fd_to_user_commands_when_available() {
     let _guard = pty_test_guard();
     if !fish_backend_tests_enabled() {

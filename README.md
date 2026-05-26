@@ -4,6 +4,8 @@
 
 Aish does not try to replace Bash, Zsh, or Fish. The backend shell still owns command execution, shell syntax, aliases, functions, job control, environment state, and process behavior. Aish owns the interactive input experience around that shell: editable drafts, history and AI browsing modes, live inline completion, templates, safe context collection, editor review, pickers, logging, and conservative sync.
 
+Command history submitted through Aish is stored in Aish-managed history files, not in the backend shell's native history. Aish suppresses Bash, Zsh, and Fish native history for its backend session so commands do not leak into `~/.bash_history`, `~/.zsh_history`, Fish history files, or those shells' in-memory history lists.
+
 ## Current Status
 
 Aish is a usable `0.1` terminal wrapper with extensive unit, expect, PTY, and tmux screen-capture coverage.
@@ -484,7 +486,7 @@ AISH_TEST_FISH=1 cargo test --test pty_backend -- --nocapture
 AISH_TEST_FISH=1 cargo test --test tmux_capture tmux_common_shell_workflow_matches_fish_backend_real_terminal_screen -- --nocapture
 ```
 
-Aish uses shell markers to detect command completion and cwd, filters those markers from user-visible output, and avoids polluting shell history with Aish-owned marker commands where supported.
+Aish uses shell markers to detect command completion and cwd, filters those markers from user-visible output, and suppresses backend native shell history for both marker commands and Aish-submitted user commands. Bash, Zsh, and Fish commands executed through Aish are still appended to Aish's own regular history, but should not appear in Bash `history`, Zsh `fc -l`, Fish `history search`, or native shell history files.
 
 ## Interactive And Stdin Passthrough
 

@@ -405,6 +405,15 @@ function fish_prompt
 end
 ```
 
+For each backend in this step, also verify native shell history privacy with
+the same disposable `HOME`: create a preexisting native history file, run a
+unique command through Aish, force a native history save, and inspect the native
+history file. Bash commands submitted through Aish must not appear in
+`history` output or `$HOME/.bash_history` after `history -a`; zsh commands must
+not appear in `fc -l` output or `$HOME/.zsh_history` after `fc -W`; fish
+commands must not appear in `history search` output or the fish history file
+after `history save`. Preexisting native history content should remain intact.
+
 Before launching each backend, set `TEST_HOME` to the disposable backend home
 you are preparing, such as `$AISH_MANUAL_ROOT/bash-user`, then create the path
 command there:

@@ -55,7 +55,7 @@ fn zsh_pty_backend_runs_commands_and_preserves_shell_state_when_available() {
 }
 
 #[test]
-fn zsh_pty_backend_keeps_user_commands_but_not_aish_internal_markers_in_history() {
+fn zsh_pty_backend_does_not_record_aish_commands_in_native_history() {
     let _guard = pty_test_guard();
     if !Path::new("/bin/zsh").exists() {
         return;
@@ -73,14 +73,52 @@ fn zsh_pty_backend_keeps_user_commands_but_not_aish_internal_markers_in_history(
     assert_eq!(run.output.trim(), "aish-zsh-history-target");
 
     let history = backend
-        .run_command("fc -l 1", Duration::from_secs(5))
+        .run_command("fc -l 1 2>/dev/null || true", Duration::from_secs(5))
         .unwrap();
 
     assert_eq!(history.exit_code, 0);
-    assert!(history.output.contains(user_command));
+    assert!(!history.output.contains(user_command), "{history:?}");
     assert!(!history.output.contains("__aish_status=$?"));
     assert!(!history.output.contains("__AISH_STATUS__"));
     assert!(!history.output.contains("__AISH_READY__"));
+}
+
+#[test]
+fn zsh_pty_backend_does_not_flush_aish_commands_to_zsh_history_file() {
+    let _guard = pty_test_guard();
+    if !Path::new("/bin/zsh").exists() {
+        return;
+    }
+
+    let home = tempfile::tempdir().unwrap();
+    let history_path = home.path().join(".zsh_history");
+    fs::write(&history_path, ": 1:0;preexisting-zsh-history\n").unwrap();
+    fs::write(
+        home.path().join(".zshrc"),
+        "HISTFILE=$HOME/.zsh_history\n\
+         HISTSIZE=1000\n\
+         SAVEHIST=1000\n\
+         setopt append_history inc_append_history share_history\n",
+    )
+    .unwrap();
+    let _home_guard = EnvVarGuard::set("HOME", home.path().as_os_str());
+    let mut backend = PtyBackend::spawn("/bin/zsh").unwrap();
+
+    let user_command = "printf 'aish-zsh-disk-history-target\\n'";
+    let run = backend
+        .run_command(user_command, Duration::from_secs(5))
+        .unwrap();
+    assert_eq!(run.exit_code, 0);
+    assert_eq!(run.output.trim(), "aish-zsh-disk-history-target");
+
+    let flush = backend
+        .run_command("fc -W 2>/dev/null || true", Duration::from_secs(5))
+        .unwrap();
+    assert_eq!(flush.exit_code, 0);
+
+    let disk_history = fs::read_to_string(&history_path).unwrap();
+    assert_eq!(disk_history, ": 1:0;preexisting-zsh-history\n");
+    assert!(!disk_history.contains("aish-zsh-disk-history-target"));
 }
 
 #[test]

@@ -57,6 +57,12 @@ fn bash_launch_uses_clean_startup_flags() {
     assert!(launch.init_command.contains(READY_MARKER));
     assert!(launch.init_command.contains("HISTCONTROL=ignorespace"));
     assert!(launch.init_command.contains("unset AISH_CONTROL_FD"));
+    assert!(launch.init_command.contains("__aish_disable_history"));
+    assert!(launch.init_command.contains("unset HISTFILE"));
+    assert!(launch.init_command.contains("HISTSIZE=0"));
+    assert!(launch.init_command.contains("HISTIGNORE='*'"));
+    assert!(launch.init_command.contains("set +o history"));
+    assert!(!launch.init_command.contains("set -o history"));
     assert!(launch.init_command.contains("enable-bracketed-paste off"));
     assert!(launch.init_command.contains("__aish_run_prompt_command"));
     assert!(launch.init_command.contains("__aish_emit_ready"));
@@ -77,11 +83,15 @@ fn non_bash_launch_does_not_receive_bash_only_flags() {
     assert!(launch.init_command.contains("unsetopt zle"));
     assert!(launch.init_command.contains("unset AISH_CONTROL_FD"));
     assert!(launch.init_command.contains("add-zsh-hook"));
+    assert!(launch.init_command.contains("__aish_disable_history"));
+    assert!(launch.init_command.contains("unset HISTFILE"));
+    assert!(launch.init_command.contains("HISTSIZE=0"));
+    assert!(launch.init_command.contains("SAVEHIST=0"));
+    assert!(launch.init_command.contains("fc -p /dev/null 0 0"));
     assert!(launch.init_command.contains("__aish_user_preexec_function"));
     assert!(launch.init_command.contains("__aish_user_precmd_function"));
     assert!(launch.init_command.contains("__aish_preexec"));
     assert!(launch.init_command.contains("__aish_precmd"));
-    assert!(launch.init_command.contains("fc -p"));
 }
 
 #[test]
@@ -89,11 +99,20 @@ fn fish_launch_uses_event_functions_after_user_config() {
     let launch = shell_launch("/usr/bin/fish");
 
     assert_eq!(launch.program, "/usr/bin/fish");
-    if !launch.args.is_empty() {
-        assert_eq!(launch.args, ["--features", "no-query-term,no-mark-prompt"]);
+    if let Some(features_index) = launch.args.iter().position(|arg| arg == "--features") {
+        assert_eq!(
+            launch.args.get(features_index + 1).map(String::as_str),
+            Some("no-query-term,no-mark-prompt")
+        );
+    }
+    if launch.args.iter().any(|arg| arg == "--private") {
+        assert!(!launch.args.contains(&"--no-config".to_string()));
     }
     assert_eq!(launch.integration, ShellIntegration::FishEvents);
     assert!(launch.init_command.contains("set -e AISH_CONTROL_FD"));
+    assert!(launch.init_command.contains("set -g fish_history \"\""));
+    assert!(launch.init_command.contains("__aish_clear_fish_history"));
+    assert!(launch.init_command.contains("history clear-session"));
     assert!(
         launch
             .init_command
