@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 
 use crate::completion::{
-    CompletionCandidate, CompletionOptions, CompletionSource, complete_first_token_with_options,
+    CompletionCandidate, CompletionOptions, complete_first_token_with_options,
     complete_non_first_token_for_line_with_options, complete_private_command_line,
     current_token_context, dedupe_completion_candidates, limit_candidates,
     rank_completion_candidates,
@@ -87,8 +87,7 @@ impl AppState {
         let should_enqueue_async = self.should_enqueue_async_completion(&line, cursor);
         let display_deferred = !self.completion_display_ready(now) && !candidates.is_empty();
         let defer_initial_ui = should_enqueue_async
-            && self.should_defer_initial_completion_ui(&line, cursor, &candidates, &backend_shell);
-        let wait_for_backend_before_initial_ui = defer_initial_ui && backend_shell.is_some();
+            && self.should_defer_initial_completion_ui(&line, cursor, &candidates);
         let hide_initial_ui = display_deferred || defer_initial_ui;
         if should_enqueue_async || display_deferred {
             self.completion_generation = self.completion_generation.wrapping_add(1).max(1);
@@ -99,7 +98,7 @@ impl AppState {
                 cursor,
                 candidates: candidates.clone(),
             });
-            if hide_initial_ui && !candidates.is_empty() && !wait_for_backend_before_initial_ui {
+            if hide_initial_ui && !candidates.is_empty() {
                 self.queue_completion_update(
                     id,
                     line.clone(),
@@ -166,8 +165,8 @@ impl AppState {
             final_tier_seen |= completion_tier_is_final(event.tier, fuzzy_enabled);
             let previous_candidates = pending.candidates.clone();
             pending.candidates.extend(event.candidates);
-            dedupe_completion_candidates(&mut pending.candidates);
             rank_completion_candidates(&mut pending.candidates);
+            dedupe_completion_candidates(&mut pending.candidates);
             changed |= pending.candidates != previous_candidates;
         }
         let pending_id = pending.id;
@@ -357,20 +356,16 @@ impl AppState {
         line: &str,
         cursor: usize,
         candidates: &[CompletionCandidate],
-        backend_shell: &Option<String>,
     ) -> bool {
         if self.completion_config.coalesce_ms == 0 || candidates.is_empty() {
             return false;
         }
-        if backend_shell.is_some() {
-            return true;
-        }
         let token = current_token_context(line, cursor);
         token.is_first_token
             && !token.path_like
-            && candidates
-                .iter()
-                .all(|candidate| candidate.source == CompletionSource::Executable)
+            && candidates.iter().all(|candidate| {
+                candidate.source == crate::completion::CompletionSource::Executable
+            })
     }
 
     fn completion_history_snapshot(&mut self) -> Arc<Vec<HistoryEntry>> {

@@ -48,13 +48,24 @@ pub fn complete_backend_shell(request: &ShellCompletionRequest) -> Vec<Completio
 
 #[cfg(test)]
 fn test_backend_candidates(shell: &str) -> Option<Vec<String>> {
-    shell.strip_prefix("aish-test-backend:").map(|body| {
-        body.split(',')
-            .map(str::trim)
-            .filter(|candidate| !candidate.is_empty())
-            .map(ToOwned::to_owned)
-            .collect()
-    })
+    if let Some(rest) = shell.strip_prefix("aish-test-backend-delay-ms:")
+        && let Some((delay_ms, body)) = rest.split_once(':')
+    {
+        std::thread::sleep(Duration::from_millis(delay_ms.parse().unwrap_or(0)));
+        return Some(parse_test_backend_candidates(body));
+    }
+    shell
+        .strip_prefix("aish-test-backend:")
+        .map(|body| parse_test_backend_candidates(body))
+}
+
+#[cfg(test)]
+fn parse_test_backend_candidates(body: &str) -> Vec<String> {
+    body.split(',')
+        .map(str::trim)
+        .filter(|candidate| !candidate.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
 }
 
 fn completion_request_is_supported(request: &ShellCompletionRequest) -> bool {
@@ -297,11 +308,13 @@ zstyle ':completion:*' format ''
 zstyle ':completion:*' group-name ''
 zstyle ':completion:*' list-colors ''
 bindkey '^I' list-choices
+rehash 2>/dev/null || true
 print -r -- $AISH_ZSH_COMPLETION_MARKER
 "#;
     pty.write_all(init.as_bytes())?;
     let _ = pty.read_until(marker.as_bytes(), ZSH_INIT_TIMEOUT)?;
     let _ = pty.read_for(Duration::from_millis(50));
+    pty.write_all(b"\x15")?;
     pty.write_all(line_prefix_at_cursor(&request.line, request.cursor).as_bytes())?;
     pty.write_all(b"\t")?;
     let raw = pty.read_for(ZSH_LIST_TIMEOUT)?;

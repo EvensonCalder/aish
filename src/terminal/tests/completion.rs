@@ -120,7 +120,11 @@ fn backend_shell_completion_updates_live_ui_before_duplicate_history() {
     state.draft.insert_str("git st");
 
     refresh_live_completion_ui_for_width(&mut state, 80).unwrap();
-    wait_for_inline_suffix_with_attempts(&mut state, "atus", 200);
+    wait_for_inline_source_with_attempts(
+        &mut state,
+        crate::completion::CompletionSource::BackendShell,
+        200,
+    );
 
     let inline = state.completion_inline.as_ref().unwrap();
     assert_eq!(
@@ -146,11 +150,11 @@ fn backend_shell_completion_updates_live_ui_before_duplicate_history() {
 }
 
 #[test]
-fn backend_shell_completion_defers_local_path_hint_until_shell_result() {
+fn backend_shell_completion_does_not_defer_local_path_hint() {
     let temp = tempfile::tempdir().unwrap();
     std::fs::write(temp.path().join("single.txt"), "").unwrap();
     let mut state = AppState {
-        backend_shell: Some("aish-test-backend:shellfile".to_string()),
+        backend_shell: Some("aish-test-backend-delay-ms:150:shellfile".to_string()),
         current_cwd: Some(temp.path().to_path_buf()),
         ..AppState::default()
     };
@@ -158,7 +162,14 @@ fn backend_shell_completion_defers_local_path_hint_until_shell_result() {
 
     refresh_live_completion_ui_for_width(&mut state, 80).unwrap();
 
-    assert!(state.completion_inline.is_none());
+    assert_eq!(
+        state.completion_inline.as_ref().unwrap().suffix,
+        "ingle.txt"
+    );
+    assert_eq!(
+        state.completion_inline.as_ref().unwrap().candidate.source,
+        crate::completion::CompletionSource::Path
+    );
     assert!(state.completion_panel.is_empty());
     wait_for_inline_suffix_with_attempts(&mut state, "hellfile", 200);
     assert_eq!(
@@ -168,7 +179,52 @@ fn backend_shell_completion_defers_local_path_hint_until_shell_result() {
 }
 
 #[test]
-fn tab_mode_async_history_completion_updates_after_explicit_tab() {
+#[cfg(unix)]
+fn tab_accepts_first_token_executable_while_slow_backend_shell_is_pending() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let _guard = ENV_LOCK.lock().unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let bin = temp.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let executable = bin.join("aishrclone");
+    std::fs::write(&executable, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let old_path = std::env::var_os("PATH");
+    unsafe {
+        std::env::set_var("PATH", &bin);
+    }
+
+    let mut state = AppState {
+        backend_shell: Some("aish-test-backend-delay-ms:250:aishremote".to_string()),
+        ..AppState::default()
+    };
+    state.draft.insert_str("aishrcl");
+    state.defer_completion_display(Instant::now());
+    refresh_live_completion_ui_for_width(&mut state, 80).unwrap();
+
+    assert!(state.completion_inline.is_none());
+    assert!(state.completion_panel.is_empty());
+    let tab_result = complete_or_show_candidates(&mut state);
+    let draft_after_tab = state.draft.as_str().to_string();
+    let inline_after_tab = state.completion_inline.clone();
+    let panel_after_tab = state.completion_panel.clone();
+
+    unsafe {
+        match old_path {
+            Some(path) => std::env::set_var("PATH", path),
+            None => std::env::remove_var("PATH"),
+        }
+    }
+
+    tab_result.unwrap();
+    assert_eq!(draft_after_tab, "aishrclone");
+    assert!(inline_after_tab.is_none());
+    assert!(panel_after_tab.is_empty());
+}
+
+#[test]
+fn tab_mode_history_completion_shows_after_explicit_tab() {
     let mut completion_config = CompletionConfig::default();
     completion_config.set_mode(CompletionMode::Tab);
     let mut state = AppState {
@@ -184,26 +240,11 @@ fn tab_mode_async_history_completion_updates_after_explicit_tab() {
     state.draft.insert_str("git ");
 
     complete_or_show_candidates(&mut state).unwrap();
-    assert!(state.completion_inline.is_none());
-    assert!(state.completion_panel.is_empty());
-
-    let mut output = Vec::new();
-    for _ in 0..50 {
-        refresh_after_background_events(&mut state, &mut output).unwrap();
-        if state
-            .completion_inline
-            .as_ref()
-            .is_some_and(|inline| inline.suffix == "status --short")
-        {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-
     assert_eq!(
         state.completion_inline.as_ref().unwrap().suffix,
         "status --short"
     );
+    assert!(state.completion_panel.is_empty());
 
     complete_or_show_candidates(&mut state).unwrap();
 
@@ -227,6 +268,29 @@ fn wait_for_inline_suffix_with_attempts(state: &mut AppState, suffix: &str, atte
     }
     panic!(
         "missing inline suffix {suffix:?}; inline was {:?}, panel was {:?}",
+        state.completion_inline, state.completion_panel
+    );
+}
+
+fn wait_for_inline_source_with_attempts(
+    state: &mut AppState,
+    source: crate::completion::CompletionSource,
+    attempts: usize,
+) {
+    let mut output = Vec::new();
+    for _ in 0..attempts {
+        refresh_after_background_events(state, &mut output).unwrap();
+        if state
+            .completion_inline
+            .as_ref()
+            .is_some_and(|inline| inline.candidate.source == source)
+        {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!(
+        "missing inline source {source:?}; inline was {:?}, panel was {:?}",
         state.completion_inline, state.completion_panel
     );
 }

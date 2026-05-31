@@ -1,7 +1,8 @@
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 
@@ -19,6 +20,8 @@ use crate::history::HistoryEntry;
 use crate::shell_completion::{ShellCompletionRequest, complete_backend_shell};
 use crate::templates::TemplateEntry;
 use std::path::PathBuf;
+
+const BACKEND_COMPLETION_DEBOUNCE: Duration = Duration::from_millis(60);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompletionTier {
@@ -55,6 +58,7 @@ pub struct CompletionWorker {
     sender: mpsc::Sender<CompletionWorkerMessage>,
     events: mpsc::Receiver<CompletionEvent>,
     latest_id: Arc<AtomicU64>,
+    backend_handles: Arc<Mutex<Vec<JoinHandle<()>>>>,
     handle: Option<JoinHandle<()>>,
 }
 
@@ -70,13 +74,21 @@ impl CompletionWorker {
         let (event_sender, events) = mpsc::channel();
         let latest_id = Arc::new(AtomicU64::new(0));
         let worker_latest_id = Arc::clone(&latest_id);
+        let backend_handles = Arc::new(Mutex::new(Vec::new()));
+        let worker_backend_handles = Arc::clone(&backend_handles);
         let handle = thread::spawn(move || {
-            run_worker(receiver, event_sender, worker_latest_id);
+            run_worker(
+                receiver,
+                event_sender,
+                worker_latest_id,
+                worker_backend_handles,
+            );
         });
         Self {
             sender,
             events,
             latest_id,
+            backend_handles,
             handle: Some(handle),
         }
     }
@@ -99,6 +111,7 @@ impl Drop for CompletionWorker {
         if let Some(handle) = self.handle.take() {
             let _ = handle.join();
         }
+        join_backend_completion_threads(&self.backend_handles);
     }
 }
 
@@ -106,6 +119,7 @@ fn run_worker(
     receiver: mpsc::Receiver<CompletionWorkerMessage>,
     events: mpsc::Sender<CompletionEvent>,
     latest_id: Arc<AtomicU64>,
+    backend_handles: Arc<Mutex<Vec<JoinHandle<()>>>>,
 ) {
     let mut executable_index = ExecutableIndex::default();
     let mut data_index = CompletionDataIndex::default();
@@ -139,6 +153,7 @@ fn run_worker(
                 candidates: history_candidates,
             });
         }
+        spawn_backend_completion_event(&job, &events, &latest_id, &backend_handles);
 
         if !job.options.fuzzy_enabled || !is_latest(job.id, &latest_id) {
             continue;
@@ -219,13 +234,12 @@ fn complete_primary_tier(
     let mut candidates = if let Some(candidates) = primary_cache.filtered_candidates(job) {
         candidates
     } else if token.is_first_token && !token.path_like {
-        let mut candidates = complete_backend_shell_for_job(job);
         data_index.refresh_for_job(job);
-        candidates.extend(complete_first_token_templates_with_indexed_options(
+        let mut candidates = complete_first_token_templates_with_indexed_options(
             &token.text,
             &data_index.templates,
             options,
-        ));
+        );
         candidates.extend(complete_first_token_history_with_indexed_options(
             &token.text,
             &data_index.history,
@@ -239,21 +253,80 @@ fn complete_primary_tier(
         candidates
     } else {
         data_index.refresh_for_job(job);
-        let mut candidates = complete_backend_shell_for_job(job);
-        candidates.extend(complete_non_first_token_for_line_with_indexed_options(
+        complete_non_first_token_for_line_with_indexed_options(
             &job.line,
             job.cursor,
             &job.cwd,
             &data_index.history,
             &data_index.templates,
             options,
-        ));
-        candidates
+        )
     };
     dedupe_completion_candidates(&mut candidates);
     rank_completion_candidates(&mut candidates);
     primary_cache.store(job, candidates.clone());
     limit_candidates(candidates, job.options.max_results)
+}
+
+fn spawn_backend_completion_event(
+    job: &CompletionJob,
+    events: &mpsc::Sender<CompletionEvent>,
+    latest_id: &Arc<AtomicU64>,
+    backend_handles: &Arc<Mutex<Vec<JoinHandle<()>>>>,
+) {
+    if job.backend_shell.is_none() {
+        return;
+    }
+    let job = job.clone();
+    let events = events.clone();
+    let latest_id = Arc::clone(latest_id);
+    let handle = thread::spawn(move || {
+        thread::sleep(BACKEND_COMPLETION_DEBOUNCE);
+        if !is_latest(job.id, &latest_id) {
+            return;
+        }
+        let candidates = complete_backend_shell_for_job(&job);
+        if candidates.is_empty() || !is_latest(job.id, &latest_id) {
+            return;
+        }
+        let _ = events.send(CompletionEvent {
+            id: job.id,
+            tier: CompletionTier::History,
+            candidates,
+        });
+    });
+    remember_backend_completion_thread(backend_handles, handle);
+}
+
+fn remember_backend_completion_thread(
+    backend_handles: &Arc<Mutex<Vec<JoinHandle<()>>>>,
+    handle: JoinHandle<()>,
+) {
+    let mut handles = backend_handles
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut index = 0;
+    while index < handles.len() {
+        if handles[index].is_finished() {
+            let handle = handles.swap_remove(index);
+            let _ = handle.join();
+        } else {
+            index += 1;
+        }
+    }
+    handles.push(handle);
+}
+
+fn join_backend_completion_threads(backend_handles: &Arc<Mutex<Vec<JoinHandle<()>>>>) {
+    let handles = {
+        let mut handles = backend_handles
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        handles.drain(..).collect::<Vec<_>>()
+    };
+    for handle in handles {
+        let _ = handle.join();
+    }
 }
 
 fn complete_backend_shell_for_job(job: &CompletionJob) -> Vec<CompletionCandidate> {
@@ -534,7 +607,7 @@ mod tests {
     }
 
     #[test]
-    fn backend_shell_candidates_win_deduped_primary_tier() {
+    fn backend_shell_candidates_are_not_part_of_primary_tier() {
         let mut job = job(
             1,
             "git st",
@@ -553,14 +626,57 @@ mod tests {
             &mut primary_cache,
         );
 
-        assert_eq!(candidates[0].source, CompletionSource::BackendShell);
-        assert_eq!(candidates[0].replacement, "status");
-        assert_eq!(
+        assert!(
             candidates
                 .iter()
-                .filter(|candidate| candidate.replacement == "status")
-                .count(),
-            1
+                .all(|candidate| { candidate.source != CompletionSource::BackendShell })
+        );
+        assert!(candidates.iter().any(|candidate| {
+            candidate.source == CompletionSource::History && candidate.replacement == "status"
+        }));
+    }
+
+    #[test]
+    fn worker_emits_primary_candidates_before_slow_backend_shell_candidates() {
+        let mut job = job(
+            1,
+            "git st",
+            usize::MAX,
+            Arc::new(vec![history("git status", 1)]),
+        );
+        job.backend_shell = Some("aish-test-backend-delay-ms:200:status,stash".to_string());
+        let worker = CompletionWorker::start();
+        worker.enqueue(job).unwrap();
+
+        let start = std::time::Instant::now();
+        let mut primary_seen = None;
+        let mut backend_seen = None;
+        while start.elapsed() < Duration::from_secs(2) {
+            for event in worker.drain_events() {
+                if event.id != 1 || event.candidates.is_empty() {
+                    continue;
+                }
+                if event
+                    .candidates
+                    .iter()
+                    .any(|candidate| candidate.source == CompletionSource::BackendShell)
+                {
+                    backend_seen = Some(start.elapsed());
+                } else {
+                    primary_seen = Some(start.elapsed());
+                }
+            }
+            if primary_seen.is_some() && backend_seen.is_some() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let primary_seen = primary_seen.expect("missing primary completion event");
+        let backend_seen = backend_seen.expect("missing backend shell completion event");
+        assert!(
+            primary_seen < backend_seen,
+            "primary event {primary_seen:?} should arrive before backend event {backend_seen:?}"
         );
     }
 }

@@ -66,7 +66,7 @@ fn complete_or_show_auto_candidates_for_width(
         state.completion_inline.is_none() && !state.completion_panel.is_empty();
     let had_no_visible_completion =
         state.completion_inline.is_none() && state.completion_panel.is_empty();
-    let candidates = state.live_completion_candidates_with_max_results(usize::MAX)?;
+    let candidates = live_or_synchronous_completion_candidates(state)?;
     if candidates.is_empty() {
         state.clear_completion_ui();
         return Ok(());
@@ -97,7 +97,7 @@ fn complete_or_show_tab_candidates_for_width(state: &mut AppState, width: usize)
         return Ok(());
     }
     state.clear_completion_ui();
-    let candidates = state.start_live_completion_request(usize::MAX)?;
+    let candidates = live_or_synchronous_completion_candidates(state)?;
     if !candidates.is_empty() {
         set_completion_ui_from_candidates(state, candidates, width);
     }
@@ -165,10 +165,7 @@ fn accept_visible_completion(state: &mut AppState) -> Result<bool> {
     if accept_inline_completion(state)? {
         return Ok(true);
     }
-    let candidates = state
-        .cached_live_completion_candidates_with_max_results(usize::MAX)
-        .map(Ok)
-        .unwrap_or_else(|| state.completion_candidates())?;
+    let candidates = cached_or_synchronous_completion_candidates(state)?;
     let Some(candidate) = candidates.into_iter().next() else {
         state.clear_completion_ui();
         return Ok(false);
@@ -306,14 +303,33 @@ pub fn accept_first_completion(state: &mut AppState) -> Result<bool> {
     if accept_inline_completion(state)? {
         return Ok(true);
     }
-    let candidates = state
-        .cached_live_completion_candidates_with_max_results(usize::MAX)
-        .map(Ok)
-        .unwrap_or_else(|| state.completion_candidates())?;
+    let candidates = cached_or_synchronous_completion_candidates(state)?;
     let Some(candidate) = candidates.into_iter().next() else {
         return Ok(false);
     };
     accept_completion_candidate(state, candidate)
+}
+
+fn live_or_synchronous_completion_candidates(
+    state: &mut AppState,
+) -> Result<Vec<CompletionCandidate>> {
+    let candidates = state.live_completion_candidates_with_max_results(usize::MAX)?;
+    if candidates.is_empty() {
+        return state.completion_candidates();
+    }
+    Ok(candidates)
+}
+
+fn cached_or_synchronous_completion_candidates(
+    state: &AppState,
+) -> Result<Vec<CompletionCandidate>> {
+    let candidates = state
+        .cached_live_completion_candidates_with_max_results(usize::MAX)
+        .unwrap_or_default();
+    if candidates.is_empty() {
+        return state.completion_candidates();
+    }
+    Ok(candidates)
 }
 
 fn accept_completion_candidate(

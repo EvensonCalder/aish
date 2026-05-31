@@ -7,6 +7,7 @@ use crate::keybindings::{KeySequenceConfig, KeybindingConfig};
 use crate::modes::Mode;
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Mutex;
 use std::time::Instant;
 
 mod completion;
@@ -15,6 +16,8 @@ mod input;
 mod lifecycle;
 mod paste;
 mod render;
+
+static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)

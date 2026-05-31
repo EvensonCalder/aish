@@ -151,7 +151,7 @@ Important rules:
 - The inline suggestion is display-only until accepted.
 - The below-prompt panel is advisory and never decides what `Tab` accepts.
 - `completion.max_results` controls only the number of below-prompt rows.
-- `completion.coalesce_ms` controls how long Aish may wait for the next background completion tier before refreshing the live UI. The default is `50` ms; `0` restores immediate tier-by-tier refreshes. First-token executable-only live hints and local hints that are waiting for backend shell completion may defer drawing briefly so higher-priority candidates can arrive before anything is drawn.
+- `completion.coalesce_ms` controls how long Aish may wait for the next background completion tier before refreshing the live UI. The default is `50` ms; `0` restores immediate tier-by-tier refreshes. First-token executable-only live hints may defer drawing briefly while local template/history/PATH executable tiers settle; backend shell completion never blocks already available local candidates.
 - `completion.display_delay_ms` controls how long auto mode waits after the latest edit before drawing completion UI. Matching still runs in the background while the display is delayed. The default is `120` ms; `0` draws as soon as candidates are ready.
 - The panel skips the current inline candidate and shows the full command that would result from accepting each remaining candidate.
 - Candidate rows are width-aware, align command text with the prompt input column when space permits, and left-elide long commands with `...` at word boundaries instead of wrapping.
@@ -171,7 +171,7 @@ Completion sources:
 - Template completions use newest stored templates first.
 - Paths preserve directory prefixes and mark directories with `/`. Matching local directories are kept ahead of lower-priority argument/history fallbacks, and recent directory scans are cached briefly while typing.
 - With `completion.fuzzy=true`, Aish can also correct local directory typos such as `./srd` to `./src/` and intermediate path typos such as `srd/ma` to `src/main.rs`.
-- Live completion is layered: cheap local path candidates can be found immediately, backend shell/template/history/PATH executable matching arrives from a background worker, and slower typo-correction results can update the same UI later. Stale worker results are ignored when the input changes.
+- Live completion is layered: cheap local path candidates can be found immediately, template/history/PATH executable matching arrives from a background worker, backend shell completion arrives independently after a short debounce, and slower typo-correction results can update the same UI later. Stale worker results are ignored when the input changes.
 - Backend shell completion is queried from the real configured shell instead of by parsing completion files. Fish uses `complete -C`; bash runs interactive programmable completion functions and compspecs; zsh runs an interactive completion query in a PTY. This lets normal shell config such as `~/.config/fish/completions`, bash `complete`/bash-completion loaded from `.bashrc`, and zsh `fpath` directories such as `~/.zsh/completions` work through the shell's own completion engine.
 
 Configuration:
