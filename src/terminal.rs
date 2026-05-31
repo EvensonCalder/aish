@@ -243,6 +243,7 @@ fn handle_key(
     let refresh_completion = !matches!(action, KeyAction::CompleteOrShow);
     match action {
         KeyAction::Exit => {
+            state.cancel_live_completion();
             render_ctrl_d_exit(state, out, had_completion_ui)?;
             return Ok(true);
         }

@@ -29,29 +29,57 @@ pub struct ShellCompletionRequest {
 }
 
 pub fn complete_backend_shell(request: &ShellCompletionRequest) -> Vec<CompletionCandidate> {
+    complete_backend_shell_with_cancel(request, || false)
+}
+
+pub fn complete_backend_shell_with_cancel<F>(
+    request: &ShellCompletionRequest,
+    is_cancelled: F,
+) -> Vec<CompletionCandidate>
+where
+    F: Fn() -> bool,
+{
     if !completion_request_is_supported(request) {
         return Vec::new();
     }
+    if is_cancelled() {
+        return Vec::new();
+    }
     #[cfg(test)]
-    if let Some(candidates) = test_backend_candidates(&request.shell) {
+    if let Some(candidates) = test_backend_candidates(&request.shell, &is_cancelled) {
+        if is_cancelled() {
+            return Vec::new();
+        }
         return normalize_backend_candidates(request, candidates);
     }
     let candidates = match shell_name(&request.shell).as_str() {
-        "fish" => complete_fish(request),
-        "bash" => complete_bash(request),
-        "zsh" => complete_zsh(request),
+        "fish" => complete_fish(request, &is_cancelled),
+        "bash" => complete_bash(request, &is_cancelled),
+        "zsh" => complete_zsh(request, &is_cancelled),
         _ => Ok(Vec::new()),
     }
     .unwrap_or_default();
+    if is_cancelled() {
+        return Vec::new();
+    }
     normalize_backend_candidates(request, candidates)
 }
 
 #[cfg(test)]
-fn test_backend_candidates(shell: &str) -> Option<Vec<String>> {
+fn test_backend_candidates<F>(shell: &str, is_cancelled: &F) -> Option<Vec<String>>
+where
+    F: Fn() -> bool + ?Sized,
+{
     if let Some(rest) = shell.strip_prefix("aish-test-backend-delay-ms:")
         && let Some((delay_ms, body)) = rest.split_once(':')
     {
-        std::thread::sleep(Duration::from_millis(delay_ms.parse().unwrap_or(0)));
+        let delay_ms: u64 = delay_ms.parse().unwrap_or(0);
+        for _ in 0..delay_ms.div_ceil(10) {
+            if is_cancelled() {
+                return Some(Vec::new());
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
         return Some(parse_test_backend_candidates(body));
     }
     shell
@@ -75,7 +103,10 @@ fn completion_request_is_supported(request: &ShellCompletionRequest) -> bool {
         && !request.line.contains(['\n', '\r', '\t'])
 }
 
-fn complete_fish(request: &ShellCompletionRequest) -> Result<Vec<String>> {
+fn complete_fish<F>(request: &ShellCompletionRequest, is_cancelled: &F) -> Result<Vec<String>>
+where
+    F: Fn() -> bool + ?Sized,
+{
     let query_line = line_prefix_at_cursor(&request.line, request.cursor);
     let mut command = Command::new(&request.shell);
     command
@@ -95,7 +126,7 @@ printf '%s\n' __AISH_BACKEND_COMPLETION_END__"#,
         .arg(query_line)
         .current_dir(&request.cwd)
         .envs(request.env.iter().map(|(key, value)| (key, value)));
-    let output = run_process_with_timeout(&mut command, PROCESS_TIMEOUT)?;
+    let output = run_process_with_timeout(&mut command, PROCESS_TIMEOUT, is_cancelled)?;
     Ok(parse_marked_lines(
         &output,
         BASH_BEGIN_MARKER,
@@ -103,7 +134,10 @@ printf '%s\n' __AISH_BACKEND_COMPLETION_END__"#,
     ))
 }
 
-fn complete_bash(request: &ShellCompletionRequest) -> Result<Vec<String>> {
+fn complete_bash<F>(request: &ShellCompletionRequest, is_cancelled: &F) -> Result<Vec<String>>
+where
+    F: Fn() -> bool + ?Sized,
+{
     let words = bash_words_for_completion(&request.line, request.cursor);
     if words.is_empty() {
         return Ok(Vec::new());
@@ -121,7 +155,7 @@ fn complete_bash(request: &ShellCompletionRequest) -> Result<Vec<String>> {
         .current_dir(&request.cwd)
         .envs(request.env.iter().map(|(key, value)| (key, value)))
         .stderr(Stdio::null());
-    let output = run_process_with_timeout(&mut command, PROCESS_TIMEOUT)?;
+    let output = run_process_with_timeout(&mut command, PROCESS_TIMEOUT, is_cancelled)?;
     Ok(parse_marked_lines(
         &output,
         BASH_BEGIN_MARKER,
@@ -282,12 +316,24 @@ done
 printf '%s\n' __AISH_BACKEND_COMPLETION_END__
 "#;
 
-fn complete_zsh(request: &ShellCompletionRequest) -> Result<Vec<String>> {
-    complete_zsh_with_pty(request)
+fn complete_zsh<F>(request: &ShellCompletionRequest, is_cancelled: &F) -> Result<Vec<String>>
+where
+    F: Fn() -> bool + ?Sized,
+{
+    complete_zsh_with_pty(request, is_cancelled)
 }
 
 #[cfg(unix)]
-fn complete_zsh_with_pty(request: &ShellCompletionRequest) -> Result<Vec<String>> {
+fn complete_zsh_with_pty<F>(
+    request: &ShellCompletionRequest,
+    is_cancelled: &F,
+) -> Result<Vec<String>>
+where
+    F: Fn() -> bool + ?Sized,
+{
+    if is_cancelled() {
+        return Ok(Vec::new());
+    }
     let marker = format!("__AISH_ZSH_COMPLETION_DONE_{}__", std::process::id());
     let mut command = Command::new(&request.shell);
     command
@@ -296,9 +342,19 @@ fn complete_zsh_with_pty(request: &ShellCompletionRequest) -> Result<Vec<String>
         .envs(request.env.iter().map(|(key, value)| (key, value)))
         .env("AISH_ZSH_COMPLETION_MARKER", &marker);
     let mut pty = QueryPty::spawn(command)?;
-    let _ = pty.read_for(Duration::from_millis(250));
-    let init = r#"autoload -Uz compinit
-compinit -D 2>/dev/null || true
+    let _ = pty.read_for(Duration::from_millis(250), is_cancelled);
+    let init = r#"typeset -U fpath
+if [[ -n ${ZDOTDIR:-} && -d "$ZDOTDIR/completions" ]]; then
+  fpath=("$ZDOTDIR/completions" $fpath)
+fi
+if [[ -n ${ZDOTDIR:-} && -d "$ZDOTDIR/.zsh/completions" ]]; then
+  fpath=("$ZDOTDIR/.zsh/completions" $fpath)
+fi
+if [[ -n ${HOME:-} && -d "$HOME/.zsh/completions" ]]; then
+  fpath=("$HOME/.zsh/completions" $fpath)
+fi
+autoload -Uz compinit
+compinit -u -D 2>/dev/null || compinit -i -D 2>/dev/null || true
 PROMPT=''
 RPROMPT=''
 unsetopt BEEP 2>/dev/null || true
@@ -312,17 +368,29 @@ rehash 2>/dev/null || true
 print -r -- $AISH_ZSH_COMPLETION_MARKER
 "#;
     pty.write_all(init.as_bytes())?;
-    let _ = pty.read_until(marker.as_bytes(), ZSH_INIT_TIMEOUT)?;
-    let _ = pty.read_for(Duration::from_millis(50));
+    let _ = pty.read_until(marker.as_bytes(), ZSH_INIT_TIMEOUT, is_cancelled)?;
+    let _ = pty.read_for(Duration::from_millis(50), is_cancelled);
+    if is_cancelled() {
+        return Ok(Vec::new());
+    }
     pty.write_all(b"\x15")?;
     pty.write_all(line_prefix_at_cursor(&request.line, request.cursor).as_bytes())?;
     pty.write_all(b"\t")?;
-    let raw = pty.read_for(ZSH_LIST_TIMEOUT)?;
+    let raw = pty.read_for(ZSH_LIST_TIMEOUT, is_cancelled)?;
+    if is_cancelled() {
+        return Ok(Vec::new());
+    }
     Ok(parse_zsh_list_output(request, &raw))
 }
 
 #[cfg(not(unix))]
-fn complete_zsh_with_pty(_request: &ShellCompletionRequest) -> Result<Vec<String>> {
+fn complete_zsh_with_pty<F>(
+    _request: &ShellCompletionRequest,
+    _is_cancelled: &F,
+) -> Result<Vec<String>>
+where
+    F: Fn() -> bool + ?Sized,
+{
     Ok(Vec::new())
 }
 
@@ -368,10 +436,18 @@ impl QueryPty {
         Ok(())
     }
 
-    fn read_until(&mut self, needle: &[u8], timeout: Duration) -> Result<Vec<u8>> {
+    fn read_until<F>(
+        &mut self,
+        needle: &[u8],
+        timeout: Duration,
+        is_cancelled: &F,
+    ) -> Result<Vec<u8>>
+    where
+        F: Fn() -> bool + ?Sized,
+    {
         let deadline = Instant::now() + timeout;
         let mut data = Vec::new();
-        while Instant::now() < deadline {
+        while Instant::now() < deadline && !is_cancelled() {
             data.extend(self.read_available(Duration::from_millis(20))?);
             if data.windows(needle.len()).any(|window| window == needle) {
                 return Ok(data);
@@ -380,10 +456,13 @@ impl QueryPty {
         Ok(data)
     }
 
-    fn read_for(&mut self, duration: Duration) -> Result<Vec<u8>> {
+    fn read_for<F>(&mut self, duration: Duration, is_cancelled: &F) -> Result<Vec<u8>>
+    where
+        F: Fn() -> bool + ?Sized,
+    {
         let deadline = Instant::now() + duration;
         let mut data = Vec::new();
-        while Instant::now() < deadline {
+        while Instant::now() < deadline && !is_cancelled() {
             data.extend(self.read_available(Duration::from_millis(20))?);
         }
         Ok(data)
@@ -429,7 +508,21 @@ impl QueryPty {
 #[cfg(unix)]
 impl Drop for QueryPty {
     fn drop(&mut self) {
+        let pgid = self.child.id() as libc::pid_t;
         let _ = self.write_all(b"\x03exit\n");
+        unsafe {
+            let _ = libc::kill(-pgid, libc::SIGTERM);
+        }
+        let started = Instant::now();
+        while started.elapsed() < Duration::from_millis(100) {
+            match self.child.try_wait() {
+                Ok(Some(_)) | Err(_) => break,
+                Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+            }
+        }
+        unsafe {
+            let _ = libc::kill(-pgid, libc::SIGKILL);
+        }
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
@@ -474,7 +567,14 @@ fn set_nonblocking(fd: RawFd) -> Result<()> {
     Ok(())
 }
 
-fn run_process_with_timeout(command: &mut Command, timeout: Duration) -> Result<Vec<u8>> {
+fn run_process_with_timeout<F>(
+    command: &mut Command,
+    timeout: Duration,
+    is_cancelled: &F,
+) -> Result<Vec<u8>>
+where
+    F: Fn() -> bool + ?Sized,
+{
     command.stdout(Stdio::piped());
     let mut child = command
         .spawn()
@@ -491,7 +591,7 @@ fn run_process_with_timeout(command: &mut Command, timeout: Duration) -> Result<
         if child.try_wait()?.is_some() {
             return Ok(join_stdout_reader(stdout_reader));
         }
-        if Instant::now() >= deadline {
+        if is_cancelled() || Instant::now() >= deadline {
             let _ = child.kill();
             let _ = child.wait();
             let _ = join_stdout_reader(stdout_reader);
@@ -966,6 +1066,120 @@ mod tests {
         );
     }
 
+    #[test]
+    fn zsh_completion_loads_home_completion_directory_without_zshrc_fpath_when_available() {
+        let Some(zsh) = find_shell(&["zsh", "/bin/zsh", "/usr/bin/zsh", "/opt/homebrew/bin/zsh"])
+        else {
+            eprintln!("skipping zsh backend completion test: zsh not found");
+            return;
+        };
+        let temp = tempfile::tempdir().unwrap();
+        let completions = temp.path().join(".zsh/completions");
+        let zdotdir = temp.path().join("zdot");
+        let bin = temp.path().join("bin");
+        std::fs::create_dir_all(&completions).unwrap();
+        std::fs::create_dir_all(&zdotdir).unwrap();
+        std::fs::create_dir_all(&bin).unwrap();
+        make_executable(&bin.join("homecmd"));
+        std::fs::write(
+            completions.join("_homecmd"),
+            "#compdef homecmd\n_arguments '1:arg:(homebar)'\n",
+        )
+        .unwrap();
+        let mut request = request(&zsh, "homecmd h");
+        request.env = vec![
+            (
+                "ZDOTDIR".to_string(),
+                zdotdir.to_string_lossy().into_owned(),
+            ),
+            (
+                "HOME".to_string(),
+                temp.path().to_string_lossy().into_owned(),
+            ),
+            ("PATH".to_string(), test_path_with_bin(&bin)),
+        ];
+
+        let candidates = complete_backend_shell(&request);
+
+        assert!(
+            candidates.iter().any(|candidate| {
+                candidate.source == CompletionSource::BackendShell
+                    && candidate.replacement == "homebar"
+            }),
+            "{candidates:?}"
+        );
+    }
+
+    #[test]
+    fn zsh_completion_loads_zdotdir_completion_directory_without_zshrc_fpath_when_available() {
+        let Some(zsh) = find_shell(&["zsh", "/bin/zsh", "/usr/bin/zsh", "/opt/homebrew/bin/zsh"])
+        else {
+            eprintln!("skipping zsh backend completion test: zsh not found");
+            return;
+        };
+        let temp = tempfile::tempdir().unwrap();
+        let zdotdir = temp.path().join("zdot");
+        let completions = zdotdir.join("completions");
+        let bin = temp.path().join("bin");
+        std::fs::create_dir_all(&completions).unwrap();
+        std::fs::create_dir_all(&bin).unwrap();
+        make_executable(&bin.join("zdotcmd"));
+        std::fs::write(
+            completions.join("_zdotcmd"),
+            "#compdef zdotcmd\n_arguments '1:arg:(zdotbar)'\n",
+        )
+        .unwrap();
+        let mut request = request(&zsh, "zdotcmd z");
+        request.env = vec![
+            (
+                "ZDOTDIR".to_string(),
+                zdotdir.to_string_lossy().into_owned(),
+            ),
+            (
+                "HOME".to_string(),
+                temp.path().to_string_lossy().into_owned(),
+            ),
+            ("PATH".to_string(), test_path_with_bin(&bin)),
+        ];
+
+        let candidates = complete_backend_shell(&request);
+
+        assert!(
+            candidates.iter().any(|candidate| {
+                candidate.source == CompletionSource::BackendShell
+                    && candidate.replacement == "zdotbar"
+            }),
+            "{candidates:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn query_pty_drop_terminates_child_process_group() {
+        let temp = tempfile::tempdir().unwrap();
+        let pid_file = temp.path().join("child.pid");
+        let mut command = Command::new("/bin/sh");
+        command
+            .arg("-c")
+            .arg("(sleep 30) & printf '%s\\n' \"$!\" > \"$1\"; sleep 30")
+            .arg("aish-query-pty-cleanup-test")
+            .arg(&pid_file);
+        let pty = QueryPty::spawn(command).unwrap();
+        let child_pid = wait_for_pid_file(&pid_file);
+        assert!(process_exists(child_pid), "child process was not started");
+
+        drop(pty);
+
+        let started = Instant::now();
+        while process_exists(child_pid) && started.elapsed() < Duration::from_secs(2) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            !process_exists(child_pid),
+            "PTY helper child process {child_pid} survived QueryPty drop"
+        );
+    }
+
     fn find_shell(candidates: &[&str]) -> Option<String> {
         for candidate in candidates {
             let path = Path::new(candidate);
@@ -1008,5 +1222,29 @@ mod tests {
             permissions.set_mode(0o755);
             std::fs::set_permissions(path, permissions).unwrap();
         }
+    }
+
+    #[cfg(unix)]
+    fn wait_for_pid_file(path: &Path) -> libc::pid_t {
+        let started = Instant::now();
+        loop {
+            if let Ok(contents) = std::fs::read_to_string(path)
+                && let Ok(pid) = contents.trim().parse::<libc::pid_t>()
+            {
+                return pid;
+            }
+            assert!(
+                started.elapsed() < Duration::from_secs(2),
+                "timed out waiting for pid file {}",
+                path.display()
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    #[cfg(unix)]
+    fn process_exists(pid: libc::pid_t) -> bool {
+        let result = unsafe { libc::kill(pid, 0) };
+        result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
     }
 }

@@ -1,5 +1,5 @@
 use std::fmt;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -17,7 +17,7 @@ use crate::completion::{
     matches_completion_prefix_with_threshold, rank_completion_candidates, scan_path_executables,
 };
 use crate::history::HistoryEntry;
-use crate::shell_completion::{ShellCompletionRequest, complete_backend_shell};
+use crate::shell_completion::{ShellCompletionRequest, complete_backend_shell_with_cancel};
 use crate::templates::TemplateEntry;
 use std::path::PathBuf;
 
@@ -58,6 +58,7 @@ pub struct CompletionWorker {
     sender: mpsc::Sender<CompletionWorkerMessage>,
     events: mpsc::Receiver<CompletionEvent>,
     latest_id: Arc<AtomicU64>,
+    shutdown: Arc<AtomicBool>,
     backend_handles: Arc<Mutex<Vec<JoinHandle<()>>>>,
     handle: Option<JoinHandle<()>>,
 }
@@ -73,7 +74,9 @@ impl CompletionWorker {
         let (sender, receiver) = mpsc::channel();
         let (event_sender, events) = mpsc::channel();
         let latest_id = Arc::new(AtomicU64::new(0));
+        let shutdown = Arc::new(AtomicBool::new(false));
         let worker_latest_id = Arc::clone(&latest_id);
+        let worker_shutdown = Arc::clone(&shutdown);
         let backend_handles = Arc::new(Mutex::new(Vec::new()));
         let worker_backend_handles = Arc::clone(&backend_handles);
         let handle = thread::spawn(move || {
@@ -81,6 +84,7 @@ impl CompletionWorker {
                 receiver,
                 event_sender,
                 worker_latest_id,
+                worker_shutdown,
                 worker_backend_handles,
             );
         });
@@ -88,6 +92,7 @@ impl CompletionWorker {
             sender,
             events,
             latest_id,
+            shutdown,
             backend_handles,
             handle: Some(handle),
         }
@@ -103,10 +108,16 @@ impl CompletionWorker {
     pub fn drain_events(&self) -> Vec<CompletionEvent> {
         self.events.try_iter().collect()
     }
+
+    pub fn cancel_pending(&self) {
+        self.latest_id.store(u64::MAX, Ordering::Relaxed);
+    }
 }
 
 impl Drop for CompletionWorker {
     fn drop(&mut self) {
+        self.shutdown.store(true, Ordering::Relaxed);
+        self.latest_id.store(u64::MAX, Ordering::Relaxed);
         let _ = self.sender.send(CompletionWorkerMessage::Stop);
         if let Some(handle) = self.handle.take() {
             let _ = handle.join();
@@ -119,6 +130,7 @@ fn run_worker(
     receiver: mpsc::Receiver<CompletionWorkerMessage>,
     events: mpsc::Sender<CompletionEvent>,
     latest_id: Arc<AtomicU64>,
+    shutdown: Arc<AtomicBool>,
     backend_handles: Arc<Mutex<Vec<JoinHandle<()>>>>,
 ) {
     let mut executable_index = ExecutableIndex::default();
@@ -153,7 +165,7 @@ fn run_worker(
                 candidates: history_candidates,
             });
         }
-        spawn_backend_completion_event(&job, &events, &latest_id, &backend_handles);
+        spawn_backend_completion_event(&job, &events, &latest_id, &shutdown, &backend_handles);
 
         if !job.options.fuzzy_enabled || !is_latest(job.id, &latest_id) {
             continue;
@@ -272,6 +284,7 @@ fn spawn_backend_completion_event(
     job: &CompletionJob,
     events: &mpsc::Sender<CompletionEvent>,
     latest_id: &Arc<AtomicU64>,
+    shutdown: &Arc<AtomicBool>,
     backend_handles: &Arc<Mutex<Vec<JoinHandle<()>>>>,
 ) {
     if job.backend_shell.is_none() {
@@ -280,13 +293,17 @@ fn spawn_backend_completion_event(
     let job = job.clone();
     let events = events.clone();
     let latest_id = Arc::clone(latest_id);
+    let shutdown = Arc::clone(shutdown);
     let handle = thread::spawn(move || {
         thread::sleep(BACKEND_COMPLETION_DEBOUNCE);
-        if !is_latest(job.id, &latest_id) {
+        if shutdown.load(Ordering::Relaxed) || !is_latest(job.id, &latest_id) {
             return;
         }
-        let candidates = complete_backend_shell_for_job(&job);
-        if candidates.is_empty() || !is_latest(job.id, &latest_id) {
+        let candidates = complete_backend_shell_for_job(&job, &latest_id, &shutdown);
+        if candidates.is_empty()
+            || shutdown.load(Ordering::Relaxed)
+            || !is_latest(job.id, &latest_id)
+        {
             return;
         }
         let _ = events.send(CompletionEvent {
@@ -329,17 +346,24 @@ fn join_backend_completion_threads(backend_handles: &Arc<Mutex<Vec<JoinHandle<()
     }
 }
 
-fn complete_backend_shell_for_job(job: &CompletionJob) -> Vec<CompletionCandidate> {
+fn complete_backend_shell_for_job(
+    job: &CompletionJob,
+    latest_id: &AtomicU64,
+    shutdown: &AtomicBool,
+) -> Vec<CompletionCandidate> {
     let Some(shell) = &job.backend_shell else {
         return Vec::new();
     };
-    complete_backend_shell(&ShellCompletionRequest {
-        shell: shell.clone(),
-        line: job.line.clone(),
-        cursor: job.cursor,
-        cwd: job.cwd.clone(),
-        env: Vec::new(),
-    })
+    complete_backend_shell_with_cancel(
+        &ShellCompletionRequest {
+            shell: shell.clone(),
+            line: job.line.clone(),
+            cursor: job.cursor,
+            cwd: job.cwd.clone(),
+            env: Vec::new(),
+        },
+        || shutdown.load(Ordering::Relaxed) || !is_latest(job.id, latest_id),
+    )
 }
 
 #[derive(Default)]
@@ -677,6 +701,24 @@ mod tests {
         assert!(
             primary_seen < backend_seen,
             "primary event {primary_seen:?} should arrive before backend event {backend_seen:?}"
+        );
+    }
+
+    #[test]
+    fn dropping_worker_cancels_slow_backend_shell_completion() {
+        let mut job = job(1, "git st", usize::MAX, Arc::new(Vec::new()));
+        job.backend_shell = Some("aish-test-backend-delay-ms:2000:status".to_string());
+        let worker = CompletionWorker::start();
+        worker.enqueue(job).unwrap();
+        thread::sleep(Duration::from_millis(100));
+
+        let start = std::time::Instant::now();
+        drop(worker);
+
+        assert!(
+            start.elapsed() < Duration::from_millis(500),
+            "worker drop waited {:?} for a cancellable backend completion",
+            start.elapsed()
         );
     }
 }

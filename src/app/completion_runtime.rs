@@ -426,6 +426,9 @@ impl AppState {
 
     pub(crate) fn cancel_live_completion(&mut self) {
         self.clear_completion_ui();
+        if let Some(worker) = &self.completion_worker {
+            worker.cancel_pending();
+        }
         self.pending_completion = None;
         self.pending_completion_update = None;
         self.completion_display_not_before = None;
