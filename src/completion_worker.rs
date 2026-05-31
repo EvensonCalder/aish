@@ -37,6 +37,7 @@ pub struct CompletionJob {
     pub cwd: PathBuf,
     pub path_dirs: Arc<Vec<PathBuf>>,
     pub backend_shell: Option<String>,
+    pub debounce_backend: bool,
     pub history_newest_first: Arc<Vec<HistoryEntry>>,
     pub templates: Arc<Vec<TemplateEntry>>,
     pub options: CompletionOptions,
@@ -295,7 +296,9 @@ fn spawn_backend_completion_event(
     let latest_id = Arc::clone(latest_id);
     let shutdown = Arc::clone(shutdown);
     let handle = thread::spawn(move || {
-        thread::sleep(BACKEND_COMPLETION_DEBOUNCE);
+        if job.debounce_backend {
+            thread::sleep(BACKEND_COMPLETION_DEBOUNCE);
+        }
         if shutdown.load(Ordering::Relaxed) || !is_latest(job.id, &latest_id) {
             return;
         }
@@ -559,6 +562,7 @@ mod tests {
             cwd: PathBuf::from("/"),
             path_dirs: Arc::new(Vec::new()),
             backend_shell: None,
+            debounce_backend: true,
             history_newest_first,
             templates: Arc::new(Vec::new()),
             options: CompletionOptions {
@@ -639,6 +643,7 @@ mod tests {
             Arc::new(vec![history("git status", 1)]),
         );
         job.backend_shell = Some("aish-test-backend:status,stash".to_string());
+        job.debounce_backend = false;
         let mut executable_index = ExecutableIndex::default();
         let mut data_index = CompletionDataIndex::default();
         let mut primary_cache = PrimaryTierCache::default();
@@ -669,6 +674,7 @@ mod tests {
             Arc::new(vec![history("git status", 1)]),
         );
         job.backend_shell = Some("aish-test-backend-delay-ms:200:status,stash".to_string());
+        job.debounce_backend = true;
         let worker = CompletionWorker::start();
         worker.enqueue(job).unwrap();
 
@@ -708,6 +714,7 @@ mod tests {
     fn dropping_worker_cancels_slow_backend_shell_completion() {
         let mut job = job(1, "git st", usize::MAX, Arc::new(Vec::new()));
         job.backend_shell = Some("aish-test-backend-delay-ms:2000:status".to_string());
+        job.debounce_backend = false;
         let worker = CompletionWorker::start();
         worker.enqueue(job).unwrap();
         thread::sleep(Duration::from_millis(100));

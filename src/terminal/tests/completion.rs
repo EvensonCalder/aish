@@ -179,6 +179,65 @@ fn backend_shell_completion_does_not_defer_local_path_hint() {
 }
 
 #[test]
+fn tab_restarts_empty_live_request_as_explicit_backend_shell_completion() {
+    let mut state = AppState {
+        backend_shell: Some("aish-test-backend:remote".to_string()),
+        ..AppState::default()
+    };
+    state.draft.insert_str("native r");
+
+    refresh_live_completion_ui_for_width(&mut state, 80).unwrap();
+    let live_generation = state.completion_generation;
+
+    assert!(state.completion_inline.is_none());
+    assert!(state.completion_panel.is_empty());
+    assert_eq!(
+        state
+            .pending_completion
+            .as_ref()
+            .map(|pending| pending.candidates.as_slice()),
+        Some([].as_slice())
+    );
+
+    complete_or_show_candidates(&mut state).unwrap();
+
+    assert!(
+        state.completion_generation > live_generation,
+        "explicit Tab should replace an empty background request"
+    );
+    wait_for_inline_suffix_with_attempts(&mut state, "emote", 50);
+    assert_eq!(
+        state.completion_inline.as_ref().unwrap().candidate.source,
+        crate::completion::CompletionSource::BackendShell
+    );
+}
+
+#[test]
+fn tab_mode_backend_shell_completion_appears_after_explicit_tab_without_aish_match() {
+    let mut completion_config = CompletionConfig::default();
+    completion_config.set_mode(CompletionMode::Tab);
+    let mut state = AppState {
+        backend_shell: Some("aish-test-backend:native-one,native-two".to_string()),
+        completion_config,
+        ..AppState::default()
+    };
+    state.draft.insert_str("nativecmd native");
+
+    complete_or_show_candidates(&mut state).unwrap();
+
+    assert_eq!(state.draft.as_str(), "nativecmd native");
+    wait_for_inline_suffix_with_attempts(&mut state, "-one", 50);
+    assert!(
+        state
+            .completion_panel
+            .iter()
+            .any(|row| row.starts_with("shell nativecmd native-two")),
+        "{:?}",
+        state.completion_panel
+    );
+}
+
+#[test]
 #[cfg(unix)]
 fn tab_accepts_first_token_executable_while_slow_backend_shell_is_pending() {
     use std::os::unix::fs::PermissionsExt;

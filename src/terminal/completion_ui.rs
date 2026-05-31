@@ -313,7 +313,7 @@ pub fn accept_first_completion(state: &mut AppState) -> Result<bool> {
 fn live_or_synchronous_completion_candidates(
     state: &mut AppState,
 ) -> Result<Vec<CompletionCandidate>> {
-    let candidates = state.live_completion_candidates_with_max_results(usize::MAX)?;
+    let candidates = state.explicit_live_completion_candidates_with_max_results(usize::MAX)?;
     if candidates.is_empty() {
         return state.completion_candidates();
     }

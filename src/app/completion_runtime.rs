@@ -77,6 +77,21 @@ impl AppState {
         &mut self,
         max_results: usize,
     ) -> Result<Vec<CompletionCandidate>> {
+        self.start_live_completion_request_with_backend_debounce(max_results, true)
+    }
+
+    pub fn start_explicit_completion_request(
+        &mut self,
+        max_results: usize,
+    ) -> Result<Vec<CompletionCandidate>> {
+        self.start_live_completion_request_with_backend_debounce(max_results, false)
+    }
+
+    fn start_live_completion_request_with_backend_debounce(
+        &mut self,
+        max_results: usize,
+        debounce_backend: bool,
+    ) -> Result<Vec<CompletionCandidate>> {
         let now = Instant::now();
         let line = self.draft.as_str().to_string();
         let cursor = self.draft.cursor();
@@ -118,6 +133,7 @@ impl AppState {
                     cwd: completion_cwd(&self.current_cwd),
                     path_dirs: Arc::new(path_dirs()),
                     backend_shell,
+                    debounce_backend,
                     history_newest_first,
                     templates,
                     options: self.completion_options(usize::MAX),
@@ -130,6 +146,20 @@ impl AppState {
         } else {
             candidates
         })
+    }
+
+    pub fn explicit_live_completion_candidates_with_max_results(
+        &mut self,
+        max_results: usize,
+    ) -> Result<Vec<CompletionCandidate>> {
+        if let Some(candidates) =
+            self.cached_live_completion_candidates_with_max_results(max_results)
+            && !candidates.is_empty()
+        {
+            return Ok(candidates);
+        }
+        let candidates = self.start_explicit_completion_request(usize::MAX)?;
+        Ok(limit_candidates(candidates, max_results))
     }
 
     pub fn drain_live_completion_events(&mut self) -> Option<Vec<CompletionCandidate>> {
