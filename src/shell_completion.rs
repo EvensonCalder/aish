@@ -344,17 +344,19 @@ where
     let mut pty = QueryPty::spawn(command)?;
     let _ = pty.read_for(Duration::from_millis(250), is_cancelled);
     let init = r#"typeset -U fpath
-if [[ -n ${ZDOTDIR:-} && -d "$ZDOTDIR/completions" ]]; then
-  fpath=("$ZDOTDIR/completions" $fpath)
+if ! (( $+functions[compdef] && $+parameters[_comps] )); then
+  if [[ -n ${ZDOTDIR:-} && -d "$ZDOTDIR/completions" ]]; then
+    fpath=($fpath "$ZDOTDIR/completions")
+  fi
+  if [[ -n ${ZDOTDIR:-} && -d "$ZDOTDIR/.zsh/completions" ]]; then
+    fpath=($fpath "$ZDOTDIR/.zsh/completions")
+  fi
+  if [[ -n ${HOME:-} && -d "$HOME/.zsh/completions" ]]; then
+    fpath=($fpath "$HOME/.zsh/completions")
+  fi
+  autoload -Uz compinit
+  compinit -u -D 2>/dev/null || compinit -i -D 2>/dev/null || true
 fi
-if [[ -n ${ZDOTDIR:-} && -d "$ZDOTDIR/.zsh/completions" ]]; then
-  fpath=("$ZDOTDIR/.zsh/completions" $fpath)
-fi
-if [[ -n ${HOME:-} && -d "$HOME/.zsh/completions" ]]; then
-  fpath=("$HOME/.zsh/completions" $fpath)
-fi
-autoload -Uz compinit
-compinit -u -D 2>/dev/null || compinit -i -D 2>/dev/null || true
 PROMPT=''
 RPROMPT=''
 unsetopt BEEP 2>/dev/null || true
@@ -1148,6 +1150,57 @@ mod tests {
             candidates.iter().any(|candidate| {
                 candidate.source == CompletionSource::BackendShell
                     && candidate.replacement == "zdotbar"
+            }),
+            "{candidates:?}"
+        );
+    }
+
+    #[test]
+    fn zsh_completion_preserves_zshrc_compdef_mappings_after_compinit_when_available() {
+        let Some(zsh) = find_shell(&["zsh", "/bin/zsh", "/usr/bin/zsh", "/opt/homebrew/bin/zsh"])
+        else {
+            eprintln!("skipping zsh backend completion test: zsh not found");
+            return;
+        };
+        let temp = tempfile::tempdir().unwrap();
+        let completions = temp.path().join(".zsh/completions");
+        let bin = temp.path().join("bin");
+        std::fs::create_dir_all(&completions).unwrap();
+        std::fs::create_dir_all(&bin).unwrap();
+        make_executable(&bin.join("manualcmd"));
+        std::fs::write(
+            temp.path().join(".zshrc"),
+            "fpath=(\"$ZDOTDIR/.zsh/completions\" $fpath)\n\
+             autoload -Uz compinit\n\
+             compinit -u -D\n\
+             autoload -Uz _manualcmd\n\
+             compdef _manualcmd manualcmd\n",
+        )
+        .unwrap();
+        std::fs::write(
+            completions.join("_manualcmd"),
+            "_arguments '1:arg:(manualbar)'\n",
+        )
+        .unwrap();
+        let mut request = request(&zsh, "manualcmd m");
+        request.env = vec![
+            (
+                "ZDOTDIR".to_string(),
+                temp.path().to_string_lossy().into_owned(),
+            ),
+            (
+                "HOME".to_string(),
+                temp.path().to_string_lossy().into_owned(),
+            ),
+            ("PATH".to_string(), test_path_with_bin(&bin)),
+        ];
+
+        let candidates = complete_backend_shell(&request);
+
+        assert!(
+            candidates.iter().any(|candidate| {
+                candidate.source == CompletionSource::BackendShell
+                    && candidate.replacement == "manualbar"
             }),
             "{candidates:?}"
         );
