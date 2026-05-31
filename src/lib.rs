@@ -20,6 +20,7 @@ pub mod paste;
 pub mod picker;
 mod process_control;
 pub mod pty;
+pub mod shell_completion;
 pub mod shell_integration;
 pub mod sync;
 pub mod templates;

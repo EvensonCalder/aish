@@ -49,6 +49,7 @@ mod tests {
         assert!(config.completion.enabled);
         assert_eq!(config.completion.coalesce_ms, 50);
         assert_eq!(config.completion.display_delay_ms, 120);
+        assert!(config.completion.backend);
         assert!(config.completion.ignore_spaces);
         assert!(config.completion.template_first);
         assert!(config.completion.inline);
@@ -101,6 +102,7 @@ mod tests {
                 max_results: 0,
                 coalesce_ms: 1_001,
                 display_delay_ms: 1_001,
+                backend: true,
                 ignore_spaces: true,
                 template_first: true,
                 inline: true,

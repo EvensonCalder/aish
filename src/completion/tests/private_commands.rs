@@ -37,6 +37,11 @@ fn private_command_completion_includes_nested_arguments() {
             .iter()
             .any(|candidate| candidate.replacement == "display-delay-ms")
     );
+    assert!(
+        candidates
+            .iter()
+            .any(|candidate| candidate.replacement == "backend")
+    );
 
     let paste_candidates = complete_private_command_line("#paste ", "#paste ".len(), usize::MAX);
     assert_eq!(

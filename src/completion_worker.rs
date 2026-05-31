@@ -16,6 +16,7 @@ use crate::completion::{
     matches_completion_prefix_with_threshold, rank_completion_candidates, scan_path_executables,
 };
 use crate::history::HistoryEntry;
+use crate::shell_completion::{ShellCompletionRequest, complete_backend_shell};
 use crate::templates::TemplateEntry;
 use std::path::PathBuf;
 
@@ -32,6 +33,7 @@ pub struct CompletionJob {
     pub cursor: usize,
     pub cwd: PathBuf,
     pub path_dirs: Arc<Vec<PathBuf>>,
+    pub backend_shell: Option<String>,
     pub history_newest_first: Arc<Vec<HistoryEntry>>,
     pub templates: Arc<Vec<TemplateEntry>>,
     pub options: CompletionOptions,
@@ -217,12 +219,13 @@ fn complete_primary_tier(
     let mut candidates = if let Some(candidates) = primary_cache.filtered_candidates(job) {
         candidates
     } else if token.is_first_token && !token.path_like {
+        let mut candidates = complete_backend_shell_for_job(job);
         data_index.refresh_for_job(job);
-        let mut candidates = complete_first_token_templates_with_indexed_options(
+        candidates.extend(complete_first_token_templates_with_indexed_options(
             &token.text,
             &data_index.templates,
             options,
-        );
+        ));
         candidates.extend(complete_first_token_history_with_indexed_options(
             &token.text,
             &data_index.history,
@@ -236,19 +239,34 @@ fn complete_primary_tier(
         candidates
     } else {
         data_index.refresh_for_job(job);
-        complete_non_first_token_for_line_with_indexed_options(
+        let mut candidates = complete_backend_shell_for_job(job);
+        candidates.extend(complete_non_first_token_for_line_with_indexed_options(
             &job.line,
             job.cursor,
             &job.cwd,
             &data_index.history,
             &data_index.templates,
             options,
-        )
+        ));
+        candidates
     };
     dedupe_completion_candidates(&mut candidates);
     rank_completion_candidates(&mut candidates);
     primary_cache.store(job, candidates.clone());
     limit_candidates(candidates, job.options.max_results)
+}
+
+fn complete_backend_shell_for_job(job: &CompletionJob) -> Vec<CompletionCandidate> {
+    let Some(shell) = &job.backend_shell else {
+        return Vec::new();
+    };
+    complete_backend_shell(&ShellCompletionRequest {
+        shell: shell.clone(),
+        line: job.line.clone(),
+        cursor: job.cursor,
+        cwd: job.cwd.clone(),
+        env: Vec::new(),
+    })
 }
 
 #[derive(Default)]
@@ -262,6 +280,7 @@ struct PrimaryTierCacheEntry {
     cursor: usize,
     cwd: PathBuf,
     path_dirs: Arc<Vec<PathBuf>>,
+    backend_shell: Option<String>,
     history: Arc<Vec<HistoryEntry>>,
     templates: Arc<Vec<TemplateEntry>>,
     options: CompletionOptions,
@@ -293,6 +312,7 @@ impl PrimaryTierCache {
             cursor: job.cursor,
             cwd: job.cwd.clone(),
             path_dirs: Arc::clone(&job.path_dirs),
+            backend_shell: job.backend_shell.clone(),
             history: Arc::clone(&job.history_newest_first),
             templates: Arc::clone(&job.templates),
             options: job.options,
@@ -305,6 +325,7 @@ fn can_filter_primary_cache(entry: &PrimaryTierCacheEntry, job: &CompletionJob) 
     if entry.options != job.options
         || entry.cwd != job.cwd
         || entry.path_dirs.as_slice() != job.path_dirs.as_slice()
+        || entry.backend_shell != job.backend_shell
         || !Arc::ptr_eq(&entry.history, &job.history_newest_first)
         || !Arc::ptr_eq(&entry.templates, &job.templates)
         || entry.cursor != entry.line.len()
@@ -339,7 +360,9 @@ fn first_token_candidate_matches(
                 options.match_threshold_percent,
             )
         }
-        CompletionSource::Executable => candidate.replacement.starts_with(prefix),
+        CompletionSource::Executable | CompletionSource::BackendShell => {
+            candidate.replacement.starts_with(prefix)
+        }
         _ => false,
     }
 }
@@ -438,6 +461,7 @@ mod tests {
             cursor: line.len(),
             cwd: PathBuf::from("/"),
             path_dirs: Arc::new(Vec::new()),
+            backend_shell: None,
             history_newest_first,
             templates: Arc::new(Vec::new()),
             options: CompletionOptions {
@@ -506,6 +530,37 @@ mod tests {
                 .map(|candidate| candidate.replacement.as_str())
                 .collect::<Vec<_>>(),
             ["cargo build", "cat alpha"]
+        );
+    }
+
+    #[test]
+    fn backend_shell_candidates_win_deduped_primary_tier() {
+        let mut job = job(
+            1,
+            "git st",
+            usize::MAX,
+            Arc::new(vec![history("git status", 1)]),
+        );
+        job.backend_shell = Some("aish-test-backend:status,stash".to_string());
+        let mut executable_index = ExecutableIndex::default();
+        let mut data_index = CompletionDataIndex::default();
+        let mut primary_cache = PrimaryTierCache::default();
+
+        let candidates = complete_primary_tier(
+            &job,
+            &mut executable_index,
+            &mut data_index,
+            &mut primary_cache,
+        );
+
+        assert_eq!(candidates[0].source, CompletionSource::BackendShell);
+        assert_eq!(candidates[0].replacement, "status");
+        assert_eq!(
+            candidates
+                .iter()
+                .filter(|candidate| candidate.replacement == "status")
+                .count(),
+            1
         );
     }
 }

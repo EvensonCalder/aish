@@ -30,6 +30,7 @@ pub(crate) use index::{
     IndexedHistoryEntry, IndexedTemplateEntry, index_history_entries, index_template_entries,
 };
 pub use matching::{matches_completion_prefix, matches_completion_prefix_with_threshold};
+pub(crate) use parser::shell_like_words;
 pub use parser::{current_token_context, is_path_like_token};
 pub use path::complete_path;
 pub use private::{complete_private_command_line, complete_private_commands};

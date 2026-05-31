@@ -146,11 +146,12 @@ Important rules:
 - `completion.mode="tab"` keeps typing quiet; the first `Tab` shows hints and the next `Tab` accepts the visible suggestion or first ranked candidate.
 - `completion.mode="off"` disables all Aish completion candidates and makes non-empty `Tab` do nothing.
 - `completion.enabled=false` and `completion.inline=false` remain compatibility fields for older configs. Without an explicit `completion.mode`, `inline=false` selects `tab` mode; it does not disable the inline hint that can appear after pressing `Tab`.
+- `completion.backend=true` is the default. Aish asks the configured backend shell for completions and ranks those shell candidates ahead of Aish templates, history, PATH executables, and path candidates.
 - `completion.fuzzy=false` keeps fast prefix/structural completion but disables typo-correction work.
 - The inline suggestion is display-only until accepted.
 - The below-prompt panel is advisory and never decides what `Tab` accepts.
 - `completion.max_results` controls only the number of below-prompt rows.
-- `completion.coalesce_ms` controls how long Aish may wait for the next background completion tier before refreshing the live UI. The default is `50` ms; `0` restores immediate tier-by-tier refreshes. First-token executable-only live hints may also wait for this window so history can replace lower-priority PATH matches before anything is drawn.
+- `completion.coalesce_ms` controls how long Aish may wait for the next background completion tier before refreshing the live UI. The default is `50` ms; `0` restores immediate tier-by-tier refreshes. First-token executable-only live hints and local hints that are waiting for backend shell completion may defer drawing briefly so higher-priority candidates can arrive before anything is drawn.
 - `completion.display_delay_ms` controls how long auto mode waits after the latest edit before drawing completion UI. Matching still runs in the background while the display is delayed. The default is `120` ms; `0` draws as soon as candidates are ready.
 - The panel skips the current inline candidate and shows the full command that would result from accepting each remaining candidate.
 - Candidate rows are width-aware, align command text with the prompt input column when space permits, and left-elide long commands with `...` at word boundaries instead of wrapping.
@@ -163,13 +164,15 @@ Important rules:
 
 Completion sources:
 
-- First token: templates, regular history, then PATH executables.
-- Non-first token: structural template matches, structural history suffixes, template placeholders, history arguments, and filesystem paths.
+- When `completion.backend=true`, backend shell candidates are ranked first for both inline ghost text and the below-prompt panel. Duplicate Aish candidates are removed by final replacement text so a shell candidate wins when it overlaps with Aish history, templates, executables, or paths.
+- First token after backend shell candidates: templates, regular history, then PATH executables.
+- Non-first token after backend shell candidates: structural template matches, structural history suffixes, template placeholders, history arguments, and filesystem paths.
 - After a trailing space, Aish uses structural template/history matches and does not show unrelated filesystem entries for the empty token.
 - Template completions use newest stored templates first.
 - Paths preserve directory prefixes and mark directories with `/`. Matching local directories are kept ahead of lower-priority argument/history fallbacks, and recent directory scans are cached briefly while typing.
 - With `completion.fuzzy=true`, Aish can also correct local directory typos such as `./srd` to `./src/` and intermediate path typos such as `srd/ma` to `src/main.rs`.
-- Live completion is layered: cheap local path candidates can be found immediately, template/history/PATH executable matching arrives from a background worker, and slower typo-correction results can update the same UI later. Stale worker results are ignored when the input changes.
+- Live completion is layered: cheap local path candidates can be found immediately, backend shell/template/history/PATH executable matching arrives from a background worker, and slower typo-correction results can update the same UI later. Stale worker results are ignored when the input changes.
+- Backend shell completion is queried from the real configured shell instead of by parsing completion files. Fish uses `complete -C`; bash runs interactive programmable completion functions and compspecs; zsh runs an interactive completion query in a PTY. This lets normal shell config such as `~/.config/fish/completions`, bash `complete`/bash-completion loaded from `.bashrc`, and zsh `fpath` directories such as `~/.zsh/completions` work through the shell's own completion engine.
 
 Configuration:
 
@@ -180,6 +183,7 @@ enabled = true
 max_results = 5
 coalesce_ms = 50
 display_delay_ms = 120
+backend = true
 ignore_spaces = true
 template_first = true
 inline = true
@@ -203,6 +207,8 @@ Commands:
 #completion display-delay-ms 120
 #completion inline on
 #completion inline off
+#completion backend on
+#completion backend off
 #completion fuzzy on
 #completion fuzzy off
 #completion tab-accept full
@@ -262,6 +268,7 @@ Completion:
 #completion coalesce-ms <0-1000>
 #completion display-delay-ms <0-1000>
 #completion inline on|off
+#completion backend on|off
 #completion fuzzy on|off
 #completion tab-accept full|word
 #completion match-threshold <0-100>
@@ -486,6 +493,8 @@ AISH_TEST_FISH=1 cargo test --test tmux_capture tmux_common_shell_workflow_match
 ```
 
 Aish uses shell markers to detect command completion and cwd, filters those markers from user-visible output, and suppresses backend native shell history for both marker commands and Aish-submitted user commands. Bash, Zsh, and Fish commands executed through Aish are still appended to Aish's own regular history, but should not appear in Bash `history`, Zsh `fc -l`, Fish `history search`, or native shell history files.
+
+Backend shell completion follows the configured backend shell. Aish does not migrate fish, zsh, or bash completion files into its own format; it asks the shell to evaluate them. For zsh completion files under `~/.zsh/completions`, keep the directory in `fpath` from `.zshrc` and let zsh `compinit` load it. Fish completion files under `~/.config/fish/completions` and completions registered from interactive `config.fish` are loaded through fish. Bash completions registered from `.bashrc` or bash-completion scripts are executed through bash programmable completion.
 
 ## Interactive And Stdin Passthrough
 

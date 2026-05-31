@@ -532,6 +532,7 @@ Completion visuals:
 - Test narrow terminal width.
 - Test large font or high contrast.
 - Test `#completion tab-accept full` and `#completion tab-accept word`.
+- Test `#completion backend on` and `#completion backend off` with one shell-native completion from bash, zsh, or fish.
 
 ## Step 9: Private Listing And Privacy Exports
 

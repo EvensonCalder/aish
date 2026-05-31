@@ -4,13 +4,7 @@ use super::{CompletionCandidate, CompletionSource};
 
 pub(crate) fn dedupe_completion_candidates(candidates: &mut Vec<CompletionCandidate>) {
     let mut seen = HashSet::new();
-    candidates.retain(|candidate| {
-        seen.insert((
-            candidate.source,
-            candidate.replacement.clone(),
-            candidate.display.clone(),
-        ))
-    });
+    candidates.retain(|candidate| seen.insert(candidate.replacement.clone()));
 }
 
 pub(crate) fn rank_completion_candidates(candidates: &mut [CompletionCandidate]) {
@@ -26,7 +20,8 @@ fn completion_candidate_rank(candidate: &CompletionCandidate) -> u8 {
 
 fn completion_source_rank(source: CompletionSource) -> u8 {
     match source {
-        CompletionSource::PrivateCommand => 0,
+        CompletionSource::BackendShell => 0,
+        CompletionSource::PrivateCommand => 1,
         CompletionSource::TemplateTypo => 9,
         CompletionSource::Template => 10,
         CompletionSource::HistoryTypo => 19,

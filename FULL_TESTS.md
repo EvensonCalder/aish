@@ -236,9 +236,10 @@ Use a fresh isolated `AISH_HOME` when possible so history-based suggestions are 
 | COMP-009 | Create files with spaces, then use path completion. | Suggested and accepted paths are shell-safe for the backend. | Paste command/output. |
 | COMP-010 | In a narrow terminal, type a long prefix with long suggestions. | Below-prompt rows remain one line and elide with `...` instead of wrapping. | Screenshot. |
 | COMP-011 | Move cursor to the middle of a draft and trigger completion. | Completion does not corrupt text before or after the cursor. | Paste final command/output. |
-| COMP-012 | Verify bash and zsh completion behavior using the same history. | User-visible completion is Aish-owned and backend independent. | Record backend results. |
+| COMP-012 | Verify bash and zsh completion behavior using the same history. | Aish history/template/path completion remains consistent across backends when `#completion backend off` is set. | Record backend results. |
 | COMP-013 | Run `#completion match-threshold 80`, type a weak partial match, then run `#completion match-threshold 30` and repeat. | The stricter threshold hides weak candidates; the lower threshold allows them. | Paste output or screenshots. |
 | COMP-014 | If fish is tested, repeat a basic completion workflow. | Fish matches bash/zsh behavior or the difference is recorded. | Record result. |
+| COMP-015 | Add a disposable shell-native completion: bash `complete -W 'native-one native-two' aishnative`, zsh `_aishnative` in an `fpath` directory, or fish `~/.config/fish/completions/aishnative.fish`; then type `aishnative native`. | With `#completion backend on`, the shell-native candidate appears first with the `shell` source label; with `#completion backend off`, it disappears and Aish fallbacks still work. | Paste output or screenshot. |
 
 ## Continuation Input
 

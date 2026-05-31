@@ -39,6 +39,7 @@ aish_enter
 aish_expect "Completion help"
 aish_expect "#completion mode auto|tab|off"
 aish_expect "#completion display-delay-ms <0-1000>"
+aish_expect "#completion backend on|off"
 aish_expect "#completion tab-accept full|word"
 aish_wait_prompt
 

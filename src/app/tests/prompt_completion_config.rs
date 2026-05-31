@@ -143,6 +143,8 @@ fn completion_config_commands_persist_and_reject_invalid_values() {
             "completion.display_delay_ms=120",
         ),
         ("#completion inline off", "completion.mode=tab"),
+        ("#completion backend off", "completion.backend=false"),
+        ("#completion shell on", "completion.backend=true"),
         ("#completion tab-accept word", "completion.tab_accept=word"),
         ("#completion fuzzy off", "completion.fuzzy=false"),
         ("#completion fuzzy on", "completion.fuzzy=true"),
@@ -178,6 +180,10 @@ fn completion_config_commands_persist_and_reject_invalid_values() {
         (
             "#completion inline maybe",
             "usage: #completion inline on|off",
+        ),
+        (
+            "#completion backend maybe",
+            "usage: #completion backend on|off",
         ),
         (
             "#completion mode manual",

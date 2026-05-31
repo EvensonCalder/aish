@@ -811,7 +811,10 @@ For command completion:
 - `completion.mode = "tab"` disables live hints while typing; the first non-empty `Tab` starts completion and displays hints, and the next `Tab` accepts the visible inline suggestion or first ranked displayed/cached candidate.
 - `completion.mode = "off"` disables all Aish completion candidates, live completion UI, and non-empty `Tab` acceptance.
 - `completion.enabled` and `completion.inline` remain legacy compatibility fields. When `completion.mode` is absent, `enabled=false` maps to `off`, `enabled=true` with `inline=true` maps to `auto`, and `enabled=true` with `inline=false` maps to `tab`. The legacy `inline=false` field selects tab-triggered completion; it does not disable the inline hint that can be shown after an explicit `Tab`. When `completion.mode` is present, it is authoritative and Aish normalizes the legacy fields to match it.
+- `completion.backend = true` enables backend shell completion and is the default. Backend shell candidates are ranked ahead of Aish templates, history, PATH executables, and filesystem paths for both inline ghost text and below-prompt rows.
 - `completion.fuzzy = false` disables typo-correction/fuzzy work while preserving fast prefix, path, template, and structural history completion.
+- Backend shell candidates and Aish candidates are deduplicated by final accepted replacement text. If a backend shell candidate overlaps with an Aish candidate, the backend shell candidate must win because it has the higher source rank.
+- Backend shell completion should query the configured shell's own completion system instead of migrating shell completion files into Aish-specific data. Fish completion should use fish `complete -C`; bash completion should execute programmable completion functions/compspecs from an interactive bash; zsh completion should query an interactive zsh completion session. User config such as fish `~/.config/fish/completions`, fish interactive `config.fish`, bash `complete` definitions loaded from `.bashrc`, bash-completion scripts, zsh `fpath`, and zsh `~/.zsh/completions` should work when the backend shell itself loads them.
 - Template candidates are shown before history candidates.
 - History candidates are ordered newest to oldest.
 - Matching ignores spaces when configured.
@@ -834,11 +837,11 @@ For command completion:
 - In `tab` mode, ordinary typing clears any stale completion UI and does not start a live completion request. Pressing `Tab` starts the same layered request explicitly; background history and typo tiers may update the displayed hints for that request without accepting anything.
 - Live completion must not scan regular history, stored templates, or PATH executables synchronously on every keypress. It sends a versioned background request using cheap cached snapshot references.
 - The background worker may keep parsed history/template indexes and append-only primary-tier caches across requests. Correctness caches must retain the complete candidate set for their tier; the displayed top `completion.max_results` rows are a UI cache only and must not be used as the next request's matching input.
-- Live completion is layered: cheap local path candidates can be found immediately, template/history/PATH executable results can refresh the UI when the worker finishes, and slower typo-correction results can refresh the UI after that when `completion.fuzzy = true`.
+- Live completion is layered: cheap local path candidates can be found immediately, backend shell/template/history/PATH executable results can refresh the UI when the worker finishes, and slower typo-correction results can refresh the UI after that when `completion.fuzzy = true`.
 - Typo correction must not filter only from a previous request's matched candidates because edit-distance similarity is not monotonic as input grows. Typo tiers may use broad indexed pools, but each visible typo result must come from exact similarity scoring for the current input and config.
 - Layered live completion refreshes may be coalesced until the final background tier arrives or `completion.coalesce_ms` elapses, whichever comes first, to avoid visible flicker while preserving non-blocking input.
 - Auto-mode completion refreshes may also be delayed until `completion.display_delay_ms` after the most recent edit. This delay is only a display gate; it must not block input and must not prevent background matching from progressing.
-- If the first-token immediate result set contains only PATH executable candidates and an async history tier is pending, Aish may defer drawing those executable candidates until the coalescing window resolves.
+- If the first-token immediate result set contains only PATH executable candidates and an async history tier is pending, Aish may defer drawing those executable candidates until the coalescing window resolves. If backend shell completion is enabled and a backend shell query is pending, Aish may also defer drawing local immediate candidates so shell candidates can take the first visible position without a brief lower-priority flash.
 - Completion worker events carry the request id. Events for older input, different cursor positions, or stale request ids must be ignored.
 - Empty non-first tokens after trailing whitespace must not run path fallback. They may show structural template candidates immediately and structural history candidates when the worker returns.
 - Live inline completion also renders remaining candidates as below-prompt hints when they fit the configured display rules.
@@ -882,6 +885,7 @@ enabled = true
 max_results = 5
 coalesce_ms = 50
 display_delay_ms = 120
+backend = true
 ignore_spaces = true
 template_first = true
 inline = true
@@ -900,6 +904,7 @@ Command:
 #completion coalesce-ms <0-1000>
 #completion display-delay-ms <0-1000>
 #completion inline on|off
+#completion backend on|off
 #completion fuzzy on|off
 #completion tab-accept full|word
 #completion match-threshold <0-100>
@@ -1469,6 +1474,7 @@ Initial command set:
 #completion coalesce-ms <0-1000>
 #completion display-delay-ms <0-1000>
 #completion inline on|off
+#completion backend on|off
 #completion fuzzy on|off
 #completion tab-accept full|word
 #completion match-threshold <0-100>

@@ -226,6 +226,7 @@ fn private_help_prints_topic_specific_usage() {
     assert!(output.contains("Completion help"));
     assert!(output.contains("#completion mode auto|tab|off"));
     assert!(output.contains("#completion display-delay-ms <0-1000>"));
+    assert!(output.contains("#completion backend on|off"));
     assert!(output.contains("#completion tab-accept full|word"));
     assert!(output.contains("auto shows live hints while typing"));
     assert!(!output.contains("Sync help"));

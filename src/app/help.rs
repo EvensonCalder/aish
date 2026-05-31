@@ -182,6 +182,10 @@ const COMPLETION_HELP: &[HelpEntry] = &[
         description: "legacy switch; off maps to tab-triggered completion",
     },
     HelpEntry {
+        usage: "#completion backend on|off",
+        description: "show or hide backend shell completion candidates",
+    },
+    HelpEntry {
         usage: "#completion fuzzy on|off",
         description: "enable or disable typo-correction work",
     },

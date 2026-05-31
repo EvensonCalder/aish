@@ -83,10 +83,12 @@ impl AppState {
         let candidates = self.immediate_completion_candidates_with_max_results(max_results)?;
         self.pending_completion = None;
         self.pending_completion_update = None;
+        let backend_shell = self.backend_shell_for_completion();
         let should_enqueue_async = self.should_enqueue_async_completion(&line, cursor);
         let display_deferred = !self.completion_display_ready(now) && !candidates.is_empty();
         let defer_initial_ui = should_enqueue_async
-            && self.should_defer_initial_completion_ui(&line, cursor, &candidates);
+            && self.should_defer_initial_completion_ui(&line, cursor, &candidates, &backend_shell);
+        let wait_for_backend_before_initial_ui = defer_initial_ui && backend_shell.is_some();
         let hide_initial_ui = display_deferred || defer_initial_ui;
         if should_enqueue_async || display_deferred {
             self.completion_generation = self.completion_generation.wrapping_add(1).max(1);
@@ -97,7 +99,7 @@ impl AppState {
                 cursor,
                 candidates: candidates.clone(),
             });
-            if hide_initial_ui && !candidates.is_empty() {
+            if hide_initial_ui && !candidates.is_empty() && !wait_for_backend_before_initial_ui {
                 self.queue_completion_update(
                     id,
                     line.clone(),
@@ -116,6 +118,7 @@ impl AppState {
                     cursor,
                     cwd: completion_cwd(&self.current_cwd),
                     path_dirs: Arc::new(path_dirs()),
+                    backend_shell,
                     history_newest_first,
                     templates,
                     options: self.completion_options(usize::MAX),
@@ -326,6 +329,13 @@ impl AppState {
         }
     }
 
+    fn backend_shell_for_completion(&self) -> Option<String> {
+        self.completion_config
+            .backend
+            .then(|| self.backend_shell.clone())
+            .flatten()
+    }
+
     fn ensure_completion_worker(&mut self) -> &CompletionWorker {
         self.completion_worker
             .get_or_insert_with(CompletionWorker::start)
@@ -339,7 +349,7 @@ impl AppState {
         {
             return false;
         }
-        !current_token_context(line, cursor).path_like
+        self.completion_config.backend || !current_token_context(line, cursor).path_like
     }
 
     fn should_defer_initial_completion_ui(
@@ -347,9 +357,13 @@ impl AppState {
         line: &str,
         cursor: usize,
         candidates: &[CompletionCandidate],
+        backend_shell: &Option<String>,
     ) -> bool {
         if self.completion_config.coalesce_ms == 0 || candidates.is_empty() {
             return false;
+        }
+        if backend_shell.is_some() {
+            return true;
         }
         let token = current_token_context(line, cursor);
         token.is_first_token

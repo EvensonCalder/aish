@@ -26,6 +26,7 @@ fn private_config_prints_read_only_runtime_config() {
             max_results: 8,
             coalesce_ms: 50,
             display_delay_ms: 120,
+            backend: true,
             ignore_spaces: false,
             template_first: true,
             inline: false,

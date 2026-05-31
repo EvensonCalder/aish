@@ -249,6 +249,7 @@ impl QuoteScanState {
 
 fn completion_source_label(source: CompletionSource) -> &'static str {
     match source {
+        CompletionSource::BackendShell => "shell",
         CompletionSource::Path => "file",
         CompletionSource::Template => "template",
         CompletionSource::TemplateTypo => "template",

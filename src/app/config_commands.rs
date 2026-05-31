@@ -344,6 +344,16 @@ pub(super) fn update_completion_config(
                 Ok(())
             })
         }
+        (Some("backend" | "shell"), Some(value), None) => {
+            let Some(backend) = parse_on_off(value) else {
+                writeln!(out, "usage: #completion backend on|off")?;
+                return Ok(());
+            };
+            set_completion_config(state, out, |config| {
+                config.completion.backend = backend;
+                Ok(())
+            })
+        }
         (Some("fuzzy"), Some(value), None) => {
             let Some(fuzzy) = parse_on_off(value) else {
                 writeln!(out, "usage: #completion fuzzy on|off")?;
@@ -394,7 +404,7 @@ pub(super) fn update_completion_config(
         }
         _ => writeln!(
             out,
-            "usage: #completion on|off|mode auto|tab|off|max <count>|coalesce-ms <0-1000>|display-delay-ms <0-1000>|inline on|off|fuzzy on|off|tab-accept full|word|match-threshold <0-100>|typo-threshold <0-100>"
+            "usage: #completion on|off|mode auto|tab|off|max <count>|coalesce-ms <0-1000>|display-delay-ms <0-1000>|inline on|off|backend on|off|fuzzy on|off|tab-accept full|word|match-threshold <0-100>|typo-threshold <0-100>"
         )
         .map_err(Into::into),
     }
@@ -439,6 +449,7 @@ fn write_completion_config(out: &mut impl Write, config: &CompletionConfig) -> R
     writeln!(out, "completion.ignore_spaces={}", config.ignore_spaces)?;
     writeln!(out, "completion.template_first={}", config.template_first)?;
     writeln!(out, "completion.inline={}", config.inline)?;
+    writeln!(out, "completion.backend={}", config.backend)?;
     writeln!(out, "completion.fuzzy={}", config.fuzzy)?;
     writeln!(out, "completion.tab_accept={}", config.tab_accept.as_str())?;
     writeln!(

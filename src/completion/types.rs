@@ -66,6 +66,7 @@ pub struct AcceptedCompletion {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CompletionSource {
+    BackendShell,
     Path,
     Template,
     TemplateTypo,

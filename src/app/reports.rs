@@ -263,6 +263,7 @@ fn write_completion_config_lines(out: &mut impl Write, config: &CompletionConfig
     writeln!(out, "completion.ignore_spaces={}", config.ignore_spaces)?;
     writeln!(out, "completion.template_first={}", config.template_first)?;
     writeln!(out, "completion.inline={}", config.inline)?;
+    writeln!(out, "completion.backend={}", config.backend)?;
     writeln!(out, "completion.fuzzy={}", config.fuzzy)?;
     writeln!(out, "completion.tab_accept={}", config.tab_accept.as_str())?;
     writeln!(

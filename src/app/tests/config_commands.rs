@@ -649,6 +649,7 @@ fn subsystem_commands_report_current_state() {
         ("#completion", "completion.enabled=true"),
         ("#completion", "completion.coalesce_ms=50"),
         ("#completion", "completion.display_delay_ms=120"),
+        ("#completion", "completion.backend=true"),
         ("#completion", "completion.fuzzy=true"),
         ("#editor", "editor temp directory is not configured"),
     ] {

@@ -104,6 +104,70 @@ fn async_history_completion_updates_live_ui_after_request() {
 }
 
 #[test]
+fn backend_shell_completion_updates_live_ui_before_duplicate_history() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut state = AppState {
+        backend_shell: Some("aish-test-backend:status,stash".to_string()),
+        current_cwd: Some(temp.path().to_path_buf()),
+        regular_history: vec![crate::history::HistoryEntry {
+            t: 1,
+            command: "git status".to_string(),
+            exit_code: Some(0),
+            source: crate::history::HistorySource::User,
+        }],
+        ..AppState::default()
+    };
+    state.draft.insert_str("git st");
+
+    refresh_live_completion_ui_for_width(&mut state, 80).unwrap();
+    wait_for_inline_suffix_with_attempts(&mut state, "atus", 200);
+
+    let inline = state.completion_inline.as_ref().unwrap();
+    assert_eq!(
+        inline.candidate.source,
+        crate::completion::CompletionSource::BackendShell
+    );
+    assert_eq!(inline.candidate.replacement, "status");
+    assert!(
+        state
+            .completion_panel
+            .iter()
+            .any(|row| row.starts_with("shell git stash"))
+    );
+    assert_eq!(
+        state
+            .cached_live_completion_candidates_with_max_results(10)
+            .unwrap()
+            .iter()
+            .filter(|candidate| candidate.replacement == "status")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn backend_shell_completion_defers_local_path_hint_until_shell_result() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::write(temp.path().join("single.txt"), "").unwrap();
+    let mut state = AppState {
+        backend_shell: Some("aish-test-backend:shellfile".to_string()),
+        current_cwd: Some(temp.path().to_path_buf()),
+        ..AppState::default()
+    };
+    state.draft.insert_str("cat s");
+
+    refresh_live_completion_ui_for_width(&mut state, 80).unwrap();
+
+    assert!(state.completion_inline.is_none());
+    assert!(state.completion_panel.is_empty());
+    wait_for_inline_suffix_with_attempts(&mut state, "hellfile", 200);
+    assert_eq!(
+        state.completion_inline.as_ref().unwrap().candidate.source,
+        crate::completion::CompletionSource::BackendShell
+    );
+}
+
+#[test]
 fn tab_mode_async_history_completion_updates_after_explicit_tab() {
     let mut completion_config = CompletionConfig::default();
     completion_config.set_mode(CompletionMode::Tab);
@@ -146,6 +210,25 @@ fn tab_mode_async_history_completion_updates_after_explicit_tab() {
     assert_eq!(state.draft.as_str(), "git status");
     assert!(state.completion_inline.is_none());
     assert!(state.completion_panel.is_empty());
+}
+
+fn wait_for_inline_suffix_with_attempts(state: &mut AppState, suffix: &str, attempts: usize) {
+    let mut output = Vec::new();
+    for _ in 0..attempts {
+        refresh_after_background_events(state, &mut output).unwrap();
+        if state
+            .completion_inline
+            .as_ref()
+            .is_some_and(|inline| inline.suffix == suffix)
+        {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!(
+        "missing inline suffix {suffix:?}; inline was {:?}, panel was {:?}",
+        state.completion_inline, state.completion_panel
+    );
 }
 
 #[test]

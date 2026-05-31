@@ -15,11 +15,17 @@ fn render_completion_candidates_labels_sources_without_mutating_input() {
             is_dir: false,
             source: CompletionSource::Path,
         },
+        CompletionCandidate {
+            display: "status".to_string(),
+            replacement: "status".to_string(),
+            is_dir: false,
+            source: CompletionSource::BackendShell,
+        },
     ];
 
     assert_eq!(
         render_completion_candidates(&candidates),
-        ["template\tdeploy", "file\tsrc/main.rs"]
+        ["template\tdeploy", "file\tsrc/main.rs", "shell\tstatus"]
     );
 }
 

@@ -258,6 +258,7 @@ fn completion_candidates_use_templates_before_history_for_first_token() {
             max_results: 2,
             coalesce_ms: 50,
             display_delay_ms: 120,
+            backend: false,
             ignore_spaces: true,
             template_first: true,
             inline: true,
