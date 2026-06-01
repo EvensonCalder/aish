@@ -358,6 +358,9 @@ fn submit_cancels_hidden_completion_request_before_command_output() {
         line: "echo hello".to_string(),
         cursor: "echo hello".len(),
         candidates: vec![candidate.clone()],
+        backend_expected: false,
+        backend_complete: true,
+        backend_priority_deadline: None,
     });
     state.pending_completion_update = Some(crate::app::PendingCompletionUpdate {
         id: 9,

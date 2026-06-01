@@ -150,6 +150,128 @@ fn backend_shell_completion_updates_live_ui_before_duplicate_history() {
 }
 
 #[test]
+fn tab_waits_for_backend_shell_before_accepting_history_completion() {
+    let mut state = AppState {
+        backend_shell: Some("aish-test-backend-delay-ms:80:assistant".to_string()),
+        regular_history: vec![crate::history::HistoryEntry {
+            t: 1,
+            command: "nativecmd assemble".to_string(),
+            exit_code: Some(0),
+            source: crate::history::HistorySource::User,
+        }],
+        ..AppState::default()
+    };
+    state.draft.insert_str("nativecmd ass");
+
+    refresh_live_completion_ui_for_width(&mut state, 80).unwrap();
+    assert!(state.completion_inline.is_none());
+    assert!(state.completion_panel.is_empty());
+
+    complete_or_show_candidates(&mut state).unwrap();
+
+    assert_eq!(state.draft.as_str(), "nativecmd ass");
+    wait_for_inline_source_with_attempts(
+        &mut state,
+        crate::completion::CompletionSource::BackendShell,
+        200,
+    );
+    assert_eq!(state.completion_inline.as_ref().unwrap().suffix, "istant");
+}
+
+#[test]
+fn history_completion_appears_after_backend_shell_finishes_empty() {
+    let mut state = AppState {
+        backend_shell: Some("aish-test-backend-delay-ms:40:".to_string()),
+        regular_history: vec![crate::history::HistoryEntry {
+            t: 1,
+            command: "nativecmd assemble".to_string(),
+            exit_code: Some(0),
+            source: crate::history::HistorySource::User,
+        }],
+        ..AppState::default()
+    };
+    state.draft.insert_str("nativecmd ass");
+
+    refresh_live_completion_ui_for_width(&mut state, 80).unwrap();
+    assert!(state.completion_inline.is_none());
+    assert!(state.completion_panel.is_empty());
+
+    wait_for_inline_suffix_with_attempts(&mut state, "emble", 200);
+    assert_eq!(
+        state.completion_inline.as_ref().unwrap().candidate.source,
+        crate::completion::CompletionSource::History
+    );
+}
+
+#[test]
+fn visible_history_completion_is_not_accepted_while_backend_shell_is_pending() {
+    let candidate = CompletionCandidate {
+        display: "assemble".to_string(),
+        replacement: "assemble".to_string(),
+        is_dir: false,
+        source: crate::completion::CompletionSource::History,
+    };
+    let mut state = AppState {
+        backend_shell: Some("aish-test-backend-delay-ms:200:assistant".to_string()),
+        completion_inline: Some(InlineCompletion {
+            candidate: candidate.clone(),
+            suffix: "emble".to_string(),
+        }),
+        pending_completion: Some(crate::app::PendingCompletion {
+            id: 42,
+            line: "nativecmd ass".to_string(),
+            cursor: "nativecmd ass".len(),
+            candidates: vec![candidate],
+            backend_expected: true,
+            backend_complete: false,
+            backend_priority_deadline: Some(Instant::now() + Duration::from_secs(1)),
+        }),
+        ..AppState::default()
+    };
+    state.draft.insert_str("nativecmd ass");
+
+    complete_or_show_candidates(&mut state).unwrap();
+
+    assert_eq!(state.draft.as_str(), "nativecmd ass");
+    assert!(state.completion_inline.is_none());
+    assert!(state.completion_panel.is_empty());
+}
+
+#[test]
+fn visible_history_completion_is_accepted_after_backend_priority_wait_expires() {
+    let candidate = CompletionCandidate {
+        display: "assemble".to_string(),
+        replacement: "assemble".to_string(),
+        is_dir: false,
+        source: crate::completion::CompletionSource::History,
+    };
+    let mut state = AppState {
+        backend_shell: Some("aish-test-backend-delay-ms:200:assistant".to_string()),
+        completion_inline: Some(InlineCompletion {
+            candidate: candidate.clone(),
+            suffix: "emble".to_string(),
+        }),
+        pending_completion: Some(crate::app::PendingCompletion {
+            id: 43,
+            line: "nativecmd ass".to_string(),
+            cursor: "nativecmd ass".len(),
+            candidates: vec![candidate],
+            backend_expected: true,
+            backend_complete: false,
+            backend_priority_deadline: Some(Instant::now() - Duration::from_millis(1)),
+        }),
+        ..AppState::default()
+    };
+    state.draft.insert_str("nativecmd ass");
+
+    complete_or_show_candidates(&mut state).unwrap();
+
+    assert_eq!(state.draft.as_str(), "nativecmd assemble");
+    assert!(state.completion_inline.is_none());
+    assert!(state.completion_panel.is_empty());
+}
+
+#[test]
 fn backend_shell_completion_does_not_defer_local_path_hint() {
     let temp = tempfile::tempdir().unwrap();
     std::fs::write(temp.path().join("single.txt"), "").unwrap();

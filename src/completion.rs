@@ -169,7 +169,7 @@ pub(crate) fn complete_non_first_token_for_line_with_indexed_options(
         dedupe_completion_candidates(&mut structural_candidates);
         return limit_candidates(structural_candidates, options.max_results);
     }
-    let structural_history_candidates = complete_structural_history_for_line_indexed(
+    let mut structural_history_candidates = complete_structural_history_for_line_indexed(
         line,
         cursor,
         &token,
@@ -180,6 +180,8 @@ pub(crate) fn complete_non_first_token_for_line_with_indexed_options(
     let path_candidates = complete_path_with_options(&token.text, cwd, options);
     let (directory_candidates, file_candidates) = split_path_candidates(path_candidates);
     if token.path_like {
+        retain_path_like_structural_candidates(&token, &mut structural_candidates, options);
+        retain_path_like_structural_candidates(&token, &mut structural_history_candidates, options);
         if !directory_candidates.is_empty() {
             let mut candidates = directory_candidates;
             candidates.extend(structural_candidates);
@@ -221,6 +223,24 @@ pub(crate) fn complete_non_first_token_for_line_with_indexed_options(
     candidates.extend(file_candidates);
     dedupe_completion_candidates(&mut candidates);
     limit_candidates(candidates, options.max_results)
+}
+
+fn retain_path_like_structural_candidates(
+    token: &TokenContext,
+    candidates: &mut Vec<CompletionCandidate>,
+    options: CompletionOptions,
+) {
+    if !token.path_like {
+        return;
+    }
+    candidates.retain(|candidate| {
+        matches_completion_prefix_with_threshold(
+            &candidate.replacement,
+            &token.text,
+            options.ignore_spaces,
+            options.match_threshold_percent,
+        )
+    });
 }
 
 pub fn complete_history_arguments_for_token_with_options(

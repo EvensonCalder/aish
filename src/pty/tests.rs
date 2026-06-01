@@ -43,6 +43,7 @@ fn shell_launch_recognizes_login_shell_and_case_variants() {
 
 #[test]
 fn spawned_backend_reports_resolved_shell_program() {
+    let _guard = crate::test_support::shell_process_test_guard();
     let backend = PtyBackend::spawn("/bin/bash").unwrap();
 
     assert_eq!(backend.shell_program(), "/bin/bash");
@@ -583,6 +584,7 @@ fn line_continuation_detects_odd_trailing_backslashes() {
 
 #[test]
 fn bash_continuation_check_detects_incomplete_lexical_input_without_hanging() {
+    let _guard = crate::test_support::shell_process_test_guard();
     let backend = PtyBackend::spawn("/bin/bash").unwrap();
 
     let continued = backend.input_needs_more_lines("echo aa \\").unwrap();
@@ -608,6 +610,7 @@ fn zsh_continuation_check_detects_incomplete_lexical_input_without_hanging() {
         return;
     }
 
+    let _guard = crate::test_support::shell_process_test_guard();
     let backend = PtyBackend::spawn("/bin/zsh").unwrap();
 
     let unclosed = backend.input_needs_more_lines("echo \"").unwrap();

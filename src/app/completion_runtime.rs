@@ -18,6 +18,8 @@ use crate::templates::{TemplateEntry, load_templates};
 
 use super::{AppState, PendingCompletion, PendingCompletionUpdate};
 
+const BACKEND_PRIORITY_WAIT: Duration = Duration::from_millis(750);
+
 impl AppState {
     pub fn completion_candidates(&self) -> Result<Vec<CompletionCandidate>> {
         self.completion_candidates_with_max_results(usize::MAX)
@@ -100,9 +102,15 @@ impl AppState {
         self.pending_completion_update = None;
         let backend_shell = self.backend_shell_for_completion();
         let should_enqueue_async = self.should_enqueue_async_completion(&line, cursor);
+        let backend_expected = should_enqueue_async && backend_shell.is_some();
         let display_deferred = !self.completion_display_ready(now) && !candidates.is_empty();
         let defer_initial_ui = should_enqueue_async
-            && self.should_defer_initial_completion_ui(&line, cursor, &candidates);
+            && self.should_defer_initial_completion_ui(
+                &line,
+                cursor,
+                &candidates,
+                backend_expected,
+            );
         let hide_initial_ui = display_deferred || defer_initial_ui;
         if should_enqueue_async || display_deferred {
             self.completion_generation = self.completion_generation.wrapping_add(1).max(1);
@@ -112,6 +120,9 @@ impl AppState {
                 line: line.clone(),
                 cursor,
                 candidates: candidates.clone(),
+                backend_expected,
+                backend_complete: !backend_expected,
+                backend_priority_deadline: backend_expected.then_some(now + BACKEND_PRIORITY_WAIT),
             });
             if hide_initial_ui && !candidates.is_empty() {
                 self.queue_completion_update(
@@ -156,6 +167,9 @@ impl AppState {
             self.cached_live_completion_candidates_with_max_results(max_results)
             && !candidates.is_empty()
         {
+            if self.should_hold_completion_candidates_for_backend_priority(&candidates) {
+                return Ok(Vec::new());
+            }
             return Ok(candidates);
         }
         let candidates = self.start_explicit_completion_request(usize::MAX)?;
@@ -192,6 +206,9 @@ impl AppState {
             if event.id != pending.id {
                 continue;
             }
+            if matches!(event.tier, CompletionTier::BackendShell) {
+                pending.backend_complete = true;
+            }
             final_tier_seen |= completion_tier_is_final(event.tier, fuzzy_enabled);
             let previous_candidates = pending.candidates.clone();
             pending.candidates.extend(event.candidates);
@@ -203,16 +220,25 @@ impl AppState {
         let pending_line = pending.line.clone();
         let pending_cursor = pending.cursor;
         let pending_candidates = pending.candidates.clone();
+        let backend_complete = pending.backend_complete;
         if changed {
             self.queue_completion_update(
                 pending_id,
-                pending_line,
+                pending_line.clone(),
                 pending_cursor,
                 pending_candidates,
                 final_tier_seen,
                 now,
             );
         } else if final_tier_seen
+            && let Some(update) = self.pending_completion_update.as_mut()
+            && update.id == pending_id
+            && update.line == pending_line
+            && update.cursor == pending_cursor
+        {
+            update.final_tier_seen = true;
+        }
+        if backend_complete
             && let Some(update) = self.pending_completion_update.as_mut()
             && update.id == pending_id
             && update.line == pending_line
@@ -284,6 +310,11 @@ impl AppState {
                 || final_tier_seen
                 || now.saturating_duration_since(first_seen) >= Duration::from_millis(coalesce_ms));
         if ready {
+            if let Some(update) = self.pending_completion_update.as_ref()
+                && self.should_hold_completion_candidates_for_backend_priority(&update.candidates)
+            {
+                return None;
+            }
             self.completion_display_not_before = None;
             return self
                 .pending_completion_update
@@ -386,8 +417,17 @@ impl AppState {
         line: &str,
         cursor: usize,
         candidates: &[CompletionCandidate],
+        backend_expected: bool,
     ) -> bool {
-        if self.completion_config.coalesce_ms == 0 || candidates.is_empty() {
+        if candidates.is_empty() {
+            return false;
+        }
+        if backend_expected
+            && should_defer_candidates_for_backend_priority(line, cursor, candidates)
+        {
+            return true;
+        }
+        if self.completion_config.coalesce_ms == 0 {
             return false;
         }
         let token = current_token_context(line, cursor);
@@ -396,6 +436,43 @@ impl AppState {
             && candidates.iter().all(|candidate| {
                 candidate.source == crate::completion::CompletionSource::Executable
             })
+    }
+
+    pub(crate) fn pending_backend_completion_should_take_priority(&self) -> bool {
+        self.pending_backend_completion_should_take_priority_at(Instant::now())
+    }
+
+    fn pending_backend_completion_should_take_priority_at(&self, now: Instant) -> bool {
+        if !self.completion_config.backend || self.backend_shell.is_none() {
+            return false;
+        }
+        let line = self.draft.as_str();
+        let cursor = self.draft.cursor();
+        let token = current_token_context(line, cursor);
+        if token.is_first_token || token.path_like {
+            return false;
+        }
+        self.pending_completion.as_ref().is_some_and(|pending| {
+            pending.line == line
+                && pending.cursor == cursor
+                && pending.backend_expected
+                && !pending.backend_complete
+                && pending
+                    .backend_priority_deadline
+                    .is_some_and(|deadline| now < deadline)
+        })
+    }
+
+    pub(crate) fn should_hold_completion_candidates_for_backend_priority(
+        &self,
+        candidates: &[CompletionCandidate],
+    ) -> bool {
+        self.pending_backend_completion_should_take_priority()
+            && should_defer_candidates_for_backend_priority(
+                self.draft.as_str(),
+                self.draft.cursor(),
+                candidates,
+            )
     }
 
     fn completion_history_snapshot(&mut self) -> Arc<Vec<HistoryEntry>> {
@@ -476,8 +553,35 @@ impl AppState {
 }
 
 fn completion_tier_is_final(tier: CompletionTier, fuzzy_enabled: bool) -> bool {
-    matches!(tier, CompletionTier::Typo)
+    matches!(tier, CompletionTier::BackendShell | CompletionTier::Typo)
         || (!fuzzy_enabled && matches!(tier, CompletionTier::History))
+}
+
+fn should_defer_candidates_for_backend_priority(
+    line: &str,
+    cursor: usize,
+    candidates: &[CompletionCandidate],
+) -> bool {
+    if candidates.is_empty() {
+        return false;
+    }
+    let token = current_token_context(line, cursor);
+    !token.is_first_token
+        && !token.path_like
+        && candidates
+            .iter()
+            .all(|candidate| backend_priority_can_defer_source(candidate.source))
+}
+
+fn backend_priority_can_defer_source(source: crate::completion::CompletionSource) -> bool {
+    matches!(
+        source,
+        crate::completion::CompletionSource::History
+            | crate::completion::CompletionSource::HistoryTypo
+            | crate::completion::CompletionSource::Template
+            | crate::completion::CompletionSource::TemplateTypo
+            | crate::completion::CompletionSource::TemplatePlaceholder
+    )
 }
 
 fn completion_cwd(current_cwd: &Option<PathBuf>) -> PathBuf {

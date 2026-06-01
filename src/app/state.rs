@@ -147,6 +147,9 @@ pub struct PendingCompletion {
     pub line: String,
     pub cursor: usize,
     pub candidates: Vec<CompletionCandidate>,
+    pub backend_expected: bool,
+    pub backend_complete: bool,
+    pub backend_priority_deadline: Option<Instant>,
 }
 
 #[derive(Debug, Clone)]

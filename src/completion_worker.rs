@@ -26,6 +26,7 @@ const BACKEND_COMPLETION_DEBOUNCE: Duration = Duration::from_millis(60);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompletionTier {
     History,
+    BackendShell,
     Typo,
 }
 
@@ -303,15 +304,12 @@ fn spawn_backend_completion_event(
             return;
         }
         let candidates = complete_backend_shell_for_job(&job, &latest_id, &shutdown);
-        if candidates.is_empty()
-            || shutdown.load(Ordering::Relaxed)
-            || !is_latest(job.id, &latest_id)
-        {
+        if shutdown.load(Ordering::Relaxed) || !is_latest(job.id, &latest_id) {
             return;
         }
         let _ = events.send(CompletionEvent {
             id: job.id,
-            tier: CompletionTier::History,
+            tier: CompletionTier::BackendShell,
             candidates,
         });
     });
@@ -708,6 +706,34 @@ mod tests {
             primary_seen < backend_seen,
             "primary event {primary_seen:?} should arrive before backend event {backend_seen:?}"
         );
+    }
+
+    #[test]
+    fn worker_emits_empty_backend_shell_completion_event() {
+        let mut job = job(1, "git st", usize::MAX, Arc::new(Vec::new()));
+        job.backend_shell = Some("aish-test-backend:".to_string());
+        job.debounce_backend = false;
+        let worker = CompletionWorker::start();
+        worker.enqueue(job).unwrap();
+
+        let start = std::time::Instant::now();
+        let mut empty_backend_seen = false;
+        while start.elapsed() < Duration::from_secs(2) {
+            for event in worker.drain_events() {
+                if event.id == 1
+                    && event.tier == CompletionTier::BackendShell
+                    && event.candidates.is_empty()
+                {
+                    empty_backend_seen = true;
+                }
+            }
+            if empty_backend_seen {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        assert!(empty_backend_seen, "missing empty backend shell event");
     }
 
     #[test]

@@ -57,6 +57,9 @@ fn unlock_passthrough_clears_live_completion_and_restores_mode_on_success() {
             line: "git".to_string(),
             cursor: 3,
             candidates: vec![candidate.clone()],
+            backend_expected: false,
+            backend_complete: true,
+            backend_priority_deadline: None,
         }),
         pending_completion_update: Some(PendingCompletionUpdate {
             id: 1,
@@ -447,6 +450,9 @@ fn pending_completion_update_waits_for_coalesce_window_without_final_tier() {
             line: "git ".to_string(),
             cursor: 4,
             candidates: vec![candidate.clone()],
+            backend_expected: false,
+            backend_complete: true,
+            backend_priority_deadline: None,
         }),
         pending_completion_update: Some(PendingCompletionUpdate {
             id: 7,
@@ -490,6 +496,9 @@ fn pending_completion_update_flushes_immediately_on_final_tier() {
             line: "git ".to_string(),
             cursor: 4,
             candidates: vec![candidate.clone()],
+            backend_expected: false,
+            backend_complete: true,
+            backend_priority_deadline: None,
         }),
         pending_completion_update: Some(PendingCompletionUpdate {
             id: 8,

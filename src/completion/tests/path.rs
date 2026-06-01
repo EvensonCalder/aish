@@ -129,6 +129,68 @@ fn complete_non_first_token_intermediate_directory_prefixes_ignore_fuzzy_switch(
 }
 
 #[test]
+fn path_like_line_completion_ignores_unrelated_structural_history() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir(temp.path().join("src")).unwrap();
+    std::fs::write(temp.path().join("src/main.rs"), "").unwrap();
+    let history = vec![HistoryEntry {
+        t: 1,
+        command: "cat unique-target.txt".to_string(),
+        exit_code: Some(0),
+        source: crate::history::HistorySource::User,
+    }];
+
+    let candidates = complete_non_first_token_for_line_with_options(
+        "cat src/m",
+        "cat src/m".len(),
+        temp.path(),
+        &history,
+        &[],
+        CompletionOptions::default(),
+    );
+
+    assert_eq!(
+        candidates,
+        [CompletionCandidate {
+            display: "src/main.rs".to_string(),
+            replacement: "src/main.rs".to_string(),
+            is_dir: false,
+            source: CompletionSource::Path,
+        }]
+    );
+}
+
+#[test]
+fn path_like_line_completion_keeps_matching_structural_history() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir(temp.path().join("src")).unwrap();
+    std::fs::write(temp.path().join("src/main.rs"), "").unwrap();
+    let history = vec![HistoryEntry {
+        t: 1,
+        command: "cat src/lib.rs".to_string(),
+        exit_code: Some(0),
+        source: crate::history::HistorySource::User,
+    }];
+
+    let candidates = complete_non_first_token_for_line_with_options(
+        "cat src/",
+        "cat src/".len(),
+        temp.path(),
+        &history,
+        &[],
+        CompletionOptions::default(),
+    );
+
+    assert_eq!(
+        candidates
+            .iter()
+            .map(|candidate| candidate.replacement.as_str())
+            .collect::<Vec<_>>(),
+        ["src/lib.rs"]
+    );
+}
+
+#[test]
 fn complete_path_preserves_relative_dot_prefix_for_component_completion() {
     let temp = tempfile::tempdir().unwrap();
     std::fs::create_dir(temp.path().join("src")).unwrap();

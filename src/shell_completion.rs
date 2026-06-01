@@ -341,6 +341,22 @@ fn complete_zsh_with_pty<F>(
 where
     F: Fn() -> bool + ?Sized,
 {
+    let candidates = complete_zsh_with_pty_and_rc(request, is_cancelled, false)?;
+    if !candidates.is_empty() || is_cancelled() {
+        return Ok(candidates);
+    }
+    complete_zsh_with_pty_and_rc(request, is_cancelled, true)
+}
+
+#[cfg(unix)]
+fn complete_zsh_with_pty_and_rc<F>(
+    request: &ShellCompletionRequest,
+    is_cancelled: &F,
+    source_user_zshrc: bool,
+) -> Result<Vec<String>>
+where
+    F: Fn() -> bool + ?Sized,
+{
     if is_cancelled() {
         return Ok(Vec::new());
     }
@@ -355,6 +371,10 @@ where
         .env(
             "AISH_ZSH_COMPLETION_COMMAND",
             zsh_completion_command(request).unwrap_or_default(),
+        )
+        .env(
+            "AISH_ZSH_COMPLETION_SOURCE_RC",
+            if source_user_zshrc { "1" } else { "0" },
         );
     let mut pty = QueryPty::spawn(command)?;
     let _ = pty.read_for(Duration::from_millis(20), is_cancelled);
@@ -376,7 +396,7 @@ __aish_source_zshrc() {
   source "$1"
 }
 __aish_zdotdir=${ZDOTDIR:-${HOME:-}}
-if [[ -n $__aish_zdotdir && -r "$__aish_zdotdir/.zshrc" ]]; then
+if [[ ${AISH_ZSH_COMPLETION_SOURCE_RC:-0} == 1 && -n $__aish_zdotdir && -r "$__aish_zdotdir/.zshrc" ]]; then
   __aish_source_zshrc "$__aish_zdotdir/.zshrc"
 fi
 typeset -U fpath
@@ -939,8 +959,8 @@ fn clean_terminal_output(output: &[u8]) -> String {
     let mut chars = text.chars().peekable();
     while let Some(ch) = chars.next() {
         match ch {
-            '\x1b' => {
-                if chars.peek() == Some(&'[') {
+            '\x1b' => match chars.peek().copied() {
+                Some('[') => {
                     chars.next();
                     for next in chars.by_ref() {
                         if ('@'..='~').contains(&next) {
@@ -948,7 +968,25 @@ fn clean_terminal_output(output: &[u8]) -> String {
                         }
                     }
                 }
-            }
+                Some(']') => {
+                    chars.next();
+                    let mut saw_escape = false;
+                    for next in chars.by_ref() {
+                        if next == '\x07' || (saw_escape && next == '\\') {
+                            break;
+                        }
+                        saw_escape = next == '\x1b';
+                    }
+                }
+                Some('(' | ')' | '*' | '+' | '-' | '.' | '/') => {
+                    chars.next();
+                    let _ = chars.next();
+                }
+                Some('@'..='_') => {
+                    let _ = chars.next();
+                }
+                Some(_) | None => {}
+            },
             '\x08' => {
                 clean.pop();
             }
@@ -980,6 +1018,7 @@ fn line_prefix_at_cursor(line: &str, cursor: usize) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::shell_process_test_guard;
 
     fn request(shell: &str, line: &str) -> ShellCompletionRequest {
         ShellCompletionRequest {
@@ -1061,15 +1100,25 @@ mod tests {
 
     #[test]
     fn zsh_list_parser_ignores_query_echo_and_internal_marker() {
-        let output = b"kagi \r\nk\r\nkagi\r\nask-page  assistant  auth\r\n__AISH_ZSH_COMPLETION_DONE_123__\r\n";
+        let output = b"nativecmd \r\nn\r\nnativecmd\r\nask-page  assistant  auth\r\n__AISH_ZSH_COMPLETION_DONE_123__\r\n";
         assert_eq!(
-            parse_zsh_list_output(&request("/bin/zsh", "kagi "), output),
+            parse_zsh_list_output(&request("/bin/zsh", "nativecmd "), output),
             ["ask-page", "assistant", "auth"]
         );
     }
 
     #[test]
+    fn zsh_list_parser_strips_single_character_terminal_escapes() {
+        let output = b"cat unique-tar\r\nunique-target.txt\x1bM\r\n";
+        assert_eq!(
+            parse_zsh_list_output(&request("/bin/zsh", "cat unique-tar"), output),
+            ["unique-target.txt"]
+        );
+    }
+
+    #[test]
     fn fish_completion_loads_user_completion_directory_when_available() {
+        let _guard = shell_process_test_guard();
         let Some(fish) = find_shell(&["fish", "/opt/homebrew/bin/fish", "/usr/bin/fish"]) else {
             eprintln!("skipping fish backend completion test: fish not found");
             return;
@@ -1112,6 +1161,7 @@ mod tests {
 
     #[test]
     fn fish_completion_loads_interactive_config_when_available() {
+        let _guard = shell_process_test_guard();
         let Some(fish) = find_shell(&["fish", "/opt/homebrew/bin/fish", "/usr/bin/fish"]) else {
             eprintln!("skipping fish backend completion test: fish not found");
             return;
@@ -1153,6 +1203,7 @@ mod tests {
 
     #[test]
     fn bash_completion_loads_interactive_bashrc_when_available() {
+        let _guard = shell_process_test_guard();
         let Some(bash) = find_shell(&["bash", "/bin/bash", "/usr/bin/bash"]) else {
             eprintln!("skipping bash backend completion test: bash not found");
             return;
@@ -1182,6 +1233,7 @@ mod tests {
 
     #[test]
     fn bash_completion_supports_common_compspec_flags_when_available() {
+        let _guard = shell_process_test_guard();
         let Some(bash) = find_shell(&["bash", "/bin/bash", "/usr/bin/bash"]) else {
             eprintln!("skipping bash backend completion test: bash not found");
             return;
@@ -1252,6 +1304,7 @@ mod tests {
 
     #[test]
     fn zsh_completion_loads_fpath_completion_directory_when_available() {
+        let _guard = shell_process_test_guard();
         let Some(zsh) = find_shell(&["zsh", "/bin/zsh", "/usr/bin/zsh", "/opt/homebrew/bin/zsh"])
         else {
             eprintln!("skipping zsh backend completion test: zsh not found");
@@ -1299,6 +1352,7 @@ mod tests {
 
     #[test]
     fn zsh_completion_loads_home_completion_directory_without_zshrc_fpath_when_available() {
+        let _guard = shell_process_test_guard();
         let Some(zsh) = find_shell(&["zsh", "/bin/zsh", "/usr/bin/zsh", "/opt/homebrew/bin/zsh"])
         else {
             eprintln!("skipping zsh backend completion test: zsh not found");
@@ -1343,6 +1397,7 @@ mod tests {
 
     #[test]
     fn zsh_completion_loads_home_completion_directory_after_user_compinit_when_available() {
+        let _guard = shell_process_test_guard();
         let Some(zsh) = find_shell(&["zsh", "/bin/zsh", "/usr/bin/zsh", "/opt/homebrew/bin/zsh"])
         else {
             eprintln!("skipping zsh backend completion test: zsh not found");
@@ -1390,6 +1445,7 @@ mod tests {
 
     #[test]
     fn zsh_completion_loads_zdotdir_completion_directory_without_zshrc_fpath_when_available() {
+        let _guard = shell_process_test_guard();
         let Some(zsh) = find_shell(&["zsh", "/bin/zsh", "/usr/bin/zsh", "/opt/homebrew/bin/zsh"])
         else {
             eprintln!("skipping zsh backend completion test: zsh not found");
@@ -1433,6 +1489,7 @@ mod tests {
 
     #[test]
     fn zsh_completion_preserves_zshrc_compdef_mappings_after_compinit_when_available() {
+        let _guard = shell_process_test_guard();
         let Some(zsh) = find_shell(&["zsh", "/bin/zsh", "/usr/bin/zsh", "/opt/homebrew/bin/zsh"])
         else {
             eprintln!("skipping zsh backend completion test: zsh not found");
@@ -1485,6 +1542,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn query_pty_drop_terminates_child_process_group() {
+        let _guard = shell_process_test_guard();
         let temp = tempfile::tempdir().unwrap();
         let pid_file = temp.path().join("child.pid");
         let mut command = Command::new("/bin/sh");
@@ -1495,16 +1553,19 @@ mod tests {
             .arg(&pid_file);
         let pty = QueryPty::spawn(command).unwrap();
         let child_pid = wait_for_pid_file(&pid_file);
-        assert!(process_exists(child_pid), "child process was not started");
+        assert!(
+            process_is_running(child_pid),
+            "child process was not started"
+        );
 
         drop(pty);
 
         let started = Instant::now();
-        while process_exists(child_pid) && started.elapsed() < Duration::from_secs(2) {
+        while process_is_running(child_pid) && started.elapsed() < Duration::from_secs(2) {
             std::thread::sleep(Duration::from_millis(20));
         }
         assert!(
-            !process_exists(child_pid),
+            !process_is_running(child_pid),
             "PTY helper child process {child_pid} survived QueryPty drop"
         );
     }
@@ -1572,7 +1633,17 @@ mod tests {
     }
 
     #[cfg(unix)]
-    fn process_exists(pid: libc::pid_t) -> bool {
+    fn process_is_running(pid: libc::pid_t) -> bool {
+        if let Ok(output) = Command::new("ps")
+            .args(["-o", "stat=", "-p"])
+            .arg(pid.to_string())
+            .output()
+        {
+            let status = String::from_utf8_lossy(&output.stdout);
+            if let Some(state) = status.split_whitespace().next() {
+                return !state.starts_with('Z');
+            }
+        }
         let result = unsafe { libc::kill(pid, 0) };
         result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
     }

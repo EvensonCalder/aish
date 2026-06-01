@@ -315,6 +315,9 @@ fn live_or_synchronous_completion_candidates(
 ) -> Result<Vec<CompletionCandidate>> {
     let candidates = state.explicit_live_completion_candidates_with_max_results(usize::MAX)?;
     if candidates.is_empty() {
+        if state.pending_backend_completion_should_take_priority() {
+            return Ok(Vec::new());
+        }
         return state.completion_candidates();
     }
     Ok(candidates)
@@ -336,6 +339,9 @@ fn accept_completion_candidate(
     state: &mut AppState,
     candidate: crate::completion::CompletionCandidate,
 ) -> Result<bool> {
+    if should_wait_for_backend_before_accepting_candidate(state, &candidate) {
+        return Ok(false);
+    }
     let token = current_token_context(state.draft.as_str(), state.draft.cursor());
     let accepted = accept_completion_with_mode(
         state.draft.as_str(),
@@ -355,4 +361,18 @@ fn accept_completion_candidate(
     } else {
         Ok(false)
     }
+}
+
+fn should_wait_for_backend_before_accepting_candidate(
+    state: &AppState,
+    candidate: &CompletionCandidate,
+) -> bool {
+    state.pending_backend_completion_should_take_priority()
+        && !matches!(
+            candidate.source,
+            crate::completion::CompletionSource::BackendShell
+                | crate::completion::CompletionSource::Path
+                | crate::completion::CompletionSource::Executable
+                | crate::completion::CompletionSource::PrivateCommand
+        )
 }
