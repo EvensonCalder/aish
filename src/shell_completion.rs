@@ -13,6 +13,7 @@ use anyhow::{Context, Result};
 use crate::completion::{
     CompletionCandidate, CompletionSource, current_token_context, shell_like_words,
 };
+use crate::process_control::{configure_new_process_group, terminate_child_process_group};
 
 const PROCESS_TIMEOUT: Duration = Duration::from_millis(1_200);
 const ZSH_INIT_TIMEOUT: Duration = Duration::from_millis(2_000);
@@ -801,7 +802,11 @@ fn run_process_with_timeout<F>(
 where
     F: Fn() -> bool + ?Sized,
 {
-    command.stdout(Stdio::piped());
+    configure_new_process_group(command);
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
     let mut child = command
         .spawn()
         .context("failed to spawn completion helper")?;
@@ -818,7 +823,11 @@ where
             return Ok(join_stdout_reader(stdout_reader));
         }
         if is_cancelled() || Instant::now() >= deadline {
-            let _ = child.kill();
+            let _ = terminate_child_process_group(
+                &mut child,
+                Duration::from_millis(100),
+                Duration::from_millis(10),
+            );
             let _ = child.wait();
             let _ = join_stdout_reader(stdout_reader);
             return Ok(Vec::new());
@@ -1302,6 +1311,50 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn process_completion_helpers_do_not_inherit_frontend_stdin() {
+        let _guard = shell_process_test_guard();
+        let _stdin = StdinReplacement::from_bytes(b"stolen-from-frontend\n");
+        let mut command = Command::new("/bin/sh");
+        command.arg("-c").arg(
+            "if IFS= read -r line; then printf 'read:%s\\n' \"$line\"; else printf 'eof\\n'; fi",
+        );
+
+        let output =
+            run_process_with_timeout(&mut command, Duration::from_secs(2), &|| false).unwrap();
+
+        assert_eq!(String::from_utf8_lossy(&output), "eof\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn timed_out_process_completion_helper_terminates_child_process_group() {
+        let _guard = shell_process_test_guard();
+        let temp = tempfile::tempdir().unwrap();
+        let pid_file = temp.path().join("helper-child.pid");
+        let mut command = Command::new("/bin/sh");
+        command
+            .arg("-c")
+            .arg("(sleep 30) & printf '%s\\n' \"$!\" > \"$1\"; sleep 30")
+            .arg("aish-completion-timeout-test")
+            .arg(&pid_file);
+
+        let output =
+            run_process_with_timeout(&mut command, Duration::from_millis(300), &|| false).unwrap();
+        assert!(output.is_empty());
+        let child_pid = wait_for_pid_file(&pid_file);
+
+        let started = Instant::now();
+        while process_is_running(child_pid) && started.elapsed() < Duration::from_secs(2) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            !process_is_running(child_pid),
+            "completion helper child process {child_pid} survived timeout cleanup"
+        );
+    }
+
     #[test]
     fn zsh_completion_loads_fpath_completion_directory_when_available() {
         let _guard = shell_process_test_guard();
@@ -1611,6 +1664,71 @@ mod tests {
             let mut permissions = std::fs::metadata(path).unwrap().permissions();
             permissions.set_mode(0o755);
             std::fs::set_permissions(path, permissions).unwrap();
+        }
+    }
+
+    #[cfg(unix)]
+    struct StdinReplacement {
+        saved: RawFd,
+    }
+
+    #[cfg(unix)]
+    impl StdinReplacement {
+        fn from_bytes(bytes: &[u8]) -> Self {
+            let mut fds = [-1; 2];
+            let pipe_status = unsafe { libc::pipe(fds.as_mut_ptr()) };
+            assert_eq!(
+                pipe_status,
+                0,
+                "failed to create stdin pipe: {}",
+                std::io::Error::last_os_error()
+            );
+            write_all_fd(fds[1], bytes);
+            unsafe {
+                libc::close(fds[1]);
+            }
+            let saved = unsafe { libc::dup(libc::STDIN_FILENO) };
+            assert!(
+                saved >= 0,
+                "failed to save stdin: {}",
+                std::io::Error::last_os_error()
+            );
+            let dup_status = unsafe { libc::dup2(fds[0], libc::STDIN_FILENO) };
+            unsafe {
+                libc::close(fds[0]);
+            }
+            assert_eq!(
+                dup_status,
+                libc::STDIN_FILENO,
+                "failed to replace stdin: {}",
+                std::io::Error::last_os_error()
+            );
+            Self { saved }
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for StdinReplacement {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = libc::dup2(self.saved, libc::STDIN_FILENO);
+                libc::close(self.saved);
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    fn write_all_fd(fd: RawFd, bytes: &[u8]) {
+        let mut written = 0;
+        while written < bytes.len() {
+            let result =
+                unsafe { libc::write(fd, bytes[written..].as_ptr().cast(), bytes.len() - written) };
+            assert!(
+                result > 0,
+                "failed to write stdin pipe: {}",
+                std::io::Error::last_os_error()
+            );
+            written += result as usize;
         }
     }
 

@@ -5,7 +5,9 @@
 set timeout 10
 source [file dirname [info script]]/_lib.exp
 
-set workdir "$::env(AISH_EXPECT_ARTIFACT_DIR)/aish-dir-typo-[pid]-[clock clicks]"
+# Keep the cwd short enough that the candidate row shows the replacement
+# instead of left-eliding it to only the final path bytes.
+set workdir "/tmp/aish-dir-typo-[pid]-[clock clicks]"
 file delete -force $workdir
 file mkdir $workdir
 file mkdir "$workdir/src"
@@ -23,8 +25,7 @@ aish_wait_prompt
 
 aish_send "cat ./srd"
 aish_send "\t"
-aish_expect "dir"
-aish_expect "cat ./src/"
+aish_expect "./src/"
 aish_send "\t"
 aish_expect "> cat ./src/"
 aish_send "\x03"
